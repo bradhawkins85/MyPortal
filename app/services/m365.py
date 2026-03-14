@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import apps as apps_repo
 from app.repositories import licenses as license_repo
+from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import staff as staff_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
@@ -38,6 +39,20 @@ DISCOVER_SCOPE = "openid profile"
 
 # Scopes for CSP/Lighthouse GDAP sign-in (needs Directory.Read.All for /contracts)
 CSP_SCOPE = "https://graph.microsoft.com/Directory.Read.All openid profile offline_access"
+
+# Module slug used to store the admin / CSP / Lighthouse partner app credentials
+_M365_ADMIN_MODULE_SLUG = "m365-admin"
+
+# Application-permission role IDs for the provisioned CSP/Lighthouse admin app.
+# Directory.Read.All (application) is required to enumerate /contracts via GDAP.
+# Application.ReadWrite.OwnedBy allows the app to renew its own client secret.
+_CSP_ADMIN_APP_ROLES: list[str] = [
+    "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All (application)
+    "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
+]
+
+# Delegated scope ID for Directory.Read.All (for CSP sign-in by partner admins)
+_DIRECTORY_READ_ALL_SCOPE_ID = "06da0dbc-49e2-44d2-8312-53f166ab848a"
 
 
 class M365Error(RuntimeError):
@@ -515,7 +530,354 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
             )
             failed += 1
 
+    # Also check the admin app credential (auto-provisioned only)
+    try:
+        admin_creds = await get_admin_m365_credentials()
+        if admin_creds and admin_creds.get("app_object_id"):
+            raw_expiry = admin_creds.get("client_secret_expires_at")
+            expiry_dt: datetime | None = None
+            if raw_expiry:
+                if isinstance(raw_expiry, datetime):
+                    expiry_dt = raw_expiry
+                else:
+                    try:
+                        expiry_dt = datetime.fromisoformat(str(raw_expiry))
+                    except (ValueError, TypeError):
+                        expiry_dt = None
+            if expiry_dt and expiry_dt <= cutoff:
+                try:
+                    await renew_admin_client_secret()
+                    renewed += 1
+                    log_info("Renewed M365 admin client secret during scheduled check")
+                except M365Error as exc:
+                    log_error(
+                        "Failed to renew M365 admin client secret",
+                        error=str(exc),
+                    )
+                    failed += 1
+    except Exception as exc:
+        log_error("Error checking M365 admin credentials for renewal", error=str(exc))
+
     return {"renewed": renewed, "skipped": skipped, "failed": failed}
+
+
+# ---------------------------------------------------------------------------
+# CSP / Lighthouse admin app provisioning and renewal
+# ---------------------------------------------------------------------------
+
+
+async def provision_csp_admin_app_registration(
+    *,
+    access_token: str,
+    tenant_id: str,
+    display_name: str = "MyPortal CSP Admin",
+) -> dict[str, Any]:
+    """Provision an app registration in the partner tenant for CSP/Lighthouse.
+
+    Uses a delegated *access_token* obtained via the admin-consent OAuth flow to:
+    1. Create an App Registration with delegated ``Directory.Read.All`` and
+       application ``Application.ReadWrite.OwnedBy`` permissions.
+    2. Create the corresponding Service Principal (Enterprise App).
+    3. Grant admin consent for ``Directory.Read.All`` and
+       ``Application.ReadWrite.OwnedBy`` application permissions.
+    4. Add the service principal as an owner of the app registration so it can
+       renew its own client secret later.
+    5. Generate and return a client secret.
+
+    Returns a dict with ``client_id``, ``client_secret``, ``app_object_id``,
+    ``client_secret_key_id``, ``client_secret_expires_at``, and ``tenant_id``.
+    The client secret is returned in plain text exactly once and must be stored
+    immediately.
+    """
+    settings = get_settings()
+    secret_lifetime_days = settings.m365_client_secret_lifetime_days
+
+    # 1. Create the app registration with required permissions
+    app_payload: dict[str, Any] = {
+        "displayName": display_name,
+        "signInAudience": "AzureADMyOrg",
+        "requiredResourceAccess": [
+            {
+                "resourceAppId": _GRAPH_APP_ID,
+                "resourceAccess": [
+                    # Delegated Directory.Read.All (for CSP sign-in by partner admins)
+                    {"id": _DIRECTORY_READ_ALL_SCOPE_ID, "type": "Scope"},
+                    # Application permissions (granted below)
+                    *[{"id": role_id, "type": "Role"} for role_id in _CSP_ADMIN_APP_ROLES],
+                ],
+            }
+        ],
+    }
+    app_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications",
+        app_payload,
+    )
+    app_object_id: str = app_data["id"]
+    client_id: str = app_data["appId"]
+    log_info("Provisioned M365 CSP admin app registration", client_id=client_id)
+
+    # 2. Create a service principal (Enterprise App) for the registration
+    sp_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals",
+        {"appId": client_id},
+    )
+    sp_object_id: str = sp_data["id"]
+    log_info("Created M365 CSP admin service principal", sp_object_id=sp_object_id)
+
+    # 3. Locate the Microsoft Graph service principal in this tenant
+    graph_sp_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
+    )
+    graph_sp_list = graph_sp_response.get("value", [])
+    if not graph_sp_list:
+        raise M365Error(
+            "Unable to locate Microsoft Graph service principal in the tenant"
+        )
+    graph_sp_id: str = graph_sp_list[0]["id"]
+
+    # 4. Grant admin consent for application permissions
+    for role_id in _CSP_ADMIN_APP_ROLES:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+            {
+                "principalId": sp_object_id,
+                "resourceId": graph_sp_id,
+                "appRoleId": role_id,
+            },
+        )
+    log_info(
+        "Granted admin consent for M365 CSP admin app",
+        sp_object_id=sp_object_id,
+    )
+
+    # 5. Add the service principal as an owner so it can renew its own secret
+    try:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
+            {
+                "@odata.id": (
+                    f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
+                )
+            },
+        )
+        log_info(
+            "Added service principal as owner of M365 CSP admin app registration",
+            app_object_id=app_object_id,
+            sp_object_id=sp_object_id,
+        )
+    except M365Error as exc:
+        log_error(
+            "Failed to add SP as owner of M365 CSP admin app; "
+            "automatic secret renewal will not be available",
+            app_object_id=app_object_id,
+            error=str(exc),
+        )
+
+    # 6. Create a client secret with configurable lifetime (default: 730 days / 2 years)
+    secret_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
+    secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
+    secret_data = await _graph_post(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        {
+            "passwordCredential": {
+                "displayName": "MyPortal",
+                "endDateTime": secret_expiry_str,
+            }
+        },
+    )
+    client_secret: str = secret_data["secretText"]
+    client_secret_key_id: str | None = secret_data.get("keyId")
+    client_secret_expires_at = datetime(
+        secret_expiry_date.year,
+        secret_expiry_date.month,
+        secret_expiry_date.day,
+    )
+    log_info(
+        "Created client secret for M365 CSP admin app",
+        client_id=client_id,
+        expires_at=secret_expiry_str,
+    )
+
+    return {
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "app_object_id": app_object_id,
+        "client_secret_key_id": client_secret_key_id,
+        "client_secret_expires_at": client_secret_expires_at,
+    }
+
+
+async def get_admin_m365_credentials() -> dict[str, Any] | None:
+    """Return the stored CSP/Lighthouse admin app credentials, or ``None``.
+
+    Reads the ``m365-admin`` integration module settings.  The ``client_secret``
+    field is decrypted if it was stored as ciphertext (auto-provisioned) or
+    returned as-is if it is already plain text (manually configured).
+    """
+    module = await modules_repo.get_module(_M365_ADMIN_MODULE_SLUG)
+    if not module:
+        return None
+    settings = module.get("settings") or {}
+    client_id = str(settings.get("client_id") or "").strip() or None
+    raw_secret = str(settings.get("client_secret") or "").strip() or None
+    if not client_id or not raw_secret:
+        return None
+    # decrypt_secret returns the value unchanged if it is not in ciphertext format,
+    # giving backward-compatibility with manually-configured plaintext secrets.
+    client_secret = decrypt_secret(raw_secret)
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "tenant_id": str(settings.get("tenant_id") or "").strip() or None,
+        "app_object_id": str(settings.get("app_object_id") or "").strip() or None,
+        "client_secret_key_id": str(settings.get("client_secret_key_id") or "").strip() or None,
+        "client_secret_expires_at": settings.get("client_secret_expires_at") or None,
+    }
+
+
+async def update_admin_m365_credentials(
+    *,
+    client_id: str,
+    client_secret: str,
+    tenant_id: str | None = None,
+    app_object_id: str | None = None,
+    client_secret_key_id: str | None = None,
+    client_secret_expires_at: datetime | None = None,
+) -> None:
+    """Persist CSP/Lighthouse admin app credentials to the ``m365-admin`` module.
+
+    The ``client_secret`` is encrypted before storage.  Any field that is
+    ``None`` is omitted from the update so that existing values are preserved.
+    """
+    module = await modules_repo.get_module(_M365_ADMIN_MODULE_SLUG)
+    existing_settings: dict[str, Any] = dict((module or {}).get("settings") or {})
+
+    new_settings: dict[str, Any] = {
+        **existing_settings,
+        "client_id": client_id,
+        "client_secret": encrypt_secret(client_secret),
+    }
+    if tenant_id is not None:
+        new_settings["tenant_id"] = tenant_id
+    if app_object_id is not None:
+        new_settings["app_object_id"] = app_object_id
+    if client_secret_key_id is not None:
+        new_settings["client_secret_key_id"] = client_secret_key_id
+    if client_secret_expires_at is not None:
+        new_settings["client_secret_expires_at"] = client_secret_expires_at.isoformat()
+
+    await modules_repo.update_module(
+        _M365_ADMIN_MODULE_SLUG,
+        enabled=True,
+        settings=new_settings,
+    )
+    log_info("Updated M365 admin credentials in integration module", client_id=client_id)
+
+
+async def renew_admin_client_secret() -> None:
+    """Renew the Azure AD client secret for the provisioned CSP/Lighthouse admin app.
+
+    Authenticates using the admin app's own credentials via the
+    ``client_credentials`` grant, then calls ``addPassword`` to create a new
+    secret.  The old secret is revoked after the new one is safely persisted.
+
+    Requires the provisioned admin app to have ``Application.ReadWrite.OwnedBy``
+    application permission granted and to be registered as an owner of its own
+    app registration (configured automatically by
+    :func:`provision_csp_admin_app_registration`).
+
+    Raises :class:`M365Error` if the credentials or ``app_object_id`` are missing.
+    """
+    settings_cfg = get_settings()
+    creds = await get_admin_m365_credentials()
+    if not creds:
+        raise M365Error("No M365 admin credentials found")
+
+    tenant_id = creds.get("tenant_id")
+    if not tenant_id:
+        raise M365Error(
+            "Admin tenant ID not stored – re-provisioning is required to enable "
+            "automatic client secret renewal for the admin app"
+        )
+
+    app_object_id = creds.get("app_object_id")
+    if not app_object_id:
+        raise M365Error(
+            "App object ID not stored – re-provisioning is required to enable "
+            "automatic client secret renewal for the admin app"
+        )
+
+    # Acquire an access token via client_credentials using the admin app's own credentials
+    access_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id,
+        client_id=creds["client_id"],
+        client_secret=creds["client_secret"],
+        refresh_token=None,
+    )
+
+    # Calculate new expiry
+    secret_lifetime_days = settings_cfg.m365_client_secret_lifetime_days
+    new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
+    new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
+
+    # Create new client secret via Graph API
+    secret_data = await _graph_post(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        {
+            "passwordCredential": {
+                "displayName": "MyPortal",
+                "endDateTime": new_expiry_str,
+            }
+        },
+    )
+    new_secret: str = secret_data["secretText"]
+    new_key_id: str | None = secret_data.get("keyId")
+    new_expires_at = datetime(
+        new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
+    )
+
+    old_key_id: str | None = creds.get("client_secret_key_id")
+
+    # Persist new secret BEFORE revoking old key so we never lose access
+    await update_admin_m365_credentials(
+        client_id=creds["client_id"],
+        client_secret=new_secret,
+        tenant_id=tenant_id,
+        app_object_id=app_object_id,
+        client_secret_key_id=new_key_id,
+        client_secret_expires_at=new_expires_at,
+    )
+    log_info(
+        "Renewed M365 admin client secret",
+        new_key_id=new_key_id,
+        expires_at=new_expiry_str,
+    )
+
+    # Revoke the old secret now that the new one is safely stored
+    if old_key_id:
+        try:
+            await _graph_post(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
+                {"keyId": old_key_id},
+            )
+            log_info("Revoked old M365 admin client secret", old_key_id=old_key_id)
+        except M365Error as exc:
+            log_error(
+                "Failed to revoke old M365 admin client secret",
+                old_key_id=old_key_id,
+                error=str(exc),
+            )
+
 
 async def _sync_staff_assignments(
     *,

@@ -142,7 +142,7 @@ from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
-from app.security.encryption import encrypt_secret
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.rate_limiter import (
     EndpointRateLimiter,
@@ -4729,9 +4729,15 @@ async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
     """Return (client_id, client_secret) for the M365 admin / CSP / Lighthouse flow.
 
     Reads from the ``m365-admin`` integration module first so that admins can
-    configure the credentials through the UI.  Falls back to the environment
-    variables ``M365_ADMIN_CLIENT_ID`` / ``M365_ADMIN_CLIENT_SECRET`` for
-    backwards-compatibility with existing deployments.
+    configure the credentials through the UI or via auto-provisioning.  Falls
+    back to the environment variables ``M365_ADMIN_CLIENT_ID`` /
+    ``M365_ADMIN_CLIENT_SECRET`` for backwards-compatibility with existing
+    deployments.
+
+    The ``client_secret`` is decrypted if it was stored as ciphertext by the
+    auto-provisioning flow; plaintext values (manually configured) are returned
+    unchanged because :func:`decrypt_secret` is a no-op for non-ciphertext
+    strings.
     """
     try:
         module = await modules_service.get_module("m365-admin", redact=False)
@@ -4740,8 +4746,9 @@ async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
     if module:
         module_settings = module.get("settings") or {}
         client_id = str(module_settings.get("client_id") or "").strip() or None
-        client_secret = str(module_settings.get("client_secret") or "").strip() or None
-        if client_id and client_secret:
+        raw_secret = str(module_settings.get("client_secret") or "").strip() or None
+        if client_id and raw_secret:
+            client_secret = decrypt_secret(raw_secret)
             return client_id, client_secret
     # Fall back to environment variables
     return settings.m365_admin_client_id or None, settings.m365_admin_client_secret or None
@@ -4849,6 +4856,59 @@ async def admin_csp_signin(request: Request):
         "redirect_uri": redirect_uri,
         "response_mode": "query",
         "scope": m365_service.CSP_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/csp/provision")
+async def admin_csp_provision(request: Request):
+    """Provision the CSP/Lighthouse admin app registration automatically.
+
+    Redirects the super-admin to Microsoft's OAuth consent page.  The admin
+    must sign in with an account that has ``Application.ReadWrite.All`` and
+    ``AppRoleAssignment.ReadWrite.All`` permissions in their partner tenant.
+    After consent, the callback creates a dedicated app registration in the
+    partner tenant and stores the resulting credentials in the ``m365-admin``
+    integration module so that subsequent CSP sign-in can use them.
+    """
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    redirect_uri = str(request.url_for("m365_callback"))
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": 0,
+            "user_id": current_user.get("id"),
+            "flow": "csp_admin_provision",
+        }
+    )
+    # Use the existing admin credentials' client_id if available, otherwise
+    # we need a bootstrap client_id.  When auto-provisioning for the first time
+    # there are no admin credentials yet, so we fall back to a special
+    # "bootstrap" OAuth app configured via M365_BOOTSTRAP_CLIENT_ID.
+    bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
+    existing_client_id, _ = await _get_m365_admin_credentials()
+    oauth_client_id = existing_client_id or bootstrap_client_id
+    if not oauth_client_id:
+        encoded = urlencode(
+            {"error": "A client ID is required to initiate provisioning. "
+                      "Set M365_BOOTSTRAP_CLIENT_ID or configure a client ID in the M365 Admin module."}
+        )
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+    params = {
+        "client_id": oauth_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.PROVISION_SCOPE,
         "state": state,
         "prompt": "select_account",
     }
@@ -5115,6 +5175,108 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         log_info("CSP session stored for user", user_id=user_id)
         return RedirectResponse(url="/admin/csp/customers", status_code=status.HTTP_303_SEE_OTHER)
+
+    if flow == "csp_admin_provision":
+        # ── Auto-provision the CSP/Lighthouse admin app registration ──────
+        # The admin signed in with PROVISION_SCOPE targeting /organizations,
+        # so their token has Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
+        # in their own partner tenant.  We use it to create a dedicated app
+        # registration that will serve as the M365 admin OAuth client.
+        redirect_uri = str(request.url_for("m365_callback"))
+
+        def _csp_provision_error(msg: str) -> RedirectResponse:
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        # Determine which client_id was used during the OAuth redirect so we
+        # can complete the authorization_code exchange.
+        bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
+        existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
+        oauth_client_id = existing_client_id or bootstrap_client_id
+        # For the bootstrap case we need a secret to exchange the code.
+        # If we have an existing secret, use it; otherwise the caller must
+        # supply M365_BOOTSTRAP_CLIENT_SECRET (treated as the exchange secret).
+        bootstrap_client_secret = str(settings.m365_bootstrap_client_secret or "").strip()
+        oauth_client_secret = existing_client_secret or bootstrap_client_secret
+
+        if not oauth_client_id or not oauth_client_secret:
+            return _csp_provision_error(
+                "No client credentials available to complete provisioning. "
+                "Configure M365_BOOTSTRAP_CLIENT_ID / M365_BOOTSTRAP_CLIENT_SECRET or "
+                "enter credentials in the M365 Admin module."
+            )
+
+        token_endpoint = (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": oauth_client_id,
+            "client_secret": oauth_client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.PROVISION_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "CSP admin provision token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _csp_provision_error("Authorization failed during CSP admin provisioning.")
+
+        token_payload = token_response.json()
+        access_token = token_payload.get("access_token", "")
+        if not access_token:
+            return _csp_provision_error("No access token received during CSP admin provisioning.")
+
+        # Extract the partner tenant ID from the token
+        try:
+            partner_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+        except m365_service.M365Error:
+            try:
+                id_token = token_payload.get("id_token", "")
+                partner_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+            except m365_service.M365Error:
+                return _csp_provision_error(
+                    "Unable to determine partner tenant ID from token."
+                )
+
+        try:
+            provision_result = await m365_service.provision_csp_admin_app_registration(
+                access_token=access_token,
+                tenant_id=partner_tenant_id,
+                display_name="MyPortal CSP Admin",
+            )
+        except m365_service.M365Error as exc:
+            log_error(
+                "CSP admin app provisioning failed",
+                tenant_id=partner_tenant_id,
+                error=str(exc),
+            )
+            return _csp_provision_error(f"Provisioning failed: {exc}")
+
+        await m365_service.update_admin_m365_credentials(
+            client_id=provision_result["client_id"],
+            client_secret=provision_result["client_secret"],
+            tenant_id=provision_result["tenant_id"],
+            app_object_id=provision_result.get("app_object_id"),
+            client_secret_key_id=provision_result.get("client_secret_key_id"),
+            client_secret_expires_at=provision_result.get("client_secret_expires_at"),
+        )
+        log_info(
+            "M365 CSP admin app provisioned and credentials stored",
+            tenant_id=partner_tenant_id,
+            client_id=provision_result["client_id"],
+        )
+        encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in as your CSP account."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
 
     if flow == "provision":
         # ── Auto-provision flow ────────────────────────────────────────────
