@@ -4,12 +4,15 @@ from typing import Any
 
 from app.core.database import db
 
+# Sentinel used to distinguish "not provided" from "explicitly set to None"
+_UNSET: Any = object()
+
 
 async def list_field_definitions() -> list[dict[str, Any]]:
     """Get all custom field definitions ordered by display_order."""
     rows = await db.fetch_all(
         """
-        SELECT id, name, field_type, display_order, created_at, updated_at
+        SELECT id, name, display_name, field_type, display_order, created_at, updated_at
         FROM asset_custom_field_definitions
         ORDER BY display_order ASC, id ASC
         """,
@@ -20,7 +23,7 @@ async def list_field_definitions() -> list[dict[str, Any]]:
 async def get_field_definition(definition_id: int) -> dict[str, Any] | None:
     """Get a single field definition by ID."""
     return await db.fetch_one(
-        "SELECT id, name, field_type, display_order, created_at, updated_at FROM asset_custom_field_definitions WHERE id = %s",
+        "SELECT id, name, display_name, field_type, display_order, created_at, updated_at FROM asset_custom_field_definitions WHERE id = %s",
         (definition_id,),
     )
 
@@ -29,14 +32,15 @@ async def create_field_definition(
     name: str,
     field_type: str,
     display_order: int = 0,
+    display_name: str | None = None,
 ) -> int | None:
     """Create a new custom field definition."""
     result = await db.execute(
         """
-        INSERT INTO asset_custom_field_definitions (name, field_type, display_order)
-        VALUES (%s, %s, %s)
+        INSERT INTO asset_custom_field_definitions (name, display_name, field_type, display_order)
+        VALUES (%s, %s, %s, %s)
         """,
-        (name, field_type, display_order),
+        (name, display_name or None, field_type, display_order),
     )
     return result
 
@@ -46,8 +50,13 @@ async def update_field_definition(
     name: str | None = None,
     field_type: str | None = None,
     display_order: int | None = None,
+    display_name: Any = _UNSET,
 ) -> None:
-    """Update a custom field definition."""
+    """Update a custom field definition.
+
+    Pass ``display_name=None`` to explicitly clear the display name.
+    Omit ``display_name`` (or pass ``_UNSET``) to leave it unchanged.
+    """
     updates = []
     params = []
     
@@ -60,6 +69,12 @@ async def update_field_definition(
     if display_order is not None:
         updates.append("display_order = %s")
         params.append(display_order)
+    if display_name is not _UNSET:
+        if display_name is None:
+            updates.append("display_name = NULL")
+        else:
+            updates.append("display_name = %s")
+            params.append(display_name)
     
     if not updates:
         return
