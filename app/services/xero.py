@@ -10,6 +10,7 @@ import httpx
 from loguru import logger
 
 from app.repositories import assets as assets_repo
+from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
@@ -672,7 +673,11 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
         company_id: The company ID to build context for
     
     Returns:
-        Dictionary of available variables including device counts
+        Dictionary of available variables including device counts and custom field counts.
+        Custom field checkbox counts are available as:
+          {cf_total_FIELDNAME}  - total assets with the field set to true
+          {cf_active_FIELDNAME} - assets synced within the last 30 days with the field set to true
+        where FIELDNAME is the field name with hyphens replaced by underscores.
     """
     # Calculate date for "last month" - assets synced in the last 30 days
     since_date = datetime.now(timezone.utc) - timedelta(days=30)
@@ -706,7 +711,7 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
     company = await company_repo.get_company_by_id(company_id)
     company_name = company.get("name") if company else f"Company {company_id}"
     
-    return {
+    context: dict[str, Any] = {
         "company_id": company_id,
         "company_name": company_name,
         "active_agents": total_assets,
@@ -715,6 +720,34 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
         "active_users": user_count,
         "total_assets": total_assets,
     }
+
+    # Add custom field checkbox counts for all defined checkbox fields.
+    # Variables are exposed as {cf_total_FIELDNAME} and {cf_active_FIELDNAME}
+    # where spaces, hyphens and any other non-alphanumeric characters in the
+    # field name are replaced with underscores.
+    field_definitions = await asset_custom_fields_repo.list_field_definitions()
+    for field_def in field_definitions:
+        if field_def.get("field_type") != "checkbox":
+            continue
+        raw_name: str = str(field_def.get("name") or "")
+        if not raw_name:
+            continue
+        safe_name = re.sub(r"[^a-zA-Z0-9]+", "_", raw_name).strip("_")
+        total_count = await asset_custom_fields_repo.count_assets_by_custom_field(
+            company_id=company_id,
+            field_name=raw_name,
+            field_value=True,
+        )
+        active_count = await asset_custom_fields_repo.count_assets_by_custom_field(
+            company_id=company_id,
+            field_name=raw_name,
+            field_value=True,
+            since=since_date,
+        )
+        context[f"cf_total_{safe_name}"] = total_count
+        context[f"cf_active_{safe_name}"] = active_count
+
+    return context
 
 
 async def build_recurring_invoice_items(

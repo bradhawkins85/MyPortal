@@ -499,17 +499,32 @@
             <h3 class="card__help-title">Variable Substitution</h3>
             <p class="card__help-text">
               Use variables in the description and quantity fields to dynamically populate invoice data.
+              Wrap variable names in curly braces: <code>{variable_name}</code>.
             </p>
             <p class="card__help-text">
-              <strong>Available variables:</strong>
+              <strong>Standard variables:</strong>
             </p>
             <ul class="card__help-list">
-              <li><code>{active_agents}</code> - Total count of all active devices (synced in last 30 days)</li>
-              <li><code>{active_workstations}</code> - Count of active Workstation devices</li>
-              <li><code>{active_servers}</code> - Count of active Server devices</li>
-              <li><code>{active_users}</code> - Count of active User devices</li>
               <li><code>{company_name}</code> - Name of the company</li>
+              <li><code>{active_agents}</code> - Count of assets synced within the last 30 days</li>
+              <li><code>{active_workstations}</code> - Count of active Workstation-type assets</li>
+              <li><code>{active_servers}</code> - Count of active Server-type assets</li>
+              <li><code>{active_users}</code> - Count of active User-type assets</li>
+              <li><code>{total_assets}</code> - Same as <code>{active_agents}</code></li>
             </ul>
+            <p class="card__help-text">
+              <strong>Asset custom field counts</strong> (checkbox fields only):
+            </p>
+            <ul class="card__help-list">
+              <li><code>{cf_total_FIELDNAME}</code> - Total assets where the checkbox field is ticked</li>
+              <li><code>{cf_active_FIELDNAME}</code> - Assets synced within 30 days where the checkbox field is ticked</li>
+            </ul>
+            <p class="card__help-text">
+              Replace <code>FIELDNAME</code> with the custom field name, converting spaces, hyphens and other
+              punctuation to underscores (consecutive separators collapse to a single underscore).
+              For example: <em>threatlocker-installed</em> → <code>{cf_active_threatlocker_installed}</code>,
+              and <em>Bit Defender EDR</em> → <code>{cf_active_Bit_Defender_EDR}</code>.
+            </p>
             <p class="card__help-text">
               If no price override is specified, the price will be retrieved from Xero using the product code.
             </p>
@@ -969,7 +984,7 @@
                 required
                 placeholder="Monthly managed services for {company_name}"
               ></textarea>
-              <p class="form-help">Supports variable substitution using {variable_name} syntax.</p>
+              <p class="form-help">Supports variable substitution using {variable_name} syntax. See the usage notes below for all available variables.</p>
             </div>
             <div class="form-field">
               <label class="form-label" for="recurring-item-qty">Quantity expression</label>
@@ -981,7 +996,10 @@
                 required
                 placeholder="1"
               />
-              <p class="form-help">Static number (e.g., "5") or variable (e.g., "{active_agents}").</p>
+              <p class="form-help">
+                Static number (e.g., "5") or a variable wrapped in curly braces (e.g., "{active_agents}").
+                See the usage notes below for all available variables.
+              </p>
             </div>
             <div class="form-field">
               <label class="form-label" for="recurring-item-price">Price override (optional)</label>
