@@ -34,6 +34,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
 
+# Mapping of module slug -> set of scheduled task commands that require that module.
+# Used to filter available commands in the UI and to disable tasks when a module is disabled.
+COMMANDS_BY_MODULE: dict[str, set[str]] = {
+    "m365": {"sync_o365"},
+    "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
+    "call-recordings": {"sync_recordings", "queue_transcriptions", "process_transcription"},
+    "unifi-talk": {"sync_unifi_talk_recordings"},
+    "tacticalrmm": {"push_tactical_companies", "pull_tactical_companies"},
+}
+
 
 def _truncate_output(payload: str | bytes | None) -> str | None:
     if payload is None:
