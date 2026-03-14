@@ -9,6 +9,8 @@
 {% block header_actions %}
   {% if admin_credentials_configured %}
     <a class="button" href="/admin/csp/signin">{% if has_csp_session %}Refresh sign-in{% else %}Sign in as CSP account{% endif %}</a>
+  {% else %}
+    <a class="button" href="/admin/csp/provision">Provision admin app</a>
   {% endif %}
 {% endblock %}
 
@@ -31,8 +33,14 @@
       </header>
       <div class="card__body">
         <p class="text-muted">
-          The <code>M365_ADMIN_CLIENT_ID</code> and <code>M365_ADMIN_CLIENT_SECRET</code>
-          environment variables must be set before CSP sign-in is available.
+          No CSP/Lighthouse admin credentials are configured. You can either set the
+          <code>M365_ADMIN_CLIENT_ID</code> and <code>M365_ADMIN_CLIENT_SECRET</code>
+          environment variables manually, or click <strong>Provision admin app</strong>
+          to sign in with your Microsoft partner account and automatically create a
+          dedicated app registration.
+        </p>
+        <p style="margin-top: 0.75rem;">
+          <a href="/admin/csp/provision" class="button">Provision admin app</a>
         </p>
       </div>
     </section>
