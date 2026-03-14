@@ -61,7 +61,7 @@ _DIRECTORY_READ_ALL_SCOPE_ID = "06da0dbc-49e2-44d2-8312-53f166ab848a"
 # all Azure AD tenants.  Public clients do not require a client secret, which
 # lets admins trigger the provisioning flow without pre-creating an app
 # registration.
-_AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+_UNUSED_AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 
 
 class M365Error(RuntimeError):
