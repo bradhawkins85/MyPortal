@@ -45,6 +45,85 @@
       </div>
     </section>
 
+    <section class="card card--panel admin-grid__full">
+      <header class="card__header">
+        <div class="stacked">
+          <h2 class="card__title">Provisioning fails? Create your own app registration</h2>
+          <p class="card__subtitle">
+            Some Azure AD tenants block the default public client used for provisioning
+            (<code>AADSTS700016</code>). Follow these steps to register your own public
+            client app and set <code>M365_PKCE_CLIENT_ID</code>.
+          </p>
+        </div>
+      </header>
+      <div class="card__body">
+        <details>
+          <summary style="cursor: pointer; font-weight: 600;">
+            Step-by-step: Create an Azure AD public client app registration
+          </summary>
+          <ol class="list list--ordered" style="margin-top: 1rem;">
+            <li>
+              Sign in to the
+              <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer">Azure portal</a>
+              with a <strong>Global Administrator</strong> or <strong>Application Administrator</strong>
+              account in your partner tenant.
+            </li>
+            <li>
+              In the left navigation, go to
+              <strong>Azure Active Directory</strong> &rarr; <strong>App registrations</strong>
+              and click <strong>New registration</strong>.
+            </li>
+            <li>
+              Enter a display name (e.g. <code>MyPortal PKCE Bootstrap</code>).
+              Under <strong>Supported account types</strong>, select
+              <em>Accounts in this organizational directory only</em>.
+            </li>
+            <li>
+              Under <strong>Redirect URI</strong>, choose <strong>Public client/native
+              (mobile &amp; desktop)</strong> from the platform dropdown and enter
+              the following callback URL:
+              <br />
+              <code>{{ request.url_for('m365_callback') }}</code>
+            </li>
+            <li>
+              Click <strong>Register</strong>.
+            </li>
+            <li>
+              On the newly created app's page, click <strong>Authentication</strong>
+              in the left menu.
+            </li>
+            <li>
+              Scroll to <strong>Advanced settings</strong>.
+              Under <em>Allow public client flows</em>, set
+              <strong>Enable the following mobile and desktop flows</strong> to
+              <strong>Yes</strong>.
+            </li>
+            <li>
+              Click <strong>Save</strong>.
+            </li>
+            <li>
+              Go to <strong>Overview</strong> and copy the
+              <strong>Application (client) ID</strong> (a UUID like
+              <code>xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code>).
+            </li>
+            <li>
+              Add the following line to your <code>.env</code> file and restart MyPortal:
+              <br />
+              <code>M365_PKCE_CLIENT_ID=&lt;your-application-client-id&gt;</code>
+            </li>
+            <li>
+              Return to this page and click <strong>Provision admin app</strong>.
+            </li>
+          </ol>
+          <p class="text-muted" style="margin-top: 0.75rem;">
+            This app registration is only needed once during the initial CSP admin
+            provisioning. After provisioning completes, MyPortal stores its own dedicated
+            credentials and the PKCE bootstrap client is no longer used.
+          </p>
+        </details>
+      </div>
+    </section>
+
     {% elif not has_csp_session %}
     <section class="card card--panel admin-grid__full">
       <header class="card__header">
