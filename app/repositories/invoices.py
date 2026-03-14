@@ -45,16 +45,18 @@ async def create_invoice(
     due_date: date | None,
     status: str | None,
 ) -> dict[str, Any]:
-    await db.execute(
+    invoice_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO invoices (company_id, invoice_number, amount, due_date, status)
         VALUES (%s, %s, %s, %s, %s)
         """,
         (company_id, invoice_number, amount, due_date, status),
     )
-    row = await db.fetch_one("SELECT * FROM invoices WHERE id = LAST_INSERT_ID()")
-    if not row:
+    if not invoice_id:
         raise RuntimeError("Failed to create invoice")
+    row = await db.fetch_one("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
+    if not row:
+        raise RuntimeError("Failed to retrieve created invoice")
     return _normalise_invoice(row)
 
 

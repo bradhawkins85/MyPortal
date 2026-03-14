@@ -90,7 +90,7 @@ async def create_license(
     expiry_date: datetime | None,
     contract_term: str | None,
 ) -> dict[str, Any]:
-    await db.execute(
+    license_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO licenses (company_id, name, platform, count, expiry_date, contract_term)
         VALUES (%s, %s, %s, %s, %s, %s)
@@ -104,9 +104,11 @@ async def create_license(
             contract_term,
         ),
     )
-    row = await db.fetch_one("SELECT * FROM licenses WHERE id = LAST_INSERT_ID()")
-    if not row:
+    if not license_id:
         raise RuntimeError("Failed to create license")
+    row = await db.fetch_one("SELECT * FROM licenses WHERE id = %s", (license_id,))
+    if not row:
+        raise RuntimeError("Failed to retrieve created license")
     return _normalise_license(row)
 
 
