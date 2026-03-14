@@ -294,6 +294,12 @@ class SchedulerService:
                     else:
                         summary = await asset_importer.import_all_tactical_assets()
                         details = json.dumps(summary, default=str)
+                elif command == "push_tactical_companies":
+                    summary = await modules_service.push_companies_to_tacticalrmm()
+                    details = json.dumps(summary, default=str)
+                elif command == "pull_tactical_companies":
+                    summary = await modules_service.pull_companies_from_tacticalrmm()
+                    details = json.dumps(summary, default=str)
                 elif command == "sync_o365":
                     company_id = task.get("company_id")
                     if company_id:
