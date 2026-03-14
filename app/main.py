@@ -15814,9 +15814,11 @@ async def _render_modules_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
+    uptimekuma_webhook_url = str(request.url_for("uptimekuma_receive_alert").replace(scheme="https"))
     extra = {
         "title": "Integration modules",
         "modules": modules,
+        "uptimekuma_webhook_url": uptimekuma_webhook_url,
         "success_message": success_message,
         "error_message": error_message,
     }
