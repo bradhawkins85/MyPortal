@@ -457,6 +457,22 @@
                   </label>
                 </div>
               </fieldset>
+            {% elif module.slug == 'm365-admin' %}
+              <div class="form-field">
+                <label class="form-label" for="m365-admin-client-id">Application (client) ID</label>
+                <input id="m365-admin-client-id" name="settings.client_id" class="form-input" value="{{ settings.client_id or '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                <p class="form-help">The Azure AD application ID for the CSP / Lighthouse partner app registration.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="m365-admin-client-secret">Client secret</label>
+                <input id="m365-admin-client-secret" name="settings.client_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new client secret" />
+                <p class="form-help">Secrets are stored securely. Leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field">
+                <p class="form-help">
+                  Once configured, use <a href="/admin/csp/customers">CSP / Lighthouse customers</a> to sign in with your partner account and manage customer tenants.
+                </p>
+              </div>
             {% else %}
               {% for key, value in settings.items() %}
                 <div class="form-field">
