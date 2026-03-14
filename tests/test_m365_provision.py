@@ -88,19 +88,21 @@ async def test_graph_post_raises_on_error():
 
 @pytest.mark.anyio("asyncio")
 async def test_provision_app_registration_success():
-    """provision_app_registration returns (client_id, client_secret) on success."""
+    """provision_app_registration returns a dict with client_id, client_secret, etc."""
     access_token = "delegated-access-token"
 
     call_order: list[str] = []
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         call_order.append(url)
-        if "/applications" in url and "addPassword" not in url:
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
             return _make_app_data("provisioned-client-id")
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data("provisioned-sp-id")
         if "appRoleAssignments" in url:
             return _make_role_assignment()
+        if "owners/$ref" in url:
+            return {}  # 204 No Content → empty dict
         if "addPassword" in url:
             return _make_secret_data("provisioned-secret")
         return {}
@@ -114,13 +116,14 @@ async def test_provision_app_registration_success():
         patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
     ):
-        client_id, client_secret = await m365_service.provision_app_registration(
+        result = await m365_service.provision_app_registration(
             access_token=access_token,
             display_name="MyPortal – Acme Corp",
         )
 
-    assert client_id == "provisioned-client-id"
-    assert client_secret == "provisioned-secret"
+    assert result["client_id"] == "provisioned-client-id"
+    assert result["client_secret"] == "provisioned-secret"
+    assert result["app_object_id"] == "app-object-id"
     # Verify all required Graph calls were made
     assert any("/applications" in u and "addPassword" not in u for u in call_order), \
         "Should POST to /applications to create app registration"
@@ -137,7 +140,7 @@ async def test_provision_app_registration_success():
 async def test_provision_app_registration_missing_graph_sp():
     """provision_app_registration raises M365Error if Graph SP not found."""
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
-        if "/applications" in url and "addPassword" not in url:
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
             return _make_app_data()
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data()
@@ -165,12 +168,14 @@ async def test_provision_app_registration_default_display_name():
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         captured_payloads.append({"url": url, "payload": payload})
-        if "/applications" in url and "addPassword" not in url:
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
             return _make_app_data()
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data()
         if "appRoleAssignments" in url:
             return _make_role_assignment()
+        if "owners/$ref" in url:
+            return {}
         if "addPassword" in url:
             return _make_secret_data()
         return {}

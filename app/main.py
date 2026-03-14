@@ -3064,9 +3064,7 @@ async def _render_companies_dashboard(
         "temporary_password": temporary_password,
         "invited_email": invited_email,
         "show_archived": include_archived,
-        "admin_credentials_configured": bool(
-            settings.m365_admin_client_id and settings.m365_admin_client_secret
-        ),
+        "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
     }
 
     response = await _render_template("admin/companies.html", request, user, extra=extra)
@@ -3571,9 +3569,7 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
-        "m365_admin_credentials_configured": bool(
-            settings.m365_admin_client_id and settings.m365_admin_client_secret
-        ),
+        "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -4557,9 +4553,7 @@ async def m365_page(request: Request, error: str | None = None):
         "error": error,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
-        "admin_credentials_configured": bool(
-            settings.m365_admin_client_id and settings.m365_admin_client_secret
-        ),
+        "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
 
@@ -4651,7 +4645,8 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required",
         )
-    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
         encoded = urlencode({"error": "Admin M365 credentials are not configured."})
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     tenant_id = tenant_id.strip()
@@ -4668,7 +4663,7 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         }
     )
     params = {
-        "client_id": settings.m365_admin_client_id,
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4691,7 +4686,8 @@ async def admin_company_m365_provision(
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
         return _company_edit_redirect(
             company_id=company_id,
             error="Admin M365 credentials are not configured.",
@@ -4713,7 +4709,7 @@ async def admin_company_m365_provision(
         }
     )
     params = {
-        "client_id": settings.m365_admin_client_id,
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4728,6 +4724,29 @@ async def admin_company_m365_provision(
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+
+async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
+    """Return (client_id, client_secret) for the M365 admin / CSP / Lighthouse flow.
+
+    Reads from the ``m365-admin`` integration module first so that admins can
+    configure the credentials through the UI.  Falls back to the environment
+    variables ``M365_ADMIN_CLIENT_ID`` / ``M365_ADMIN_CLIENT_SECRET`` for
+    backwards-compatibility with existing deployments.
+    """
+    try:
+        module = await modules_service.get_module("m365-admin", redact=False)
+    except RuntimeError:
+        module = None
+    if module:
+        module_settings = module.get("settings") or {}
+        client_id = str(module_settings.get("client_id") or "").strip() or None
+        client_secret = str(module_settings.get("client_secret") or "").strip() or None
+        if client_id and client_secret:
+            return client_id, client_secret
+    # Fall back to environment variables
+    return settings.m365_admin_client_id or None, settings.m365_admin_client_secret or None
+
+
 @app.get("/m365/discover")
 async def m365_discover(request: Request):
     """Sign in as Global Admin to discover the tenant ID automatically."""
@@ -4739,7 +4758,8 @@ async def m365_discover(request: Request):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required",
         )
-    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
         encoded = urlencode({"error": "Admin M365 credentials are not configured."})
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = str(request.url_for("m365_callback"))
@@ -4751,7 +4771,7 @@ async def m365_discover(request: Request):
         }
     )
     params = {
-        "client_id": settings.m365_admin_client_id,
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4772,7 +4792,8 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
         return _company_edit_redirect(
             company_id=company_id,
             error="Admin M365 credentials are not configured.",
@@ -4787,7 +4808,7 @@ async def admin_company_m365_discover(company_id: int, request: Request):
         }
     )
     params = {
-        "client_id": settings.m365_admin_client_id,
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4808,7 +4829,8 @@ async def admin_csp_signin(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
         encoded = urlencode({"error": "Admin M365 credentials are not configured."})
         return RedirectResponse(
             url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
@@ -4822,7 +4844,7 @@ async def admin_csp_signin(request: Request):
         }
     )
     params = {
-        "client_id": settings.m365_admin_client_id,
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4885,9 +4907,7 @@ async def admin_csp_customers_page(
             "error": session_error,
             "success": _sanitize_message(success),
             "csrf_token": csrf_token,
-            "admin_credentials_configured": bool(
-                settings.m365_admin_client_id and settings.m365_admin_client_secret
-            ),
+            "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
         },
     )
 
@@ -4981,15 +5001,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        _discover_cid, _discover_csec = await _get_m365_admin_credentials()
+        if not _discover_cid or not _discover_csec:
             return _discover_error("Admin M365 credentials are not configured.")
 
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
         token_data = {
-            "client_id": settings.m365_admin_client_id,
-            "client_secret": settings.m365_admin_client_secret,
+            "client_id": _discover_cid,
+            "client_secret": _discover_csec,
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5050,15 +5071,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        _csp_cid, _csp_csec = await _get_m365_admin_credentials()
+        if not _csp_cid or not _csp_csec:
             return _csp_error("Admin M365 credentials are not configured.")
 
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
         token_data = {
-            "client_id": settings.m365_admin_client_id,
-            "client_secret": settings.m365_admin_client_secret,
+            "client_id": _csp_cid,
+            "client_secret": _csp_csec,
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5110,15 +5132,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         if not tenant_id:
             return _provision_error("Missing tenant ID in provision state.")
-        if not settings.m365_admin_client_id or not settings.m365_admin_client_secret:
+        _provision_cid, _provision_csec = await _get_m365_admin_credentials()
+        if not _provision_cid or not _provision_csec:
             return _provision_error("Admin M365 credentials are not configured.")
 
         token_endpoint = (
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         )
         token_data = {
-            "client_id": settings.m365_admin_client_id,
-            "client_secret": settings.m365_admin_client_secret,
+            "client_id": _provision_cid,
+            "client_secret": _provision_csec,
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5144,11 +5167,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         display_name = f"MyPortal – {company_name}" if company_name else "MyPortal Integration"
 
         try:
-            new_client_id, new_client_secret = (
-                await m365_service.provision_app_registration(
-                    access_token=access_token,
-                    display_name=display_name,
-                )
+            provision_result = await m365_service.provision_app_registration(
+                access_token=access_token,
+                display_name=display_name,
             )
         except m365_service.M365Error as exc:
             log_error(
@@ -5162,14 +5183,17 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         await m365_service.upsert_credentials(
             company_id=company_id,
             tenant_id=tenant_id,
-            client_id=new_client_id,
-            client_secret=new_client_secret,
+            client_id=provision_result["client_id"],
+            client_secret=provision_result["client_secret"],
+            app_object_id=provision_result.get("app_object_id"),
+            client_secret_key_id=provision_result.get("client_secret_key_id"),
+            client_secret_expires_at=provision_result.get("client_secret_expires_at"),
         )
         log_info(
             "M365 enterprise app provisioned and credentials stored",
             company_id=company_id,
             tenant_id=tenant_id,
-            client_id=new_client_id,
+            client_id=provision_result["client_id"],
         )
         if return_to_company_edit:
             return _company_edit_redirect(

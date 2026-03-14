@@ -167,6 +167,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Run M365 credential renewal check daily at 03:00
+        if not self._scheduler.get_job("m365-credential-renewal"):
+            self._scheduler.add_job(
+                self._run_m365_credential_renewal,
+                CronTrigger(hour=3, minute=0, timezone=self._scheduler.timezone),
+                id="m365-credential-renewal",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
@@ -216,6 +226,20 @@ class SchedulerService:
                     date=today,
                     error=str(exc),
                 )
+
+    async def _run_m365_credential_renewal(self) -> None:
+        """Renew expiring Microsoft 365 client secrets with distributed lock."""
+        async with db.acquire_lock("m365_credential_renewal", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("M365 credential renewal already running on another worker, skipping")
+                return
+
+            log_info("Starting M365 client secret renewal check")
+            try:
+                result = await m365_service.renew_expiring_client_secrets()
+                log_info("M365 client secret renewal check completed", **result)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("M365 client secret renewal check failed", error=str(exc))
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
