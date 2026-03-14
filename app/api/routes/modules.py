@@ -18,7 +18,7 @@ async def list_modules(current_user: dict = Depends(require_super_admin)) -> lis
 
 @router.get("/{slug}", response_model=IntegrationModuleResponse)
 async def get_module(slug: str, current_user: dict = Depends(require_super_admin)) -> IntegrationModuleResponse:
-    module = await module_repo.get_module(slug)
+    module = await modules_service.get_module(slug)
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
     return IntegrationModuleResponse(**module)
@@ -30,12 +30,12 @@ async def update_module(
     payload: IntegrationModuleUpdate,
     current_user: dict = Depends(require_super_admin),
 ) -> IntegrationModuleResponse:
-    module = await module_repo.get_module(slug)
-    if not module:
+    exists = await module_repo.get_module(slug)
+    if not exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
     updated = await modules_service.update_module(slug, enabled=payload.enabled, settings=payload.settings)
     if not updated:
-        updated = await module_repo.get_module(slug)
+        updated = await modules_service.get_module(slug)
     return IntegrationModuleResponse(**updated)
 
 
