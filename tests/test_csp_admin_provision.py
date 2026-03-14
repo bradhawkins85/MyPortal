@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -559,7 +559,7 @@ async def test_renew_expiring_does_not_renew_admin_when_not_expiring():
 
     async def mock_get_admin_creds():
         # Expiry is far in the future
-        far_future = (datetime.utcnow() + timedelta(days=365)).isoformat()
+        far_future = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
         return {
             "client_id": "admin-cid",
             "client_secret": "admin-sec",

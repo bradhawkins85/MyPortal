@@ -8,6 +8,9 @@
 --   app_object_id           – Azure AD app registration object ID (for addPassword)
 --   client_secret_key_id    – current secret key ID (for removePassword on renewal)
 --   client_secret_expires_at – UTC expiry so scheduler can trigger renewal
+--
+-- This migration is idempotent: it only updates the row if it exists and
+-- does not overwrite existing values for the new fields.
 
 UPDATE integration_modules
 SET settings = JSON_MERGE_PATCH(

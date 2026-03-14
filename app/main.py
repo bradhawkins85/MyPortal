@@ -5273,7 +5273,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             tenant_id=partner_tenant_id,
             client_id=provision_result["client_id"],
         )
-        encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in as your CSP account."})
+        encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in with your CSP account."})
         return RedirectResponse(
             url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
