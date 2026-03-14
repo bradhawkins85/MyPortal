@@ -246,8 +246,8 @@
             {% elif module.slug == 'uptimekuma' %}
               <div class="form-field">
                 <label class="form-label" for="uptimekuma-webhook">Webhook URL</label>
-                <input id="uptimekuma-webhook" class="form-input" value="{{ request.url_for('uptimekuma_receive_alert') }}" readonly />
-                <p class="form-help">Configure this endpoint as the HTTP POST target inside Uptime Kuma.</p>
+                <input id="uptimekuma-webhook" class="form-input" value="{{ uptimekuma_webhook_url }}" readonly />
+                <p class="form-help">Configure this endpoint as the HTTPS POST target inside Uptime Kuma.</p>
               </div>
               <div class="form-field">
                 <label class="form-label" for="uptimekuma-secret">Shared secret</label>
