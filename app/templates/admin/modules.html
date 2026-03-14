@@ -520,6 +520,17 @@
                 <button type="submit" class="button button--secondary">Push companies to Tactical RMM</button>
               </div>
             </form>
+            <form action="/admin/modules/tacticalrmm/pull-companies" method="post" class="form card__form">
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <div class="form-field">
+                <p class="form-help">Pull all clients from Tactical RMM into My Portal. Missing companies will be created and existing companies will be linked by their Tactical RMM client ID.</p>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--secondary">Pull companies from Tactical RMM</button>
+              </div>
+            </form>
           {% endif %}
 
         </div>

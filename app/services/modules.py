@@ -3454,6 +3454,93 @@ async def push_companies_to_tacticalrmm(
     return summary
 
 
+
+async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
+    """Pull clients from Tactical RMM and create or update matching companies in MyPortal."""
+    settings = await _load_tacticalrmm_settings()
+
+    clients_result = await _invoke_tacticalrmm(
+        settings,
+        {"endpoint": "/clients/", "method": "GET"},
+        event_future=None,
+    )
+
+    if clients_result.get("status") != "succeeded":
+        error = _summarise_event_error(clients_result)
+        raise RuntimeError(f"Failed to fetch Tactical RMM clients: {error}")
+
+    response = clients_result.get("response")
+    raw_clients: list[Mapping[str, Any]] = []
+    if isinstance(response, list):
+        raw_clients = [item for item in response if isinstance(item, Mapping)]
+    elif isinstance(response, Mapping):
+        results = response.get("results")
+        if isinstance(results, list):
+            raw_clients = [item for item in results if isinstance(item, Mapping)]
+
+    logger.info("Pulling Tactical RMM clients into MyPortal", count=len(raw_clients))
+
+    summary: dict[str, Any] = {
+        "fetched": len(raw_clients),
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    for client in raw_clients:
+        client_id = client.get("id")
+        name = str(client.get("name") or "").strip()
+
+        if not name:
+            summary["skipped"] += 1
+            continue
+
+        try:
+            tactical_id_str = str(client_id).strip() if client_id is not None else None
+
+            existing = None
+            if tactical_id_str:
+                existing = await company_repo.get_company_by_tactical_id(tactical_id_str)
+            if not existing:
+                existing = await company_repo.get_company_by_name(name)
+
+            if existing:
+                updates: dict[str, Any] = {}
+                if tactical_id_str and str(existing.get("tacticalrmm_client_id") or "").strip() != tactical_id_str:
+                    updates["tacticalrmm_client_id"] = tactical_id_str
+                if str(existing.get("name") or "").strip() != name:
+                    updates["name"] = name
+                if updates:
+                    await company_repo.update_company(int(existing["id"]), **updates)
+                    summary["updated"] += 1
+                else:
+                    summary["skipped"] += 1
+            else:
+                payload: dict[str, Any] = {"name": name}
+                if tactical_id_str:
+                    payload["tacticalrmm_client_id"] = tactical_id_str
+                await company_repo.create_company(**payload)
+                summary["created"] += 1
+        except Exception as exc:
+            logger.error(
+                "Failed to import Tactical RMM client",
+                client_id=client_id,
+                name=name,
+                error=str(exc),
+            )
+            summary["errors"].append({"client_id": client_id, "name": name, "error": str(exc)})
+
+    logger.info(
+        "Tactical RMM client pull completed",
+        fetched=summary["fetched"],
+        created=summary["created"],
+        updated=summary["updated"],
+        skipped=summary["skipped"],
+        errors=len(summary["errors"]),
+    )
+    return summary
+
 async def _invoke_update_ticket(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
