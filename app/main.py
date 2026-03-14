@@ -5294,6 +5294,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 access_token=access_token,
                 tenant_id=partner_tenant_id,
                 display_name="MyPortal CSP Admin",
+                redirect_uri=redirect_uri,
             )
         except m365_service.M365Error as exc:
             log_error(
