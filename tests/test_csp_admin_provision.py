@@ -112,6 +112,64 @@ async def test_csp_admin_provision_creates_app_with_correct_permissions():
     assert "18a4783c-866b-4cc7-a460-3d5e5662c884" in resource_access_ids
 
 
+
+@pytest.mark.anyio("asyncio")
+async def test_csp_admin_provision_registers_redirect_uri_when_provided():
+    """provision_csp_admin_app_registration includes redirect URI in app payload when given."""
+    captured_payloads: list[dict] = []
+    mock_post, mock_get = _make_csp_admin_provision_mocks()
+
+    async def capturing_post(token: str, url: str, payload: dict) -> dict:
+        captured_payloads.append({"url": url, "payload": payload})
+        return await mock_post(token, url, payload)
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=capturing_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_get),
+    ):
+        await m365_service.provision_csp_admin_app_registration(
+            access_token="tok",
+            tenant_id="partner-tenant-id",
+            redirect_uri="https://myportal.example.com/m365/callback",
+        )
+
+    app_creation = next(
+        c for c in captured_payloads
+        if "/applications" in c["url"]
+        and "addPassword" not in c["url"]
+        and "owners" not in c["url"]
+    )
+    web = app_creation["payload"].get("web", {})
+    assert web.get("redirectUris") == ["https://myportal.example.com/m365/callback"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_csp_admin_provision_omits_web_when_no_redirect_uri():
+    """provision_csp_admin_app_registration omits the web property when no redirect_uri given."""
+    captured_payloads: list[dict] = []
+    mock_post, mock_get = _make_csp_admin_provision_mocks()
+
+    async def capturing_post(token: str, url: str, payload: dict) -> dict:
+        captured_payloads.append({"url": url, "payload": payload})
+        return await mock_post(token, url, payload)
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=capturing_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_get),
+    ):
+        await m365_service.provision_csp_admin_app_registration(
+            access_token="tok",
+            tenant_id="partner-tenant-id",
+        )
+
+    app_creation = next(
+        c for c in captured_payloads
+        if "/applications" in c["url"]
+        and "addPassword" not in c["url"]
+        and "owners" not in c["url"]
+    )
+    assert "web" not in app_creation["payload"]
+
 @pytest.mark.anyio("asyncio")
 async def test_csp_admin_provision_grants_consent_for_app_roles():
     """provision_csp_admin_app_registration grants admin consent for CSP admin roles."""
