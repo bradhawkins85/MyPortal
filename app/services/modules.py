@@ -3497,12 +3497,20 @@ async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
             continue
 
         try:
-            tactical_id_str = str(client_id).strip() if client_id is not None else None
+            tactical_id_str = str(client_id).strip() if client_id is not None and client_id != "" else None
+            if not tactical_id_str:
+                tactical_id_str = None
 
             existing = None
             if tactical_id_str:
                 existing = await company_repo.get_company_by_tactical_id(tactical_id_str)
             if not existing:
+                if tactical_id_str:
+                    logger.info(
+                        "Tactical RMM client not matched by ID, falling back to name lookup",
+                        tactical_id=tactical_id_str,
+                        name=name,
+                    )
                 existing = await company_repo.get_company_by_name(name)
 
             if existing:
