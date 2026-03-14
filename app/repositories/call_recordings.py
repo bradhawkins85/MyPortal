@@ -302,7 +302,7 @@ async def create_call_recording(
     if phone_number:
         staff_id = await _lookup_staff_by_phone(phone_number)
     
-    await db.execute(
+    recording_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO call_recordings (
             file_path, file_name, phone_number,
@@ -322,10 +322,11 @@ async def create_call_recording(
             transcription_status,
         ),
     )
-    
-    created = await db.fetch_one("SELECT * FROM call_recordings WHERE id = LAST_INSERT_ID()")
-    if not created:
+    if not recording_id:
         raise RuntimeError("Failed to create call recording")
+    created = await db.fetch_one("SELECT * FROM call_recordings WHERE id = %s", (recording_id,))
+    if not created:
+        raise RuntimeError("Failed to retrieve created call recording")
     return _map_recording_row(created)
 
 

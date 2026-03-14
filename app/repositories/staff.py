@@ -261,7 +261,7 @@ async def create_staff(
     account_action: str | None = None,
     syncro_contact_id: str | None = None,
 ) -> dict[str, Any]:
-    await db.execute(
+    staff_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO staff (
             company_id,
@@ -307,9 +307,11 @@ async def create_staff(
             syncro_contact_id,
         ),
     )
-    created = await db.fetch_one("SELECT * FROM staff WHERE id = LAST_INSERT_ID()")
-    if not created:
+    if not staff_id:
         raise RuntimeError("Failed to create staff record")
+    created = await db.fetch_one("SELECT * FROM staff WHERE id = %s", (staff_id,))
+    if not created:
+        raise RuntimeError("Failed to retrieve created staff record")
     return _map_staff_row(created)
 
 
