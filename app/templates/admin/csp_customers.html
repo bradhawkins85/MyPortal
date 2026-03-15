@@ -203,7 +203,7 @@
                 {% if is_provisioned %}
                   {% for company in companies if company.id == current_company_id %}
                   <div class="form-field__group">
-                    <span class="text-muted">{{ company.name }}</span>
+                    <span class="text-muted" style="flex: 1">{{ company.name }}</span>
                     <a
                       href="/admin/companies/{{ company.id }}/edit"
                       class="button button--ghost button--small"
