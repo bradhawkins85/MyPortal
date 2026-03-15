@@ -24,11 +24,22 @@ _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 # Microsoft Graph's own well-known app ID (constant across all tenants)
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 
-# Application-permission role IDs required for the provisioned integration app
+# Application-permission role IDs required for the provisioned integration app.
+# The CIS benchmark checks require several additional read-only permissions so
+# that the app can inspect security policies, Intune compliance policies, and
+# audit logs.  These are included in the initial provisioning grant so that
+# newly provisioned apps immediately support CIS benchmarking without requiring
+# re-provisioning.
 _PROVISION_APP_ROLES: list[str] = [
     "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
     "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
     "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
+    # Additional permissions for CIS benchmark checks:
+    "246dd0d5-5bd0-4def-940b-0421030a5b68",  # Policy.Read.All
+    "498476ce-e0fe-48b0-b801-37ba7e2685c6",  # Organization.Read.All
+    "dc377aa6-52d8-4e23-b271-2a7ae04cedf3",  # DeviceManagementConfiguration.Read.All
+    "2f51be20-0bb4-4fed-bf7b-db946066c75e",  # DeviceManagementManagedDevices.Read.All
+    "b0afded3-3588-46d8-8b3d-9842eff778da",  # AuditLog.Read.All
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
