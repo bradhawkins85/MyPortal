@@ -45,7 +45,8 @@ _PROVISION_APP_ROLES: list[str] = [
 
 # OAuth scopes requested during the admin-consent provisioning flow
 PROVISION_SCOPE = (
-    "Application.ReadWrite.All AppRoleAssignment.ReadWrite.All offline_access"
+    "https://graph.microsoft.com/Application.ReadWrite.All "
+    "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All offline_access"
 )
 
 # Minimal scopes used for the tenant-discovery sign-in step

@@ -278,9 +278,9 @@ async def test_provision_app_registration_no_redirect_uri_when_not_provided():
 
 @pytest.mark.anyio("asyncio")
 async def test_provision_scope_constant():
-    """PROVISION_SCOPE contains the required permissions."""
-    assert "Application.ReadWrite.All" in m365_service.PROVISION_SCOPE
-    assert "AppRoleAssignment.ReadWrite.All" in m365_service.PROVISION_SCOPE
+    """PROVISION_SCOPE contains the required Graph-qualified delegated permissions."""
+    assert "https://graph.microsoft.com/Application.ReadWrite.All" in m365_service.PROVISION_SCOPE
+    assert "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All" in m365_service.PROVISION_SCOPE
     assert "offline_access" in m365_service.PROVISION_SCOPE
 
 
