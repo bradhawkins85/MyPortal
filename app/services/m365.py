@@ -263,12 +263,33 @@ async def acquire_access_token(company_id: int) -> str:
     # which would otherwise cause /subscribedSkus to return the parent's licenses.
     csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
     effective_tenant_id = csp_tenant_id or creds["tenant_id"]
-    access_token, refresh, expires_at = await _exchange_token(
-        tenant_id=effective_tenant_id,
-        client_id=creds["client_id"],
-        client_secret=creds.get("client_secret") or "",
-        refresh_token=creds.get("refresh_token"),
-    )
+    stored_refresh = creds.get("refresh_token")
+    try:
+        access_token, refresh, expires_at = await _exchange_token(
+            tenant_id=effective_tenant_id,
+            client_id=creds["client_id"],
+            client_secret=creds.get("client_secret") or "",
+            refresh_token=stored_refresh,
+        )
+    except M365Error:
+        if not stored_refresh:
+            raise
+        # The stored refresh token is stale or revoked.  Fall back to the
+        # client_credentials grant so that background sync jobs can continue
+        # using application permissions without user interaction.
+        log_error(
+            "M365 refresh token is invalid; falling back to client_credentials grant",
+            company_id=company_id,
+        )
+        access_token, refresh, expires_at = await _exchange_token(
+            tenant_id=effective_tenant_id,
+            client_id=creds["client_id"],
+            client_secret=creds.get("client_secret") or "",
+            refresh_token=None,
+        )
+        # Clear the stale refresh token so future calls use client_credentials
+        # immediately rather than attempting the refresh_token grant again.
+        refresh = None
     expires_value = None
     if expires_at:
         expires_value = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
