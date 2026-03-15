@@ -242,6 +242,20 @@ async def acquire_access_token(company_id: int) -> str:
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
+
+    # Reuse a stored token that is still valid (with a 5-minute safety margin).
+    # This avoids an unnecessary round-trip to Microsoft's token endpoint on
+    # every call (e.g. after an app restart) and prevents transient failures
+    # from breaking sync jobs when a perfectly valid token is already cached.
+    stored_token = creds.get("access_token")
+    stored_expires_at = creds.get("token_expires_at")
+    if stored_token and stored_expires_at:
+        # token_expires_at is stored as a naive UTC datetime; compare likewise.
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        margin = timedelta(minutes=5)
+        if isinstance(stored_expires_at, datetime) and stored_expires_at - margin > now_utc:
+            return stored_token
+
     # Prefer the company's mapped CSP tenant ID when available.  This ensures
     # that a shared CSP admin app (registered in the partner/parent tenant) still
     # acquires a token scoped to the *customer* tenant rather than the parent,
