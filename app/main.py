@@ -279,12 +279,18 @@ def _build_m365_redirect_uri(request: Request) -> str:
 
     This ensures the redirect_uri uses HTTPS when the app is behind a
     reverse proxy, preventing Microsoft from rejecting the redirect_uri.
-    Falls back to the request-derived URL when PORTAL_URL is not set.
+    Falls back to the request-derived URL when PORTAL_URL is not set,
+    forcing the scheme to HTTPS so Microsoft accepts the reply address.
     """
     if settings.portal_url:
         base = str(settings.portal_url).rstrip("/")
         return f"{base}/m365/callback"
-    return str(request.url_for("m365_callback"))
+    uri = str(request.url_for("m365_callback"))
+    # Microsoft requires HTTPS redirect URIs; force the scheme when the
+    # request arrives over HTTP (e.g. via a plain reverse proxy).
+    if uri.startswith("http://"):
+        uri = "https://" + uri[len("http://"):]
+    return uri
 
 
 def _random_daily_cron() -> str:
@@ -4778,9 +4784,16 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         "prompt": "consent",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        # domain_hint directs the admin to sign in to the correct customer
+        # tenant without requiring the PKCE client to be registered in that
+        # tenant (avoids AADSTS700016 for single-tenant partner apps).
+        "domain_hint": tenant_id,
     }
+    # Use the /organizations endpoint so that the PKCE public client does not
+    # need to be registered or consented in every customer tenant.  The
+    # domain_hint above steers the Global Admin to the correct tenant.
     authorize_url = (
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
     )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
@@ -4822,9 +4835,15 @@ async def admin_company_m365_provision(
         "prompt": "consent",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        # domain_hint directs the admin to sign in to the correct customer
+        # tenant without requiring the PKCE client to be registered in that
+        # tenant (avoids AADSTS700016 for single-tenant partner apps).
+        "domain_hint": tenant_id,
     }
+    # Use the /organizations endpoint so that the PKCE public client does not
+    # need to be registered or consented in every customer tenant.
     authorize_url = (
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
     )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
@@ -5578,6 +5597,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             provision_result = await m365_service.provision_app_registration(
                 access_token=access_token,
                 display_name=display_name,
+                redirect_uri=redirect_uri,
             )
         except m365_service.M365Error as exc:
             log_error(
