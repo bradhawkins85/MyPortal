@@ -70,8 +70,7 @@ For automated onboarding scripts, create the service principal via Graph in cust
 
 This is functionally similar to `az ad sp create --id`.
 
-In MyPortal, this option is available directly on **Admin → CSP / Lighthouse customers**
-as **Option 3 (Graph)** for each mapped tenant.
+In MyPortal, this option is available from the **Microsoft 365** provisioning flows as **Option 3 (Graph)** for mapped tenants.
 
 ## Implementation checklist for this app
 
