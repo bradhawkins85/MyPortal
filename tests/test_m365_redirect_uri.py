@@ -158,6 +158,41 @@ def _extract_prompt(location: str) -> str:
     return query_params["prompt"][0]
 
 
+def _extract_scope(location: str) -> str:
+    query_params = parse_qs(urlparse(location).query)
+    assert "scope" in query_params
+    return query_params["scope"][0]
+
+
+def test_m365_connect_scope_does_not_mix_default_with_resource_scopes(monkeypatch):
+    """/m365/connect must not combine .default with resource-specific scopes (AADSTS70011)."""
+    monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
+
+    async def fake_load_license_context(request, **kwargs):
+        user = {"id": 1, "is_super_admin": True, "company_id": 1}
+        return user, None, None, 1, None
+
+    async def fake_get_credentials(company_id: int):
+        return {
+            "client_id": TEST_CLIENT_ID,
+            "client_secret": TEST_CLIENT_SECRET,
+            "tenant_id": "test-tenant-id",
+        }
+
+    monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module.m365_service, "get_credentials", fake_get_credentials)
+
+    with TestClient(app) as client:
+        response = client.get("/m365/connect", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    scope = _extract_scope(location)
+    assert ".default" in scope
+    assert "User.Read.All" not in scope
+    assert "Directory.Read.All" not in scope
+
+
 def test_m365_provision_uses_consent_prompt(monkeypatch):
     """m365_provision uses prompt=consent (not admin_consent) in the authorize URL."""
     monkeypatch.setattr(main_module.settings, "portal_url", AnyHttpUrl(TEST_PORTAL_URL))
