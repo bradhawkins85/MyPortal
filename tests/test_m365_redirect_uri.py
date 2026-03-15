@@ -280,3 +280,52 @@ def test_admin_company_m365_provision_uses_consent_prompt(monkeypatch):
     assert parsed.netloc == "login.microsoftonline.com"
     prompt = _extract_prompt(location)
     assert prompt == "consent", f"Expected prompt=consent, got prompt={prompt!r}"
+
+
+
+def test_m365_test_connectivity_redirects_with_success(monkeypatch):
+    """POST /m365/test redirects with a success message when Graph access succeeds."""
+
+    async def fake_load_license_context(request, **kwargs):
+        user = {"id": 1, "is_super_admin": True, "company_id": 1}
+        return user, None, None, 1, None
+
+    async def fake_test_connectivity(company_id: int):
+        return {"graph_access": True, "organization_name": "Contoso"}
+
+    monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module.m365_service, "test_connectivity", fake_test_connectivity)
+
+    with TestClient(app) as client:
+        response = client.post("/m365/test", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/m365?")
+    query_params = parse_qs(urlparse(location).query)
+    assert "success" in query_params
+    assert "Contoso" in query_params["success"][0]
+
+
+def test_m365_test_connectivity_redirects_with_error(monkeypatch):
+    """POST /m365/test redirects with an error message when Graph access fails."""
+
+    async def fake_load_license_context(request, **kwargs):
+        user = {"id": 1, "is_super_admin": True, "company_id": 1}
+        return user, None, None, 1, None
+
+    async def fake_test_connectivity(company_id: int):
+        raise main_module.m365_service.M365Error("invalid credentials")
+
+    monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module.m365_service, "test_connectivity", fake_test_connectivity)
+
+    with TestClient(app) as client:
+        response = client.post("/m365/test", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/m365?")
+    query_params = parse_qs(urlparse(location).query)
+    assert "error" in query_params
+    assert "invalid credentials" in query_params["error"][0]
