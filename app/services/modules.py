@@ -26,6 +26,7 @@ if _env_path.exists():
 from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
+from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import call_recordings as call_recordings_service
@@ -1125,6 +1126,12 @@ async def update_module(
     coerced = _coerce_settings(slug, settings, existing) if settings is not None else None
     updated = await module_repo.update_module(slug, enabled=enabled, settings=coerced)
     if updated:
+        # When a module is disabled, deactivate any scheduled tasks that belong to it.
+        if enabled is False:
+            from app.services.scheduler import COMMANDS_BY_MODULE  # local import to avoid circular dependency
+            module_commands = COMMANDS_BY_MODULE.get(slug, set())
+            if module_commands:
+                await scheduled_tasks_repo.disable_tasks_for_commands(module_commands)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
     return _redact_module_settings(updated) if updated else None

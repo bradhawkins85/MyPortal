@@ -237,3 +237,19 @@ async def mark_task_run(task_id: int) -> None:
         "UPDATE scheduled_tasks SET last_run_at = %s WHERE id = %s",
         (now, task_id),
     )
+
+
+async def disable_tasks_for_commands(commands: Iterable[str]) -> int:
+    """Disable all active scheduled tasks whose command is in *commands*.
+
+    Returns the number of tasks that were deactivated.
+    """
+    command_list = [c for c in commands if c]
+    if not command_list:
+        return 0
+    placeholders = ",".join(["%s"] * len(command_list))
+    result = await db.execute(
+        f"UPDATE scheduled_tasks SET active = 0 WHERE active = 1 AND command IN ({placeholders})",
+        tuple(command_list),
+    )
+    return int(result or 0)
