@@ -126,6 +126,78 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert 'href="/assets"' not in html
 
 
+def test_m365_menu_item_has_data_menu_key(monkeypatch):
+    """Office 365 expandable menu item must have data-menu-key so it appears in left menu customisation."""
+    user = {"id": 1, "email": "admin@example.com", "is_super_admin": False}
+    membership = {
+        "company_id": 10,
+        "is_admin": True,
+        "can_access_shop": False,
+        "can_access_cart": False,
+        "can_access_orders": False,
+        "can_access_forms": False,
+        "can_manage_assets": False,
+        "can_manage_licenses": True,
+        "can_manage_invoices": False,
+        "can_manage_issues": False,
+        "can_manage_staff": False,
+        "can_view_compliance": False,
+        "staff_permission": 2,
+    }
+
+    async def fake_require_user(request):
+        return user, None
+
+    async def fake_overview(request, current_user):
+        return {"unread_notifications": 0}
+
+    async def fake_run_system_update(*, force_restart: bool = False):
+        return None
+
+    async def fake_build_base_context(request, current_user, *, extra=None):
+        context = {
+            "request": request,
+            "app_name": "MyPortal",
+            "current_year": 2025,
+            "current_user": current_user,
+            "available_companies": [],
+            "active_company": None,
+            "active_company_id": membership["company_id"],
+            "active_membership": membership,
+            "csrf_token": "csrf-token",
+            "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
+            "notification_unread_count": 0,
+            "can_access_tickets": False,
+            "can_view_bcp": False,
+            "can_view_compliance": False,
+            "plausible_config": {"enabled": False, "site_domain": "", "base_url": ""},
+        }
+        if extra:
+            context.update(extra)
+        return context
+
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_user)
+    monkeypatch.setattr(main_module, "_build_consolidated_overview", fake_overview)
+    monkeypatch.setattr(main_module, "_build_base_context", fake_build_base_context)
+    monkeypatch.setattr(scheduler_service, "run_system_update", fake_run_system_update)
+    main_module.templates.env.globals["plausible_config"] = {
+        "enabled": False,
+        "site_domain": "",
+        "base_url": "",
+    }
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'href="/m365"' in html
+    assert 'data-menu-key="/m365"' in html, (
+        "Office 365 expandable menu item must carry data-menu-key so it is included "
+        "in left menu customisation"
+    )
+
+
 def test_bcp_menu_replaces_business_continuity(company_admin_context):
     """Ensure the BCP navigation link is present and the legacy menu is removed."""
     with TestClient(app) as client:
