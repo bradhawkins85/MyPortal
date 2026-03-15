@@ -16,6 +16,12 @@
   </div>
   {% endif %}
 
+  {% if success %}
+  <div class="alert alert--success" role="status">
+    {{ success }}
+  </div>
+  {% endif %}
+
   <section class="panel">
     <header class="panel__header">
       <div>
@@ -111,6 +117,12 @@
         </div>
       </form>
       {% if credential %}
+      <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--ghost">Test connectivity</button>
+      </form>
       <form method="post" action="/m365/credentials/delete" class="form-inline">
         {% if csrf_token %}
         <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
