@@ -1120,18 +1120,29 @@ async def get_all_users(company_id: int) -> list[dict[str, Any]]:
     Fetches members from the Microsoft Graph ``/users`` endpoint and handles
     ``@odata.nextLink`` pagination so that tenants with more than the default
     page size are fully returned.
+
+    ``$filter=accountEnabled eq true`` is an advanced directory-object query
+    that requires the ``ConsistencyLevel: eventual`` request header and the
+    ``$count=true`` query parameter.  Without these, Microsoft Graph returns
+    403 Forbidden in many tenant configurations (application-permission context).
+    The same header must also be forwarded for every ``@odata.nextLink``
+    paginated request, otherwise subsequent pages will also fail.
     """
     access_token = await acquire_access_token(company_id)
+    # $count=true is required alongside ConsistencyLevel: eventual for advanced
+    # filter queries on directory objects.
     url = (
         "https://graph.microsoft.com/v1.0/users?"
         "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
         "mobilePhone,businessPhones,streetAddress,city,state,postalCode,country,"
         "department,jobTitle&"
-        "$filter=accountEnabled eq true"
+        "$filter=accountEnabled eq true&"
+        "$count=true"
     )
+    consistency_headers = {"ConsistencyLevel": "eventual"}
     users: list[dict[str, Any]] = []
     while url:
-        payload = await _graph_get(access_token, url)
+        payload = await _graph_get(access_token, url, extra_headers=consistency_headers)
         users.extend(payload.get("value", []))
         url = payload.get("@odata.nextLink")
     return users
