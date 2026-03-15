@@ -1,0 +1,7 @@
+{
+  "guid": "647103a6-87e1-4c9f-9d62-143042ca5c74",
+  "occurred_at": "2026-03-15T13:15:31.140066+00:00",
+  "change_type": "Feature",
+  "summary": "Expand Microsoft 365 scheduled sync to include staff directory sync and rename task command to sync_m365_data.",
+  "content_hash": "67a1aca10403f20aaf24018f472f3bab840029f9089fbe7b407cc5174e6b7400"
+}

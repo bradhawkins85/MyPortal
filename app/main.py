@@ -3467,7 +3467,7 @@ async def _render_company_edit_page(
 
         automation_command_options = [
             {"value": "sync_staff", "label": "Sync staff directory"},
-            {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
+            {"value": "sync_m365_data", "label": "Sync Microsoft 365 data"},
             {"value": "sync_to_xero", "label": "Sync to Xero"},
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
             {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
@@ -5592,10 +5592,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         # Auto-create default sync tasks for the company if not already present.
         existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
+        has_m365_sync_task = bool({"sync_m365_data", "sync_o365"} & existing_commands)
         for command, label in (
-            ("sync_o365", "Sync Microsoft 365 licenses"),
+            ("sync_m365_data", "Sync Microsoft 365 data"),
             ("sync_staff", "Sync staff directory"),
         ):
+            if command == "sync_m365_data" and has_m365_sync_task:
+                continue
             if command not in existing_commands:
                 await scheduled_tasks_repo.create_task(
                     name=label,
@@ -10644,7 +10647,7 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
 
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
-        {"value": "sync_o365", "label": "Sync Microsoft 365 licenses"},
+        {"value": "sync_m365_data", "label": "Sync Microsoft 365 data"},
         {"value": "sync_to_xero", "label": "Sync to Xero"},
         {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
         {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},

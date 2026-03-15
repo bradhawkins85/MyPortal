@@ -48,7 +48,7 @@ async def test_disable_tasks_for_commands_executes_update(monkeypatch):
 
     monkeypatch.setattr(scheduled_tasks_repo.db, "execute", fake_execute)
 
-    count = await scheduled_tasks_repo.disable_tasks_for_commands({"sync_o365", "sync_to_xero"})
+    count = await scheduled_tasks_repo.disable_tasks_for_commands({"sync_m365_data", "sync_to_xero"})
 
     assert count == 2
     assert len(executed_queries) == 1
