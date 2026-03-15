@@ -287,6 +287,67 @@ async def test_provision_callback_uses_pkce_token_exchange(
     assert "client_secret" not in token_req
 
 
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_callback_persists_token_tenant_when_it_differs_from_state(
+    async_client: HttpxAsyncClient,
+):
+    """Provision callback stores credentials using tenant ID extracted from token."""
+    code_verifier, _ = m365_service.generate_pkce_pair()
+    state = _signed_state(
+        {
+            "company_id": 42,
+            "user_id": 1,
+            "tenant_id": "state-tenant-id",
+            "flow": "provision",
+            "code_verifier": code_verifier,
+        }
+    )
+
+    async def fake_post(url, *, data=None, **kwargs):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        # tid claim resolves to token-tenant-id
+        mock_resp.json.return_value = {
+            "access_token": (
+                "eyJhbGciOiJub25lIn0."
+                "eyJ0aWQiOiJ0b2tlbi10ZW5hbnQtaWQifQ."
+                "sig"
+            )
+        }
+        return mock_resp
+
+    async def fake_provision(**kwargs):
+        return {
+            "client_id": "new-client-id",
+            "client_secret": "new-secret",
+            "app_object_id": "obj-id",
+            "client_secret_key_id": "key-id",
+            "client_secret_expires_at": None,
+        }
+
+    with (
+        patch("app.main.httpx.AsyncClient") as mock_http,
+        patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
+        patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock) as mock_upsert,
+        patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
+        patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=[]),
+        patch("app.main.scheduled_tasks_repo.create_task", new_callable=AsyncMock),
+        patch("app.main.scheduler_service.refresh", new_callable=AsyncMock),
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=AsyncMock(side_effect=fake_post)))
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        response = await async_client.get(
+            f"/m365/callback?code=auth-code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert mock_upsert.await_count == 1
+    assert mock_upsert.await_args.kwargs["tenant_id"] == "token-tenant-id"
+
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
