@@ -166,6 +166,7 @@ from app.services import email as email_service
 from app.services import imap as imap_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
+from app.services import cis_benchmark as cis_benchmark_service
 from app.services import modules as modules_service
 from app.services import notification_event_settings as event_settings_service
 from app.services import message_templates as message_templates_service
@@ -4598,7 +4599,74 @@ async def m365_page(request: Request, error: str | None = None):
     return await _render_template("m365/index.html", request, user, extra=extra)
 
 
-@app.post("/m365/credentials", response_class=RedirectResponse)
+@app.get("/m365/benchmarks", response_class=HTMLResponse)
+async def m365_benchmarks_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    results = await cis_benchmark_service.get_last_results(company_id)
+    extra = {
+        "title": "CIS Benchmarks",
+        "company": company,
+        "categories": cis_benchmark_service.BENCHMARK_CATEGORIES,
+        "results": results,
+        "has_credentials": bool(credentials),
+        "is_super_admin": bool(user.get("is_super_admin")),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/benchmarks.html", request, user, extra=extra)
+
+
+@app.post("/m365/benchmarks/run", response_class=RedirectResponse)
+async def run_m365_benchmarks(request: Request):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        await cis_benchmark_service.run_benchmarks(company_id)
+        log_info("CIS benchmarks run", company_id=company_id, user_id=user.get("id"))
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365/benchmarks?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(url="/m365/benchmarks?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/benchmarks/exclude", response_class=RedirectResponse)
+async def exclude_benchmark_check(
+    request: Request,
+    check_id: str = Form(..., alias="checkId"),
+    reason: str = Form("", alias="reason"),
+):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await cis_benchmark_service.add_exclusion(company_id, check_id, reason)
+    return RedirectResponse(url="/m365/benchmarks?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/benchmarks/exclude/remove", response_class=RedirectResponse)
+async def remove_benchmark_exclusion(
+    request: Request,
+    check_id: str = Form(..., alias="checkId"),
+):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await cis_benchmark_service.remove_exclusion(company_id, check_id)
+    return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+
+
+
 async def save_m365_credentials(
     request: Request,
     tenant_id: str = Form(..., alias="tenantId"),
