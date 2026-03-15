@@ -4998,6 +4998,7 @@ async def admin_csp_customers_page(
 
     session_data = await session_manager.load_session(request)
     csrf_token = session_data.csrf_token if session_data else None
+    provisioned_company_ids = await m365_repo.list_provisioned_company_ids()
 
     return await _render_template(
         "admin/csp_customers.html",
@@ -5012,6 +5013,7 @@ async def admin_csp_customers_page(
             "success": _sanitize_message(success),
             "csrf_token": csrf_token,
             "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
+            "provisioned_company_ids": provisioned_company_ids,
         },
     )
 
