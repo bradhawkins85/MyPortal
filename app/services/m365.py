@@ -1058,6 +1058,29 @@ async def sync_company_licenses(company_id: int) -> None:
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
 
 
+async def get_all_users(company_id: int) -> list[dict[str, Any]]:
+    """Return all enabled M365 users for the given company.
+
+    Fetches members from the Microsoft Graph ``/users`` endpoint and handles
+    ``@odata.nextLink`` pagination so that tenants with more than the default
+    page size are fully returned.
+    """
+    access_token = await acquire_access_token(company_id)
+    url = (
+        "https://graph.microsoft.com/v1.0/users?"
+        "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
+        "mobilePhone,businessPhones,streetAddress,city,state,postalCode,country,"
+        "department,jobTitle&"
+        "$filter=accountEnabled eq true"
+    )
+    users: list[dict[str, Any]] = []
+    while url:
+        payload = await _graph_get(access_token, url)
+        users.extend(payload.get("value", []))
+        url = payload.get("@odata.nextLink")
+    return users
+
+
 async def _exchange_obo_token(
     *,
     customer_tenant_id: str,
