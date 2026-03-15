@@ -46,6 +46,15 @@ def _normalise_run(row: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+async def get_commands_for_company(company_id: int) -> set[str]:
+    """Return the set of command names already scheduled for *company_id*."""
+    rows = await db.fetch_all(
+        "SELECT command FROM scheduled_tasks WHERE company_id = %s",
+        (company_id,),
+    )
+    return {row["command"] for row in rows}
+
+
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"
     rows = await db.fetch_all(
