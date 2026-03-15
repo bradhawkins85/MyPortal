@@ -315,8 +315,13 @@ def test_admin_company_m365_provision_uses_pkce_even_when_admin_credentials_pres
 # Tests: PKCE code_verifier is stored in state
 # ---------------------------------------------------------------------------
 
-def test_m365_provision_pkce_stores_code_verifier_in_state(monkeypatch):
-    """m365_provision always stores code_verifier in the signed OAuth state."""
+def test_m365_provision_stores_code_verifier_in_state(monkeypatch):
+    """m365_provision always stores code_verifier in the signed OAuth state.
+
+    PKCE is unconditionally used for per-tenant provision; the code_verifier
+    must always be present so the callback can exchange the code without a
+    client secret.
+    """
     monkeypatch.setattr(main_module.settings, "portal_url", None)
 
     async def fake_load_license_context(request, **kwargs):
