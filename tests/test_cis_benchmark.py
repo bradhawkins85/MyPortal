@@ -743,12 +743,12 @@ async def test_graph_get_error_includes_status_code():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio("asyncio")
-async def test_check_audit_log_enabled_fail_on_403():
-    """A 403 from the audit-log endpoint should return STATUS_FAIL, not STATUS_UNKNOWN.
+async def test_check_audit_log_enabled_unknown_on_403():
+    """A 403 from the audit-log endpoint should return STATUS_UNKNOWN.
 
-    _graph_get now includes the HTTP status code in the M365Error message, so
-    _check_audit_log_enabled can correctly detect a 403 Forbidden and return
-    STATUS_FAIL instead of the generic STATUS_UNKNOWN.
+    A 403 means the app lacks AuditLog.Read.All permission – it does NOT tell
+    us whether auditing is enabled or disabled.  Returning STATUS_FAIL would be
+    misleading, so STATUS_UNKNOWN is the correct outcome.
     """
     from app.services.m365 import M365Error
 
@@ -759,7 +759,7 @@ async def test_check_audit_log_enabled_fail_on_403():
         results = await cis_service.run_m365_benchmarks("fake-token")
 
     check = next(r for r in results if r["check_id"] == "m365_audit_log_enabled")
-    assert check["status"] == STATUS_FAIL
+    assert check["status"] == STATUS_UNKNOWN
 
 
 @pytest.mark.anyio("asyncio")

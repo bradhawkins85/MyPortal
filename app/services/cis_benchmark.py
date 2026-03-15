@@ -361,7 +361,11 @@ async def _check_audit_log_enabled(token: str) -> dict[str, Any]:
     except M365Error as exc:
         err = str(exc)
         if "403" in err or "Forbidden" in err or "Authorization" in err:
-            return _fail(check_id, check_name, "Audit log endpoint returned Forbidden – auditing may be disabled or the app lacks AuditLog.Read.All permission.")
+            return _unknown(
+                check_id,
+                check_name,
+                "Unable to verify audit log status – the app may lack AuditLog.Read.All permission.",
+            )
         return _unknown(check_id, check_name, f"Unable to verify audit log status: {exc}")
 
 
