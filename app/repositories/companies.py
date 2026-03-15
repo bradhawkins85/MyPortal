@@ -217,6 +217,18 @@ async def unarchive_company(company_id: int) -> dict[str, Any]:
     return updated
 
 
+async def get_company_csp_tenant_id(company_id: int) -> str | None:
+    """Return the CSP tenant ID for a company, or ``None`` if not set."""
+    row = await db.fetch_one(
+        "SELECT csp_tenant_id FROM companies WHERE id = %s",
+        (company_id,),
+    )
+    if not row:
+        return None
+    value = row.get("csp_tenant_id")
+    return str(value).strip() if value else None
+
+
 async def set_company_csp_tenant_id(company_id: int, csp_tenant_id: str | None) -> None:
     """Set or clear the CSP tenant ID for a company."""
     await db.execute(
