@@ -124,3 +124,111 @@ async def test_acquire_access_token_exchanges_when_no_stored_token():
 
     assert result == "brand-new-token"
     mock_exchange.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests: stale refresh_token falls back to client_credentials
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_acquire_access_token_falls_back_when_refresh_token_invalid():
+    """When the stored refresh_token is stale/revoked, acquire_access_token falls
+    back to client_credentials and clears the stale refresh_token from the DB."""
+    from app.services.m365 import M365Error
+
+    creds = {
+        "company_id": 1,
+        "tenant_id": "tenant-abc",
+        "client_id": "client-abc",
+        "client_secret": "secret-abc",
+        "refresh_token": "stale-refresh-token",
+        "access_token": None,
+        "token_expires_at": None,
+    }
+
+    call_count = 0
+
+    async def _mock_exchange(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if kwargs.get("refresh_token"):
+            # Simulate Microsoft rejecting the stale refresh token
+            raise M365Error("Unable to acquire Microsoft 365 access token")
+        # client_credentials succeeds
+        return ("cc-access-token", None, _utcnow() + timedelta(hours=1))
+
+    mock_update = AsyncMock()
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)),
+        patch.object(m365_service.companies_repo, "get_company_csp_tenant_id", AsyncMock(return_value=None)),
+        patch.object(m365_service, "_exchange_token", side_effect=_mock_exchange),
+        patch.object(m365_service.m365_repo, "update_tokens", mock_update),
+        patch.object(m365_service, "_encrypt", lambda x: x),
+    ):
+        result = await m365_service.acquire_access_token(1)
+
+    assert result == "cc-access-token"
+    assert call_count == 2  # first attempt with refresh_token, second with client_credentials
+    # The stale refresh_token must be cleared (None) so future calls skip it
+    mock_update.assert_called_once()
+    _, call_kwargs = mock_update.call_args
+    assert call_kwargs.get("refresh_token") is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_acquire_access_token_raises_when_no_refresh_token_and_credentials_fail():
+    """When there is no refresh_token and the client_credentials grant fails,
+    the M365Error is propagated to the caller."""
+    from app.services.m365 import M365Error
+
+    creds = {
+        "company_id": 1,
+        "tenant_id": "tenant-abc",
+        "client_id": "client-abc",
+        "client_secret": "bad-secret",
+        "refresh_token": None,
+        "access_token": None,
+        "token_expires_at": None,
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)),
+        patch.object(m365_service.companies_repo, "get_company_csp_tenant_id", AsyncMock(return_value=None)),
+        patch.object(
+            m365_service,
+            "_exchange_token",
+            AsyncMock(side_effect=M365Error("Unable to acquire Microsoft 365 access token")),
+        ),
+    ):
+        with pytest.raises(M365Error):
+            await m365_service.acquire_access_token(1)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_acquire_access_token_raises_when_fallback_also_fails():
+    """When the refresh_token fails AND the client_credentials fallback also fails,
+    the M365Error is propagated to the caller."""
+    from app.services.m365 import M365Error
+
+    creds = {
+        "company_id": 1,
+        "tenant_id": "tenant-abc",
+        "client_id": "client-abc",
+        "client_secret": "bad-secret",
+        "refresh_token": "stale-refresh-token",
+        "access_token": None,
+        "token_expires_at": None,
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)),
+        patch.object(m365_service.companies_repo, "get_company_csp_tenant_id", AsyncMock(return_value=None)),
+        patch.object(
+            m365_service,
+            "_exchange_token",
+            AsyncMock(side_effect=M365Error("Unable to acquire Microsoft 365 access token")),
+        ),
+    ):
+        with pytest.raises(M365Error):
+            await m365_service.acquire_access_token(1)
