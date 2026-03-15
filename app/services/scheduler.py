@@ -315,7 +315,7 @@ class SchedulerService:
                     if company_id:
                         company_id_int = int(company_id)
                         await m365_service.sync_company_licenses(company_id_int)
-                        staff_summary = await staff_importer.import_contacts_for_company(company_id_int)
+                        staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
                         details = json.dumps(
                             {
                                 "company_id": company_id_int,

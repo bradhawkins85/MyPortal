@@ -235,6 +235,57 @@ async def test_import_m365_updates_existing_staff(monkeypatch):
     assert updated_calls[0]["id"] == 99
 
 
+
+@pytest.mark.anyio
+async def test_import_m365_contacts_bypasses_syncro_when_syncro_id_set(monkeypatch):
+    """import_m365_contacts_for_company should use M365 even when a Syncro ID is configured."""
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    m365_users_called = []
+
+    async def fake_get_all_users(company_id):
+        m365_users_called.append(company_id)
+        return [{"givenName": "Eve", "surname": "Green", "mail": "eve@example.com"}]
+
+    monkeypatch.setattr("app.services.m365.get_all_users", fake_get_all_users)
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return([]),
+    )
+
+    async def fake_create_staff(**kwargs):
+        return {**kwargs, "id": 500}
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+
+    # Syncro should never be called
+    async def syncro_must_not_be_called(*_, **__):
+        raise AssertionError("Syncro should not be called")
+
+    monkeypatch.setattr("app.services.syncro.get_contacts", syncro_must_not_be_called)
+
+    summary = await staff_importer.import_m365_contacts_for_company(5)
+    assert summary.created == 1
+    assert m365_users_called == [5]
+
+
+@pytest.mark.anyio
+async def test_import_m365_contacts_returns_empty_when_no_credentials(monkeypatch):
+    """import_m365_contacts_for_company returns an empty summary when M365 is not configured."""
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return(None),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(6)
+    assert summary.created == 0
+    assert summary.updated == 0
+    assert summary.skipped == 0
+    assert summary.total == 0
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
