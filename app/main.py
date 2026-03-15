@@ -286,6 +286,18 @@ def _build_m365_redirect_uri(request: Request) -> str:
     return str(request.url_for("m365_callback"))
 
 
+def _random_daily_cron() -> str:
+    """Return a randomised daily cron expression (``M H * * *``).
+
+    Mirrors the ``randomDailyCron()`` helper in ``automation.js`` so that
+    automatically-provisioned tasks are spread across the day rather than
+    all firing at the same time.
+    """
+    minute = secrets.randbelow(60)
+    hour = secrets.randbelow(24)
+    return f"{minute} {hour} * * *"
+
+
 def _serialise_for_json(value: Any) -> Any:
     """Convert mappings and sequences to JSON-safe primitives for templates."""
 
@@ -5415,6 +5427,28 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             tenant_id=tenant_id,
             client_id=provision_result["client_id"],
         )
+
+        # Auto-create default sync tasks for the company if not already present.
+        existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
+        for command, label in (
+            ("sync_o365", "Sync Microsoft 365 licenses"),
+            ("sync_staff", "Sync staff directory"),
+        ):
+            if command not in existing_commands:
+                await scheduled_tasks_repo.create_task(
+                    name=label,
+                    command=command,
+                    cron=_random_daily_cron(),
+                    company_id=company_id,
+                    active=True,
+                )
+                log_info(
+                    "Auto-created scheduled task after M365 provisioning",
+                    command=command,
+                    company_id=company_id,
+                )
+        await scheduler_service.refresh()
+
         if return_to_company_edit:
             return _company_edit_redirect(
                 company_id=company_id,
