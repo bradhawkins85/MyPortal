@@ -187,8 +187,7 @@
               <th data-column="name" data-sortable>Customer name</th>
               <th data-column="domain" data-sortable>Default domain</th>
               <th data-column="tenant" data-sortable>Tenant ID</th>
-              <th style="width: 20%">MyPortal company</th>
-              <th></th>
+              <th style="width: 100%">MyPortal company</th>
               <th></th>
             </tr>
           </thead>
@@ -196,6 +195,7 @@
             {% for customer in customers %}
             {% set current_company_id = mapped.get(customer.tenant_id) %}
             {% set is_provisioned = current_company_id and current_company_id in provisioned_company_ids %}
+            {% set outer_index = loop.index %}
             <tr>
               <td data-column="name">{{ customer.name or '—' }}</td>
               <td data-column="domain">{{ customer.default_domain or '—' }}</td>
@@ -203,21 +203,14 @@
               <td>
                 {% if is_provisioned %}
                   {% for company in companies if company.id == current_company_id %}
-                  <div class="form-field__group">
-                    <span class="text-muted" style="flex: 1">{{ company.name }}</span>
-                    <a
-                      href="/admin/companies/{{ company.id }}/edit"
-                      class="button button--ghost button--small"
-                      title="Remove M365 connection via company page to modify"
-                    >Manage</a>
-                  </div>
+                  <span class="text-muted">{{ company.name }}</span>
                   {% endfor %}
                 {% else %}
                 <form
                   method="post"
                   action="/admin/csp/customers/map"
                   class="form-field__group"
-                  id="csp-map-{{ loop.index }}"
+                  id="csp-map-{{ outer_index }}"
                 >
                   {% include "partials/csrf.html" %}
                   <input type="hidden" name="tenant_id" value="{{ customer.tenant_id }}" />
@@ -230,38 +223,45 @@
                     >{{ company.name }}</option>
                     {% endfor %}
                   </select>
-                  <button type="submit" class="button button--ghost button--small">Save</button>
                 </form>
                 {% endif %}
               </td>
               <td>
                 {% if is_provisioned %}
                   {% for company in companies if company.id == current_company_id %}
-                  <form method="post" action="/admin/csp/customers/verify">
-                    {% include "partials/csrf.html" %}
-                    <input type="hidden" name="company_id" value="{{ company.id }}" />
-                    <button
-                      type="submit"
-                      class="button button--ghost button--small"
-                      title="Check and update permissions for {{ company.name }}"
-                    >Verify</button>
-                  </form>
-                  {% endfor %}
-                {% endif %}
-              </td>
-              <td>
-                {% if is_provisioned %}
-                  <span class="badge badge--success" title="M365 provisioned — remove connection via the company page to modify">M365 provisioned</span>
-                {% elif current_company_id %}
-                  {% for company in companies if company.id == current_company_id %}
-                    {% if admin_credentials_configured %}
+                  <div class="form-field__group">
+                    <span class="badge badge--success" title="M365 provisioned — remove connection via the company page to modify">M365 provisioned</span>
                     <a
-                      href="/admin/companies/{{ company.id }}/m365-discover"
+                      href="/admin/companies/{{ company.id }}/edit"
                       class="button button--ghost button--small"
-                      title="Auto-provision M365 app for {{ company.name }}"
-                    >Provision M365</a>
-                    {% endif %}
+                      title="Remove M365 connection via company page to modify"
+                    >Manage</a>
+                    <form method="post" action="/admin/csp/customers/verify">
+                      {% include "partials/csrf.html" %}
+                      <input type="hidden" name="company_id" value="{{ company.id }}" />
+                      <button
+                        type="submit"
+                        class="button button--ghost button--small"
+                        title="Check and update permissions for {{ company.name }}"
+                      >Verify</button>
+                    </form>
+                  </div>
                   {% endfor %}
+                {% else %}
+                <div class="form-field__group">
+                  <button type="submit" form="csp-map-{{ outer_index }}" class="button button--ghost button--small">Save</button>
+                  {% if current_company_id %}
+                    {% for company in companies if company.id == current_company_id %}
+                      {% if admin_credentials_configured %}
+                      <a
+                        href="/admin/companies/{{ company.id }}/m365-discover"
+                        class="button button--ghost button--small"
+                        title="Auto-provision M365 app for {{ company.name }}"
+                      >Provision M365</a>
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
+                </div>
                 {% endif %}
               </td>
             </tr>
