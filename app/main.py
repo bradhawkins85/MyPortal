@@ -4985,7 +4985,7 @@ async def admin_csp_signin(request: Request):
     if not m365_admin_client_id or not m365_admin_client_secret:
         encoded = urlencode({"error": "Admin M365 credentials are not configured."})
         return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
     redirect_uri = _build_m365_redirect_uri(request)
     state = oauth_state_serializer.dumps(
@@ -5091,7 +5091,7 @@ async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...
     if not clean_tenant_id:
         encoded = urlencode({"error": "Tenant ID is required for Graph bootstrap."})
         return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
 
     admin_client_id, _ = await _get_m365_admin_credentials()
@@ -5100,7 +5100,7 @@ async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...
             {"error": "Admin M365 application ID is not configured for Graph bootstrap."}
         )
         return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
 
     redirect_uri = _build_m365_redirect_uri(request)
@@ -5133,184 +5133,6 @@ async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...
         f"?{urlencode(params)}"
     )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/admin/csp/customers", response_class=HTMLResponse)
-async def admin_csp_customers_page(
-    request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
-):
-    """Show CSP customer tenants and allow mapping them to MyPortal companies."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    user_id = int(current_user.get("id", 0))
-    csp_session = await csp_repo.get_session(user_id)
-    customers: list[dict] = []
-    session_error: str | None = _sanitize_message(error)
-
-    if csp_session:
-        access_token = m365_service._decrypt(csp_session.get("access_token"))
-        if access_token:
-            try:
-                customers = await m365_service.list_csp_customers(access_token)
-            except m365_service.M365Error as exc:
-                session_error = f"Failed to load CSP customers: {exc}"
-
-    all_companies = await company_repo.list_companies()
-
-    # Build a quick lookup of csp_tenant_id → company for pre-populating dropdowns
-    mapped: dict[str, int] = {}
-    for company in all_companies:
-        csp_tid = company.get("csp_tenant_id")
-        if csp_tid:
-            mapped[str(csp_tid)] = int(company["id"])
-
-    session_data = await session_manager.load_session(request)
-    csrf_token = session_data.csrf_token if session_data else None
-    provisioned_company_ids = await m365_repo.list_provisioned_company_ids()
-
-    return await _render_template(
-        "admin/csp_customers.html",
-        request,
-        current_user,
-        extra={
-            "customers": customers,
-            "companies": all_companies,
-            "mapped": mapped,
-            "has_csp_session": csp_session is not None,
-            "error": session_error,
-            "success": _sanitize_message(success),
-            "csrf_token": csrf_token,
-            "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
-            "provisioned_company_ids": provisioned_company_ids,
-        },
-    )
-
-
-@app.post("/admin/csp/customers/map", response_class=HTMLResponse)
-async def admin_csp_map_tenant(request: Request):
-    """Save the mapping between a CSP customer tenant and a MyPortal company."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    form = await request.form()
-    tenant_id = str(form.get("tenant_id", "")).strip()
-    company_id_raw = str(form.get("company_id", "")).strip()
-
-    if not tenant_id:
-        encoded = urlencode({"error": "Tenant ID is required."})
-        return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    company_id: int | None = None
-    if company_id_raw:
-        try:
-            company_id = int(company_id_raw)
-        except ValueError:
-            encoded = urlencode({"error": "Invalid company ID."})
-            return RedirectResponse(
-                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-
-    if company_id:
-        existing = await company_repo.get_company_by_id(company_id)
-        if not existing:
-            encoded = urlencode({"error": "Company not found."})
-            return RedirectResponse(
-                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-        await company_repo.set_company_csp_tenant_id(company_id, tenant_id)
-        log_info(
-            "CSP tenant mapped to company",
-            tenant_id=tenant_id,
-            company_id=company_id,
-            user_id=current_user.get("id"),
-        )
-        encoded = urlencode({"success": f"Tenant {tenant_id} mapped to company {existing.get('name', company_id)}."})
-    else:
-        # Clearing the mapping — find which company currently has this tenant mapped
-        current_mapped = await company_repo.get_company_by_csp_tenant_id(tenant_id)
-        if current_mapped:
-            await company_repo.set_company_csp_tenant_id(int(current_mapped["id"]), None)
-            log_info(
-                "CSP tenant mapping cleared",
-                tenant_id=tenant_id,
-                company_id=current_mapped["id"],
-                user_id=current_user.get("id"),
-            )
-        encoded = urlencode({"success": "CSP tenant mapping cleared."})
-
-    return RedirectResponse(
-        url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-    )
-
-
-@app.post("/admin/csp/customers/verify", response_class=HTMLResponse)
-async def admin_csp_verify_tenant(request: Request):
-    """Verify (and if possible fix) permissions for a provisioned M365 tenant."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    form = await request.form()
-    company_id_raw = str(form.get("company_id", "")).strip()
-
-    if not company_id_raw:
-        encoded = urlencode({"error": "Company ID is required."})
-        return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    try:
-        company_id = int(company_id_raw)
-    except ValueError:
-        encoded = urlencode({"error": "Invalid company ID."})
-        return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    user_id = int(current_user.get("id", 0))
-    csp_session = await csp_repo.get_session(user_id)
-    csp_access_token: str | None = None
-    if csp_session:
-        csp_access_token = m365_service._decrypt(csp_session.get("access_token"))
-
-    try:
-        result = await m365_service.verify_tenant_permissions(
-            company_id=company_id,
-            csp_access_token=csp_access_token,
-        )
-    except m365_service.M365Error as exc:
-        encoded = urlencode({"error": f"Verification failed: {exc}"})
-        return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    if result.get("all_ok"):
-        if result.get("updated"):
-            encoded = urlencode({"success": "Permissions verified and updated successfully."})
-        else:
-            encoded = ""
-    else:
-        error_detail = result.get("error", "")
-        missing_count = len(result.get("missing", []))
-        if error_detail:
-            msg = f"Verification failed: {error_detail}"
-        else:
-            msg = (
-                f"Missing {missing_count} permission(s). "
-                "Sign in as CSP account to auto-fix."
-            )
-        encoded = urlencode({"error": msg})
-
-    return RedirectResponse(
-        url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-    )
 
 
 @app.get("/m365/callback", name="m365_callback")
@@ -5420,7 +5242,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         def _csp_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
             return RedirectResponse(
-                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
         _csp_cid, _csp_csec = await _get_m365_admin_credentials()
@@ -5466,7 +5288,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             expires_at=expires_at,
         )
         log_info("CSP session stored for user", user_id=user_id)
-        return RedirectResponse(url="/admin/csp/customers", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
     if flow == "csp_admin_provision":
         # ── Auto-provision the CSP/Lighthouse admin app registration ──────
@@ -5479,7 +5301,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         def _csp_provision_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
             return RedirectResponse(
-                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
         # Determine the token exchange method.  When the flow was initiated
@@ -5579,7 +5401,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in with your CSP account."})
         return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
 
     if flow == "csp_graph_bootstrap":
@@ -5592,7 +5414,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         def _csp_graph_bootstrap_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
             return RedirectResponse(
-                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
         if not tenant_id:
@@ -5649,7 +5471,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         encoded = urlencode({"success": message})
         return RedirectResponse(
-            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
 
     if flow == "provision":
