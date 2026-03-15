@@ -197,7 +197,7 @@ def test_m365_provision_uses_pkce_when_no_admin_credentials(monkeypatch):
     assert params.get("prompt") == "consent"
     # Auth URL must target the specific tenant (tenant ID appears in the path)
     assert urlparse(location).netloc == "login.microsoftonline.com"
-    assert "contoso.onmicrosoft.com" in urlparse(location).path
+    assert urlparse(location).path.split("/")[1] == "contoso.onmicrosoft.com"
 
 
 def test_m365_provision_no_pkce_when_admin_credentials_present(monkeypatch):
@@ -265,7 +265,7 @@ def test_admin_company_m365_provision_uses_pkce_when_no_admin_credentials(monkey
     assert "code_challenge" in params
     assert params.get("code_challenge_method") == "S256"
     assert urlparse(location).netloc == "login.microsoftonline.com"
-    assert "contoso.onmicrosoft.com" in urlparse(location).path
+    assert urlparse(location).path.split("/")[1] == "contoso.onmicrosoft.com"
 
 
 # ---------------------------------------------------------------------------
