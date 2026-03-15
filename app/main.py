@@ -5709,9 +5709,28 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
             return _provision_error("Authorization failed during provision flow.")
 
-        access_token = token_response.json().get("access_token", "")
+        token_payload = token_response.json()
+        access_token = token_payload.get("access_token", "")
         if not access_token:
             return _provision_error("No access token received during provision.")
+
+        # Resolve tenant from the returned token when possible. This protects
+        # against mismatches where a Global Admin signs into a different tenant
+        # than the tenant_id carried in OAuth state, which can otherwise leave
+        # credentials stored against the wrong tenant and cause Graph failures.
+        try:
+            token_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+        except m365_service.M365Error:
+            token_tenant_id = ""
+
+        effective_tenant_id = token_tenant_id.strip() or tenant_id
+        if token_tenant_id and token_tenant_id != tenant_id:
+            log_info(
+                "M365 provision callback tenant mismatch; using token tenant",
+                company_id=company_id,
+                requested_tenant_id=tenant_id,
+                token_tenant_id=token_tenant_id,
+            )
 
         # Load company name for a descriptive app display name
         company_record = await company_repo.get_company_by_id(company_id)
@@ -5728,14 +5747,14 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             log_error(
                 "M365 app provisioning failed",
                 company_id=company_id,
-                tenant_id=tenant_id,
+                tenant_id=effective_tenant_id,
                 error=str(exc),
             )
             return _provision_error(f"Provisioning failed: {exc}")
 
         await m365_service.upsert_credentials(
             company_id=company_id,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             client_id=provision_result["client_id"],
             client_secret=provision_result["client_secret"],
             app_object_id=provision_result.get("app_object_id"),
@@ -5745,7 +5764,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         log_info(
             "M365 enterprise app provisioned and credentials stored",
             company_id=company_id,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             client_id=provision_result["client_id"],
         )
 
