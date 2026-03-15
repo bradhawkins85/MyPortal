@@ -239,7 +239,6 @@ async def acquire_access_token(company_id: int) -> str:
     # (e.g. when the CSP admin signed in during the discover flow and their
     # home-tenant id was captured instead of the client's tenant id).
     tenant_id = creds["tenant_id"]
-    csp_tenant_override = False
     company = await companies_repo.get_company_by_id(company_id)
     if company:
         csp_tenant_id = str(company.get("csp_tenant_id") or "").strip()
@@ -251,33 +250,11 @@ async def acquire_access_token(company_id: int) -> str:
                 csp_tenant_id=csp_tenant_id,
             )
             tenant_id = csp_tenant_id
-            csp_tenant_override = True
-
-    # Determine which credentials to use for the token exchange.
-    # When the CSP tenant override is applied the stored credentials may belong
-    # to an app registered in the partner tenant, not the customer tenant.
-    # If the stored client_id matches the admin CSP app we fetch the current
-    # admin credentials so that any secret rotation is automatically picked up.
-    exchange_client_id = creds["client_id"]
-    exchange_client_secret = creds.get("client_secret") or ""
-    if (
-        csp_tenant_override
-        and (admin_creds := await get_admin_m365_credentials())
-        and admin_creds.get("client_id") == exchange_client_id
-    ):
-        # The company is using the partner admin app for M365 access.
-        # Refresh the secret from the admin module so stale stored secrets
-        # (e.g. after automatic renewal) do not cause token failures.
-        exchange_client_secret = admin_creds["client_secret"] or exchange_client_secret
-        log_info(
-            "Using current admin CSP credentials for CSP client token exchange",
-            company_id=company_id,
-        )
 
     access_token, refresh, expires_at = await _exchange_token(
         tenant_id=tenant_id,
-        client_id=exchange_client_id,
-        client_secret=exchange_client_secret,
+        client_id=creds["client_id"],
+        client_secret=creds.get("client_secret") or "",
         refresh_token=creds.get("refresh_token"),
     )
     expires_value = None
@@ -681,15 +658,10 @@ async def provision_csp_admin_app_registration(
     settings = get_settings()
     secret_lifetime_days = settings.m365_client_secret_lifetime_days
 
-    # 1. Create the app registration with required permissions.
-    # The app must be multi-tenant (AzureADMultipleOrgs) so that the partner's
-    # admin app can authenticate against customer tenants via client_credentials
-    # once the customer has granted consent (e.g. through the GDAP verify flow).
-    # A single-tenant app cannot acquire tokens for foreign tenants, which would
-    # prevent sync_o365 from working on CSP-managed customers.
+    # 1. Create the app registration with required permissions
     app_payload: dict[str, Any] = {
         "displayName": display_name,
-        "signInAudience": "AzureADMultipleOrgs",
+        "signInAudience": "AzureADMyOrg",
         "requiredResourceAccess": [
             {
                 "resourceAppId": _GRAPH_APP_ID,
