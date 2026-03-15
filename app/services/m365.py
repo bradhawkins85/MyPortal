@@ -12,7 +12,6 @@ import httpx
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import apps as apps_repo
-from app.repositories import companies as companies_repo
 from app.repositories import licenses as license_repo
 from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
@@ -231,28 +230,8 @@ async def acquire_access_token(company_id: int) -> str:
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
-
-    # When the company has a CSP tenant ID set it represents the definitive
-    # Azure AD tenant for that client (sourced from Microsoft's /v1.0/contracts
-    # API via the CSP customer mapping). Prefer it over the stored tenant_id,
-    # which may have been recorded as the CSP partner tenant during provisioning
-    # (e.g. when the CSP admin signed in during the discover flow and their
-    # home-tenant id was captured instead of the client's tenant id).
-    tenant_id = creds["tenant_id"]
-    company = await companies_repo.get_company_by_id(company_id)
-    if company:
-        csp_tenant_id = str(company.get("csp_tenant_id") or "").strip()
-        if csp_tenant_id and csp_tenant_id != tenant_id:
-            log_info(
-                "Overriding stored tenant_id with csp_tenant_id for M365 token exchange",
-                company_id=company_id,
-                stored_tenant_id=tenant_id,
-                csp_tenant_id=csp_tenant_id,
-            )
-            tenant_id = csp_tenant_id
-
     access_token, refresh, expires_at = await _exchange_token(
-        tenant_id=tenant_id,
+        tenant_id=creds["tenant_id"],
         client_id=creds["client_id"],
         client_secret=creds.get("client_secret") or "",
         refresh_token=creds.get("refresh_token"),
