@@ -4731,7 +4731,7 @@ async def m365_connect(request: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": "offline_access https://graph.microsoft.com/.default User.Read.All Directory.Read.All",
+        "scope": "offline_access https://graph.microsoft.com/.default",
         "state": state,
         "prompt": "consent",
     }
@@ -5599,7 +5599,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "scope": "offline_access https://graph.microsoft.com/.default User.Read.All Directory.Read.All",
+        "scope": "offline_access https://graph.microsoft.com/.default",
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
