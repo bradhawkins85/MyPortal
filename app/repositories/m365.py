@@ -138,3 +138,11 @@ async def delete_credentials(company_id: int) -> None:
         "DELETE FROM company_m365_credentials WHERE company_id = %s",
         (company_id,),
     )
+
+
+async def list_provisioned_company_ids() -> set[int]:
+    """Return the set of company IDs that have M365 credentials configured."""
+    rows = await db.fetch_all(
+        "SELECT DISTINCT company_id FROM company_m365_credentials",
+    )
+    return {int(row["company_id"]) for row in rows}
