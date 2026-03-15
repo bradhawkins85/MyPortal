@@ -4686,34 +4686,24 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
             detail="Super admin privileges required",
         )
     m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     tenant_id = tenant_id.strip()
     if not tenant_id:
         encoded = urlencode({"error": "Tenant ID is required to auto-provision."})
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
-
-    # Prefer existing admin credentials; fall back to PKCE with a public client
-    # when none are configured so that the flow works without M365_ADMIN_CLIENT_ID.
-    # This avoids AADSTS700016 errors caused by using a deprecated or single-tenant
-    # client ID that is not registered in the target tenant.
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
-
-    state_payload: dict = {
-        "company_id": company_id,
-        "user_id": user.get("id"),
-        "tenant_id": tenant_id,
-        "flow": "provision",
-    }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
-    state = oauth_state_serializer.dumps(state_payload)
-    params: dict = {
-        "client_id": oauth_client_id,
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "tenant_id": tenant_id,
+            "flow": "provision",
+        }
+    )
+    params = {
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4721,9 +4711,6 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         "state": state,
         "prompt": "consent",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
     authorize_url = (
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -4740,6 +4727,11 @@ async def admin_company_m365_provision(
     if redirect:
         return redirect
     m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Admin M365 credentials are not configured.",
+        )
     tenant_id = tenant_id.strip()
     if not tenant_id:
         return _company_edit_redirect(
@@ -4747,28 +4739,17 @@ async def admin_company_m365_provision(
             error="Tenant ID is required to auto-provision.",
         )
     redirect_uri = _build_m365_redirect_uri(request)
-
-    # Prefer existing admin credentials; fall back to PKCE with a public client
-    # when none are configured.
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
-
-    state_payload: dict = {
-        "company_id": company_id,
-        "user_id": current_user.get("id"),
-        "tenant_id": tenant_id,
-        "flow": "provision",
-        "return_to": "company_edit",
-    }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
-    state = oauth_state_serializer.dumps(state_payload)
-    params: dict = {
-        "client_id": oauth_client_id,
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": current_user.get("id"),
+            "tenant_id": tenant_id,
+            "flow": "provision",
+            "return_to": "company_edit",
+        }
+    )
+    params = {
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4776,9 +4757,6 @@ async def admin_company_m365_provision(
         "state": state,
         "prompt": "consent",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
     authorize_url = (
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -4828,29 +4806,19 @@ async def m365_discover(request: Request):
             detail="Super admin privileges required",
         )
     m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
+        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
-
-    # Prefer existing admin credentials; fall back to PKCE with a public client
-    # when none are configured.  This mirrors the CSP admin provision bootstrap
-    # approach and avoids AADSTS700016 errors caused by using a deprecated or
-    # restricted public client against the target tenant.
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
-
-    state_payload: dict = {
-        "company_id": company_id,
-        "user_id": user.get("id"),
-        "flow": "discover",
-    }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
-    state = oauth_state_serializer.dumps(state_payload)
-    params: dict = {
-        "client_id": oauth_client_id,
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": user.get("id"),
+            "flow": "discover",
+        }
+    )
+    params = {
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4858,9 +4826,6 @@ async def m365_discover(request: Request):
         "state": state,
         "prompt": "select_account",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -4875,28 +4840,22 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     if redirect:
         return redirect
     m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
+    if not m365_admin_client_id or not m365_admin_client_secret:
+        return _company_edit_redirect(
+            company_id=company_id,
+            error="Admin M365 credentials are not configured.",
+        )
     redirect_uri = _build_m365_redirect_uri(request)
-
-    # Prefer existing admin credentials; fall back to PKCE with a public client
-    # when none are configured.
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
-
-    state_payload: dict = {
-        "company_id": company_id,
-        "user_id": current_user.get("id"),
-        "flow": "discover",
-        "return_to": "company_edit",
-    }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
-    state = oauth_state_serializer.dumps(state_payload)
-    params: dict = {
-        "client_id": oauth_client_id,
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": company_id,
+            "user_id": current_user.get("id"),
+            "flow": "discover",
+            "return_to": "company_edit",
+        }
+    )
+    params = {
+        "client_id": m365_admin_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4904,9 +4863,6 @@ async def admin_company_m365_discover(company_id: int, request: Request):
         "state": state,
         "prompt": "select_account",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -5229,32 +5185,20 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
 
         _discover_cid, _discover_csec = await _get_m365_admin_credentials()
+        if not _discover_cid or not _discover_csec:
+            return _discover_error("Admin M365 credentials are not configured.")
 
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
-        discover_code_verifier: str | None = state_data.get("code_verifier")
-        if discover_code_verifier:
-            # PKCE flow – no client secret needed.
-            token_data = {
-                "client_id": m365_service.get_pkce_client_id(),
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": discover_code_verifier,
-                "scope": m365_service.DISCOVER_SCOPE,
-            }
-        else:
-            if not _discover_cid or not _discover_csec:
-                return _discover_error("Admin M365 credentials are not configured.")
-            token_data = {
-                "client_id": _discover_cid,
-                "client_secret": _discover_csec,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "scope": m365_service.DISCOVER_SCOPE,
-            }
+        token_data = {
+            "client_id": _discover_cid,
+            "client_secret": _discover_csec,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.DISCOVER_SCOPE,
+        }
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
@@ -5502,33 +5446,21 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         if not tenant_id:
             return _provision_error("Missing tenant ID in provision state.")
+        _provision_cid, _provision_csec = await _get_m365_admin_credentials()
+        if not _provision_cid or not _provision_csec:
+            return _provision_error("Admin M365 credentials are not configured.")
 
         token_endpoint = (
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         )
-        provision_code_verifier: str | None = state_data.get("code_verifier")
-        if provision_code_verifier:
-            # PKCE flow – no client secret needed.
-            token_data = {
-                "client_id": m365_service.get_pkce_client_id(),
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": provision_code_verifier,
-                "scope": m365_service.PROVISION_SCOPE,
-            }
-        else:
-            _provision_cid, _provision_csec = await _get_m365_admin_credentials()
-            if not _provision_cid or not _provision_csec:
-                return _provision_error("Admin M365 credentials are not configured.")
-            token_data = {
-                "client_id": _provision_cid,
-                "client_secret": _provision_csec,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "scope": m365_service.PROVISION_SCOPE,
-            }
+        token_data = {
+            "client_id": _provision_cid,
+            "client_secret": _provision_csec,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "scope": m365_service.PROVISION_SCOPE,
+        }
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
