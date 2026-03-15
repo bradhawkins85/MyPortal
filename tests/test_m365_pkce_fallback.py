@@ -200,13 +200,8 @@ def test_m365_provision_uses_pkce_when_no_admin_credentials(monkeypatch):
     assert urlparse(location).path.split("/")[1] == "contoso.onmicrosoft.com"
 
 
-def test_m365_provision_uses_pkce_even_when_admin_credentials_present(monkeypatch):
-    """m365_provision always uses PKCE even when admin credentials are configured.
-
-    The CSP admin app may not have a service principal in the customer tenant,
-    which causes AADSTS700016 during the OAuth redirect.  Using PKCE
-    unconditionally prevents this and ensures the enterprise app is created.
-    """
+def test_m365_provision_no_pkce_when_admin_credentials_present(monkeypatch):
+    """m365_provision uses admin client (no PKCE) when credentials are configured."""
     monkeypatch.setattr(main_module.settings, "portal_url", None)
 
     async def fake_load_license_context(request, **kwargs):
@@ -217,7 +212,6 @@ def test_m365_provision_uses_pkce_even_when_admin_credentials_present(monkeypatc
 
     monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
     monkeypatch.setattr(main_module, "_get_m365_admin_credentials", fake_admin_creds)
-    monkeypatch.setattr(m365_service, "get_pkce_client_id", lambda: PKCE_CLIENT_ID)
 
     with TestClient(app) as client:
         response = client.get(
@@ -230,9 +224,8 @@ def test_m365_provision_uses_pkce_even_when_admin_credentials_present(monkeypatc
     location = response.headers["location"]
     params = _parse_auth_url_params(location)
 
-    assert params["client_id"] == PKCE_CLIENT_ID, "Provision must use PKCE client, not admin credentials"
-    assert "code_challenge" in params, "PKCE code_challenge must be present"
-    assert params.get("code_challenge_method") == "S256"
+    assert params["client_id"] == "admin-client-id"
+    assert "code_challenge" not in params
 
 
 # ---------------------------------------------------------------------------
@@ -275,59 +268,22 @@ def test_admin_company_m365_provision_uses_pkce_when_no_admin_credentials(monkey
     assert urlparse(location).path.split("/")[1] == "contoso.onmicrosoft.com"
 
 
-def test_admin_company_m365_provision_uses_pkce_even_when_admin_credentials_present(monkeypatch):
-    """admin_company_m365_provision always uses PKCE even when admin credentials are configured."""
-    monkeypatch.setattr(main_module.settings, "portal_url", None)
-
-    async def fake_load_session(request, *, allow_inactive: bool = False):
-        return _make_session()
-
-    async def fake_get_user_by_id(user_id: int):
-        return {"id": 1, "is_super_admin": True}
-
-    async def fake_admin_creds():
-        return ("admin-client-id", "admin-secret")
-
-    monkeypatch.setattr(main_module.session_manager, "load_session", fake_load_session)
-    monkeypatch.setattr(main_module.user_repo, "get_user_by_id", fake_get_user_by_id)
-    monkeypatch.setattr(main_module, "_get_m365_admin_credentials", fake_admin_creds)
-    monkeypatch.setattr(m365_service, "get_pkce_client_id", lambda: PKCE_CLIENT_ID)
-
-    with TestClient(app) as client:
-        response = client.get(
-            "/admin/companies/10/m365-provision",
-            params={"tenant_id": "contoso.onmicrosoft.com"},
-            follow_redirects=False,
-        )
-
-    assert response.status_code == 303
-    location = response.headers["location"]
-    params = _parse_auth_url_params(location)
-
-    assert params["client_id"] == PKCE_CLIENT_ID, "Provision must use PKCE client, not admin credentials"
-    assert "code_challenge" in params
-    assert params.get("code_challenge_method") == "S256"
-    assert urlparse(location).netloc == "login.microsoftonline.com"
-    assert urlparse(location).path.split("/")[1] == "contoso.onmicrosoft.com"
-
-
 # ---------------------------------------------------------------------------
 # Tests: PKCE code_verifier is stored in state
 # ---------------------------------------------------------------------------
 
-def test_m365_provision_stores_code_verifier_in_state(monkeypatch):
-    """m365_provision always stores code_verifier in the signed OAuth state.
-
-    PKCE is unconditionally used for per-tenant provision; the code_verifier
-    must always be present so the callback can exchange the code without a
-    client secret.
-    """
+def test_m365_provision_pkce_stores_code_verifier_in_state(monkeypatch):
+    """m365_provision stores code_verifier in the signed OAuth state when using PKCE."""
     monkeypatch.setattr(main_module.settings, "portal_url", None)
 
     async def fake_load_license_context(request, **kwargs):
         return {"id": 1, "is_super_admin": True}, None, None, 1, None
 
+    async def fake_no_admin_creds():
+        return (None, None)
+
     monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module, "_get_m365_admin_credentials", fake_no_admin_creds)
     monkeypatch.setattr(m365_service, "get_pkce_client_id", lambda: PKCE_CLIENT_ID)
 
     with TestClient(app) as client:
@@ -342,7 +298,7 @@ def test_m365_provision_stores_code_verifier_in_state(monkeypatch):
     state_value = params["state"]
     state_data = oauth_state_serializer.loads(state_value)
 
-    assert "code_verifier" in state_data, "code_verifier must always be stored in signed state"
+    assert "code_verifier" in state_data, "code_verifier must be stored in signed state for PKCE"
     assert len(state_data["code_verifier"]) > 0
 
 
@@ -373,11 +329,11 @@ def test_m365_discover_pkce_stores_code_verifier_in_state(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Tests: code_verifier is always in state for provision (even with admin creds)
+# Tests: no code_verifier in state when using admin credentials
 # ---------------------------------------------------------------------------
 
-def test_m365_provision_always_stores_code_verifier_in_state_even_with_admin_creds(monkeypatch):
-    """m365_provision stores code_verifier in state even when admin credentials are configured."""
+def test_m365_provision_no_code_verifier_in_state_when_using_admin_creds(monkeypatch):
+    """m365_provision does NOT store code_verifier in state when using admin credentials."""
     monkeypatch.setattr(main_module.settings, "portal_url", None)
 
     async def fake_load_license_context(request, **kwargs):
@@ -388,7 +344,6 @@ def test_m365_provision_always_stores_code_verifier_in_state_even_with_admin_cre
 
     monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
     monkeypatch.setattr(main_module, "_get_m365_admin_credentials", fake_admin_creds)
-    monkeypatch.setattr(m365_service, "get_pkce_client_id", lambda: PKCE_CLIENT_ID)
 
     with TestClient(app) as client:
         response = client.get(
@@ -401,5 +356,4 @@ def test_m365_provision_always_stores_code_verifier_in_state_even_with_admin_cre
     params = _parse_auth_url_params(location)
     state_data = oauth_state_serializer.loads(params["state"])
 
-    assert "code_verifier" in state_data, "code_verifier must be in state for PKCE token exchange"
-    assert len(state_data["code_verifier"]) > 0
+    assert "code_verifier" not in state_data
