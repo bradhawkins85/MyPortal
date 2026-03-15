@@ -101,7 +101,7 @@ def test_m365_discover_uses_pkce_when_no_admin_credentials(monkeypatch):
     assert params["client_id"] == PKCE_CLIENT_ID
     assert "code_challenge" in params, "PKCE code_challenge should be present"
     assert params.get("code_challenge_method") == "S256"
-    assert "login.microsoftonline.com" in location
+    assert urlparse(location).netloc == "login.microsoftonline.com"
 
 
 def test_m365_discover_no_pkce_when_admin_credentials_present(monkeypatch):
@@ -183,7 +183,7 @@ def test_m365_provision_uses_pkce_when_no_admin_credentials(monkeypatch):
     with TestClient(app) as client:
         response = client.get(
             "/m365/provision",
-            params={"tenant_id": "forgate.com.au"},
+            params={"tenant_id": "contoso.onmicrosoft.com"},
             follow_redirects=False,
         )
 
@@ -195,8 +195,9 @@ def test_m365_provision_uses_pkce_when_no_admin_credentials(monkeypatch):
     assert "code_challenge" in params
     assert params.get("code_challenge_method") == "S256"
     assert params.get("prompt") == "consent"
-    # Auth URL must target the specific tenant
-    assert "forgate.com.au" in location
+    # Auth URL must target the specific tenant (tenant ID appears in the path)
+    assert urlparse(location).netloc == "login.microsoftonline.com"
+    assert "contoso.onmicrosoft.com" in urlparse(location).path
 
 
 def test_m365_provision_no_pkce_when_admin_credentials_present(monkeypatch):
@@ -252,7 +253,7 @@ def test_admin_company_m365_provision_uses_pkce_when_no_admin_credentials(monkey
     with TestClient(app) as client:
         response = client.get(
             "/admin/companies/10/m365-provision",
-            params={"tenant_id": "forgate.com.au"},
+            params={"tenant_id": "contoso.onmicrosoft.com"},
             follow_redirects=False,
         )
 
@@ -263,7 +264,8 @@ def test_admin_company_m365_provision_uses_pkce_when_no_admin_credentials(monkey
     assert params["client_id"] == PKCE_CLIENT_ID
     assert "code_challenge" in params
     assert params.get("code_challenge_method") == "S256"
-    assert "forgate.com.au" in location
+    assert urlparse(location).netloc == "login.microsoftonline.com"
+    assert "contoso.onmicrosoft.com" in urlparse(location).path
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +289,7 @@ def test_m365_provision_pkce_stores_code_verifier_in_state(monkeypatch):
     with TestClient(app) as client:
         response = client.get(
             "/m365/provision",
-            params={"tenant_id": "forgate.com.au"},
+            params={"tenant_id": "contoso.onmicrosoft.com"},
             follow_redirects=False,
         )
 
