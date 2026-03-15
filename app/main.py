@@ -5080,6 +5080,61 @@ async def admin_csp_provision(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/admin/csp/graph-bootstrap")
+async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...)):
+    """Start Option 3 Graph bootstrap to create the enterprise app in a tenant."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    clean_tenant_id = tenant_id.strip()
+    if not clean_tenant_id:
+        encoded = urlencode({"error": "Tenant ID is required for Graph bootstrap."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    admin_client_id, _ = await _get_m365_admin_credentials()
+    if not admin_client_id:
+        encoded = urlencode(
+            {"error": "Admin M365 application ID is not configured for Graph bootstrap."}
+        )
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    redirect_uri = _build_m365_redirect_uri(request)
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    state = oauth_state_serializer.dumps(
+        {
+            "company_id": 0,
+            "user_id": current_user.get("id"),
+            "flow": "csp_graph_bootstrap",
+            "tenant_id": clean_tenant_id,
+            "target_app_id": admin_client_id,
+            "code_verifier": code_verifier,
+        }
+    )
+
+    params = {
+        "client_id": m365_service.get_pkce_client_id(),
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.PROVISION_SCOPE,
+        "state": state,
+        "prompt": "consent",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "domain_hint": clean_tenant_id,
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get("/admin/csp/customers", response_class=HTMLResponse)
 async def admin_csp_customers_page(
     request: Request,
@@ -5523,6 +5578,76 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             client_id=provision_result["client_id"],
         )
         encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in with your CSP account."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    if flow == "csp_graph_bootstrap":
+        # ── Option 3 Graph bootstrap for enterprise app creation ─────────
+        redirect_uri = _build_m365_redirect_uri(request)
+        tenant_id = str(state_data.get("tenant_id", "")).strip()
+        target_app_id = str(state_data.get("target_app_id", "")).strip()
+        code_verifier = str(state_data.get("code_verifier", "")).strip()
+
+        def _csp_graph_bootstrap_error(msg: str) -> RedirectResponse:
+            encoded = urlencode({"error": msg})
+            return RedirectResponse(
+                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        if not tenant_id:
+            return _csp_graph_bootstrap_error("Missing tenant ID for Graph bootstrap.")
+        if not target_app_id:
+            return _csp_graph_bootstrap_error("Missing application ID for Graph bootstrap.")
+        if not code_verifier:
+            return _csp_graph_bootstrap_error("Missing PKCE verifier for Graph bootstrap.")
+
+        token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        token_data = {
+            "client_id": m365_service.get_pkce_client_id(),
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+            "scope": m365_service.PROVISION_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "CSP Graph bootstrap token exchange failed",
+                status=token_response.status_code,
+                body=token_response.text,
+            )
+            return _csp_graph_bootstrap_error("Authorization failed during Graph bootstrap.")
+
+        token_payload = token_response.json()
+        access_token = str(token_payload.get("access_token") or "")
+        if not access_token:
+            return _csp_graph_bootstrap_error(
+                "No access token received during Graph bootstrap."
+            )
+
+        try:
+            bootstrap_result = await m365_service.ensure_service_principal_for_app(
+                access_token,
+                target_app_id,
+            )
+        except m365_service.M365Error as exc:
+            log_error(
+                "CSP Graph bootstrap failed",
+                tenant_id=tenant_id,
+                app_id=target_app_id,
+                error=str(exc),
+            )
+            return _csp_graph_bootstrap_error(f"Graph bootstrap failed: {exc}")
+
+        if bootstrap_result.get("created"):
+            message = "Graph bootstrap completed. Enterprise app created for this tenant."
+        else:
+            message = "Graph bootstrap completed. Enterprise app already existed in this tenant."
+
+        encoded = urlencode({"success": message})
         return RedirectResponse(
             url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
