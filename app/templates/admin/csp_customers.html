@@ -252,13 +252,11 @@
                   <button type="submit" form="csp-map-{{ outer_index }}" class="button button--ghost button--small">Save</button>
                   {% if current_company_id %}
                     {% for company in companies if company.id == current_company_id %}
-                      {% if admin_credentials_configured %}
                       <a
                         href="/admin/companies/{{ company.id }}/m365-discover"
                         class="button button--ghost button--small"
                         title="Auto-provision M365 app for {{ company.name }}"
                       >Provision M365</a>
-                      {% endif %}
                     {% endfor %}
                   {% endif %}
                 </div>

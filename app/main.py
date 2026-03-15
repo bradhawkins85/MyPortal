@@ -4784,9 +4784,16 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         "prompt": "consent",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        # domain_hint directs the admin to sign in to the correct customer
+        # tenant without requiring the PKCE client to be registered in that
+        # tenant (avoids AADSTS700016 for single-tenant partner apps).
+        "domain_hint": tenant_id,
     }
+    # Use the /organizations endpoint so that the PKCE public client does not
+    # need to be registered or consented in every customer tenant.  The
+    # domain_hint above steers the Global Admin to the correct tenant.
     authorize_url = (
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
     )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
@@ -4828,9 +4835,15 @@ async def admin_company_m365_provision(
         "prompt": "consent",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        # domain_hint directs the admin to sign in to the correct customer
+        # tenant without requiring the PKCE client to be registered in that
+        # tenant (avoids AADSTS700016 for single-tenant partner apps).
+        "domain_hint": tenant_id,
     }
+    # Use the /organizations endpoint so that the PKCE public client does not
+    # need to be registered or consented in every customer tenant.
     authorize_url = (
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
     )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
