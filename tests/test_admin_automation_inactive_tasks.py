@@ -97,7 +97,7 @@ async def test_admin_automation_shows_inactive_when_requested(monkeypatch):
             {
                 "id": 2,
                 "name": "Inactive Task",
-                "command": "sync_o365",
+                "command": "sync_m365_data",
                 "company_id": None,
                 "active": 0,
                 "last_run_at": None,
