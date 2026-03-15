@@ -4612,6 +4612,7 @@ async def m365_benchmarks_page(request: Request, error: str | None = None, succe
         "categories": cis_benchmark_service.BENCHMARK_CATEGORIES,
         "results": results,
         "has_credentials": bool(credentials),
+        "is_super_admin": bool(user.get("is_super_admin")),
         "error": error,
         "success": success,
     }
@@ -4630,13 +4631,42 @@ async def run_m365_benchmarks(request: Request):
         log_info("CIS benchmarks run", company_id=company_id, user_id=user.get("id"))
     except m365_service.M365Error as exc:
         return RedirectResponse(
-            url=f"/m365/benchmarks?error={exc}",
+            url=f"/m365/benchmarks?error={quote(str(exc))}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(url="/m365/benchmarks?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post("/m365/credentials", response_class=RedirectResponse)
+@app.post("/m365/benchmarks/exclude", response_class=RedirectResponse)
+async def exclude_benchmark_check(
+    request: Request,
+    check_id: str = Form(..., alias="checkId"),
+    reason: str = Form("", alias="reason"),
+):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await cis_benchmark_service.add_exclusion(company_id, check_id, reason)
+    return RedirectResponse(url="/m365/benchmarks?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/benchmarks/exclude/remove", response_class=RedirectResponse)
+async def remove_benchmark_exclusion(
+    request: Request,
+    check_id: str = Form(..., alias="checkId"),
+):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await cis_benchmark_service.remove_exclusion(company_id, check_id)
+    return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+
+
+
 async def save_m365_credentials(
     request: Request,
     tenant_id: str = Form(..., alias="tenantId"),

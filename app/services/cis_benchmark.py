@@ -28,6 +28,7 @@ STATUS_PASS = "pass"
 STATUS_FAIL = "fail"
 STATUS_UNKNOWN = "unknown"
 STATUS_NOT_APPLICABLE = "not_applicable"
+STATUS_EXCLUDED = "excluded"
 
 # ---------------------------------------------------------------------------
 # Benchmark category constants
@@ -896,18 +897,57 @@ async def get_last_results(company_id: int) -> dict[str, list[dict[str, Any]]]:
     """Return the most recent stored benchmark results for the company.
 
     Groups results by category and adds remediation guidance to failed checks.
+    Checks that have been excluded by an administrator are shown with
+    ``STATUS_EXCLUDED`` and the exclusion reason, regardless of their raw result.
+
+    Note: ``STATUS_EXCLUDED`` is an overlay applied at read time only.  It is
+    **never** written to the ``cis_benchmark_results`` table (which enforces a
+    CHECK constraint on the ``status`` column that does not include 'excluded').
+    Exclusion data lives in the separate ``cis_benchmark_exclusions`` table.
     """
     rows = await benchmark_repo.list_results(company_id)
+    exclusion_map = await benchmark_repo.get_exclusion_map(company_id)
     by_category: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         category = row["benchmark_category"]
+        check_id = row["check_id"]
+        exclusion_reason = exclusion_map.get(check_id)
+        if exclusion_reason is not None:
+            effective_status = STATUS_EXCLUDED
+            details = f"Excluded: {exclusion_reason}" if exclusion_reason else "Excluded by administrator."
+        else:
+            effective_status = row["status"]
+            details = row["details"]
         entry: dict[str, Any] = {
-            "check_id": row["check_id"],
+            "check_id": check_id,
             "check_name": row["check_name"],
-            "status": row["status"],
-            "details": row["details"],
+            "status": effective_status,
+            "raw_status": row["status"],
+            "details": details,
             "run_at": row["run_at"],
-            "remediation": get_remediation(row["check_id"]) if row["status"] == STATUS_FAIL else None,
+            "exclusion_reason": exclusion_reason,
+            "remediation": get_remediation(check_id) if effective_status == STATUS_FAIL else None,
         }
         by_category.setdefault(category, []).append(entry)
     return by_category
+
+
+async def add_exclusion(company_id: int, check_id: str, reason: str) -> None:
+    """Exclude a specific benchmark check for the given company."""
+    await benchmark_repo.upsert_exclusion(
+        company_id=company_id,
+        check_id=check_id,
+        reason=reason.strip(),
+    )
+    log_info("CIS benchmark check excluded", company_id=company_id, check_id=check_id)
+
+
+async def remove_exclusion(company_id: int, check_id: str) -> None:
+    """Remove a previously set exclusion for a benchmark check."""
+    await benchmark_repo.delete_exclusion(company_id=company_id, check_id=check_id)
+    log_info("CIS benchmark exclusion removed", company_id=company_id, check_id=check_id)
+
+
+async def list_exclusions(company_id: int) -> list[dict[str, Any]]:
+    """Return all active exclusions for the given company."""
+    return await benchmark_repo.list_exclusions(company_id)

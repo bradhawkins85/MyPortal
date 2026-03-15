@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from typing import Any
 
 from app.services import cis_benchmark as cis_service
@@ -540,8 +540,12 @@ async def test_get_last_results_groups_by_category():
         },
     ]
 
-    with patch("app.services.cis_benchmark.benchmark_repo.list_results", new_callable=AsyncMock) as mock_list:
+    with (
+        patch("app.services.cis_benchmark.benchmark_repo.list_results", new_callable=AsyncMock) as mock_list,
+        patch("app.services.cis_benchmark.benchmark_repo.get_exclusion_map", new_callable=AsyncMock) as mock_excl,
+    ):
         mock_list.return_value = mock_rows
+        mock_excl.return_value = {}
         results = await cis_service.get_last_results(company_id=1)
 
     assert "m365" in results
@@ -551,6 +555,140 @@ async def test_get_last_results_groups_by_category():
     assert results["m365"][0]["remediation"] is not None
     # Passing check should not have remediation
     assert results["intune_windows"][0]["remediation"] is None
+
+
+# ---------------------------------------------------------------------------
+# Exclusion overlay in get_last_results
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_get_last_results_applies_exclusion_overlay():
+    """Excluded checks are shown with STATUS_EXCLUDED and the exclusion reason."""
+    from datetime import datetime
+
+    mock_rows = [
+        {
+            "benchmark_category": "m365",
+            "check_id": "m365_security_defaults",
+            "check_name": "Security Defaults",
+            "status": "fail",
+            "details": "Disabled",
+            "run_at": datetime(2024, 1, 1, 12, 0, 0),
+        },
+    ]
+
+    with (
+        patch("app.services.cis_benchmark.benchmark_repo.list_results", new_callable=AsyncMock) as mock_list,
+        patch("app.services.cis_benchmark.benchmark_repo.get_exclusion_map", new_callable=AsyncMock) as mock_excl,
+    ):
+        mock_list.return_value = mock_rows
+        mock_excl.return_value = {"m365_security_defaults": "Not supported in this tenant configuration"}
+        results = await cis_service.get_last_results(company_id=1)
+
+    check = results["m365"][0]
+    assert check["status"] == cis_service.STATUS_EXCLUDED
+    assert check["raw_status"] == "fail"
+    assert "Not supported" in check["details"]
+    assert check["exclusion_reason"] == "Not supported in this tenant configuration"
+    # Excluded checks should not have remediation guidance
+    assert check["remediation"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_last_results_exclusion_with_empty_reason():
+    """Excluded check with empty reason shows a default message."""
+    from datetime import datetime
+
+    mock_rows = [
+        {
+            "benchmark_category": "m365",
+            "check_id": "m365_security_defaults",
+            "check_name": "Security Defaults",
+            "status": "fail",
+            "details": "Disabled",
+            "run_at": datetime(2024, 1, 1, 12, 0, 0),
+        },
+    ]
+
+    with (
+        patch("app.services.cis_benchmark.benchmark_repo.list_results", new_callable=AsyncMock) as mock_list,
+        patch("app.services.cis_benchmark.benchmark_repo.get_exclusion_map", new_callable=AsyncMock) as mock_excl,
+    ):
+        mock_list.return_value = mock_rows
+        mock_excl.return_value = {"m365_security_defaults": ""}
+        results = await cis_service.get_last_results(company_id=1)
+
+    check = results["m365"][0]
+    assert check["status"] == cis_service.STATUS_EXCLUDED
+    assert "administrator" in check["details"].lower() or "excluded" in check["details"].lower()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_last_results_non_excluded_check_unaffected():
+    """Checks not in the exclusion map retain their original status."""
+    from datetime import datetime
+
+    mock_rows = [
+        {
+            "benchmark_category": "m365",
+            "check_id": "m365_audit_log_enabled",
+            "check_name": "Audit log",
+            "status": "fail",
+            "details": "Disabled",
+            "run_at": datetime(2024, 1, 1, 12, 0, 0),
+        },
+    ]
+
+    with (
+        patch("app.services.cis_benchmark.benchmark_repo.list_results", new_callable=AsyncMock) as mock_list,
+        patch("app.services.cis_benchmark.benchmark_repo.get_exclusion_map", new_callable=AsyncMock) as mock_excl,
+    ):
+        mock_list.return_value = mock_rows
+        # Exclusion map has a different check_id – this check is NOT excluded
+        mock_excl.return_value = {"m365_security_defaults": "some reason"}
+        results = await cis_service.get_last_results(company_id=1)
+
+    check = results["m365"][0]
+    assert check["status"] == "fail"
+    assert check["exclusion_reason"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_add_exclusion_calls_upsert():
+    """add_exclusion delegates to benchmark_repo.upsert_exclusion."""
+    with patch("app.services.cis_benchmark.benchmark_repo.upsert_exclusion", new_callable=AsyncMock) as mock_upsert:
+        await cis_service.add_exclusion(1, "m365_security_defaults", "  built-in domain  ")
+    mock_upsert.assert_awaited_once_with(
+        company_id=1,
+        check_id="m365_security_defaults",
+        reason="built-in domain",  # stripped
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remove_exclusion_calls_delete():
+    """remove_exclusion delegates to benchmark_repo.delete_exclusion."""
+    with patch("app.services.cis_benchmark.benchmark_repo.delete_exclusion", new_callable=AsyncMock) as mock_delete:
+        await cis_service.remove_exclusion(1, "m365_security_defaults")
+    mock_delete.assert_awaited_once_with(
+        company_id=1,
+        check_id="m365_security_defaults",
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_exclusions_returns_repo_data():
+    """list_exclusions returns data from the repository."""
+    mock_data = [{"check_id": "m365_security_defaults", "reason": "n/a", "created_at": None}]
+    with patch("app.services.cis_benchmark.benchmark_repo.list_exclusions", new_callable=AsyncMock) as mock_list:
+        mock_list.return_value = mock_data
+        result = await cis_service.list_exclusions(1)
+    assert result == mock_data
+
+
+def test_status_excluded_constant_exists():
+    """STATUS_EXCLUDED constant is defined."""
+    assert cis_service.STATUS_EXCLUDED == "excluded"
 
 
 # ---------------------------------------------------------------------------
