@@ -279,12 +279,18 @@ def _build_m365_redirect_uri(request: Request) -> str:
 
     This ensures the redirect_uri uses HTTPS when the app is behind a
     reverse proxy, preventing Microsoft from rejecting the redirect_uri.
-    Falls back to the request-derived URL when PORTAL_URL is not set.
+    Falls back to the request-derived URL when PORTAL_URL is not set,
+    forcing the scheme to HTTPS so Microsoft accepts the reply address.
     """
     if settings.portal_url:
         base = str(settings.portal_url).rstrip("/")
         return f"{base}/m365/callback"
-    return str(request.url_for("m365_callback"))
+    uri = str(request.url_for("m365_callback"))
+    # Microsoft requires HTTPS redirect URIs; force the scheme when the
+    # request arrives over HTTP (e.g. via a plain reverse proxy).
+    if uri.startswith("http://"):
+        uri = "https://" + uri[len("http://"):]
+    return uri
 
 
 def _random_daily_cron() -> str:
@@ -5533,6 +5539,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             provision_result = await m365_service.provision_app_registration(
                 access_token=access_token,
                 display_name=display_name,
+                redirect_uri=redirect_uri,
             )
         except m365_service.M365Error as exc:
             log_error(

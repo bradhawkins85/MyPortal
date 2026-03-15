@@ -315,6 +315,7 @@ async def provision_app_registration(
     *,
     access_token: str,
     display_name: str = "MyPortal Integration",
+    redirect_uri: str | None = None,
 ) -> dict[str, Any]:
     """Create a per-tenant app registration with required permissions.
 
@@ -330,6 +331,11 @@ async def provision_app_registration(
     Returns a dict with ``client_id``, ``client_secret``, ``app_object_id``,
     ``client_secret_key_id`` and ``client_secret_expires_at``.  The client
     secret is returned in plain text exactly once and must be stored immediately.
+
+    :param redirect_uri: The OAuth redirect URI to register on the app
+        registration.  This must match the ``redirect_uri`` used in the
+        connect flow so that Microsoft accepts the authorisation request.
+        Should be an HTTPS URL.
     """
     settings = get_settings()
     secret_lifetime_days = settings.m365_client_secret_lifetime_days
@@ -348,6 +354,8 @@ async def provision_app_registration(
             }
         ],
     }
+    if redirect_uri:
+        app_payload["web"] = {"redirectUris": [redirect_uri]}
     app_data = await _graph_post(
         access_token,
         "https://graph.microsoft.com/v1.0/applications",

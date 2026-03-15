@@ -197,6 +197,86 @@ async def test_provision_app_registration_default_display_name():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_registers_redirect_uri():
+    """provision_app_registration includes web.redirectUris when redirect_uri is provided."""
+    captured_payloads: list[dict] = []
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        captured_payloads.append({"url": url, "payload": payload})
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
+            return _make_app_data()
+        if "/servicePrincipals" in url and "appRoleAssignments" not in url:
+            return _make_sp_data()
+        if "appRoleAssignments" in url:
+            return _make_role_assignment()
+        if "owners/$ref" in url:
+            return {}
+        if "addPassword" in url:
+            return _make_secret_data()
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return _make_graph_sp_response()
+
+    redirect_uri = "https://myportal.example.com/m365/callback"
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.provision_app_registration(
+            access_token="token",
+            redirect_uri=redirect_uri,
+        )
+
+    app_create = next(
+        p for p in captured_payloads
+        if "/applications" in p["url"]
+        and "addPassword" not in p["url"]
+        and "owners" not in p["url"]
+    )
+    assert "web" in app_create["payload"], "App payload should include web section with redirectUris"
+    assert app_create["payload"]["web"]["redirectUris"] == [redirect_uri]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_no_redirect_uri_when_not_provided():
+    """provision_app_registration omits web.redirectUris when redirect_uri is not provided."""
+    captured_payloads: list[dict] = []
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        captured_payloads.append({"url": url, "payload": payload})
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
+            return _make_app_data()
+        if "/servicePrincipals" in url and "appRoleAssignments" not in url:
+            return _make_sp_data()
+        if "appRoleAssignments" in url:
+            return _make_role_assignment()
+        if "owners/$ref" in url:
+            return {}
+        if "addPassword" in url:
+            return _make_secret_data()
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return _make_graph_sp_response()
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.provision_app_registration(access_token="token")
+
+    app_create = next(
+        p for p in captured_payloads
+        if "/applications" in p["url"]
+        and "addPassword" not in p["url"]
+        and "owners" not in p["url"]
+    )
+    assert "web" not in app_create["payload"], "App payload should not include web section when no redirect_uri"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_provision_scope_constant():
     """PROVISION_SCOPE contains the required permissions."""
     assert "Application.ReadWrite.All" in m365_service.PROVISION_SCOPE
