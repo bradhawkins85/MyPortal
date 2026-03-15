@@ -1026,6 +1026,215 @@ async def sync_company_licenses(company_id: int) -> None:
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
 
 
+async def _exchange_obo_token(
+    *,
+    customer_tenant_id: str,
+    client_id: str,
+    client_secret: str,
+    user_assertion: str,
+) -> tuple[str, str | None, datetime | None]:
+    """Exchange a partner admin token for a customer-tenant-scoped token via OBO.
+
+    Uses the OAuth2 On-Behalf-Of (OBO) flow to exchange the partner admin's
+    access token for a delegated token scoped to the customer tenant.  This
+    enables GDAP delegated-admin operations (such as granting app permissions)
+    in the customer tenant.
+
+    :param customer_tenant_id: The Azure AD tenant ID of the customer.
+    :param client_id: The CSP admin app's client ID (in the partner tenant).
+    :param client_secret: The CSP admin app's client secret.
+    :param user_assertion: The partner admin's access token to exchange.
+    """
+    token_endpoint = (
+        f"https://login.microsoftonline.com/{customer_tenant_id}/oauth2/v2.0/token"
+    )
+    data = {
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "assertion": user_assertion,
+        "scope": _GRAPH_SCOPE,
+        "requested_token_use": "on_behalf_of",
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(token_endpoint, data=data)
+    if response.status_code != 200:
+        log_error(
+            "OBO token exchange failed",
+            status=response.status_code,
+            body=response.text,
+        )
+        raise M365Error(
+            f"OBO token exchange failed ({response.status_code}): "
+            f"{response.text[:200]}"
+        )
+
+    payload = response.json()
+    access_token = str(payload.get("access_token"))
+    new_refresh = payload.get("refresh_token")
+    expires_in = payload.get("expires_in")
+    expires_at: datetime | None = None
+    if isinstance(expires_in, (int, float)):
+        expires_at = (
+            datetime.now(timezone.utc)
+            + timedelta(seconds=float(expires_in))
+        )
+    return access_token, str(new_refresh) if new_refresh else None, expires_at
+
+
+async def verify_tenant_permissions(
+    company_id: int,
+    csp_access_token: str | None = None,
+) -> dict[str, Any]:
+    """Verify that the provisioned M365 app has all required permissions.
+
+    Uses the company's stored credentials (client_credentials grant) to check
+    the current app role assignments on the service principal.  If any required
+    permissions are missing and a CSP *access_token* is provided, attempts to
+    grant them via the GDAP on-behalf-of flow using the stored admin app
+    credentials.
+
+    Returns a dict with:
+
+    - ``all_ok`` – ``True`` if all required permissions are present
+    - ``missing`` – list of role IDs that are missing
+    - ``present`` – list of role IDs that are present
+    - ``updated`` – ``True`` if missing permissions were successfully granted
+    - ``error``   – human-readable error message if the check or update failed
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+
+    tenant_id = creds["tenant_id"]
+    client_id = creds["client_id"]
+    client_secret = creds.get("client_secret") or ""
+
+    # Acquire a client_credentials access token for the customer tenant
+    access_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
+        refresh_token=None,
+    )
+
+    # Find the service principal for this app in the customer tenant
+    sp_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{client_id}'&$select=id",
+    )
+    sp_list = sp_response.get("value", [])
+    if not sp_list:
+        raise M365Error("Service principal not found in tenant")
+    sp_object_id: str = sp_list[0]["id"]
+
+    # Retrieve current app role assignments for the service principal
+    assignments_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+    )
+    assigned_roles: set[str] = {
+        str(a.get("appRoleId") or "")
+        for a in assignments_response.get("value", [])
+    }
+
+    required_roles: set[str] = set(_PROVISION_APP_ROLES)
+    present: list[str] = sorted(required_roles & assigned_roles)
+    missing: list[str] = sorted(required_roles - assigned_roles)
+
+    if not missing:
+        return {"all_ok": True, "missing": [], "present": present, "updated": False}
+
+    # No CSP session — report what is missing but cannot fix automatically
+    if not csp_access_token:
+        return {
+            "all_ok": False,
+            "missing": missing,
+            "present": present,
+            "updated": False,
+        }
+
+    # Exchange the CSP session token for a customer-tenant-scoped token via OBO
+    admin_creds = await get_admin_m365_credentials()
+    if not admin_creds:
+        return {
+            "all_ok": False,
+            "missing": missing,
+            "present": present,
+            "updated": False,
+            "error": "CSP admin credentials not configured",
+        }
+
+    try:
+        customer_token, _, _ = await _exchange_obo_token(
+            customer_tenant_id=tenant_id,
+            client_id=admin_creds["client_id"],
+            client_secret=admin_creds["client_secret"],
+            user_assertion=csp_access_token,
+        )
+    except M365Error as exc:
+        return {
+            "all_ok": False,
+            "missing": missing,
+            "present": present,
+            "updated": False,
+            "error": f"Unable to obtain admin token for tenant: {exc}",
+        }
+
+    # Locate the Microsoft Graph service principal in the customer tenant
+    graph_sp_response = await _graph_get(
+        customer_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
+    )
+    graph_sp_list = graph_sp_response.get("value", [])
+    if not graph_sp_list:
+        return {
+            "all_ok": False,
+            "missing": missing,
+            "present": present,
+            "updated": False,
+            "error": "Microsoft Graph service principal not found in customer tenant",
+        }
+    graph_sp_id: str = graph_sp_list[0]["id"]
+
+    # Grant missing app role assignments
+    for role_id in missing:
+        try:
+            await _graph_post(
+                customer_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                {
+                    "principalId": sp_object_id,
+                    "resourceId": graph_sp_id,
+                    "appRoleId": role_id,
+                },
+            )
+        except M365Error as exc:
+            return {
+                "all_ok": False,
+                "missing": missing,
+                "present": present,
+                "updated": False,
+                "error": f"Failed to grant permission {role_id}: {exc}",
+            }
+
+    log_info(
+        "Granted missing M365 permissions for tenant",
+        company_id=company_id,
+        tenant_id=tenant_id,
+        granted_roles=missing,
+    )
+    return {
+        "all_ok": True,
+        "missing": [],
+        "present": sorted(required_roles),
+        "updated": True,
+    }
+
+
 async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
     """Return the list of customer tenants managed by the signed-in CSP/Lighthouse account.
 

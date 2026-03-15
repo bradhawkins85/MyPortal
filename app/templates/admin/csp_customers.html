@@ -187,7 +187,8 @@
               <th data-column="name" data-sortable>Customer name</th>
               <th data-column="domain" data-sortable>Default domain</th>
               <th data-column="tenant" data-sortable>Tenant ID</th>
-              <th>MyPortal company</th>
+              <th style="width: 20%">MyPortal company</th>
+              <th></th>
               <th></th>
             </tr>
           </thead>
@@ -231,6 +232,21 @@
                   </select>
                   <button type="submit" class="button button--ghost button--small">Save</button>
                 </form>
+                {% endif %}
+              </td>
+              <td>
+                {% if is_provisioned %}
+                  {% for company in companies if company.id == current_company_id %}
+                  <form method="post" action="/admin/csp/customers/verify">
+                    {% include "partials/csrf.html" %}
+                    <input type="hidden" name="company_id" value="{{ company.id }}" />
+                    <button
+                      type="submit"
+                      class="button button--ghost button--small"
+                      title="Check and update permissions for {{ company.name }}"
+                    >Verify</button>
+                  </form>
+                  {% endfor %}
                 {% endif %}
               </td>
               <td>
