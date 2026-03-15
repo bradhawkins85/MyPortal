@@ -16,7 +16,7 @@
 {% endblock %}
 
 {% block header_actions %}
-  {% if is_super_admin and admin_credentials_configured %}
+  {% if is_super_admin %}
     <a class="button button--ghost" href="/admin/csp/customers">CSP / Lighthouse</a>
   {% endif %}
 {% endblock %}

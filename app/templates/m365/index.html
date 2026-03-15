@@ -48,13 +48,13 @@
     </div>
   </section>
 
-  {% if admin_credentials_configured and is_super_admin %}
+  {% if is_super_admin %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">Auto-provision enterprise app</h3>
     </header>
     <div class="panel__body">
-      <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The portal admin credentials are used to perform the provisioning — no manual Azure portal steps required.</p>
+      <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The customer's Global Admin signs in to grant consent — no manual Azure portal steps required.</p>
       <div style="margin-top: 1rem;">
         <a href="/m365/discover" class="button">Sign in as Global Admin</a>
         <p class="form-help" style="margin-top: 0.5rem;">The Global Admin signs in to identify the tenant automatically, then grants consent for the required permissions.</p>
