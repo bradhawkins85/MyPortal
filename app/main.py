@@ -5231,25 +5231,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             tenant_id=discovered_tenant_id,
         )
 
-        # Redirect to the provision flow using the discovered tenant ID.
-        # For CSP-managed companies the authoritative tenant is stored in
-        # csp_tenant_id (populated via the CSP customer mapping). When the
-        # discover sign-in was performed by the partner admin their home
-        # tenant may have been returned instead of the customer's tenant.
-        # Prefer csp_tenant_id so the per-company app is provisioned in the
-        # correct customer tenant.
+        # Redirect to the provision flow using the discovered tenant ID
         if return_to_company_edit:
-            company_rec = await company_repo.get_company_by_id(company_id)
-            if company_rec:
-                company_csp_tid = str(company_rec.get("csp_tenant_id") or "").strip()
-                if company_csp_tid and company_csp_tid != discovered_tenant_id:
-                    log_info(
-                        "Using csp_tenant_id for M365 provisioning instead of discovered tenant",
-                        company_id=company_id,
-                        discovered_tenant_id=discovered_tenant_id,
-                        csp_tenant_id=company_csp_tid,
-                    )
-                    discovered_tenant_id = company_csp_tid
             return RedirectResponse(
                 url=f"/admin/companies/{company_id}/m365-provision"
                 f"?{urlencode({'tenant_id': discovered_tenant_id})}",
