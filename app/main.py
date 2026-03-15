@@ -5090,6 +5090,71 @@ async def admin_csp_map_tenant(request: Request):
     )
 
 
+@app.post("/admin/csp/customers/verify", response_class=HTMLResponse)
+async def admin_csp_verify_tenant(request: Request):
+    """Verify (and if possible fix) permissions for a provisioned M365 tenant."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    company_id_raw = str(form.get("company_id", "")).strip()
+
+    if not company_id_raw:
+        encoded = urlencode({"error": "Company ID is required."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    try:
+        company_id = int(company_id_raw)
+    except ValueError:
+        encoded = urlencode({"error": "Invalid company ID."})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    user_id = int(current_user.get("id", 0))
+    csp_session = await csp_repo.get_session(user_id)
+    csp_access_token: str | None = None
+    if csp_session:
+        csp_access_token = m365_service._decrypt(csp_session.get("access_token"))
+
+    try:
+        result = await m365_service.verify_tenant_permissions(
+            company_id=company_id,
+            csp_access_token=csp_access_token,
+        )
+    except m365_service.M365Error as exc:
+        encoded = urlencode({"error": f"Verification failed: {exc}"})
+        return RedirectResponse(
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    if result.get("all_ok"):
+        msg = (
+            "Permissions verified and updated successfully."
+            if result.get("updated")
+            else "All required permissions are present."
+        )
+        encoded = urlencode({"success": msg})
+    else:
+        error_detail = result.get("error", "")
+        missing_count = len(result.get("missing", []))
+        if error_detail:
+            msg = f"Verification failed: {error_detail}"
+        else:
+            msg = (
+                f"Missing {missing_count} permission(s). "
+                "Sign in as CSP account to auto-fix."
+            )
+        encoded = urlencode({"error": msg})
+
+    return RedirectResponse(
+        url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:

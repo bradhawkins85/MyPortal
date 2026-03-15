@@ -163,3 +163,212 @@ def test_csp_scope_constant():
     assert "openid" in m365_service.CSP_SCOPE
     assert "profile" in m365_service.CSP_SCOPE
     assert "offline_access" in m365_service.CSP_SCOPE
+
+
+# ---------------------------------------------------------------------------
+# Tests for verify_tenant_permissions
+# ---------------------------------------------------------------------------
+
+
+def _make_sp_list(sp_id: str = "sp-obj-id") -> dict[str, Any]:
+    return {"value": [{"id": sp_id}]}
+
+
+def _make_assignments(role_ids: list[str]) -> dict[str, Any]:
+    return {"value": [{"appRoleId": rid} for rid in role_ids]}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_tenant_permissions_all_ok():
+    """verify_tenant_permissions returns all_ok=True when all roles are assigned."""
+    all_roles = list(m365_service._PROVISION_APP_ROLES)
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return _make_assignments(all_roles)
+        return _make_sp_list()
+
+    async def mock_exchange(*, tenant_id, client_id, client_secret, refresh_token):
+        return "access-token", None, None
+
+    mock_creds = {
+        "tenant_id": "tenant-abc",
+        "client_id": "client-id",
+        "client_secret": "secret",
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", return_value=mock_creds),
+        patch.object(m365_service, "_exchange_token", side_effect=mock_exchange),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        result = await m365_service.verify_tenant_permissions(company_id=1)
+
+    assert result["all_ok"] is True
+    assert result["missing"] == []
+    assert result["updated"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_tenant_permissions_missing_no_csp_session():
+    """verify_tenant_permissions reports missing roles when no CSP session available."""
+    present_roles = [m365_service._PROVISION_APP_ROLES[0]]
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return _make_assignments(present_roles)
+        return _make_sp_list()
+
+    async def mock_exchange(*, tenant_id, client_id, client_secret, refresh_token):
+        return "access-token", None, None
+
+    mock_creds = {
+        "tenant_id": "tenant-abc",
+        "client_id": "client-id",
+        "client_secret": "secret",
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", return_value=mock_creds),
+        patch.object(m365_service, "_exchange_token", side_effect=mock_exchange),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        result = await m365_service.verify_tenant_permissions(
+            company_id=1, csp_access_token=None
+        )
+
+    assert result["all_ok"] is False
+    assert len(result["missing"]) > 0
+    assert result["updated"] is False
+    assert "error" not in result
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_tenant_permissions_raises_when_no_credentials():
+    """verify_tenant_permissions raises M365Error when no credentials are stored."""
+    with patch.object(m365_service, "get_credentials", return_value=None):
+        with pytest.raises(m365_service.M365Error, match="No M365 credentials"):
+            await m365_service.verify_tenant_permissions(company_id=99)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_tenant_permissions_raises_when_sp_not_found():
+    """verify_tenant_permissions raises M365Error when service principal is absent."""
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return {"value": []}
+
+    async def mock_exchange(*, tenant_id, client_id, client_secret, refresh_token):
+        return "access-token", None, None
+
+    mock_creds = {
+        "tenant_id": "tenant-abc",
+        "client_id": "client-id",
+        "client_secret": "secret",
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", return_value=mock_creds),
+        patch.object(m365_service, "_exchange_token", side_effect=mock_exchange),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        with pytest.raises(m365_service.M365Error, match="Service principal not found"):
+            await m365_service.verify_tenant_permissions(company_id=1)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_tenant_permissions_grants_missing_and_returns_updated():
+    """verify_tenant_permissions grants missing roles and returns updated=True."""
+    present_roles = [m365_service._PROVISION_APP_ROLES[0]]
+    graph_post_calls: list[str] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return _make_assignments(present_roles)
+        # SP lookup for both the provisioned app and the Graph SP
+        return {"value": [{"id": "sp-or-graph-sp-id"}]}
+
+    async def mock_exchange(*, tenant_id, client_id, client_secret, refresh_token):
+        return "access-token", None, None
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        graph_post_calls.append(url)
+        return {"id": "new-assignment"}
+
+    async def mock_obo(*, customer_tenant_id, client_id, client_secret, user_assertion):
+        return "customer-token", None, None
+
+    mock_creds = {
+        "tenant_id": "tenant-abc",
+        "client_id": "client-id",
+        "client_secret": "secret",
+    }
+    mock_admin_creds = {
+        "client_id": "admin-client-id",
+        "client_secret": "admin-secret",
+        "tenant_id": "partner-tenant",
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", return_value=mock_creds),
+        patch.object(m365_service, "_exchange_token", side_effect=mock_exchange),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_exchange_obo_token", side_effect=mock_obo),
+        patch.object(
+            m365_service, "get_admin_m365_credentials", return_value=mock_admin_creds
+        ),
+    ):
+        result = await m365_service.verify_tenant_permissions(
+            company_id=1, csp_access_token="csp-token"
+        )
+
+    assert result["all_ok"] is True
+    assert result["updated"] is True
+    assert result["missing"] == []
+    assert len(graph_post_calls) > 0
+
+
+@pytest.mark.anyio("asyncio")
+async def test_verify_tenant_permissions_obo_failure_returns_error():
+    """verify_tenant_permissions returns error when OBO token exchange fails."""
+    present_roles = [m365_service._PROVISION_APP_ROLES[0]]
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return _make_assignments(present_roles)
+        return _make_sp_list()
+
+    async def mock_exchange(*, tenant_id, client_id, client_secret, refresh_token):
+        return "access-token", None, None
+
+    async def mock_obo(*, customer_tenant_id, client_id, client_secret, user_assertion):
+        raise m365_service.M365Error("OBO denied")
+
+    mock_creds = {
+        "tenant_id": "tenant-abc",
+        "client_id": "client-id",
+        "client_secret": "secret",
+    }
+    mock_admin_creds = {
+        "client_id": "admin-client-id",
+        "client_secret": "admin-secret",
+        "tenant_id": "partner-tenant",
+    }
+
+    with (
+        patch.object(m365_service, "get_credentials", return_value=mock_creds),
+        patch.object(m365_service, "_exchange_token", side_effect=mock_exchange),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_exchange_obo_token", side_effect=mock_obo),
+        patch.object(
+            m365_service, "get_admin_m365_credentials", return_value=mock_admin_creds
+        ),
+    ):
+        result = await m365_service.verify_tenant_permissions(
+            company_id=1, csp_access_token="csp-token"
+        )
+
+    assert result["all_ok"] is False
+    assert "error" in result
+    assert "OBO denied" in result["error"]
+    assert result["updated"] is False
