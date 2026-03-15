@@ -247,7 +247,7 @@
                 <span class="menu__label">Licenses</span>
               </a>
             </li>
-            <li class="menu__item menu__item--expandable {% if current_path.startswith('/m365') %}menu__item--expanded{% endif %}">
+            <li class="menu__item menu__item--expandable {% if current_path.startswith('/m365') %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if current_path.startswith('/m365') %}true{% else %}false{% endif %}">
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 13-5-5 1.41-1.41L12 13.17l7.59-7.59L21 7z"/></svg>
@@ -872,7 +872,7 @@
 
           ordered.forEach((row) => {
             sidebarMenuRoot.appendChild(row.element);
-            const isCurrentPage = row.element.querySelector(':scope > a[aria-current="page"]');
+            const isCurrentPage = row.element.querySelector('a[aria-current="page"]');
             row.element.hidden = hidden.has(row.key) && !isCurrentPage;
           });
         };
