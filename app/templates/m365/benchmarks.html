@@ -33,6 +33,7 @@
         <p class="panel__subtitle">
           Automated checks based on the CIS Microsoft 365 Foundations Benchmark and CIS Microsoft Intune Benchmarks.
           Each check reports pass, fail, or unknown status along with remediation guidance for any failures.
+          Checks that cannot apply to your environment (e.g. built-in .onmicrosoft.com domains) can be excluded.
         </p>
       </div>
     </header>
@@ -58,11 +59,13 @@
       {% set fail_count = cat_results | selectattr("status", "equalto", "fail") | list | length %}
       {% set unknown_count = cat_results | selectattr("status", "equalto", "unknown") | list | length %}
       {% set na_count = cat_results | selectattr("status", "equalto", "not_applicable") | list | length %}
+      {% set excluded_count = cat_results | selectattr("status", "equalto", "excluded") | list | length %}
       <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
         {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
         {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
         {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
         {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
+        {% if excluded_count %}<span class="badge">{{ excluded_count }} excluded</span>{% endif %}
       </div>
       {% endif %}
     </header>
@@ -74,7 +77,8 @@
             <th style="width:3rem"></th>
             <th>Check</th>
             <th>Details</th>
-            <th>Last run</th>
+            <th style="white-space:nowrap">Last run</th>
+            {% if is_super_admin %}<th style="width:8rem"></th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -85,6 +89,8 @@
               <span title="Pass" style="color:var(--color-success,#16a34a);font-size:1.25rem">✓</span>
               {% elif check.status == "fail" %}
               <span title="Fail" style="color:var(--color-error,#dc2626);font-size:1.25rem">✗</span>
+              {% elif check.status == "excluded" %}
+              <span title="Excluded" style="color:var(--color-muted,#6b7280);font-size:1.25rem">⊘</span>
               {% elif check.status == "not_applicable" %}
               <span title="Not applicable" style="color:var(--color-muted,#6b7280);font-size:1.25rem">–</span>
               {% else %}
@@ -109,6 +115,25 @@
               <small class="text-muted">{{ check.run_at.strftime('%d %b %Y %H:%M') if check.run_at else '' }}</small>
               {% endif %}
             </td>
+            {% if is_super_admin %}
+            <td style="text-align:right;white-space:nowrap">
+              {% if check.status == "excluded" %}
+              <form method="post" action="/m365/benchmarks/exclude/remove" style="display:inline">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                <input type="hidden" name="checkId" value="{{ check.check_id }}" />
+                <button type="submit" class="button button--ghost button--small" title="Remove exclusion">Remove exclusion</button>
+              </form>
+              {% elif check.status in ("fail", "unknown") %}
+              <button type="button"
+                class="button button--ghost button--small exclude-btn"
+                data-check-id="{{ check.check_id }}"
+                data-check-name="{{ check.check_name | e }}"
+                title="Exclude this check">
+                Exclude
+              </button>
+              {% endif %}
+            </td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>
@@ -136,6 +161,53 @@
         DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, AuditLog.Read.All).
         Re-provision the enterprise app to grant these permissions if checks show as unknown due to missing access.
       </p>
+      <p class="text-muted" style="margin-top:0.5rem">
+        Checks that are not applicable to your environment (e.g. built-in .onmicrosoft.com domains that cannot have DKIM configured)
+        can be excluded using the <strong>Exclude</strong> button next to each failed or unknown check.
+        Excluded checks are shown with a ⊘ icon and do not count as failures.
+        Exclusions can be removed at any time to re-enable the check.
+      </p>
     </div>
   </section>
+
+  {% if is_super_admin %}
+  {# Exclude dialog #}
+  <dialog id="exclude-dialog" style="border:1px solid var(--color-border,#e5e7eb);border-radius:0.5rem;padding:1.5rem;min-width:20rem;max-width:32rem">
+    <h3 style="margin:0 0 0.75rem">Exclude check</h3>
+    <p id="exclude-dialog-desc" style="margin:0 0 1rem;font-size:0.875rem;color:var(--color-text-muted,#6b7280)"></p>
+    <form method="post" action="/m365/benchmarks/exclude" id="exclude-form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+      <input type="hidden" name="checkId" id="exclude-check-id" value="" />
+      <label class="form-field" style="display:block;margin-bottom:1rem">
+        <span class="form-label">Reason <span class="text-muted">(optional)</span></span>
+        <input type="text" name="reason" id="exclude-reason" class="input" style="width:100%"
+               placeholder="e.g. Built-in .onmicrosoft.com domain cannot have DKIM configured" maxlength="500" />
+      </label>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button type="button" class="button button--ghost" onclick="document.getElementById('exclude-dialog').close()">Cancel</button>
+        <button type="submit" class="button">Exclude check</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest('.exclude-btn');
+      if (!btn) return;
+      openExcludeDialog(btn.dataset.checkId, btn.dataset.checkName);
+    });
+
+    function openExcludeDialog(checkId, checkName) {
+      var dialog = document.getElementById('exclude-dialog');
+      document.getElementById('exclude-check-id').value = checkId;
+      document.getElementById('exclude-dialog-desc').textContent = 'Exclude: ' + checkName;
+      document.getElementById('exclude-reason').value = '';
+      if (dialog.showModal) {
+        dialog.showModal();
+      } else {
+        dialog.setAttribute('open', '');
+      }
+    }
+  </script>
+  {% endif %}
 {% endblock %}

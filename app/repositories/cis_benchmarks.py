@@ -53,3 +53,53 @@ async def delete_results(company_id: int) -> None:
         "DELETE FROM cis_benchmark_results WHERE company_id = %s",
         (company_id,),
     )
+
+
+# ---------------------------------------------------------------------------
+# Exclusions
+# ---------------------------------------------------------------------------
+
+
+async def upsert_exclusion(
+    *,
+    company_id: int,
+    check_id: str,
+    reason: str,
+) -> None:
+    """Add or update an exclusion for a specific check for the given company."""
+    await db.execute(
+        """
+        INSERT INTO cis_benchmark_exclusions (company_id, check_id, reason)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE reason = VALUES(reason)
+        """,
+        (company_id, check_id, reason),
+    )
+
+
+async def list_exclusions(company_id: int) -> list[dict[str, Any]]:
+    """Return all exclusions for the given company as a list of dicts."""
+    rows = await db.fetch_all(
+        """
+        SELECT check_id, reason, created_at
+        FROM cis_benchmark_exclusions
+        WHERE company_id = %s
+        ORDER BY check_id
+        """,
+        (company_id,),
+    )
+    return [dict(row) for row in rows]
+
+
+async def get_exclusion_map(company_id: int) -> dict[str, str]:
+    """Return a mapping of check_id → reason for all exclusions for this company."""
+    rows = await list_exclusions(company_id)
+    return {row["check_id"]: row["reason"] for row in rows}
+
+
+async def delete_exclusion(*, company_id: int, check_id: str) -> None:
+    """Remove a specific check exclusion for the given company."""
+    await db.execute(
+        "DELETE FROM cis_benchmark_exclusions WHERE company_id = %s AND check_id = %s",
+        (company_id, check_id),
+    )
