@@ -65,7 +65,8 @@ def test_build_m365_redirect_uri_uses_portal_url(monkeypatch):
 
 
 def test_build_m365_redirect_uri_falls_back_to_request(monkeypatch):
-    """_build_m365_redirect_uri falls back to request.url_for when PORTAL_URL is not set."""
+    """_build_m365_redirect_uri falls back to request.url_for when PORTAL_URL is not set,
+    and forces the scheme to HTTPS."""
     monkeypatch.setattr(main_module.settings, "portal_url", None)
 
     calls = []
@@ -77,8 +78,35 @@ def test_build_m365_redirect_uri_falls_back_to_request(monkeypatch):
 
     result = main_module._build_m365_redirect_uri(FakeRequest())
 
-    assert result == "http://localhost/m365/callback"
+    assert result == "https://localhost/m365/callback"
     assert calls == ["m365_callback"]
+
+
+def test_build_m365_redirect_uri_forces_https_on_http_fallback(monkeypatch):
+    """_build_m365_redirect_uri upgrades http:// to https:// in the fallback path."""
+    monkeypatch.setattr(main_module.settings, "portal_url", None)
+
+    class FakeRequest:
+        def url_for(self, name: str) -> str:
+            return "http://portal.example.com/m365/callback"
+
+    result = main_module._build_m365_redirect_uri(FakeRequest())
+
+    assert result.startswith("https://"), "Redirect URI must use HTTPS"
+    assert result == "https://portal.example.com/m365/callback"
+
+
+def test_build_m365_redirect_uri_preserves_https_fallback(monkeypatch):
+    """_build_m365_redirect_uri keeps https:// unchanged when the fallback already uses HTTPS."""
+    monkeypatch.setattr(main_module.settings, "portal_url", None)
+
+    class FakeRequest:
+        def url_for(self, name: str) -> str:
+            return "https://portal.example.com/m365/callback"
+
+    result = main_module._build_m365_redirect_uri(FakeRequest())
+
+    assert result == "https://portal.example.com/m365/callback"
 
 
 def _make_session() -> SessionData:
