@@ -1066,6 +1066,21 @@ async def sync_company_licenses(company_id: int) -> None:
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
 
 
+async def test_connectivity(company_id: int) -> dict[str, Any]:
+    """Validate stored credentials can acquire a token and call Microsoft Graph."""
+    access_token = await acquire_access_token(company_id)
+    payload = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/organization?$select=id,displayName",
+    )
+    organization = (payload.get("value") or [{}])[0]
+    return {
+        "graph_access": True,
+        "organization_id": str(organization.get("id") or "").strip() or None,
+        "organization_name": str(organization.get("displayName") or "").strip() or None,
+    }
+
+
 async def get_all_users(company_id: int) -> list[dict[str, Any]]:
     """Return all enabled M365 users for the given company.
 

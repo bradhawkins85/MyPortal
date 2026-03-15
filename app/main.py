@@ -4574,7 +4574,7 @@ async def switch_company(
 
 
 @app.get("/m365", response_class=HTMLResponse)
-async def m365_page(request: Request, error: str | None = None):
+async def m365_page(request: Request, error: str | None = None, success: str | None = None):
     user, membership, company, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
@@ -4598,6 +4598,7 @@ async def m365_page(request: Request, error: str | None = None):
         "company": company,
         "credential": credential_view,
         "error": error,
+        "success": success,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
         "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
@@ -4673,6 +4674,7 @@ async def remove_benchmark_exclusion(
 
 
 
+@app.post("/m365/credentials", response_class=RedirectResponse)
 async def save_m365_credentials(
     request: Request,
     tenant_id: str = Form(..., alias="tenantId"),
@@ -4704,6 +4706,28 @@ async def delete_m365_credentials(request: Request):
     await m365_service.delete_credentials(company_id)
     log_info("Microsoft 365 credentials deleted", company_id=company_id, user_id=user.get("id"))
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/test", response_class=RedirectResponse)
+async def test_m365_connectivity(request: Request):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        result = await m365_service.test_connectivity(company_id)
+    except m365_service.M365Error as exc:
+        encoded = urlencode({"error": f"Microsoft 365 connectivity test failed: {exc}"})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+
+    org_name = result.get("organization_name")
+    summary = "Microsoft 365 connectivity test succeeded"
+    if org_name:
+        summary = f"Microsoft 365 connectivity test succeeded for {org_name}"
+    log_info(summary, company_id=company_id, user_id=user.get("id"))
+    encoded = urlencode({"success": summary})
+    return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/m365/sync", response_class=JSONResponse)
