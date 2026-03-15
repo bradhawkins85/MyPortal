@@ -282,6 +282,15 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
     return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped)
 
 
+async def import_m365_contacts_for_company(company_id: int) -> ImportSummary:
+    """Import staff from Microsoft 365 only, ignoring any Syncro mapping."""
+    m365_creds = await m365_service.get_credentials(company_id)
+    if not m365_creds:
+        log_info("Skipping M365 staff import: no M365 credentials configured", company_id=company_id)
+        return ImportSummary(company_id=company_id, created=0, updated=0, skipped=0)
+    return await _import_from_m365(company_id)
+
+
 async def import_contacts_for_syncro_id(syncro_company_id: str) -> ImportSummary:
     company = await company_repo.get_company_by_syncro_id(syncro_company_id)
     if not company:
