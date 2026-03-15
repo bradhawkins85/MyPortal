@@ -286,8 +286,25 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
         response = await client.get(url, headers=headers)
     if response.status_code != 200:
         log_error("Microsoft Graph request failed", url=url, status=response.status_code, body=response.text)
-        raise M365Error("Microsoft Graph request failed")
+        raise M365Error(f"Microsoft Graph request failed ({response.status_code})")
     return response.json()
+
+
+async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:
+    """GET a Microsoft Graph collection endpoint, following ``@odata.nextLink`` pagination.
+
+    Many Graph list endpoints (e.g. conditionalAccessPolicies,
+    deviceCompliancePolicies) return a single page of results with an
+    ``@odata.nextLink`` property pointing to the next page.  Callers that only
+    fetch the first page may miss resources and produce incorrect results.  This
+    helper transparently fetches all pages and returns the combined ``value`` list.
+    """
+    items: list[dict[str, Any]] = []
+    while url:
+        data = await _graph_get(access_token, url)
+        items.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+    return items
 
 
 async def _graph_post(
