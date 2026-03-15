@@ -1298,6 +1298,40 @@ async def verify_tenant_permissions(
     }
 
 
+async def ensure_service_principal_for_app(access_token: str, app_id: str) -> dict[str, Any]:
+    """Ensure an enterprise application (service principal) exists for ``app_id``.
+
+    This is used by CSP/Lighthouse onboarding helpers so a Global Admin can
+    bootstrap the enterprise app in a customer tenant without manual portal
+    navigation.
+    """
+    clean_app_id = str(app_id or "").strip()
+    if not clean_app_id:
+        raise M365Error("Application ID is required")
+
+    existing = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{clean_app_id}'&$select=id,appId,displayName",
+    )
+    existing_items = existing.get("value", [])
+    if existing_items:
+        return {
+            "created": False,
+            "service_principal": existing_items[0],
+        }
+
+    created = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals",
+        {"appId": clean_app_id},
+    )
+    return {
+        "created": True,
+        "service_principal": created,
+    }
+
+
 async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
     """Return the list of customer tenants managed by the signed-in CSP/Lighthouse account.
 
@@ -1333,5 +1367,4 @@ async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
         url = data.get("@odata.nextLink")
     customers.sort(key=lambda c: c["name"].lower())
     return customers
-
 

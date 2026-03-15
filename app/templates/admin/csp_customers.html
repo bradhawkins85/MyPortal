@@ -257,6 +257,11 @@
                         class="button button--ghost button--small"
                         title="Auto-provision M365 app for {{ company.name }} in tenant {{ customer.tenant_id }}"
                       >Provision M365</a>
+                      <a
+                        href="/admin/csp/graph-bootstrap?tenant_id={{ customer.tenant_id | urlencode }}"
+                        class="button button--ghost button--small"
+                        title="Option 3: Create enterprise app via Microsoft Graph for tenant {{ customer.tenant_id }}"
+                      >Option 3 (Graph)</a>
                     {% endfor %}
                   {% endif %}
                 </div>
@@ -287,6 +292,7 @@
           <li>The portal reads your managed customer list from Microsoft Graph (<code>GET /v1.0/contracts</code>).</li>
           <li>Use the dropdown beside each customer to link their tenant to a MyPortal company.</li>
           <li>Once mapped, click <strong>Provision M365</strong> to automatically create a dedicated enterprise app registration in that tenant.</li>
+          <li>If you need to bootstrap only the enterprise app for existing admin credentials, click <strong>Option 3 (Graph)</strong>.</li>
         </ol>
         <p class="text-muted">GDAP relationships must already be established in Microsoft 365 Lighthouse or Partner Center before customers appear in this list.</p>
         <div class="alert alert--info" role="note" style="margin-top: 1rem;">
