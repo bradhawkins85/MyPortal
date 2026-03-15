@@ -281,10 +281,17 @@ async def acquire_access_token(company_id: int) -> str:
     return access_token
 
 
-async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {access_token}"}
+async def _graph_get(
+    access_token: str,
+    url: str,
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    req_headers: dict[str, str] = {"Authorization": f"Bearer {access_token}"}
+    if extra_headers:
+        req_headers.update(extra_headers)
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(url, headers=headers)
+        response = await client.get(url, headers=req_headers)
     if response.status_code != 200:
         log_error("Microsoft Graph request failed", url=url, status=response.status_code, body=response.text)
         raise M365Error(f"Microsoft Graph request failed ({response.status_code})")
@@ -991,12 +998,20 @@ async def _sync_staff_assignments(
     access_token: str,
     sku_id: str,
 ) -> None:
+    # Filtering by assignedLicenses is an advanced OData query that requires
+    # the ConsistencyLevel: eventual header and $count=true parameter.
+    # Without these, Microsoft Graph returns a 400 Bad Request.
     url = (
         "https://graph.microsoft.com/v1.0/users?"
         f"$filter=assignedLicenses/any(x:x/skuId eq {sku_id})&"
-        "$select=id,displayName,mail,userPrincipalName,givenName,surname"
+        "$select=id,displayName,mail,userPrincipalName,givenName,surname&"
+        "$count=true"
     )
-    payload = await _graph_get(access_token, url)
+    payload = await _graph_get(
+        access_token,
+        url,
+        extra_headers={"ConsistencyLevel": "eventual"},
+    )
     assigned_emails: set[str] = set()
     for user in payload.get("value", []):
         email = (user.get("mail") or user.get("userPrincipalName") or "").strip().lower()
