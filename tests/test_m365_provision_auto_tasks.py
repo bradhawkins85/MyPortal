@@ -48,7 +48,7 @@ async def test_get_commands_for_company_returns_set(monkeypatch):
     """get_commands_for_company returns the set of existing command names."""
     async def fake_fetch_all(query, params=()):
         return [
-            {"command": "sync_o365"},
+            {"command": "sync_m365_data"},
             {"command": "sync_staff"},
         ]
 
@@ -56,7 +56,7 @@ async def test_get_commands_for_company_returns_set(monkeypatch):
 
     commands = await scheduled_tasks_repo.get_commands_for_company(7)
 
-    assert commands == {"sync_o365", "sync_staff"}
+    assert commands == {"sync_m365_data", "sync_staff"}
 
 
 @pytest.mark.anyio
@@ -98,7 +98,7 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
     company_id = 5
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
-        ("sync_o365", "Sync Microsoft 365 licenses"),
+        ("sync_m365_data", "Sync Microsoft 365 data"),
         ("sync_staff", "Sync staff directory"),
     ):
         if command not in existing_commands:
@@ -113,7 +113,7 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
 
     assert len(created) == 2
     commands_created = {t["command"] for t in created}
-    assert commands_created == {"sync_o365", "sync_staff"}
+    assert commands_created == {"sync_m365_data", "sync_staff"}
     for task in created:
         assert task["company_id"] == company_id
         cron = task["cron"]
@@ -131,7 +131,7 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
     monkeypatch.setattr(
         scheduled_tasks_repo,
         "get_commands_for_company",
-        AsyncMock(return_value={"sync_o365", "sync_staff"}),
+        AsyncMock(return_value={"sync_m365_data", "sync_staff"}),
     )
 
     async def fake_create_task(**kwargs):
@@ -144,7 +144,7 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
     company_id = 5
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
-        ("sync_o365", "Sync Microsoft 365 licenses"),
+        ("sync_m365_data", "Sync Microsoft 365 data"),
         ("sync_staff", "Sync staff directory"),
     ):
         if command not in existing_commands:
@@ -169,7 +169,7 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
     monkeypatch.setattr(
         scheduled_tasks_repo,
         "get_commands_for_company",
-        AsyncMock(return_value={"sync_o365"}),
+        AsyncMock(return_value={"sync_m365_data"}),
     )
 
     async def fake_create_task(*, name, command, cron, company_id, active=True, **kwargs):
@@ -182,7 +182,7 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
     company_id = 5
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
-        ("sync_o365", "Sync Microsoft 365 licenses"),
+        ("sync_m365_data", "Sync Microsoft 365 data"),
         ("sync_staff", "Sync staff directory"),
     ):
         if command not in existing_commands:

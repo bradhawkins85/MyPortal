@@ -37,7 +37,7 @@ _OUTPUT_PREVIEW_LIMIT = 2000
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
 COMMANDS_BY_MODULE: dict[str, set[str]] = {
-    "m365": {"sync_o365"},
+    "m365": {"sync_m365_data", "sync_o365"},
     "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
     "call-recordings": {"sync_recordings", "queue_transcriptions", "process_transcription"},
     "unifi-talk": {"sync_unifi_talk_recordings"},
@@ -310,10 +310,28 @@ class SchedulerService:
                 elif command == "pull_tactical_companies":
                     summary = await modules_service.pull_companies_from_tacticalrmm()
                     details = json.dumps(summary, default=str)
-                elif command == "sync_o365":
+                elif command in {"sync_o365", "sync_m365_data"}:
                     company_id = task.get("company_id")
                     if company_id:
-                        await m365_service.sync_company_licenses(int(company_id))
+                        company_id_int = int(company_id)
+                        await m365_service.sync_company_licenses(company_id_int)
+                        staff_summary = await staff_importer.import_contacts_for_company(company_id_int)
+                        details = json.dumps(
+                            {
+                                "company_id": company_id_int,
+                                "licenses_synced": True,
+                                "staff": {
+                                    "created": staff_summary.created,
+                                    "updated": staff_summary.updated,
+                                    "skipped": staff_summary.skipped,
+                                    "total": staff_summary.total,
+                                },
+                            },
+                            default=str,
+                        )
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
                 elif command == "sync_to_xero":
                     company_id = task.get("company_id")
                     if company_id:
