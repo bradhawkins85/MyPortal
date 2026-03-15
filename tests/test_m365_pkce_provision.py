@@ -60,8 +60,14 @@ async def test_m365_provision_uses_pkce(async_client: HttpxAsyncClient):
     parsed = urlparse(location)
     qs = parse_qs(parsed.query)
 
-    # Must target the customer tenant endpoint (not /organizations)
-    assert "test-tenant-id" in parsed.path, "Should target the customer tenant"
+    # Must use the /organizations multi-tenant endpoint to avoid AADSTS700016
+    # (the PKCE client does not need to be registered in every customer tenant).
+    assert "organizations" in parsed.path, "Should use /organizations endpoint, not /{tenant_id}"
+    assert "test-tenant-id" not in parsed.path, "Should NOT hardcode tenant_id in the auth URL path"
+
+    # Must pass domain_hint to guide the admin to the correct customer tenant
+    assert qs.get("domain_hint", [None])[0] == "test-tenant-id", \
+        "Should include domain_hint with tenant_id to guide admin to correct tenant"
 
     # Must use PKCE client, not admin credentials
     assert qs.get("client_id", [None])[0] == _pkce_client_id()
@@ -108,6 +114,8 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
     assert qs.get("client_id", [None])[0] == _pkce_client_id()
     # Must include PKCE parameters
     assert "code_challenge" in qs
+    # Must use /organizations endpoint
+    assert "organizations" in parsed.path
 
 
 @pytest.mark.anyio("asyncio")
@@ -128,7 +136,13 @@ async def test_admin_company_m365_provision_uses_pkce(async_client: HttpxAsyncCl
     parsed = urlparse(location)
     qs = parse_qs(parsed.query)
 
-    assert "customer-tenant-id" in parsed.path
+    # Must use /organizations endpoint (not /{tenant_id}) to avoid AADSTS700016
+    assert "organizations" in parsed.path, "Should use /organizations endpoint"
+    assert "customer-tenant-id" not in parsed.path, "Should NOT hardcode tenant in URL path"
+
+    # Must pass domain_hint for the correct tenant
+    assert qs.get("domain_hint", [None])[0] == "customer-tenant-id"
+
     assert qs.get("client_id", [None])[0] == _pkce_client_id()
     assert "code_challenge" in qs
     assert qs.get("code_challenge_method", [None])[0] == "S256"
