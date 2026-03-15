@@ -5200,12 +5200,10 @@ async def admin_csp_verify_tenant(request: Request):
         )
 
     if result.get("all_ok"):
-        msg = (
-            "Permissions verified and updated successfully."
-            if result.get("updated")
-            else "All required permissions are present."
-        )
-        encoded = urlencode({"success": msg})
+        if result.get("updated"):
+            encoded = urlencode({"success": "Permissions verified and updated successfully."})
+        else:
+            encoded = ""
     else:
         error_detail = result.get("error", "")
         missing_count = len(result.get("missing", []))
