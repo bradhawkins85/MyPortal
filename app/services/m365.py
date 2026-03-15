@@ -12,6 +12,7 @@ import httpx
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import apps as apps_repo
+from app.repositories import companies as companies_repo
 from app.repositories import licenses as license_repo
 from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
@@ -230,8 +231,14 @@ async def acquire_access_token(company_id: int) -> str:
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
+    # Prefer the company's mapped CSP tenant ID when available.  This ensures
+    # that a shared CSP admin app (registered in the partner/parent tenant) still
+    # acquires a token scoped to the *customer* tenant rather than the parent,
+    # which would otherwise cause /subscribedSkus to return the parent's licenses.
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = csp_tenant_id or creds["tenant_id"]
     access_token, refresh, expires_at = await _exchange_token(
-        tenant_id=creds["tenant_id"],
+        tenant_id=effective_tenant_id,
         client_id=creds["client_id"],
         client_secret=creds.get("client_secret") or "",
         refresh_token=creds.get("refresh_token"),
