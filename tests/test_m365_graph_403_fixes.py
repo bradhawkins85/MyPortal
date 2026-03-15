@@ -163,3 +163,107 @@ async def test_sync_staff_assignments_url_includes_count_param():
 
     assert len(captured_urls) == 1
     assert "$count=true" in captured_urls[0]
+
+
+# ---------------------------------------------------------------------------
+# get_all_users uses ConsistencyLevel: eventual
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_all_users_sends_consistency_level_header():
+    """get_all_users sends ConsistencyLevel: eventual for the accountEnabled filter.
+
+    Microsoft Graph requires ConsistencyLevel: eventual (plus $count=true) for
+    $filter queries on directory objects with application permissions – without
+    them the API returns 403 Forbidden in many tenant configurations.
+    """
+    captured_extra_headers: list[dict[str, str] | None] = []
+    captured_urls: list[str] = []
+
+    async def mock_graph_get(
+        token: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        captured_urls.append(url)
+        captured_extra_headers.append(extra_headers)
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="fake-token")),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.get_all_users(1)
+
+    assert len(captured_urls) >= 1
+    assert "$count=true" in captured_urls[0]
+    assert "accountEnabled eq true" in captured_urls[0]
+
+    assert captured_extra_headers[0] is not None
+    assert captured_extra_headers[0].get("ConsistencyLevel") == "eventual"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_all_users_sends_consistency_level_header_on_paginated_requests():
+    """get_all_users forwards ConsistencyLevel: eventual on @odata.nextLink pages.
+
+    The ConsistencyLevel: eventual header must also be included in paginated
+    requests following @odata.nextLink, otherwise Graph returns 403.
+    """
+    call_count = 0
+    captured_extra_headers: list[dict[str, str] | None] = []
+
+    async def mock_graph_get(
+        token: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal call_count
+        captured_extra_headers.append(extra_headers)
+        call_count += 1
+        if call_count == 1:
+            return {
+                "value": [{"id": "user1", "mail": "user1@example.com"}],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$skiptoken=abc",
+            }
+        return {"value": [{"id": "user2", "mail": "user2@example.com"}]}
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="fake-token")),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        users = await m365_service.get_all_users(1)
+
+    assert call_count == 2
+    assert len(users) == 2
+    # Both pages must include the ConsistencyLevel header
+    for headers in captured_extra_headers:
+        assert headers is not None
+        assert headers.get("ConsistencyLevel") == "eventual"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_all_users_url_includes_count_param():
+    """get_all_users includes $count=true in the initial URL query string."""
+    captured_urls: list[str] = []
+
+    async def mock_graph_get(
+        token: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        captured_urls.append(url)
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="fake-token")),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.get_all_users(1)
+
+    assert len(captured_urls) >= 1
+    assert "$count=true" in captured_urls[0]
