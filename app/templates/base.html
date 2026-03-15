@@ -247,6 +247,25 @@
                 <span class="menu__label">Licenses</span>
               </a>
             </li>
+            <li class="menu__item menu__item--expandable {% if current_path.startswith('/m365') %}menu__item--expanded{% endif %}">
+              <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if current_path.startswith('/m365') %}true{% else %}false{% endif %}">
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 13-5-5 1.41-1.41L12 13.17l7.59-7.59L21 7z"/></svg>
+                </span>
+                <span class="menu__label">Office 365</span>
+                <span class="menu__expand-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10l5 5 5-5z"/></svg>
+                </span>
+              </button>
+              <ul class="menu__submenu {% if current_path.startswith('/m365') %}menu__submenu--expanded{% endif %}">
+                <li class="menu__subitem">
+                  <a href="/m365" {% if current_path == '/m365' %}aria-current="page"{% endif %}>Configuration</a>
+                </li>
+                <li class="menu__subitem">
+                  <a href="/m365/benchmarks" {% if current_path.startswith('/m365/benchmarks') %}aria-current="page"{% endif %}>CIS Benchmarks</a>
+                </li>
+              </ul>
+            </li>
           {% endif %}
           {% if can_manage_subscriptions %}
             <li class="menu__item">
