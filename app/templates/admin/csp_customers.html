@@ -253,9 +253,9 @@
                   {% if current_company_id %}
                     {% for company in companies if company.id == current_company_id %}
                       <a
-                        href="/admin/companies/{{ company.id }}/m365-discover"
+                        href="/admin/companies/{{ company.id }}/m365-provision?tenant_id={{ customer.tenant_id | urlencode }}"
                         class="button button--ghost button--small"
-                        title="Auto-provision M365 app for {{ company.name }}"
+                        title="Auto-provision M365 app for {{ company.name }} in tenant {{ customer.tenant_id }}"
                       >Provision M365</a>
                     {% endfor %}
                   {% endif %}
