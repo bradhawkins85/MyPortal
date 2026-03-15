@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}CIS Benchmarks – Office 365{% endblock %}
+
+{% block header_actions %}
+  {% if has_credentials %}
+  <form method="post" action="/m365/benchmarks/run" style="display:inline">
+    {% if csrf_token %}
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+    {% endif %}
+    <button type="submit" class="button">Run benchmarks</button>
+  </form>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if success %}
+  <div class="alert alert--success" role="alert">
+    {{ success }}
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">CIS Security Benchmarks</h2>
+        <p class="panel__subtitle">
+          Automated checks based on the CIS Microsoft 365 Foundations Benchmark and CIS Microsoft Intune Benchmarks.
+          Each check reports pass, fail, or unknown status along with remediation guidance for any failures.
+        </p>
+      </div>
+    </header>
+    <div class="panel__body">
+      {% if not has_credentials %}
+      <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before running benchmarks.</p>
+      {% elif not results %}
+      <p class="text-muted">No benchmark results yet. Click <strong>Run benchmarks</strong> to perform the first scan.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% for category in categories %}
+  {% set cat_results = results.get(category.id, []) %}
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h3 class="panel__title">{{ category.name }}</h3>
+        <p class="panel__subtitle">{{ category.description }}</p>
+      </div>
+      {% if cat_results %}
+      {% set pass_count = cat_results | selectattr("status", "equalto", "pass") | list | length %}
+      {% set fail_count = cat_results | selectattr("status", "equalto", "fail") | list | length %}
+      {% set unknown_count = cat_results | selectattr("status", "equalto", "unknown") | list | length %}
+      {% set na_count = cat_results | selectattr("status", "equalto", "not_applicable") | list | length %}
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
+        {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
+        {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
+        {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
+        {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
+      </div>
+      {% endif %}
+    </header>
+    {% if cat_results %}
+    <div class="panel__body" style="padding:0">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:3rem"></th>
+            <th>Check</th>
+            <th>Details</th>
+            <th>Last run</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for check in cat_results %}
+          <tr>
+            <td style="text-align:center">
+              {% if check.status == "pass" %}
+              <span title="Pass" style="color:var(--color-success,#16a34a);font-size:1.25rem">✓</span>
+              {% elif check.status == "fail" %}
+              <span title="Fail" style="color:var(--color-error,#dc2626);font-size:1.25rem">✗</span>
+              {% elif check.status == "not_applicable" %}
+              <span title="Not applicable" style="color:var(--color-muted,#6b7280);font-size:1.25rem">–</span>
+              {% else %}
+              <span title="Unknown" style="color:var(--color-warning,#d97706);font-size:1.25rem">?</span>
+              {% endif %}
+            </td>
+            <td>
+              <strong>{{ check.check_name }}</strong>
+              <br /><small class="text-muted">{{ check.check_id }}</small>
+            </td>
+            <td>
+              <span>{{ check.details or '' }}</span>
+              {% if check.remediation %}
+              <details style="margin-top:0.5rem">
+                <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">Remediation guidance</summary>
+                <p style="margin-top:0.5rem;font-size:0.875rem;color:var(--color-text,inherit)">{{ check.remediation }}</p>
+              </details>
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap">
+              {% if check.run_at %}
+              <small class="text-muted">{{ check.run_at.strftime('%d %b %Y %H:%M') if check.run_at else '' }}</small>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="panel__body">
+      <p class="text-muted">No results for this category. Run benchmarks to generate results.</p>
+    </div>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">About CIS Benchmarks</h3>
+    </header>
+    <div class="panel__body">
+      <p>
+        The <a href="https://www.cisecurity.org/benchmark/microsoft_365" target="_blank" rel="noopener noreferrer">CIS Microsoft 365 Foundations Benchmark</a> and associated Intune benchmarks provide consensus-based security configuration guidance.
+        These checks use the Microsoft Graph API to evaluate your tenant configuration against a subset of the recommended controls.
+      </p>
+      <p class="text-muted" style="margin-top:0.5rem">
+        Some checks require additional Graph API permissions (Policy.Read.All, Organization.Read.All,
+        DeviceManagementConfiguration.Read.All, DeviceManagementManagedDevices.Read.All, AuditLog.Read.All).
+        Re-provision the enterprise app to grant these permissions if checks show as unknown due to missing access.
+      </p>
+    </div>
+  </section>
+{% endblock %}
