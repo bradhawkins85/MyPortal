@@ -4685,29 +4685,32 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required",
         )
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
     tenant_id = tenant_id.strip()
     if not tenant_id:
         encoded = urlencode({"error": "Tenant ID is required to auto-provision."})
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
 
-    # Always use PKCE with a public client for the per-tenant provision authorization.
-    # Using the CSP admin app (or any confidential client registered in the partner
-    # tenant) as the OAuth client for a specific customer-tenant authorize URL causes
-    # AADSTS700016 when that tenant has not yet consented to (or has restricted) the
-    # admin app.  PKCE with the Azure CLI public client (or a custom
-    # M365_PKCE_CLIENT_ID) is recognised in virtually every tenant and eliminates
-    # this error, ensuring the enterprise app is actually created.
-    code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = m365_service.get_pkce_client_id()
+    # Prefer existing admin credentials; fall back to PKCE with a public client
+    # when none are configured so that the flow works without M365_ADMIN_CLIENT_ID.
+    # This avoids AADSTS700016 errors caused by using a deprecated or single-tenant
+    # client ID that is not registered in the target tenant.
+    code_verifier: str | None = None
+    if m365_admin_client_id and m365_admin_client_secret:
+        oauth_client_id = m365_admin_client_id
+    else:
+        code_verifier, code_challenge = m365_service.generate_pkce_pair()
+        oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
         "user_id": user.get("id"),
         "tenant_id": tenant_id,
         "flow": "provision",
-        "code_verifier": code_verifier,
     }
+    if code_verifier:
+        state_payload["code_verifier"] = code_verifier
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
         "client_id": oauth_client_id,
@@ -4717,9 +4720,10 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         "scope": m365_service.PROVISION_SCOPE,
         "state": state,
         "prompt": "consent",
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
     }
+    if code_verifier:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
     authorize_url = (
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -4735,6 +4739,7 @@ async def admin_company_m365_provision(
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
     tenant_id = tenant_id.strip()
     if not tenant_id:
         return _company_edit_redirect(
@@ -4743,10 +4748,14 @@ async def admin_company_m365_provision(
         )
     redirect_uri = _build_m365_redirect_uri(request)
 
-    # Always use PKCE with a public client for the per-tenant provision authorization.
-    # See m365_provision for the full rationale.
-    code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = m365_service.get_pkce_client_id()
+    # Prefer existing admin credentials; fall back to PKCE with a public client
+    # when none are configured.
+    code_verifier: str | None = None
+    if m365_admin_client_id and m365_admin_client_secret:
+        oauth_client_id = m365_admin_client_id
+    else:
+        code_verifier, code_challenge = m365_service.generate_pkce_pair()
+        oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
@@ -4754,8 +4763,9 @@ async def admin_company_m365_provision(
         "tenant_id": tenant_id,
         "flow": "provision",
         "return_to": "company_edit",
-        "code_verifier": code_verifier,
     }
+    if code_verifier:
+        state_payload["code_verifier"] = code_verifier
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
         "client_id": oauth_client_id,
@@ -4765,9 +4775,10 @@ async def admin_company_m365_provision(
         "scope": m365_service.PROVISION_SCOPE,
         "state": state,
         "prompt": "consent",
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
     }
+    if code_verifier:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
     authorize_url = (
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
