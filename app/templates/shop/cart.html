@@ -126,14 +126,18 @@
           </dl>
         </div>
         <div class="form-field">
-          <label class="form-label" for="cart-po-number">PO number (optional)</label>
+          <label class="form-label" for="cart-po-number">PO number{% if not require_po %} (optional){% endif %}</label>
           <input
             class="form-input"
             id="cart-po-number"
             name="poNumber"
             maxlength="100"
-            placeholder="Optional purchase order reference"
+            placeholder="{% if require_po %}Purchase order number required{% else %}Optional purchase order reference{% endif %}"
+            {% if require_po %}required{% endif %}
           />
+          {% if require_po %}
+            <p class="form-help">A purchase order number is required to place an order.</p>
+          {% endif %}
         </div>
         <div class="form-actions">
           {% if 'stripe' in payment_methods %}
