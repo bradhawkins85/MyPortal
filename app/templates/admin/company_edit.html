@@ -150,6 +150,21 @@
             </div>
             <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
           </div>
+          <div class="form-field">
+            <label class="form-label">Purchase order options</label>
+            <div class="form-checkbox-group">
+              <label class="form-checkbox__label">
+                <input
+                  type="checkbox"
+                  name="requirePo"
+                  value="1"
+                  {% if form_data.require_po %}checked{% endif %}
+                />
+                <span>Require PO</span>
+              </label>
+            </div>
+            <p class="form-help">When enabled, customers must provide a purchase order number before placing an order.</p>
+          </div>
           <div class="form-actions">
             <button type="submit" class="button">Save changes</button>
           </div>
