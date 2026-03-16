@@ -1022,50 +1022,55 @@ async def _sync_staff_assignments(
     # Filtering by assignedLicenses is an advanced OData query that requires
     # the ConsistencyLevel: eventual header and $count=true parameter.
     # Without these, Microsoft Graph returns a 400 Bad Request.
-    url = (
+    # The ConsistencyLevel: eventual header must also be forwarded on every
+    # @odata.nextLink paginated request, otherwise subsequent pages return 403.
+    url: str | None = (
         "https://graph.microsoft.com/v1.0/users?"
         f"$filter=assignedLicenses/any(x:x/skuId eq {sku_id})&"
         "$select=id,displayName,mail,userPrincipalName,givenName,surname&"
         "$count=true"
     )
-    payload = await _graph_get(
-        access_token,
-        url,
-        extra_headers={"ConsistencyLevel": "eventual"},
-    )
+    consistency_headers = {"ConsistencyLevel": "eventual"}
     assigned_emails: set[str] = set()
-    for user in payload.get("value", []):
-        email = (user.get("mail") or user.get("userPrincipalName") or "").strip().lower()
-        if not email:
-            continue
-        staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
-        if not staff:
-            first = (user.get("givenName") or "").strip() or "Unknown"
-            last = (user.get("surname") or "").strip() or user.get("displayName") or ""
-            created = await staff_repo.create_staff(
-                company_id=company_id,
-                first_name=first or "Unknown",
-                last_name=last or "",
-                email=email,
-                mobile_phone=None,
-                date_onboarded=None,
-                date_offboarded=None,
-                enabled=True,
-                street=None,
-                city=None,
-                state=None,
-                postcode=None,
-                country=None,
-                department=None,
-                job_title=None,
-                org_company=None,
-                manager_name=None,
-                account_action=None,
-                syncro_contact_id=None,
-            )
-            staff = created
-        assigned_emails.add(email)
-        await license_repo.link_staff_to_license(int(staff["id"]), license_id)
+    while url:
+        payload = await _graph_get(
+            access_token,
+            url,
+            extra_headers=consistency_headers,
+        )
+        for user in payload.get("value", []):
+            email = (user.get("mail") or user.get("userPrincipalName") or "").strip().lower()
+            if not email:
+                continue
+            staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
+            if not staff:
+                first = (user.get("givenName") or "").strip() or "Unknown"
+                last = (user.get("surname") or "").strip() or user.get("displayName") or ""
+                created = await staff_repo.create_staff(
+                    company_id=company_id,
+                    first_name=first or "Unknown",
+                    last_name=last or "",
+                    email=email,
+                    mobile_phone=None,
+                    date_onboarded=None,
+                    date_offboarded=None,
+                    enabled=True,
+                    street=None,
+                    city=None,
+                    state=None,
+                    postcode=None,
+                    country=None,
+                    department=None,
+                    job_title=None,
+                    org_company=None,
+                    manager_name=None,
+                    account_action=None,
+                    syncro_contact_id=None,
+                )
+                staff = created
+            assigned_emails.add(email)
+            await license_repo.link_staff_to_license(int(staff["id"]), license_id)
+        url = payload.get("@odata.nextLink")
 
     current_staff = await license_repo.list_staff_for_license(license_id)
     to_unlink = [
