@@ -3368,6 +3368,7 @@ async def _render_company_edit_page(
         "payment_method": _string_value(
             "payment_method", (company_record.get("payment_method") or "invoice_prepay").strip()
         ),
+        "require_po": _bool_value("require_po", bool(company_record.get("require_po"))),
     }
 
     form_email_text = form_data.get("email_domains", "")
@@ -6797,6 +6798,7 @@ async def view_cart(
         "cart_recommendations": recommendations,
         "low_stock_threshold": SHOP_LOW_STOCK_THRESHOLD,
         "payment_method": (company.get("payment_method") or "invoice_prepay") if company else "invoice_prepay",
+        "require_po": bool(company.get("require_po")) if company else False,
     }
     response = await _render_template("shop/cart.html", request, user, extra=extra)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -7308,6 +7310,14 @@ async def place_order(request: Request) -> RedirectResponse:
     po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
     if po_number and len(po_number) > 100:
         po_number = po_number[:100]
+
+    require_po = bool(company.get("require_po")) if company else False
+    if require_po and not po_number:
+        message = quote("A purchase order number is required to place an order.")
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?orderMessage={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     items = await cart_repo.list_items(session.id)
     if not items:
@@ -9387,6 +9397,7 @@ async def admin_update_company(company_id: int, request: Request):
     invoice_prepay_enabled = bool(form.get("invoicePrepay"))
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
     stripe_enabled = bool(form.get("stripeEnabled"))
+    require_po = bool(form.get("requirePo"))
     _selected_methods = [
         m for m, enabled in [
             ("invoice_prepay", invoice_prepay_enabled),
@@ -9405,6 +9416,7 @@ async def admin_update_company(company_id: int, request: Request):
         "email_domains": email_domains_text,
         "is_vip": is_vip,
         "payment_method": payment_method,
+        "require_po": require_po,
     }
     existing = await company_repo.get_company_by_id(company_id)
     if not existing:
@@ -9440,6 +9452,7 @@ async def admin_update_company(company_id: int, request: Request):
         "xero_id": xero_id,
         "email_domains": email_domains,
         "payment_method": payment_method,
+        "require_po": 1 if require_po else 0,
     }
     try:
         await company_repo.update_company(company_id, **updates)
