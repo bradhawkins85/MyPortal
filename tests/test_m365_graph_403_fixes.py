@@ -165,6 +165,78 @@ async def test_sync_staff_assignments_url_includes_count_param():
     assert "$count=true" in captured_urls[0]
 
 
+@pytest.mark.anyio("asyncio")
+async def test_sync_staff_assignments_follows_pagination_with_consistency_level():
+    """_sync_staff_assignments follows @odata.nextLink pagination and sends
+    ConsistencyLevel: eventual on every page, including paginated requests.
+
+    Microsoft Graph requires ConsistencyLevel: eventual on ALL requests
+    (including @odata.nextLink pages) for advanced filter queries –
+    without it subsequent pages return 403 Forbidden.
+
+    This test verifies the fix for the bug where subsequent clients (with
+    more than the default page size of users per license) were failing with
+    'Microsoft Graph request failed (403)'.
+    """
+    call_count = 0
+    captured_extra_headers: list[dict[str, str] | None] = []
+    captured_urls: list[str] = []
+
+    async def mock_graph_get(
+        token: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal call_count
+        captured_extra_headers.append(extra_headers)
+        captured_urls.append(url)
+        call_count += 1
+        if call_count == 1:
+            return {
+                "value": [
+                    {"id": "u1", "mail": "user1@example.com", "givenName": "User", "surname": "One"},
+                ],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$skiptoken=page2",
+            }
+        return {
+            "value": [
+                {"id": "u2", "mail": "user2@example.com", "givenName": "User", "surname": "Two"},
+            ],
+        }
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(
+            m365_service.staff_repo,
+            "get_staff_by_company_and_email",
+            AsyncMock(return_value={"id": 99, "email": "user@example.com"}),
+        ),
+        patch.object(m365_service.license_repo, "link_staff_to_license", AsyncMock()),
+        patch.object(m365_service.license_repo, "list_staff_for_license", AsyncMock(return_value=[])),
+        patch.object(m365_service.license_repo, "bulk_unlink_staff", AsyncMock()),
+    ):
+        await m365_service._sync_staff_assignments(
+            company_id=1,
+            license_id=10,
+            access_token="fake-token",
+            sku_id="84a661c4-e949-4bd2-a560-ed7766fcaf2b",
+        )
+
+    # Both pages must have been fetched
+    assert call_count == 2
+
+    # ConsistencyLevel: eventual must be sent on EVERY page request
+    for headers in captured_extra_headers:
+        assert headers is not None, "extra_headers must not be None on any page"
+        assert headers.get("ConsistencyLevel") == "eventual", (
+            "ConsistencyLevel: eventual must be sent on all pages to avoid 403"
+        )
+
+    # The second request must use the nextLink URL
+    assert captured_urls[1] == "https://graph.microsoft.com/v1.0/users?$skiptoken=page2"
+
+
 # ---------------------------------------------------------------------------
 # get_all_users uses ConsistencyLevel: eventual
 # ---------------------------------------------------------------------------
