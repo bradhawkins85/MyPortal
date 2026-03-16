@@ -222,8 +222,12 @@ async def _exchange_token(
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
     if response.status_code != 200:
+        grant_type = "refresh_token" if refresh_token else "client_credentials"
         log_error(
             "Failed to acquire Microsoft 365 token",
+            tenant_id=tenant_id,
+            client_id=client_id,
+            grant_type=grant_type,
             status=response.status_code,
             body=response.text,
         )
@@ -244,6 +248,9 @@ async def acquire_access_token(company_id: int) -> str:
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
 
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+
     # Reuse a stored token that is still valid (with a 5-minute safety margin).
     # This avoids an unnecessary round-trip to Microsoft's token endpoint on
     # every call (e.g. after an app restart) and prevents transient failures
@@ -255,6 +262,13 @@ async def acquire_access_token(company_id: int) -> str:
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         margin = timedelta(minutes=5)
         if isinstance(stored_expires_at, datetime) and stored_expires_at - margin > now_utc:
+            log_info(
+                "M365 using cached access token",
+                company_id=company_id,
+                tenant_id=tenant_id,
+                client_id=client_id,
+                token_expires_at=str(stored_expires_at),
+            )
             return stored_token
 
     # Prefer the company's mapped CSP tenant ID when available.  This ensures
@@ -262,12 +276,24 @@ async def acquire_access_token(company_id: int) -> str:
     # acquires a token scoped to the *customer* tenant rather than the parent,
     # which would otherwise cause /subscribedSkus to return the parent's licenses.
     csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or creds["tenant_id"]
+    effective_tenant_id = csp_tenant_id or tenant_id
+    csp_mapping_applied = bool(csp_tenant_id)
+
+    log_info(
+        "M365 acquiring access token",
+        company_id=company_id,
+        tenant_id=tenant_id,
+        client_id=client_id,
+        effective_tenant_id=effective_tenant_id,
+        csp_mapping_applied=csp_mapping_applied,
+    )
+
     stored_refresh = creds.get("refresh_token")
+    grant_type = "refresh_token" if stored_refresh else "client_credentials"
     try:
         access_token, refresh, expires_at = await _exchange_token(
             tenant_id=effective_tenant_id,
-            client_id=creds["client_id"],
+            client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=stored_refresh,
         )
@@ -280,16 +306,28 @@ async def acquire_access_token(company_id: int) -> str:
         log_error(
             "M365 refresh token is invalid; falling back to client_credentials grant",
             company_id=company_id,
+            tenant_id=effective_tenant_id,
+            client_id=client_id,
         )
         access_token, refresh, expires_at = await _exchange_token(
             tenant_id=effective_tenant_id,
-            client_id=creds["client_id"],
+            client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=None,
         )
+        grant_type = "client_credentials"
         # Clear the stale refresh token so future calls use client_credentials
         # immediately rather than attempting the refresh_token grant again.
         refresh = None
+
+    log_info(
+        "M365 access token acquired successfully",
+        company_id=company_id,
+        effective_tenant_id=effective_tenant_id,
+        client_id=client_id,
+        grant_type=grant_type,
+    )
+
     expires_value = None
     if expires_at:
         expires_value = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1024,6 +1062,12 @@ async def _sync_staff_assignments(
     # Without these, Microsoft Graph returns a 400 Bad Request.
     # The ConsistencyLevel: eventual header must also be forwarded on every
     # @odata.nextLink paginated request, otherwise subsequent pages return 403.
+    log_info(
+        "M365 syncing staff assignments for license",
+        company_id=company_id,
+        license_id=license_id,
+        sku_id=sku_id,
+    )
     url: str | None = (
         "https://graph.microsoft.com/v1.0/users?"
         f"$filter=assignedLicenses/any(x:x/skuId eq {sku_id})&"
@@ -1082,6 +1126,7 @@ async def _sync_staff_assignments(
 
 
 async def sync_company_licenses(company_id: int) -> None:
+    log_info("M365 starting license synchronisation", company_id=company_id)
     access_token = await acquire_access_token(company_id)
     payload = await _graph_get(access_token, "https://graph.microsoft.com/v1.0/subscribedSkus")
     for sku in payload.get("value", []):
