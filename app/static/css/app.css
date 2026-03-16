@@ -3094,6 +3094,27 @@ button.header-title-menu__link {
   gap: var(--space-gap-tight);
 }
 
+.cart-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-top: calc(var(--space-gap-roomy) * 1.25);
+  gap: calc(var(--space-gap-roomy) * 1.25);
+}
+
+.cart-footer__left {
+  display: flex;
+  align-items: flex-start;
+  padding-top: var(--space-gap-tight);
+}
+
+.cart-footer__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-gap-tight);
+}
+
 .cart-summary {
   display: flex;
   justify-content: flex-end;
@@ -3334,6 +3355,15 @@ button.header-title-menu__link {
 
   .cart-checkout {
     grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .cart-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cart-footer__right {
     align-items: stretch;
   }
 
