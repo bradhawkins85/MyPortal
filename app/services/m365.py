@@ -1129,6 +1129,7 @@ async def sync_company_licenses(company_id: int) -> None:
     log_info("M365 starting license synchronisation", company_id=company_id)
     access_token = await acquire_access_token(company_id)
     payload = await _graph_get(access_token, "https://graph.microsoft.com/v1.0/subscribedSkus")
+    synced_skus: set[str] = set()
     for sku in payload.get("value", []):
         part_number = str(sku.get("skuPartNumber") or "").strip()
         sku_id = sku.get("skuId")
@@ -1160,12 +1161,37 @@ async def sync_company_licenses(company_id: int) -> None:
                 contract_term="",
             )
             license_id = created["id"]
+        if part_number:
+            synced_skus.add(part_number)
         if sku_id:
             await _sync_staff_assignments(
                 company_id=company_id,
                 license_id=int(license_id),
                 access_token=access_token,
                 sku_id=str(sku_id),
+            )
+    today = date.today()
+    all_licenses = await license_repo.list_company_licenses(company_id)
+    for lic in all_licenses:
+        sku = lic.get("platform") or ""
+        expiry = lic.get("expiry_date")
+        if isinstance(expiry, datetime):
+            expiry_date_only = expiry.date()
+        elif isinstance(expiry, date):
+            expiry_date_only = expiry
+        else:
+            expiry_date_only = None
+        is_stale = sku not in synced_skus
+        is_expired = expiry_date_only is not None and expiry_date_only < today
+        if is_stale or is_expired:
+            reason = "expired" if is_expired and not is_stale else "not_in_tenant" if is_stale and not is_expired else "stale_and_expired"
+            await license_repo.delete_license(lic["id"])
+            log_info(
+                "M365 removed stale or expired license",
+                company_id=company_id,
+                license_id=lic["id"],
+                platform=sku,
+                reason=reason,
             )
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
 
