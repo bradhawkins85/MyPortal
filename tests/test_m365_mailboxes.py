@@ -532,3 +532,55 @@ async def test_fetch_mailbox_usage_report_csv_decodes_utf16_downloads():
             "isDeleted": False,
         }
     ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_archive_storage_used_without_mailbox():
+    """CSV fallback correctly reads archive size when the column is named
+    'Archive Storage Used (Byte)' (without 'Mailbox'), which is the column
+    name used by the Microsoft Graph CSV export for getMailboxUsageDetail."""
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            # Microsoft Graph CSV uses "Archive Storage Used (Byte)" (without "Mailbox")
+            csv_text = (
+                "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
+                "Storage Used (Byte),Archive Storage Used (Byte)\n"
+                "2024-01-01,user@example.com,Alice,false,1073741824,524288000\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with (
+        patch.object(
+            m365_service,
+            "_graph_get_all",
+            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
+        ),
+        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
+    ):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert len(rows) == 1
+    assert rows[0]["userPrincipalName"] == "user@example.com"
+    assert rows[0]["storageUsedInBytes"] == 1073741824
+    assert rows[0]["archiveMailboxStorageUsedInBytes"] == 524288000
+    assert rows[0]["isDeleted"] is False
