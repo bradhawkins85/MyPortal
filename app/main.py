@@ -10835,6 +10835,52 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
     return await _render_template("admin/automation.html", request, current_user, extra=extra)
 
 
+@app.get("/admin/scheduled-tasks", response_class=HTMLResponse)
+async def admin_scheduled_tasks(request: Request, show_inactive: bool = Query(default=False)):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive)
+    companies = await company_repo.list_companies()
+
+    company_lookup: dict[int, str] = {}
+    for company in companies:
+        try:
+            company_id = int(company.get("id")) if company.get("id") is not None else None
+        except (TypeError, ValueError):
+            company_id = None
+        if company_id is None:
+            continue
+        company_lookup[company_id] = str(company.get("name") or f"Company #{company_id}")
+
+    prepared_tasks: list[dict[str, Any]] = []
+    for task in tasks:
+        serialised_task = _serialise_mapping(task)
+        serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
+        raw_company_id = task.get("company_id")
+        company_key: int | None = None
+        if raw_company_id is not None:
+            try:
+                company_key = int(raw_company_id)
+            except (TypeError, ValueError):
+                company_key = None
+        if company_key is None:
+            serialised_task["company_name"] = "All companies"
+            serialised_task["company_edit_url"] = None
+        else:
+            company_name = company_lookup.get(company_key, f"Company #{company_key}")
+            serialised_task["company_name"] = company_name
+            serialised_task["company_edit_url"] = f"/admin/companies/{company_key}/edit"
+        prepared_tasks.append(serialised_task)
+
+    extra = {
+        "title": "Scheduled Tasks",
+        "tasks": prepared_tasks,
+        "show_inactive": show_inactive,
+    }
+    return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
+
+
 @app.get("/admin/webhooks", response_class=HTMLResponse)
 async def admin_webhooks(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
