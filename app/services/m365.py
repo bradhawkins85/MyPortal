@@ -1855,21 +1855,39 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
                 http_status=csv_response.status_code,
             )
 
+    def _normalise_csv_key(key: str) -> str:
+        return " ".join(str(key or "").replace("\ufeff", "").strip().lower().split())
+
+    def _parse_int(raw: Any, default: int = 0) -> int:
+        value = str(raw or "").replace(",", "").strip()
+        if not value:
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     parsed_rows: list[dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(csv_response.text))
     for row in reader:
-        upn = str(row.get("User Principal Name") or "").strip()
+        normalised_row = {
+            _normalise_csv_key(key): value
+            for key, value in row.items()
+            if key is not None
+        }
+        upn = str(normalised_row.get("user principal name") or "").strip().lower()
         if not upn:
             continue
-        storage_raw = str(row.get("Storage Used (Byte)") or "0").replace(",", "").strip()
-        archive_raw = str(row.get("Archive Mailbox Storage Used (Byte)") or "").replace(",", "").strip()
-        is_deleted_raw = str(row.get("Is Deleted") or "false").strip().lower()
+        display_name = str(normalised_row.get("display name") or upn).strip()
+        storage_bytes = _parse_int(normalised_row.get("storage used (byte)"))
+        archive_bytes = _parse_int(normalised_row.get("archive mailbox storage used (byte)"))
+        is_deleted_raw = str(normalised_row.get("is deleted") or "false").strip().lower()
         parsed_rows.append(
             {
                 "userPrincipalName": upn,
-                "displayName": str(row.get("Display Name") or upn).strip(),
-                "storageUsedInBytes": int(storage_raw) if storage_raw else 0,
-                "archiveMailboxStorageUsedInBytes": int(archive_raw) if archive_raw else 0,
+                "displayName": display_name,
+                "storageUsedInBytes": storage_bytes,
+                "archiveMailboxStorageUsedInBytes": archive_bytes,
                 "isDeleted": is_deleted_raw in {"true", "1", "yes"},
             }
         )
@@ -1913,39 +1931,58 @@ async def sync_mailboxes(company_id: int) -> int:
         raise
 
     # Build a lookup: lower-case UPN -> report entry (skip deleted mailboxes).
-    report_by_upn: dict[str, dict[str, Any]] = {}
+    report_by_identifier: dict[str, dict[str, Any]] = {}
+    report_primary_upns: set[str] = set()
     for item in report_items:
         upn = (item.get("userPrincipalName") or "").lower().strip()
         if upn and not item.get("isDeleted"):
-            report_by_upn[upn] = item
+            report_by_identifier[upn] = item
+            report_primary_upns.add(upn)
+
+    def _user_identifiers(user: dict[str, Any]) -> list[str]:
+        identifiers: list[str] = []
+        for raw in (user.get("userPrincipalName"), user.get("mail")):
+            value = str(raw or "").strip().lower()
+            if value and value not in identifiers:
+                identifiers.append(value)
+        return identifiers
 
     # Get all enabled users -> these are the user mailboxes.
     users = await get_all_users(company_id)
-    user_by_upn: dict[str, dict[str, Any]] = {
-        (u.get("userPrincipalName") or "").lower(): u
+    users_with_identifiers = [
+        (u, _user_identifiers(u))
         for u in users
-        if u.get("userPrincipalName")
-    }
+    ]
+    users_with_identifiers = [
+        (user, identifiers)
+        for user, identifiers in users_with_identifiers
+        if identifiers
+    ]
 
     rows_to_upsert: list[dict[str, Any]] = []
+    matched_report_upns: set[str] = set()
 
     # --- User mailboxes ---
-    for upn_lower, user in user_by_upn.items():
-        report_entry = report_by_upn.get(upn_lower, {})
+    for user, identifiers in users_with_identifiers:
+        preferred_upn = identifiers[0]
+        report_entry = next((report_by_identifier.get(key) for key in identifiers if key in report_by_identifier), {})
+        report_upn = str(report_entry.get("userPrincipalName") or "").strip().lower()
+        if report_upn:
+            matched_report_upns.add(report_upn)
         storage_bytes = int(report_entry.get("storageUsedInBytes") or 0)
         archive_raw = report_entry.get("archiveMailboxStorageUsedInBytes")
         archive_bytes = int(archive_raw) if archive_raw else 0
         display_name = (
             user.get("displayName")
             or report_entry.get("displayName")
-            or upn_lower
+            or preferred_upn
         )
 
         fw_count = await _count_forwarding_rules(access_token, user["id"])
 
         rows_to_upsert.append(
             {
-                "user_principal_name": upn_lower,
+                "user_principal_name": preferred_upn,
                 "display_name": display_name,
                 "mailbox_type": "UserMailbox",
                 "storage_used_bytes": storage_bytes,
@@ -1956,9 +1993,10 @@ async def sync_mailboxes(company_id: int) -> int:
         )
 
     # --- Shared / non-user mailboxes ---
-    for upn_lower, entry in report_by_upn.items():
-        if upn_lower in user_by_upn:
+    for upn_lower in report_primary_upns:
+        if upn_lower in matched_report_upns:
             continue  # already handled above
+        entry = report_by_identifier.get(upn_lower, {})
         storage_bytes = int(entry.get("storageUsedInBytes") or 0)
         archive_raw = entry.get("archiveMailboxStorageUsedInBytes")
         archive_bytes = int(archive_raw) if archive_raw else 0
