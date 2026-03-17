@@ -218,6 +218,10 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
         country = _normalise(user.get("country")) or None
         department = _normalise(user.get("department")) or None
         job_title = _normalise(user.get("jobTitle")) or None
+        sign_in_activity = user.get("signInActivity") or {}
+        m365_last_sign_in = m365_service.parse_graph_datetime(
+            sign_in_activity.get("lastSignInDateTime")
+        )
 
         existing = _find_existing_staff(
             existing_staff,
@@ -251,6 +255,7 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 manager_name=existing.get("manager_name"),
                 account_action=existing.get("account_action"),
                 syncro_contact_id=existing.get("syncro_contact_id"),
+                m365_last_sign_in=m365_last_sign_in,
             )
             updated += 1
         else:
@@ -275,6 +280,7 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 account_action=None,
                 syncro_contact_id=None,
                 source="m365",
+                m365_last_sign_in=m365_last_sign_in,
             )
             existing_staff.append(created_staff)
             created += 1
