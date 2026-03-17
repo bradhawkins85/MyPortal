@@ -2103,6 +2103,44 @@ async def sync_mailboxes(company_id: int) -> int:
     return len(rows_to_upsert)
 
 
+async def check_report_privacy(company_id: int) -> bool:
+    """Check whether Microsoft 365 reports are concealing mailbox identifiers.
+
+    Fetches the mailbox usage detail report and inspects the ``userPrincipalName``
+    fields.  When the tenant-level privacy setting *Display concealed user, group,
+    and site names in all reports* is enabled, Microsoft replaces real UPNs with
+    deterministic hex hashes so they cannot be mapped back to real accounts.
+
+    :returns: ``True`` if the report identifiers appear to be concealed, ``False``
+        if they look like normal UPN / e-mail addresses.
+    :raises M365Error: If the Graph API call fails (e.g. missing credentials or
+        a 403 permission error).
+    """
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    report_items = await _fetch_mailbox_usage_report(access_token)
+
+    def _looks_obfuscated(value: str) -> bool:
+        candidate = str(value or "").strip().lower()
+        if not candidate or "@" in candidate:
+            return False
+        if len(candidate) < 24:
+            return False
+        return bool(re.fullmatch(r"[0-9a-f]+", candidate))
+
+    primary_upns: set[str] = set()
+    obfuscated_count = 0
+    for item in report_items:
+        upn = (item.get("userPrincipalName") or "").lower().strip()
+        if upn and not item.get("isDeleted"):
+            primary_upns.add(upn)
+            if _looks_obfuscated(upn):
+                obfuscated_count += 1
+
+    if not primary_upns:
+        return False
+    return obfuscated_count >= max(1, int(len(primary_upns) * 0.8))
+
+
 async def get_user_mailboxes(company_id: int) -> list[dict[str, Any]]:
     """Return stored user mailbox rows for the given company, excluding package mailboxes."""
     rows = await m365_repo.get_mailboxes(company_id, "UserMailbox")

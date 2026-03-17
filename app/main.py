@@ -4736,6 +4736,44 @@ async def sync_m365_mailboxes(request: Request, redirect_to: str = Form("users",
         )
 
 
+@app.post("/m365/checks/report-privacy", response_class=RedirectResponse)
+async def check_m365_report_privacy(request: Request):
+    """Check whether Microsoft 365 report privacy concealment is active for this tenant.
+
+    Detects the *Display concealed user, group, and site names in all reports*
+    setting.  When enabled, mailbox identifiers in reports are replaced with hex
+    hashes, breaking mailbox sync.  Redirects back to ``/m365`` with a success or
+    error message.
+    """
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        concealed = await m365_service.check_report_privacy(company_id)
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if concealed:
+        msg = (
+            "Mailbox sync failed because Microsoft 365 reports are concealing mailbox identifiers. "
+            "Disable the Microsoft 365 admin center privacy option "
+            "'Display concealed user, group, and site names in all reports', "
+            "then run mailbox sync again."
+        )
+        return RedirectResponse(
+            url=f"/m365?error={quote(msg)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url=f"/m365?success={quote('Mailbox report privacy check passed – identifiers are not concealed')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post("/m365/permissions/verify")
 async def verify_m365_permissions(request: Request):
     """Check (and optionally auto-grant) missing Graph API permissions for this company.
