@@ -316,6 +316,11 @@ class SchedulerService:
                         company_id_int = int(company_id)
                         await m365_service.sync_company_licenses(company_id_int)
                         staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
+                        mailboxes_synced = 0
+                        try:
+                            mailboxes_synced = await m365_service.sync_mailboxes(company_id_int)
+                        except Exception:
+                            pass
                         details = json.dumps(
                             {
                                 "company_id": company_id_int,
@@ -326,6 +331,7 @@ class SchedulerService:
                                     "skipped": staff_summary.skipped,
                                     "total": staff_summary.total,
                                 },
+                                "mailboxes_synced": mailboxes_synced,
                             },
                             default=str,
                         )

@@ -4801,8 +4801,13 @@ async def sync_m365(request: Request):
         await m365_service.sync_company_licenses(company_id)
     except m365_service.M365Error as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    mailboxes_synced = 0
+    try:
+        mailboxes_synced = await m365_service.sync_mailboxes(company_id)
+    except Exception:
+        pass
     log_info("Microsoft 365 license sync triggered", company_id=company_id, user_id=user.get("id"))
-    return JSONResponse({"success": True})
+    return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
 
 @app.get("/m365/connect")
