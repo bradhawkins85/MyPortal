@@ -139,3 +139,35 @@ async def test_verify_tenant_permissions_reports_missing_roles():
     assert result["all_ok"] is False
     assert len(result["missing"]) > 0
     assert result["updated"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_raises_when_report_identifiers_are_concealed():
+    """Concealed mailbox identifiers should raise a remediation error."""
+    report_items = [
+        {
+            "userPrincipalName": "013944b66cad4ddfef8efc07e81d550f",
+            "displayName": "013944b66cad4ddfef8efc07e81d550f",
+            "storageUsedInBytes": 1024,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "isDeleted": False,
+        },
+        {
+            "userPrincipalName": "01c9b02a1714e53f85ee6d08a7780167",
+            "displayName": "01c9b02a1714e53f85ee6d08a7780167",
+            "storageUsedInBytes": 2048,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "isDeleted": False,
+        },
+    ]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report_items)),
+    ):
+        with pytest.raises(M365Error) as exc_info:
+            await m365_service.sync_mailboxes(1)
+
+    message = str(exc_info.value)
+    assert "concealing mailbox identifiers" in message
+    assert "Display concealed user, group, and site names in all reports" in message
