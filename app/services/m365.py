@@ -1457,6 +1457,113 @@ async def verify_tenant_permissions(
     }
 
 
+async def try_grant_missing_permissions(
+    company_id: int,
+    access_token: str,
+) -> None:
+    """Best-effort: grant any missing ``_PROVISION_APP_ROLES`` to the company's
+    enterprise app service principal using the provided *access_token*.
+
+    This is called from the "Authorize portal access" (``/m365/connect``)
+    callback so that when an administrator re-authorises, any application
+    permissions that were added after the app was originally provisioned (e.g.
+    ``Reports.Read.All`` and ``MailboxSettings.Read`` for mailbox sync) are
+    automatically added to the app's ``appRoleAssignments``.
+
+    Failures are logged but never raised – the connect flow must not be
+    interrupted by a permission-grant error.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        return
+
+    client_id = str(creds.get("client_id") or "").strip()
+    if not client_id:
+        return
+
+    try:
+        # Find the service principal for the company's app
+        sp_response = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{client_id}'&$select=id",
+        )
+        sp_list = sp_response.get("value", [])
+        if not sp_list:
+            log_info(
+                "try_grant_missing_permissions: service principal not found",
+                company_id=company_id,
+                client_id=client_id,
+            )
+            return
+        sp_object_id: str = sp_list[0]["id"]
+
+        # Retrieve current appRoleAssignments
+        assignments_response = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+        )
+        assigned_roles: set[str] = {
+            str(a.get("appRoleId") or "")
+            for a in assignments_response.get("value", [])
+        }
+
+        required_roles: set[str] = set(_PROVISION_APP_ROLES)
+        missing: list[str] = sorted(required_roles - assigned_roles)
+        if not missing:
+            return
+
+        # Locate the Microsoft Graph service principal in this tenant
+        graph_sp_response = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
+        )
+        graph_sp_list = graph_sp_response.get("value", [])
+        if not graph_sp_list:
+            log_info(
+                "try_grant_missing_permissions: Graph SP not found",
+                company_id=company_id,
+            )
+            return
+        graph_sp_id: str = graph_sp_list[0]["id"]
+
+        # Grant each missing role assignment
+        granted: list[str] = []
+        for role_id in missing:
+            try:
+                await _graph_post(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                    {
+                        "principalId": sp_object_id,
+                        "resourceId": graph_sp_id,
+                        "appRoleId": role_id,
+                    },
+                )
+                granted.append(role_id)
+            except M365Error as exc:
+                log_error(
+                    "try_grant_missing_permissions: failed to grant role",
+                    company_id=company_id,
+                    role_id=role_id,
+                    error=str(exc),
+                )
+
+        if granted:
+            log_info(
+                "Granted missing M365 permissions via connect flow",
+                company_id=company_id,
+                granted_roles=granted,
+            )
+    except Exception as exc:  # noqa: BLE001
+        log_error(
+            "try_grant_missing_permissions: unexpected error",
+            company_id=company_id,
+            error=str(exc),
+        )
+
+
 async def ensure_service_principal_for_app(access_token: str, app_id: str) -> dict[str, Any]:
     """Ensure an enterprise application (service principal) exists for ``app_id``.
 

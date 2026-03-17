@@ -5771,6 +5771,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         access_token=encrypt_secret(access_token) if access_token else None,
         token_expires_at=expires_at.replace(tzinfo=None) if expires_at else None,
     )
+    # Best-effort: grant any newly-required app role assignments (e.g. the
+    # permissions added for mailbox sync) using the admin's delegated token.
+    # This ensures existing deployments pick up new permissions automatically
+    # when an administrator re-runs "Authorize portal access".
+    if access_token:
+        await m365_service.try_grant_missing_permissions(
+            company_id=company_id,
+            access_token=access_token,
+        )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
