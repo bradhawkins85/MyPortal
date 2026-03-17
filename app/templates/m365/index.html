@@ -93,46 +93,48 @@
 
   {% if is_super_admin %}
   <section class="panel">
-    <header class="panel__header">
-      <h3 class="panel__title">Manage credentials</h3>
-    </header>
-    <div class="panel__body">
-      <form method="post" action="/m365/credentials" class="form-grid">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+    <details>
+      <summary class="panel__header" style="cursor: pointer; list-style: none; display: flex; align-items: center;">
+        <h3 class="panel__title">Manage credentials</h3>
+      </summary>
+      <div class="panel__body">
+        <form method="post" action="/m365/credentials" class="form-grid">
+          {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+          {% endif %}
+          <label class="form-field">
+            <span class="form-label">Tenant ID</span>
+            <input type="text" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Client ID</span>
+            <input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required />
+          </label>
+          <label class="form-field">
+            <span class="form-label">Client secret</span>
+            <input type="password" name="clientSecret" class="input" placeholder="Enter a new client secret" {% if not credential %}required{% endif %} />
+            <span class="form-help">Secrets are encrypted at rest; re-enter to rotate.</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="button">Save credentials</button>
+          </div>
+        </form>
+        {% if credential %}
+        <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
+          {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+          {% endif %}
+          <button type="submit" class="button button--ghost">Test connectivity</button>
+        </form>
+        <form method="post" action="/m365/credentials/delete" class="form-inline">
+          {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+          {% endif %}
+          <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
+        </form>
         {% endif %}
-        <label class="form-field">
-          <span class="form-label">Tenant ID</span>
-          <input type="text" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
-        </label>
-        <label class="form-field">
-          <span class="form-label">Client ID</span>
-          <input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required />
-        </label>
-        <label class="form-field">
-          <span class="form-label">Client secret</span>
-          <input type="password" name="clientSecret" class="input" placeholder="Enter a new client secret" {% if not credential %}required{% endif %} />
-          <span class="form-help">Secrets are encrypted at rest; re-enter to rotate.</span>
-        </label>
-        <div class="form-actions">
-          <button type="submit" class="button">Save credentials</button>
-        </div>
-      </form>
-      {% if credential %}
-      <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <button type="submit" class="button button--ghost">Test connectivity</button>
-      </form>
-      <form method="post" action="/m365/credentials/delete" class="form-inline">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
-      </form>
-      {% endif %}
-    </div>
+      </div>
+    </details>
   </section>
   {% endif %}
 
