@@ -1796,14 +1796,11 @@ async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
 async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]:
     """Return mailbox usage entries from Microsoft Graph Reports API.
 
-    Prefers the JSON projection supported by ``$format=application/json``.
-    Some tenants intermittently reject that query option with HTTP 400, so we
-    gracefully fall back to Graph's default CSV export and parse it locally.
+    Always uses the CSV export of ``getMailboxUsageDetail`` because the JSON
+    projection (``$format=application/json``) omits the
+    ``archiveMailboxStorageUsedInBytes`` field — archive mailbox size is only
+    present in the CSV download.
     """
-    json_report_url = (
-        "https://graph.microsoft.com/v1.0/reports/"
-        "getMailboxUsageDetail(period='D7')?$format=application/json"
-    )
     def _normalise_report_item(item: dict[str, Any]) -> dict[str, Any] | None:
         def _normalise_key(key: str) -> str:
             return " ".join(str(key or "").replace("\ufeff", "").strip().lower().split())
@@ -1855,20 +1852,6 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             "archiveMailboxStorageUsedInBytes": archive_bytes,
             "isDeleted": is_deleted_raw in {"true", "1", "yes"},
         }
-
-    try:
-        rows = await _graph_get_all(access_token, json_report_url)
-        normalised_rows = [
-            normalised for row in rows if (normalised := _normalise_report_item(row)) is not None
-        ]
-        return normalised_rows
-    except M365Error as exc:
-        if exc.http_status != 400:
-            raise
-        log_info(
-            "Mailbox usage JSON report rejected; falling back to CSV export",
-            status=exc.http_status,
-        )
 
     csv_report_url = (
         "https://graph.microsoft.com/v1.0/reports/"
