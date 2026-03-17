@@ -111,7 +111,7 @@ async def test_sync_mailboxes_classifies_user_vs_shared():
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
@@ -138,7 +138,7 @@ async def test_sync_mailboxes_stores_forwarding_rule_count():
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=3)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
@@ -162,7 +162,7 @@ async def test_sync_mailboxes_archive_populated_when_present():
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
@@ -187,7 +187,7 @@ async def test_sync_mailboxes_archive_none_when_absent():
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
@@ -215,7 +215,7 @@ async def test_sync_mailboxes_skips_deleted_entries():
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
@@ -250,3 +250,60 @@ async def test_get_shared_mailboxes_delegates_to_repo():
         result = await m365_service.get_shared_mailboxes(42)
     mock_get.assert_called_once_with(42, "SharedMailbox")
     assert result == fake_rows
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_falls_back_to_csv_on_400():
+    """When JSON format is rejected with 400, mailbox report falls back to CSV export."""
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+            self.status_code = status_code
+            self.text = text
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            csv_text = (
+                "Report Refresh Date,User Principal Name,Display Name,Is Deleted,Storage Used (Byte),"
+                "Archive Mailbox Storage Used (Byte)\n"
+                "2024-01-01,user@example.com,Alice,false,123,45\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with (
+        patch.object(
+            m365_service,
+            "_graph_get_all",
+            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
+        ),
+        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
+    ):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert len(rows) == 1
+    assert rows[0]["userPrincipalName"] == "user@example.com"
+    assert rows[0]["storageUsedInBytes"] == 123
+    assert rows[0]["archiveMailboxStorageUsedInBytes"] == 45
+    assert rows[0]["isDeleted"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_uses_json_when_available():
+    """JSON mailbox report is returned directly when Graph accepts $format=application/json."""
+    report = [{"userPrincipalName": "user@example.com", "storageUsedInBytes": 5}]
+    with patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+    assert rows == report
