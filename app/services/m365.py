@@ -99,7 +99,17 @@ def get_pkce_client_id() -> str:
 
 
 class M365Error(RuntimeError):
-    """Raised when Microsoft 365 operations fail."""
+    """Raised when Microsoft 365 operations fail.
+
+    :param http_status: The HTTP status code from the Microsoft Graph API
+        response that triggered this error, if applicable.  ``None`` for errors
+        not associated with a specific HTTP response.
+    """
+
+    def __init__(self, message: str, *, http_status: int | None = None) -> None:
+        super().__init__(message)
+        self.http_status: int | None = http_status
+
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -356,7 +366,10 @@ async def _graph_get(
         response = await client.get(url, headers=req_headers)
     if response.status_code != 200:
         log_error("Microsoft Graph request failed", url=url, status=response.status_code, body=response.text)
-        raise M365Error(f"Microsoft Graph request failed ({response.status_code})")
+        raise M365Error(
+            f"Microsoft Graph request failed ({response.status_code})",
+            http_status=response.status_code,
+        )
     return response.json()
 
 
@@ -392,7 +405,10 @@ async def _graph_post(
             status=response.status_code,
             body=response.text,
         )
-        raise M365Error(f"Microsoft Graph POST failed ({response.status_code})")
+        raise M365Error(
+            f"Microsoft Graph POST failed ({response.status_code})",
+            http_status=response.status_code,
+        )
     if response.status_code == 204:
         return {}
     return response.json()
@@ -474,17 +490,30 @@ async def provision_app_registration(
         )
     graph_sp_id: str = graph_sp_list[0]["id"]
 
-    # 4. Grant admin consent for each required application permission
+    # 4. Grant admin consent for each required application permission.
+    # 409 Conflict means the assignment already exists (e.g. an earlier partial
+    # provision or Microsoft Graph eventual-consistency behaviour) – treat it as
+    # success and continue so that the remaining roles are still processed.
     for role_id in _PROVISION_APP_ROLES:
-        await _graph_post(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-            {
-                "principalId": sp_object_id,
-                "resourceId": graph_sp_id,
-                "appRoleId": role_id,
-            },
-        )
+        try:
+            await _graph_post(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                {
+                    "principalId": sp_object_id,
+                    "resourceId": graph_sp_id,
+                    "appRoleId": role_id,
+                },
+            )
+        except M365Error as exc:
+            if exc.http_status == 409:
+                log_info(
+                    "App role assignment already exists, skipping",
+                    role_id=role_id,
+                    sp_object_id=sp_object_id,
+                )
+            else:
+                raise
     log_info(
         "Granted admin consent for provisioned M365 app",
         sp_object_id=sp_object_id,
@@ -1460,7 +1489,7 @@ async def verify_tenant_permissions(
 async def try_grant_missing_permissions(
     company_id: int,
     access_token: str,
-) -> None:
+) -> bool:
     """Best-effort: grant any missing ``_PROVISION_APP_ROLES`` to the company's
     enterprise app service principal using the provided *access_token*.
 
@@ -1470,16 +1499,18 @@ async def try_grant_missing_permissions(
     ``Reports.Read.All`` and ``MailboxSettings.Read`` for mailbox sync) are
     automatically added to the app's ``appRoleAssignments``.
 
-    Failures are logged but never raised – the connect flow must not be
-    interrupted by a permission-grant error.
+    Returns ``True`` if one or more previously-missing permissions were
+    successfully granted, ``False`` otherwise (no grants needed, or all
+    attempts failed).  Failures are logged but never raised – the connect flow
+    must not be interrupted by a permission-grant error.
     """
     creds = await get_credentials(company_id)
     if not creds:
-        return
+        return False
 
     client_id = str(creds.get("client_id") or "").strip()
     if not client_id:
-        return
+        return False
 
     try:
         # Find the service principal for the company's app
@@ -1495,7 +1526,7 @@ async def try_grant_missing_permissions(
                 company_id=company_id,
                 client_id=client_id,
             )
-            return
+            return False
         sp_object_id: str = sp_list[0]["id"]
 
         # Retrieve current appRoleAssignments
@@ -1511,7 +1542,7 @@ async def try_grant_missing_permissions(
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
         missing: list[str] = sorted(required_roles - assigned_roles)
         if not missing:
-            return
+            return False
 
         # Locate the Microsoft Graph service principal in this tenant
         graph_sp_response = await _graph_get(
@@ -1525,7 +1556,7 @@ async def try_grant_missing_permissions(
                 "try_grant_missing_permissions: Graph SP not found",
                 company_id=company_id,
             )
-            return
+            return False
         graph_sp_id: str = graph_sp_list[0]["id"]
 
         # Grant each missing role assignment
@@ -1556,12 +1587,15 @@ async def try_grant_missing_permissions(
                 company_id=company_id,
                 granted_roles=granted,
             )
+            return True
+        return False
     except Exception as exc:  # noqa: BLE001
         log_error(
             "try_grant_missing_permissions: unexpected error",
             company_id=company_id,
             error=str(exc),
         )
+        return False
 
 
 async def ensure_service_principal_for_app(access_token: str, app_id: str) -> dict[str, Any]:
@@ -1699,11 +1733,12 @@ async def sync_mailboxes(company_id: int) -> int:
     try:
         report_items = await _graph_get_all(access_token, report_url)
     except M365Error as exc:
-        if "(403)" in str(exc):
+        if exc.http_status == 403:
             raise M365Error(
                 "Mailbox sync failed (403 Forbidden). The enterprise app is missing the "
                 "Reports.Read.All permission. Re-provision the enterprise app to grant "
-                "the required permissions, then retry the sync."
+                "the required permissions. If you have just re-provisioned, please wait "
+                "a few minutes for the permissions to take effect, then retry the sync."
             ) from exc
         raise
 
