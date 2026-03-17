@@ -723,8 +723,78 @@
     }
   }
 
+
+  function setupPullToRefresh() {
+    const banner = document.querySelector('[data-pull-refresh-banner]');
+    if (!banner || !('ontouchstart' in window)) {
+      return;
+    }
+
+    const PULL_THRESHOLD_PX = 72;
+    let touchStartY = null;
+    let shouldRefresh = false;
+    let refreshing = false;
+
+    function atTop() {
+      const root = document.scrollingElement || document.documentElement;
+      return (root ? root.scrollTop : window.scrollY) <= 0;
+    }
+
+    function showRefreshingBanner() {
+      banner.hidden = false;
+      banner.setAttribute('aria-hidden', 'false');
+    }
+
+    document.addEventListener(
+      'touchstart',
+      (event) => {
+        if (refreshing || !event.touches || event.touches.length !== 1 || !atTop()) {
+          touchStartY = null;
+          shouldRefresh = false;
+          return;
+        }
+
+        touchStartY = event.touches[0].clientY;
+        shouldRefresh = false;
+      },
+      { passive: true },
+    );
+
+    document.addEventListener(
+      'touchmove',
+      (event) => {
+        if (refreshing || touchStartY === null || !event.touches || event.touches.length !== 1) {
+          return;
+        }
+
+        const pullDistance = event.touches[0].clientY - touchStartY;
+        shouldRefresh = atTop() && pullDistance >= PULL_THRESHOLD_PX;
+      },
+      { passive: true },
+    );
+
+    document.addEventListener(
+      'touchend',
+      () => {
+        if (refreshing || !shouldRefresh) {
+          touchStartY = null;
+          shouldRefresh = false;
+          return;
+        }
+
+        refreshing = true;
+        showRefreshingBanner();
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 150);
+      },
+      { passive: true },
+    );
+  }
+
   function initialise() {
     setupAutoRefresh();
+    setupPullToRefresh();
     setupForceRefresh();
     setupUpdateBanner();
     setupHeaderMenus();
