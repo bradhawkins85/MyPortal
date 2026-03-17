@@ -145,6 +145,7 @@ async def update_license(
 
 
 async def delete_license(license_id: int) -> None:
+    await db.execute("DELETE FROM staff_licenses WHERE license_id = %s", (license_id,))
     await db.execute("DELETE FROM licenses WHERE id = %s", (license_id,))
 
 
