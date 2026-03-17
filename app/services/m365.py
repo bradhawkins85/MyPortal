@@ -256,7 +256,7 @@ async def _exchange_token(
     return access_token, str(new_refresh) if new_refresh else None, expires_at
 
 
-async def acquire_access_token(company_id: int) -> str:
+async def acquire_access_token(company_id: int, *, force_client_credentials: bool = False) -> str:
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
@@ -268,9 +268,13 @@ async def acquire_access_token(company_id: int) -> str:
     # This avoids an unnecessary round-trip to Microsoft's token endpoint on
     # every call (e.g. after an app restart) and prevents transient failures
     # from breaking sync jobs when a perfectly valid token is already cached.
+    #
+    # For flows that explicitly require application permissions (for example
+    # mailbox reporting APIs), callers can set ``force_client_credentials=True``
+    # to bypass the cached delegated token and force an app-only token refresh.
     stored_token = creds.get("access_token")
     stored_expires_at = creds.get("token_expires_at")
-    if stored_token and stored_expires_at:
+    if not force_client_credentials and stored_token and stored_expires_at:
         # token_expires_at is stored as a naive UTC datetime; compare likewise.
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         margin = timedelta(minutes=5)
@@ -301,7 +305,7 @@ async def acquire_access_token(company_id: int) -> str:
         csp_mapping_applied=csp_mapping_applied,
     )
 
-    stored_refresh = creds.get("refresh_token")
+    stored_refresh = None if force_client_credentials else creds.get("refresh_token")
     grant_type = "refresh_token" if stored_refresh else "client_credentials"
     try:
         access_token, refresh, expires_at = await _exchange_token(
@@ -1160,7 +1164,7 @@ async def _sync_staff_assignments(
 
 async def sync_company_licenses(company_id: int) -> None:
     log_info("M365 starting license synchronisation", company_id=company_id)
-    access_token = await acquire_access_token(company_id)
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
     payload = await _graph_get(access_token, "https://graph.microsoft.com/v1.0/subscribedSkus")
     synced_skus: set[str] = set()
     for sku in payload.get("value", []):
@@ -1721,7 +1725,7 @@ async def sync_mailboxes(company_id: int) -> int:
 
     :returns: The total number of mailboxes synced.
     """
-    access_token = await acquire_access_token(company_id)
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
 
     # Fetch mailbox usage report (sizes for all mailboxes, including shared).
     # The $format=application/json parameter returns the data as a JSON

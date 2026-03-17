@@ -317,10 +317,11 @@ class SchedulerService:
                         await m365_service.sync_company_licenses(company_id_int)
                         staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
                         mailboxes_synced = 0
+                        mailbox_sync_error: str | None = None
                         try:
                             mailboxes_synced = await m365_service.sync_mailboxes(company_id_int)
-                        except Exception:
-                            pass
+                        except Exception as exc:  # noqa: BLE001
+                            mailbox_sync_error = str(exc)
                         details = json.dumps(
                             {
                                 "company_id": company_id_int,
@@ -333,6 +334,7 @@ class SchedulerService:
                                     "total": staff_summary.total,
                                 },
                                 "mailboxes_synced": mailboxes_synced,
+                                "mailbox_sync_error": mailbox_sync_error,
                             },
                             default=str,
                         )
