@@ -27,7 +27,7 @@ async def test_sync_mailboxes_403_raises_actionable_error():
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(
             m365_service,
-            "_graph_get_all",
+            "_fetch_mailbox_usage_report",
             AsyncMock(side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403)),
         ),
     ):
@@ -52,7 +52,7 @@ async def test_sync_mailboxes_non_403_error_propagates_unchanged():
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(
             m365_service,
-            "_graph_get_all",
+            "_fetch_mailbox_usage_report",
             AsyncMock(side_effect=M365Error(original_message)),
         ),
     ):

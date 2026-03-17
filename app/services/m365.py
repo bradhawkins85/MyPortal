@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
+import io
 import json
 import secrets
 from datetime import date, datetime, timedelta, timezone
@@ -1703,6 +1705,89 @@ async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
     return count
 
 
+async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]:
+    """Return mailbox usage entries from Microsoft Graph Reports API.
+
+    Prefers the JSON projection supported by ``$format=application/json``.
+    Some tenants intermittently reject that query option with HTTP 400, so we
+    gracefully fall back to Graph's default CSV export and parse it locally.
+    """
+    json_report_url = (
+        "https://graph.microsoft.com/v1.0/reports/"
+        "getMailboxUsageDetail(period='D7')?$format=application/json"
+    )
+    try:
+        return await _graph_get_all(access_token, json_report_url)
+    except M365Error as exc:
+        if exc.http_status != 400:
+            raise
+        log_info(
+            "Mailbox usage JSON report rejected; falling back to CSV export",
+            status=exc.http_status,
+        )
+
+    csv_report_url = (
+        "https://graph.microsoft.com/v1.0/reports/"
+        "getMailboxUsageDetail(period='D7')"
+    )
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        # Reports endpoints normally return a temporary CSV download URL via
+        # redirect. Handle the redirect manually so we can log and parse
+        # deterministically.
+        "Accept": "text/csv",
+    }
+    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        response = await client.get(csv_report_url, headers=headers)
+        if response.status_code not in (302, 303, 307, 308):
+            log_error(
+                "Mailbox usage CSV export request failed",
+                url=csv_report_url,
+                status=response.status_code,
+                body=response.text,
+            )
+            raise M365Error(
+                f"Microsoft Graph request failed ({response.status_code})",
+                http_status=response.status_code,
+            )
+
+        download_url = str(response.headers.get("Location") or "").strip()
+        if not download_url:
+            raise M365Error("Mailbox usage CSV export missing download URL")
+
+        csv_response = await client.get(download_url)
+        if csv_response.status_code != 200:
+            log_error(
+                "Mailbox usage CSV download failed",
+                status=csv_response.status_code,
+                body=csv_response.text,
+            )
+            raise M365Error(
+                f"Microsoft Graph request failed ({csv_response.status_code})",
+                http_status=csv_response.status_code,
+            )
+
+    parsed_rows: list[dict[str, Any]] = []
+    reader = csv.DictReader(io.StringIO(csv_response.text))
+    for row in reader:
+        upn = str(row.get("User Principal Name") or "").strip()
+        if not upn:
+            continue
+        storage_raw = str(row.get("Storage Used (Byte)") or "0").replace(",", "").strip()
+        archive_raw = str(row.get("Archive Mailbox Storage Used (Byte)") or "").replace(",", "").strip()
+        is_deleted_raw = str(row.get("Is Deleted") or "false").strip().lower()
+        parsed_rows.append(
+            {
+                "userPrincipalName": upn,
+                "displayName": str(row.get("Display Name") or upn).strip(),
+                "storageUsedInBytes": int(storage_raw) if storage_raw else 0,
+                "archiveMailboxStorageUsedInBytes": int(archive_raw) if archive_raw else 0,
+                "isDeleted": is_deleted_raw in {"true", "1", "yes"},
+            }
+        )
+    return parsed_rows
+
+
 async def sync_mailboxes(company_id: int) -> int:
     """Sync mailbox data for all users and shared mailboxes in the tenant.
 
@@ -1727,16 +1812,8 @@ async def sync_mailboxes(company_id: int) -> int:
     """
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
 
-    # Fetch mailbox usage report (sizes for all mailboxes, including shared).
-    # The $format=application/json parameter returns the data as a JSON
-    # collection instead of a CSV redirect.  The period value 'D7' is the
-    # minimum supported by the reporting endpoint.
-    report_url = (
-        "https://graph.microsoft.com/v1.0/reports/"
-        "getMailboxUsageDetail(period='D7')?$format=application/json"
-    )
     try:
-        report_items = await _graph_get_all(access_token, report_url)
+        report_items = await _fetch_mailbox_usage_report(access_token)
     except M365Error as exc:
         if exc.http_status == 403:
             raise M365Error(
