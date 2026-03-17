@@ -427,6 +427,79 @@ async def _graph_post(
     return response.json()
 
 
+async def _graph_delete(access_token: str, url: str) -> None:
+    """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.delete(url, headers=headers)
+    if response.status_code not in (200, 204):
+        log_error(
+            "Microsoft Graph DELETE failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        raise M365Error(
+            f"Microsoft Graph DELETE failed ({response.status_code})",
+            http_status=response.status_code,
+        )
+
+
+async def _delete_existing_apps_by_display_name(
+    access_token: str,
+    display_name: str,
+) -> None:
+    """Delete all app registrations whose ``displayName`` matches *display_name*.
+
+    Searching by display name covers the case where a previous provision run
+    left behind an orphaned app registration (e.g. if the stored
+    ``app_object_id`` is stale or was never recorded).  Deletion of the app
+    registration also removes the corresponding service principal in the same
+    tenant.
+
+    Errors are logged but never re-raised so that the caller (the provision
+    flow) can continue to create a fresh registration even when cleanup fails.
+    """
+    safe_name = display_name.replace("'", "''")
+    try:
+        existing = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications"
+            f"?$filter=displayName eq '{safe_name}'&$select=id,appId,displayName",
+        )
+    except M365Error as exc:
+        log_error(
+            "Failed to search for existing app registrations; skipping cleanup",
+            display_name=display_name,
+            error=str(exc),
+        )
+        return
+
+    for app in existing.get("value", []):
+        obj_id = app.get("id", "")
+        app_id = app.get("appId", "")
+        if not obj_id:
+            continue
+        try:
+            await _graph_delete(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/applications/{obj_id}",
+            )
+            log_info(
+                "Deleted existing app registration before re-provisioning",
+                app_object_id=obj_id,
+                app_id=app_id,
+                display_name=display_name,
+            )
+        except M365Error as exc:
+            log_error(
+                "Failed to delete existing app registration; continuing with provisioning",
+                app_object_id=obj_id,
+                app_id=app_id,
+                error=str(exc),
+            )
+
+
 async def provision_app_registration(
     *,
     access_token: str,
@@ -455,6 +528,10 @@ async def provision_app_registration(
     """
     settings = get_settings()
     secret_lifetime_days = settings.m365_client_secret_lifetime_days
+
+    # 0. Remove any existing app registrations with the same display name so
+    #    that re-provisioning always starts from a clean slate.
+    await _delete_existing_apps_by_display_name(access_token, display_name)
 
     # 1. Create the app registration
     app_payload: dict[str, Any] = {
@@ -805,6 +882,10 @@ async def provision_csp_admin_app_registration(
     """
     settings = get_settings()
     secret_lifetime_days = settings.m365_client_secret_lifetime_days
+
+    # 0. Remove any existing app registrations with the same display name so
+    #    that re-provisioning always starts from a clean slate.
+    await _delete_existing_apps_by_display_name(access_token, display_name)
 
     # 1. Create the app registration with required permissions
     app_payload: dict[str, Any] = {
