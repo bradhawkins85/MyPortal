@@ -1309,6 +1309,21 @@ button.header-title-menu__link {
   overflow-x: hidden;
 }
 
+.pull-refresh-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 0 var(--space-gap-tight);
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(14, 116, 144, 0.9);
+  color: #f0f9ff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 8px 20px -16px rgba(12, 74, 110, 0.8);
+}
+
 .update-banner {
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 0.9rem;
