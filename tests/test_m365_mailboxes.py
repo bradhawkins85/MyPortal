@@ -235,7 +235,7 @@ async def test_sync_mailboxes_skips_deleted_entries():
 @pytest.mark.anyio("asyncio")
 async def test_get_user_mailboxes_delegates_to_repo():
     """get_user_mailboxes calls m365_repo.get_mailboxes with 'UserMailbox'."""
-    fake_rows = [{"user_principal_name": "u@x.com", "mailbox_type": "UserMailbox"}]
+    fake_rows = [{"user_principal_name": "u@x.com", "mailbox_type": "UserMailbox", "display_name": "Alice"}]
     with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)) as mock_get:
         result = await m365_service.get_user_mailboxes(42)
     mock_get.assert_called_once_with(42, "UserMailbox")
@@ -245,11 +245,54 @@ async def test_get_user_mailboxes_delegates_to_repo():
 @pytest.mark.anyio("asyncio")
 async def test_get_shared_mailboxes_delegates_to_repo():
     """get_shared_mailboxes calls m365_repo.get_mailboxes with 'SharedMailbox'."""
-    fake_rows = [{"user_principal_name": "shared@x.com", "mailbox_type": "SharedMailbox"}]
+    fake_rows = [{"user_principal_name": "shared@x.com", "mailbox_type": "SharedMailbox", "display_name": "Shared Box"}]
     with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)) as mock_get:
         result = await m365_service.get_shared_mailboxes(42)
     mock_get.assert_called_once_with(42, "SharedMailbox")
     assert result == fake_rows
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_user_mailboxes_filters_package_mailboxes():
+    """get_user_mailboxes excludes mailboxes whose display_name matches the package_ UUID pattern."""
+    fake_rows = [
+        {"user_principal_name": "u@x.com", "display_name": "Alice"},
+        {"user_principal_name": "p@x.com", "display_name": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},
+        {"user_principal_name": "p2@x.com", "display_name": "package_61fd5e57-4ae4-431b-9f34-16dfeed01fbb"},
+    ]
+    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)):
+        result = await m365_service.get_user_mailboxes(42)
+    assert len(result) == 1
+    assert result[0]["display_name"] == "Alice"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_shared_mailboxes_filters_package_mailboxes():
+    """get_shared_mailboxes excludes mailboxes whose display_name matches the package_ UUID pattern."""
+    fake_rows = [
+        {"user_principal_name": "shared@x.com", "display_name": "Shared Box"},
+        {"user_principal_name": "pkg@x.com", "display_name": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},
+    ]
+    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)):
+        result = await m365_service.get_shared_mailboxes(42)
+    assert len(result) == 1
+    assert result[0]["display_name"] == "Shared Box"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_user_mailboxes_keeps_non_package_similar_names():
+    """Mailboxes with names that look similar but don't match the pattern are kept."""
+    fake_rows = [
+        {"user_principal_name": "a@x.com", "display_name": "package_not-a-uuid"},
+        {"user_principal_name": "b@x.com", "display_name": "Package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},  # case-insensitive match → filtered
+        {"user_principal_name": "c@x.com", "display_name": "my_package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},  # prefix doesn't match
+    ]
+    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)):
+        result = await m365_service.get_user_mailboxes(42)
+    upns = {r["user_principal_name"] for r in result}
+    assert "b@x.com" not in upns  # filtered (case-insensitive)
+    assert "a@x.com" in upns  # not a valid UUID
+    assert "c@x.com" in upns  # not a package_ prefix
 
 
 @pytest.mark.anyio("asyncio")
