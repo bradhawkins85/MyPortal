@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}User Mailboxes – Office 365{% endblock %}
+
+{% block header_actions %}
+  {% if has_credentials %}
+  <form method="post" action="/m365/mailboxes/sync" style="display:inline">
+    {% if csrf_token %}
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+    {% endif %}
+    <input type="hidden" name="redirectTo" value="users" />
+    <button type="submit" class="button">Sync mailboxes</button>
+  </form>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if success %}
+  <div class="alert alert--success" role="status">
+    {{ success }}
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">User Mailboxes</h2>
+        <p class="panel__subtitle">
+          Primary and archive mailbox sizes, and the number of forwarding rules configured in Outlook
+          for each licensed staff member.
+          {% if synced_at %}
+          Last synced {{ synced_at.strftime('%d %b %Y %H:%M') }} UTC.
+          {% endif %}
+        </p>
+      </div>
+    </header>
+    <div class="panel__body" {% if mailboxes %}style="padding:0"{% endif %}>
+      {% if not has_credentials %}
+      <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before syncing mailboxes.</p>
+      {% elif not mailboxes %}
+      <p class="text-muted">No mailbox data found. Click <strong>Sync mailboxes</strong> to fetch the latest data from Microsoft 365.</p>
+      {% else %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Display Name</th>
+            <th>User Principal Name</th>
+            <th style="text-align:right">Mailbox Size</th>
+            <th style="text-align:right">Archive Size</th>
+            <th style="text-align:right">Forwarding Rules</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mb in mailboxes %}
+          <tr>
+            <td>{{ mb.display_name or mb.user_principal_name }}</td>
+            <td><small class="text-muted">{{ mb.user_principal_name }}</small></td>
+            <td style="text-align:right;white-space:nowrap">{{ mb.storage_used_bytes | filesizeformat }}</td>
+            <td style="text-align:right;white-space:nowrap">
+              {% if mb.has_archive %}
+                {{ (mb.archive_storage_used_bytes or 0) | filesizeformat }}
+              {% else %}
+                <span class="text-muted">–</span>
+              {% endif %}
+            </td>
+            <td style="text-align:right">
+              {% if mb.forwarding_rule_count > 0 %}
+              <span class="badge badge--warning" title="{{ mb.forwarding_rule_count }} forwarding rule{% if mb.forwarding_rule_count != 1 %}s{% endif %}">{{ mb.forwarding_rule_count }}</span>
+              {% else %}
+              <span class="text-muted">0</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}
