@@ -260,6 +260,7 @@ async def create_staff(
     manager_name: str | None = None,
     account_action: str | None = None,
     syncro_contact_id: str | None = None,
+    source: str = "manual",
 ) -> dict[str, Any]:
     staff_id = await db.execute_returning_lastrowid(
         """
@@ -282,8 +283,9 @@ async def create_staff(
             org_company,
             manager_name,
             account_action,
-            syncro_contact_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            syncro_contact_id,
+            source
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -305,6 +307,7 @@ async def create_staff(
             manager_name,
             account_action,
             syncro_contact_id,
+            source,
         ),
     )
     if not staff_id:
@@ -394,6 +397,25 @@ async def update_staff(
 
 async def delete_staff(staff_id: int) -> None:
     await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
+
+
+async def delete_m365_staff_not_in(company_id: int, keep_emails: set[str]) -> int:
+    """Delete M365-sourced staff for the company whose emails are not in *keep_emails*.
+
+    Returns the number of records deleted.
+    """
+    rows = await db.fetch_all(
+        "SELECT id, email FROM staff WHERE company_id = %s AND source = 'm365'",
+        (company_id,),
+    )
+    to_delete = [
+        int(row["id"])
+        for row in rows
+        if (row.get("email") or "").lower() not in keep_emails
+    ]
+    for staff_id in to_delete:
+        await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
+    return len(to_delete)
 
 
 async def set_enabled(staff_id: int, enabled: bool) -> None:
