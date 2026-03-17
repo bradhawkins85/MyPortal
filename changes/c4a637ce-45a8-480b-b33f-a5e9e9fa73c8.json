@@ -1,0 +1,7 @@
+{
+  "guid": "c4a637ce-45a8-480b-b33f-a5e9e9fa73c8",
+  "occurred_at": "2026-03-17T11:56:24Z",
+  "change_type": "Fix",
+  "summary": "Fix M365 mailbox usage report normalization so user mailbox sizes no longer display as 0 Bytes when Graph returns non-canonical keys.",
+  "content_hash": "1c9960317a26335c4dbb53a3ad5cc92a08b0699a38cebab094d02061eeeea645"
+}
