@@ -1589,7 +1589,16 @@ async def sync_mailboxes(company_id: int) -> int:
         "https://graph.microsoft.com/v1.0/reports/"
         "getMailboxUsageDetail(period='D7')?$format=application/json"
     )
-    report_items = await _graph_get_all(access_token, report_url)
+    try:
+        report_items = await _graph_get_all(access_token, report_url)
+    except M365Error as exc:
+        if "(403)" in str(exc):
+            raise M365Error(
+                "Mailbox sync failed (403 Forbidden). The enterprise app is missing the "
+                "Reports.Read.All permission. Re-provision the enterprise app to grant "
+                "the required permissions, then retry the sync."
+            ) from exc
+        raise
 
     # Build a lookup: lower-case UPN -> report entry (skip deleted mailboxes).
     report_by_upn: dict[str, dict[str, Any]] = {}

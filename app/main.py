@@ -4736,6 +4736,29 @@ async def sync_m365_mailboxes(request: Request, redirect_to: str = Form("users",
         )
 
 
+@app.post("/m365/permissions/verify")
+async def verify_m365_permissions(request: Request):
+    """Check (and optionally auto-grant) missing Graph API permissions for this company.
+
+    Returns a JSON object with:
+    - ``all_ok``  – True if all required permissions are present
+    - ``missing`` – list of role IDs that are not yet granted
+    - ``present`` – list of role IDs that are currently granted
+    - ``updated`` – True if missing permissions were successfully auto-granted
+    - ``error``   – human-readable message when the check or update failed
+    """
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        result = await m365_service.verify_tenant_permissions(company_id)
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JSONResponse(result)
+
+
 @app.post("/m365/credentials", response_class=RedirectResponse)
 async def save_m365_credentials(
     request: Request,
