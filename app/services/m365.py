@@ -41,6 +41,9 @@ _PROVISION_APP_ROLES: list[str] = [
     "dc377aa6-52d8-4e23-b271-2a7ae04cedf3",  # DeviceManagementConfiguration.Read.All
     "2f51be20-0bb4-4fed-bf7b-db946066c75e",  # DeviceManagementManagedDevices.Read.All
     "b0afded3-3588-46d8-8b3d-9842eff778da",  # AuditLog.Read.All
+    # Additional permissions for mailbox reporting:
+    "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
+    "3b55498e-47ec-484f-8136-9013221c06a9",  # MailboxSettings.Read
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
@@ -1524,3 +1527,157 @@ async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
     customers.sort(key=lambda c: c["name"].lower())
     return customers
 
+
+
+async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
+    """Return the number of inbox message rules that forward or redirect mail.
+
+    Queries the ``/mailFolders/inbox/messageRules`` endpoint for the given user
+    and counts rules that have ``forwardTo``, ``redirectTo``, or
+    ``forwardAsAttachmentTo`` actions populated.  Returns 0 if the endpoint is
+    unavailable (e.g. the mailbox does not exist or permissions are missing).
+    """
+    url = (
+        f"https://graph.microsoft.com/v1.0/users/{user_id}"
+        "/mailFolders/inbox/messageRules"
+    )
+    try:
+        rules = await _graph_get_all(access_token, url)
+    except M365Error:
+        return 0
+    count = 0
+    for rule in rules:
+        actions = rule.get("actions") or {}
+        if (
+            actions.get("forwardTo")
+            or actions.get("redirectTo")
+            or actions.get("forwardAsAttachmentTo")
+        ):
+            count += 1
+    return count
+
+
+async def sync_mailboxes(company_id: int) -> int:
+    """Sync mailbox data for all users and shared mailboxes in the tenant.
+
+    Uses the Microsoft Graph Reports API (``getMailboxUsageDetail``) to fetch
+    primary and archive mailbox sizes for every mailbox in the tenant.  Enabled
+    user accounts (from ``get_all_users``) are classified as ``UserMailbox``
+    entries; all other active mailboxes in the report are classified as
+    ``SharedMailbox`` entries (which typically covers shared mailboxes, room
+    mailboxes and equipment mailboxes).
+
+    For each user mailbox, inbox message rules are queried to count forwarding
+    rules set up by the owner.  This requires the ``MailboxSettings.Read``
+    application permission.  Forwarding rule counts default to 0 for shared
+    mailboxes (and for user mailboxes where the rules endpoint is unavailable).
+
+    Requires the ``Reports.Read.All`` and ``MailboxSettings.Read`` application
+    permissions granted to the provisioned enterprise app.  Re-provision the
+    enterprise app to pick up these permissions if they were added after initial
+    provisioning.
+
+    :returns: The total number of mailboxes synced.
+    """
+    access_token = await acquire_access_token(company_id)
+
+    # Fetch mailbox usage report (sizes for all mailboxes, including shared).
+    # The $format=application/json parameter returns the data as a JSON
+    # collection instead of a CSV redirect.  The period value 'D7' is the
+    # minimum supported by the reporting endpoint.
+    report_url = (
+        "https://graph.microsoft.com/v1.0/reports/"
+        "getMailboxUsageDetail(period='D7')?$format=application/json"
+    )
+    report_items = await _graph_get_all(access_token, report_url)
+
+    # Build a lookup: lower-case UPN -> report entry (skip deleted mailboxes).
+    report_by_upn: dict[str, dict[str, Any]] = {}
+    for item in report_items:
+        upn = (item.get("userPrincipalName") or "").lower().strip()
+        if upn and not item.get("isDeleted"):
+            report_by_upn[upn] = item
+
+    # Get all enabled users -> these are the user mailboxes.
+    users = await get_all_users(company_id)
+    user_by_upn: dict[str, dict[str, Any]] = {
+        (u.get("userPrincipalName") or "").lower(): u
+        for u in users
+        if u.get("userPrincipalName")
+    }
+
+    rows_to_upsert: list[dict[str, Any]] = []
+
+    # --- User mailboxes ---
+    for upn_lower, user in user_by_upn.items():
+        report_entry = report_by_upn.get(upn_lower, {})
+        storage_bytes = int(report_entry.get("storageUsedInBytes") or 0)
+        archive_raw = report_entry.get("archiveMailboxStorageUsedInBytes")
+        archive_bytes = int(archive_raw) if archive_raw else 0
+        display_name = (
+            user.get("displayName")
+            or report_entry.get("displayName")
+            or upn_lower
+        )
+
+        fw_count = await _count_forwarding_rules(access_token, user["id"])
+
+        rows_to_upsert.append(
+            {
+                "user_principal_name": upn_lower,
+                "display_name": display_name,
+                "mailbox_type": "UserMailbox",
+                "storage_used_bytes": storage_bytes,
+                "archive_storage_used_bytes": archive_bytes if archive_bytes > 0 else None,
+                "has_archive": archive_bytes > 0,
+                "forwarding_rule_count": fw_count,
+            }
+        )
+
+    # --- Shared / non-user mailboxes ---
+    for upn_lower, entry in report_by_upn.items():
+        if upn_lower in user_by_upn:
+            continue  # already handled above
+        storage_bytes = int(entry.get("storageUsedInBytes") or 0)
+        archive_raw = entry.get("archiveMailboxStorageUsedInBytes")
+        archive_bytes = int(archive_raw) if archive_raw else 0
+        display_name = entry.get("displayName") or upn_lower
+
+        rows_to_upsert.append(
+            {
+                "user_principal_name": upn_lower,
+                "display_name": display_name,
+                "mailbox_type": "SharedMailbox",
+                "storage_used_bytes": storage_bytes,
+                "archive_storage_used_bytes": archive_bytes if archive_bytes > 0 else None,
+                "has_archive": archive_bytes > 0,
+                "forwarding_rule_count": 0,
+            }
+        )
+
+    # Upsert all rows into the database.
+    for row in rows_to_upsert:
+        await m365_repo.upsert_mailbox(company_id=company_id, **row)
+
+    # Remove stale entries (mailboxes that no longer exist in the tenant).
+    current_upns = [r["user_principal_name"] for r in rows_to_upsert]
+    await m365_repo.delete_stale_mailboxes(company_id, current_upns)
+
+    log_info(
+        "M365 mailbox sync complete",
+        company_id=company_id,
+        total=len(rows_to_upsert),
+        user_mailboxes=sum(1 for r in rows_to_upsert if r["mailbox_type"] == "UserMailbox"),
+        shared_mailboxes=sum(1 for r in rows_to_upsert if r["mailbox_type"] == "SharedMailbox"),
+    )
+    return len(rows_to_upsert)
+
+
+async def get_user_mailboxes(company_id: int) -> list[dict[str, Any]]:
+    """Return stored user mailbox rows for the given company."""
+    return await m365_repo.get_mailboxes(company_id, "UserMailbox")
+
+
+async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
+    """Return stored shared mailbox rows for the given company."""
+    return await m365_repo.get_mailboxes(company_id, "SharedMailbox")

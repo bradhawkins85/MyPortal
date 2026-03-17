@@ -264,6 +264,12 @@
                 <li class="menu__subitem">
                   <a href="/m365/benchmarks" {% if current_path.startswith('/m365/benchmarks') %}aria-current="page"{% endif %}>CIS Benchmarks</a>
                 </li>
+                <li class="menu__subitem">
+                  <a href="/m365/mailboxes/users" {% if current_path.startswith('/m365/mailboxes/users') %}aria-current="page"{% endif %}>User Mailboxes</a>
+                </li>
+                <li class="menu__subitem">
+                  <a href="/m365/mailboxes/shared" {% if current_path.startswith('/m365/mailboxes/shared') %}aria-current="page"{% endif %}>Shared Mailboxes</a>
+                </li>
               </ul>
             </li>
           {% endif %}
