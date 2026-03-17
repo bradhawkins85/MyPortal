@@ -70,11 +70,12 @@ async def test_try_grant_missing_permissions_grants_missing_roles():
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
         patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
     ):
-        await m365_service.try_grant_missing_permissions(
+        result = await m365_service.try_grant_missing_permissions(
             company_id=1,
             access_token="admin-token",
         )
 
+    assert result is True, "Should return True when permissions were granted"
     granted_role_ids = {g["appRoleId"] for g in granted}
     assert _MAILBOX_REPORTS_ROLE in granted_role_ids, (
         "Reports.Read.All must be granted when missing"
@@ -105,28 +106,29 @@ async def test_try_grant_missing_permissions_noop_when_all_present():
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
         patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
     ):
-        await m365_service.try_grant_missing_permissions(
+        result = await m365_service.try_grant_missing_permissions(
             company_id=1,
             access_token="admin-token",
         )
 
+    assert result is False, "Should return False when no permissions were missing"
     assert post_calls == [], "No appRoleAssignment POSTs expected when all roles are present"
 
 
 @pytest.mark.anyio("asyncio")
 async def test_try_grant_missing_permissions_noop_when_no_credentials():
-    """Returns without error when no credentials are configured for the company."""
+    """Returns False without error when no credentials are configured for the company."""
     with patch.object(m365_service, "get_credentials", AsyncMock(return_value=None)):
-        # Should not raise
-        await m365_service.try_grant_missing_permissions(
+        result = await m365_service.try_grant_missing_permissions(
             company_id=99,
             access_token="token",
         )
+    assert result is False
 
 
 @pytest.mark.anyio("asyncio")
 async def test_try_grant_missing_permissions_noop_when_sp_not_found():
-    """Returns without error when the service principal is not found."""
+    """Returns False without error when the service principal is not found."""
 
     async def mock_graph_get(token: str, url: str) -> dict:
         return {"value": []}  # empty – SP not found
@@ -135,10 +137,11 @@ async def test_try_grant_missing_permissions_noop_when_sp_not_found():
         patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
     ):
-        await m365_service.try_grant_missing_permissions(
+        result = await m365_service.try_grant_missing_permissions(
             company_id=1,
             access_token="token",
         )
+    assert result is False
 
 
 @pytest.mark.anyio("asyncio")
@@ -172,13 +175,15 @@ async def test_try_grant_missing_permissions_continues_on_partial_failure():
         patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
     ):
         # Should not raise even when one role grant fails
-        await m365_service.try_grant_missing_permissions(
+        result = await m365_service.try_grant_missing_permissions(
             company_id=1,
             access_token="admin-token",
         )
 
     # At least the second role should have been attempted
     assert call_count == 2, "Both missing roles should be attempted even when first fails"
+    # The second role succeeded, so result should be True
+    assert result is True, "Should return True when at least one permission was granted"
 
 
 @pytest.mark.anyio("asyncio")
@@ -193,10 +198,93 @@ async def test_try_grant_missing_permissions_swallows_unexpected_errors():
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
     ):
         # Must not raise
-        await m365_service.try_grant_missing_permissions(
+        result = await m365_service.try_grant_missing_permissions(
             company_id=1,
             access_token="token",
         )
+    assert result is False, "Should return False when an unexpected error occurs"
+
+
+# ---------------------------------------------------------------------------
+# Tests for provision_app_registration – 409 Conflict handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_skips_409_role_assignments():
+    """provision_app_registration must not fail when an appRoleAssignment returns 409."""
+    from app.services.m365 import provision_app_registration, M365Error
+
+    post_calls: list[dict] = []
+    call_count = 0
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        nonlocal call_count
+        call_count += 1
+        post_calls.append({"url": url, "payload": payload})
+        # Simulate 409 Conflict for the first appRoleAssignment
+        if "appRoleAssignments" in url and call_count == 1:
+            raise M365Error("Microsoft Graph POST failed (409)")
+        # All other calls succeed
+        if url.endswith("/addPassword"):
+            return {"secretText": "test-secret", "keyId": "key-id-1"}
+        return {"id": "created-id", "appId": "new-client-id"}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "servicePrincipals" in url and _GRAPH_APP_ID in url:
+            return {"value": [{"id": "graph-sp-id"}]}
+        return {"value": [{"id": "new-sp-id"}]}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        result = await provision_app_registration(
+            access_token="admin-token",
+            display_name="Test App",
+        )
+
+    assert result["client_id"] == "new-client-id"
+    assert result["client_secret"] == "test-secret"
+    # All roles should have been attempted (not stopped at the first 409)
+    role_assignment_calls = [c for c in post_calls if "appRoleAssignments" in c["url"]]
+    assert len(role_assignment_calls) == len(_PROVISION_APP_ROLES), (
+        "All role assignments must be attempted even when the first returns 409"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tests for connect callback – access token cleared when permissions granted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_returns_false_when_all_grants_fail():
+    """Returns False when all permission grants fail (no new permissions added)."""
+    all_roles = list(_PROVISION_APP_ROLES)
+    present_roles = [r for r in all_roles if r not in {_MAILBOX_REPORTS_ROLE, _MAILBOX_SETTINGS_ROLE}]
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return _assignments_response(present_roles)
+        if _GRAPH_APP_ID in url:
+            return {"value": [{"id": "graph-sp-id"}]}
+        return _sp_response()
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        raise M365Error("403 Forbidden – insufficient privileges")
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service.try_grant_missing_permissions(
+            company_id=1,
+            access_token="admin-token",
+        )
+
+    assert result is False, "Should return False when all grants fail"
 
 
 # ---------------------------------------------------------------------------
