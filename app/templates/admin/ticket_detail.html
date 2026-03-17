@@ -330,6 +330,13 @@
                                   aria-label="Remove tag {{ tag }}"
                                   title="Remove this tag"
                                 >×</button>
+                                <button
+                                  type="button"
+                                  class="tag__exclude"
+                                  onclick="excludeAndRemoveTag('{{ tag }}')"
+                                  aria-label="Exclude tag {{ tag }} from future use"
+                                  title="Remove and exclude from future use"
+                                ><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8.27 3 3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3H8.27zm4.5 13h-1.5v-1.5h1.5V16zm0-3h-1.5V8h1.5v5z"/></svg></button>
                               {% endif %}
                             </span>
                           {% endfor %}
@@ -1249,6 +1256,50 @@
       } catch (error) {
         console.error('Error removing tag:', error);
         alert(error.message || 'Failed to remove tag. Please try again.');
+      }
+    }
+
+    async function excludeAndRemoveTag(tagSlug) {
+      const displayName = tagSlug.replace(/-/g, ' ');
+      if (!confirm(`Remove tag "${displayName}" from this ticket and exclude it from future AI tag generation?`)) {
+        return;
+      }
+
+      try {
+        const removeResponse = await fetch(`/api/tag-exclusions/tickets/{{ ticket.id }}/remove-tag`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag_slug: tagSlug }),
+        });
+
+        if (!removeResponse.ok) {
+          const error = await removeResponse.json();
+          throw new Error(error.detail || 'Failed to remove tag from ticket');
+        }
+
+        const excludeResponse = await fetch('/api/tag-exclusions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag_slug: tagSlug }),
+        });
+
+        if (!excludeResponse.ok && excludeResponse.status !== 409) {
+          const error = await excludeResponse.json();
+          throw new Error(error.detail || 'Failed to add tag exclusion');
+        }
+
+        const tagElement = document.querySelector(`[data-tag-slug="${tagSlug}"]`);
+        if (tagElement) {
+          tagElement.remove();
+        }
+
+        const container = document.getElementById('ai-tags-container');
+        if (container && container.children.length === 0) {
+          container.innerHTML = '<span class="card__empty">No AI tags remaining.</span>';
+        }
+      } catch (error) {
+        console.error('Error excluding tag:', error);
+        alert(error.message || 'Failed to exclude tag. Please try again.');
       }
     }
   </script>
