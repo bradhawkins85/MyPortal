@@ -82,6 +82,7 @@ async def test_sync_m365_data_details_includes_mailboxes_synced():
     assert recorded_details, "record_task_run should have been called"
     result = json.loads(recorded_details[-1])
     assert result.get("mailboxes_synced") == 7
+    assert result.get("mailbox_sync_error") is None
 
 
 @pytest.mark.asyncio
@@ -121,3 +122,4 @@ async def test_sync_m365_data_continues_if_sync_mailboxes_fails():
     )
     result = json.loads(recorded_details[-1])
     assert result.get("mailboxes_synced") == 0
+    assert result.get("mailbox_sync_error") == "Graph error"
