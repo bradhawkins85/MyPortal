@@ -232,3 +232,34 @@ async def test_acquire_access_token_raises_when_fallback_also_fails():
     ):
         with pytest.raises(M365Error):
             await m365_service.acquire_access_token(1)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_acquire_access_token_force_client_credentials_bypasses_cache_and_refresh():
+    """force_client_credentials=True must ignore cached/delegated tokens and
+    call the client_credentials grant directly."""
+    creds = {
+        "company_id": 1,
+        "tenant_id": "tenant-abc",
+        "client_id": "client-abc",
+        "client_secret": "secret-abc",
+        "refresh_token": "delegated-refresh-token",
+        "access_token": "cached-delegated-token",
+        "token_expires_at": _utcnow() + timedelta(hours=1),
+    }
+
+    mock_update = AsyncMock()
+    mock_exchange = AsyncMock(return_value=("app-only-token", None, _utcnow() + timedelta(hours=1)))
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)),
+        patch.object(m365_service.companies_repo, "get_company_csp_tenant_id", AsyncMock(return_value=None)),
+        patch.object(m365_service, "_exchange_token", mock_exchange),
+        patch.object(m365_service.m365_repo, "update_tokens", mock_update),
+        patch.object(m365_service, "_encrypt", lambda x: x),
+    ):
+        result = await m365_service.acquire_access_token(1, force_client_credentials=True)
+
+    assert result == "app-only-token"
+    mock_exchange.assert_called_once()
+    _, call_kwargs = mock_exchange.call_args
+    assert call_kwargs.get("refresh_token") is None
