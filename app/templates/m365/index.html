@@ -4,6 +4,8 @@
 
 {% block header_actions %}
   {% if has_credentials %}
+    <a class="button button--ghost" href="/m365/mailboxes/users">User Mailboxes</a>
+    <a class="button button--ghost" href="/m365/mailboxes/shared">Shared Mailboxes</a>
     <a class="button button--ghost" href="/m365/benchmarks">CIS Benchmarks</a>
     <a class="button" href="/m365/connect">Authorize portal access</a>
   {% endif %}
