@@ -438,7 +438,40 @@ async def test_fetch_mailbox_usage_report_uses_json_when_available():
     report = [{"userPrincipalName": "user@example.com", "storageUsedInBytes": 5}]
     with patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
-    assert rows == report
+    assert rows == [
+        {
+            "userPrincipalName": "user@example.com",
+            "displayName": "user@example.com",
+            "storageUsedInBytes": 5,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "isDeleted": False,
+        }
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_normalises_non_canonical_json_keys():
+    """JSON projection rows with CSV-style keys are normalised into expected schema."""
+    report = [
+        {
+            "User Principal Name": "USER@EXAMPLE.COM",
+            "Display Name": "User One",
+            "Storage Used (Byte)": "2048",
+            "Archive Mailbox Storage Used (Byte)": "1024",
+            "Is Deleted": "false",
+        }
+    ]
+    with patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+    assert rows == [
+        {
+            "userPrincipalName": "user@example.com",
+            "displayName": "User One",
+            "storageUsedInBytes": 2048,
+            "archiveMailboxStorageUsedInBytes": 1024,
+            "isDeleted": False,
+        }
+    ]
 
 
 @pytest.mark.anyio("asyncio")

@@ -1804,8 +1804,64 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         "https://graph.microsoft.com/v1.0/reports/"
         "getMailboxUsageDetail(period='D7')?$format=application/json"
     )
+    def _normalise_report_item(item: dict[str, Any]) -> dict[str, Any] | None:
+        def _normalise_key(key: str) -> str:
+            return " ".join(str(key or "").replace("\ufeff", "").strip().lower().split())
+
+        def _parse_int(raw: Any, default: int = 0) -> int:
+            value = str(raw or "").replace(",", "").strip()
+            if not value:
+                return default
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        normalised_item = {_normalise_key(k): v for k, v in item.items()}
+
+        upn = str(
+            item.get("userPrincipalName")
+            or normalised_item.get("user principal name")
+            or ""
+        ).strip().lower()
+        if not upn:
+            return None
+
+        display_name = str(
+            item.get("displayName")
+            or normalised_item.get("display name")
+            or upn
+        ).strip()
+        storage_bytes = _parse_int(
+            item.get("storageUsedInBytes")
+            if "storageUsedInBytes" in item
+            else normalised_item.get("storage used (byte)")
+        )
+        archive_bytes = _parse_int(
+            item.get("archiveMailboxStorageUsedInBytes")
+            if "archiveMailboxStorageUsedInBytes" in item
+            else normalised_item.get("archive mailbox storage used (byte)")
+        )
+        is_deleted_raw = str(
+            item.get("isDeleted")
+            if "isDeleted" in item
+            else normalised_item.get("is deleted")
+            or "false"
+        ).strip().lower()
+        return {
+            "userPrincipalName": upn,
+            "displayName": display_name,
+            "storageUsedInBytes": storage_bytes,
+            "archiveMailboxStorageUsedInBytes": archive_bytes,
+            "isDeleted": is_deleted_raw in {"true", "1", "yes"},
+        }
+
     try:
-        return await _graph_get_all(access_token, json_report_url)
+        rows = await _graph_get_all(access_token, json_report_url)
+        normalised_rows = [
+            normalised for row in rows if (normalised := _normalise_report_item(row)) is not None
+        ]
+        return normalised_rows
     except M365Error as exc:
         if exc.http_status != 400:
             raise
@@ -1855,18 +1911,6 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
                 http_status=csv_response.status_code,
             )
 
-    def _normalise_csv_key(key: str) -> str:
-        return " ".join(str(key or "").replace("\ufeff", "").strip().lower().split())
-
-    def _parse_int(raw: Any, default: int = 0) -> int:
-        value = str(raw or "").replace(",", "").strip()
-        if not value:
-            return default
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
-
     csv_text = csv_response.text
     # Graph report downloads can be UTF-16 encoded without an explicit
     # charset. httpx then decodes as UTF-8 and leaves NUL bytes in-place,
@@ -1883,32 +1927,15 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
     parsed_rows: list[dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(csv_text))
     for row in reader:
-        normalised_row = {
-            _normalise_csv_key(key): value
-            for key, value in row.items()
-            if key is not None
-        }
-        if not normalised_row:
+        filtered_row = {key: value for key, value in row.items() if key is not None}
+        if not filtered_row:
             continue
         # Excel-style CSVs may include a dialect prefix row: "sep=,"
-        if "sep=" in normalised_row and len(normalised_row) == 1:
+        if "sep=" in next(iter(filtered_row)).lower() and len(filtered_row) == 1:
             continue
-        upn = str(normalised_row.get("user principal name") or "").strip().lower()
-        if not upn:
-            continue
-        display_name = str(normalised_row.get("display name") or upn).strip()
-        storage_bytes = _parse_int(normalised_row.get("storage used (byte)"))
-        archive_bytes = _parse_int(normalised_row.get("archive mailbox storage used (byte)"))
-        is_deleted_raw = str(normalised_row.get("is deleted") or "false").strip().lower()
-        parsed_rows.append(
-            {
-                "userPrincipalName": upn,
-                "displayName": display_name,
-                "storageUsedInBytes": storage_bytes,
-                "archiveMailboxStorageUsedInBytes": archive_bytes,
-                "isDeleted": is_deleted_raw in {"true", "1", "yes"},
-            }
-        )
+        normalised_row = _normalise_report_item(filtered_row)
+        if normalised_row is not None:
+            parsed_rows.append(normalised_row)
     return parsed_rows
 
 
