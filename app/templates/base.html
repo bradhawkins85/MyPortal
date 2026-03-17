@@ -359,6 +359,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/scheduled-tasks" {% if current_path.startswith('/admin/scheduled-tasks') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2zm0 2a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 2v6l4 2-1 1.73-5-2.5V6z"/></svg>
+                  </span>
+                  <span class="menu__label">Scheduled Tasks</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/message-templates" {% if current_path.startswith('/admin/message-templates') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3z"/><path d="M7 6h10v2H7zm0 4h10v2H7zm0 4h6v2H7z"/></svg>
