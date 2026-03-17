@@ -177,6 +177,17 @@ def _encrypt(field: str | None) -> str | None:
     return encrypt_secret(field)
 
 
+def parse_graph_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 datetime string from Microsoft Graph into a UTC datetime."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        return None
+
+
 async def get_credentials(company_id: int) -> dict[str, Any] | None:
     record = await m365_repo.get_credentials(company_id)
     if not record:
@@ -1197,7 +1208,7 @@ async def _sync_staff_assignments(
     url: str | None = (
         "https://graph.microsoft.com/v1.0/users?"
         f"$filter=assignedLicenses/any(x:x/skuId eq {sku_id})&"
-        "$select=id,displayName,mail,userPrincipalName,givenName,surname&"
+        "$select=id,displayName,mail,userPrincipalName,givenName,surname,signInActivity&"
         "$count=true"
     )
     consistency_headers = {"ConsistencyLevel": "eventual"}
@@ -1212,6 +1223,9 @@ async def _sync_staff_assignments(
             email = (user.get("mail") or user.get("userPrincipalName") or "").strip().lower()
             if not email:
                 continue
+            sign_in_activity = user.get("signInActivity") or {}
+            last_sign_in_str = sign_in_activity.get("lastSignInDateTime")
+            last_sign_in = parse_graph_datetime(last_sign_in_str)
             staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
             if not staff:
                 first = (user.get("givenName") or "").strip() or "Unknown"
@@ -1237,8 +1251,11 @@ async def _sync_staff_assignments(
                     account_action=None,
                     syncro_contact_id=None,
                     source="m365",
+                    m365_last_sign_in=last_sign_in,
                 )
                 staff = created
+            elif last_sign_in is not None:
+                await staff_repo.update_m365_last_sign_in(int(staff["id"]), last_sign_in)
             assigned_emails.add(email)
             await license_repo.link_staff_to_license(int(staff["id"]), license_id)
         url = payload.get("@odata.nextLink")
@@ -1359,7 +1376,7 @@ async def get_all_users(company_id: int) -> list[dict[str, Any]]:
         "https://graph.microsoft.com/v1.0/users?"
         "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
         "mobilePhone,businessPhones,streetAddress,city,state,postalCode,country,"
-        "department,jobTitle&"
+        "department,jobTitle,signInActivity&"
         "$filter=accountEnabled eq true&"
         "$count=true"
     )
