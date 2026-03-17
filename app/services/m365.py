@@ -2151,3 +2151,105 @@ async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
     """Return stored shared mailbox rows for the given company, excluding package mailboxes."""
     rows = await m365_repo.get_mailboxes(company_id, "SharedMailbox")
     return [r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
+
+
+async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
+    """Return mailbox permission details for a given UPN.
+
+    Queries Microsoft Graph for two sets of information:
+
+    **Mailboxes I can access** – mail-enabled M365 groups the given identity is a
+    member of.  In Exchange Online, adding a user to an M365 group that backs a
+    shared mailbox grants FullAccess.  This reflects group-based delegations only.
+
+    **Mailboxes that can access me** – members of the M365 group associated with
+    the given mailbox address, if one exists.  For traditional (non-group) shared
+    mailboxes or user mailboxes without a backing group this section will be empty.
+
+    Requires the ``Directory.Read.All`` application permission, which is already
+    included in ``_PROVISION_APP_ROLES``.
+
+    :returns: A dict with keys ``can_access`` (list of dicts with ``display_name``
+        and ``email``) and ``accessible_by`` (list of dicts with ``display_name``
+        and ``upn``).
+    """
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+
+    # Look up the user/mailbox directory object to get its stable ID.
+    try:
+        user_data = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{upn}?$select=id,displayName",
+        )
+    except M365Error:
+        return {"can_access": [], "accessible_by": []}
+
+    user_id = user_data.get("id")
+    if not user_id:
+        return {"can_access": [], "accessible_by": []}
+
+    # ------------------------------------------------------------------
+    # "Mailboxes I can access": mail-enabled group memberships
+    # ------------------------------------------------------------------
+    member_of_url = (
+        f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf"
+        "?$select=id,displayName,mail,mailEnabled"
+    )
+    try:
+        groups = await _graph_get_all(access_token, member_of_url)
+    except M365Error:
+        groups = []
+
+    can_access: list[dict[str, Any]] = []
+    for group in groups:
+        if group.get("mailEnabled") and group.get("mail"):
+            can_access.append(
+                {
+                    "display_name": group.get("displayName") or group["mail"],
+                    "email": group["mail"],
+                }
+            )
+    can_access.sort(key=lambda x: x["display_name"].lower())
+
+    # ------------------------------------------------------------------
+    # "Mailboxes that can access me": members of the backing M365 group
+    # ------------------------------------------------------------------
+    accessible_by: list[dict[str, Any]] = []
+    try:
+        # Find the M365 group whose primary email matches this mailbox UPN.
+        # $filter on 'mail' is an advanced query requiring ConsistencyLevel.
+        group_filter_url = (
+            f"https://graph.microsoft.com/v1.0/groups"
+            f"?$filter=mail eq '{upn}'"
+            "&$select=id,displayName,mail"
+            "&$count=true"
+        )
+        consistency_headers = {"ConsistencyLevel": "eventual"}
+        group_data = await _graph_get(
+            access_token,
+            group_filter_url,
+            extra_headers=consistency_headers,
+        )
+        backing_groups = group_data.get("value", [])
+        if backing_groups:
+            group_id = backing_groups[0].get("id")
+            if group_id:
+                members_url = (
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+                    "?$select=id,displayName,userPrincipalName"
+                )
+                members = await _graph_get_all(access_token, members_url)
+                for member in members:
+                    member_upn = member.get("userPrincipalName")
+                    if member_upn:
+                        accessible_by.append(
+                            {
+                                "display_name": member.get("displayName") or member_upn,
+                                "upn": member_upn,
+                            }
+                        )
+                accessible_by.sort(key=lambda x: x["display_name"].lower())
+    except M365Error:
+        pass
+
+    return {"can_access": can_access, "accessible_by": accessible_by}
