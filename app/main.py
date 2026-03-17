@@ -5776,10 +5776,27 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     # This ensures existing deployments pick up new permissions automatically
     # when an administrator re-runs "Authorize portal access".
     if access_token:
-        await m365_service.try_grant_missing_permissions(
+        new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,
         )
+        if new_permissions_granted:
+            # Clear the cached delegated access token so that the next sync
+            # acquires a fresh client_credentials token that includes the
+            # newly-granted application permissions (e.g. Reports.Read.All).
+            # The delegated token stored above does not carry application
+            # permissions, so leaving it cached would cause mailbox sync to
+            # continue failing until the token expires naturally (~1 hour).
+            await m365_repo.update_tokens(
+                company_id=company_id,
+                refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
+                access_token=None,
+                token_expires_at=None,
+            )
+            log_info(
+                "Cleared cached access token after granting missing M365 permissions",
+                company_id=company_id,
+            )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 

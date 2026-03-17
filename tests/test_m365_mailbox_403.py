@@ -28,7 +28,7 @@ async def test_sync_mailboxes_403_raises_actionable_error():
         patch.object(
             m365_service,
             "_graph_get_all",
-            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (403)")),
+            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403)),
         ),
     ):
         with pytest.raises(M365Error) as exc_info:
@@ -38,6 +38,10 @@ async def test_sync_mailboxes_403_raises_actionable_error():
     assert "Reports.Read.All" in error_message
     assert "Re-provision" in error_message
     assert "403 Forbidden" in error_message
+    # The message should also mention waiting for permissions to propagate
+    assert "wait" in error_message.lower(), (
+        "Error message should mention waiting for permissions to propagate after re-provisioning"
+    )
 
 
 @pytest.mark.anyio("asyncio")
