@@ -4736,6 +4736,33 @@ async def sync_m365_mailboxes(request: Request, redirect_to: str = Form("users",
         )
 
 
+@app.get("/m365/mailboxes/permissions", response_class=JSONResponse, tags=["Microsoft 365"])
+async def get_m365_mailbox_permissions(request: Request, upn: str):
+    """Return mailbox permission details for a given mailbox UPN.
+
+    Returns a JSON object with ``can_access`` (mailboxes this identity can access
+    via M365 group membership) and ``accessible_by`` (members of the M365 group
+    backing this mailbox).
+    """
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+
+    # Validate the UPN belongs to a known mailbox for this company to prevent
+    # arbitrary Graph API queries with user-supplied input.
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    known_upns = {mb["user_principal_name"] for mb in user_mbs + shared_mbs}
+    if upn not in known_upns:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
+
+    try:
+        permissions = await m365_service.get_mailbox_permissions(company_id, upn)
+        return JSONResponse(permissions)
+    except m365_service.M365Error as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
 @app.post("/m365/checks/report-privacy", response_class=RedirectResponse)
 async def check_m365_report_privacy(request: Request):
     """Check whether Microsoft 365 report privacy concealment is active for this tenant.
