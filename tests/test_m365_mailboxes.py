@@ -339,6 +339,7 @@ async def test_fetch_mailbox_usage_report_falls_back_to_csv_on_400():
         def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
             self.status_code = status_code
             self.text = text
+            self.content = text.encode("utf-8")
             self.headers = headers or {}
 
     class _FakeAsyncClient:
@@ -387,6 +388,7 @@ async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invali
         def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
             self.status_code = status_code
             self.text = text
+            self.content = text.encode("utf-8")
             self.headers = headers or {}
 
     class _FakeAsyncClient:
@@ -437,3 +439,63 @@ async def test_fetch_mailbox_usage_report_uses_json_when_available():
     with patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
     assert rows == report
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_decodes_utf16_downloads():
+    """CSV fallback decodes UTF-16 report payloads without losing mailbox rows."""
+
+    class _FakeResponse:
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+            content: bytes | None = None,
+        ):
+            self.status_code = status_code
+            self.text = text
+            self.content = content if content is not None else text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            csv_text = (
+                "User Principal Name,Display Name,Is Deleted,Storage Used (Byte),Archive Mailbox Storage Used (Byte)\n"
+                "shared@example.com,Shared Team,false,2048,0\n"
+            )
+            # Simulate httpx incorrectly exposing text with embedded NULs when
+            # the payload is UTF-16 but no charset is supplied.
+            return _FakeResponse(200, text="\x00bad\x00decode", content=csv_text.encode("utf-16"))
+
+    with (
+        patch.object(
+            m365_service,
+            "_graph_get_all",
+            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
+        ),
+        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
+    ):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert rows == [
+        {
+            "userPrincipalName": "shared@example.com",
+            "displayName": "Shared Team",
+            "storageUsedInBytes": 2048,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "isDeleted": False,
+        }
+    ]
