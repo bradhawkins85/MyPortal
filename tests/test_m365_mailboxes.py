@@ -126,6 +126,42 @@ async def test_sync_mailboxes_classifies_user_vs_shared():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_matches_user_to_report_by_mail_alias():
+    """When report UPN differs from Entra UPN, user mailbox still maps via mail alias."""
+    report = [
+        _make_report_entry("alias@example.com", "Alice Alias", storage_bytes=250),
+    ]
+    users = [
+        {
+            "id": "u1",
+            "userPrincipalName": "user@example.onmicrosoft.com",
+            "mail": "alias@example.com",
+            "displayName": "Alice",
+        },
+    ]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+    ):
+        total = await m365_service.sync_mailboxes(1)
+
+    assert total == 1
+    assert upserted[0]["mailbox_type"] == "UserMailbox"
+    assert upserted[0]["user_principal_name"] == "user@example.onmicrosoft.com"
+    assert upserted[0]["storage_used_bytes"] == 250
+
+
+@pytest.mark.anyio("asyncio")
 async def test_sync_mailboxes_stores_forwarding_rule_count():
     """Forwarding rule count from _count_forwarding_rules is stored for user mailboxes."""
     report = [_make_report_entry("user@example.com", "Alice")]
@@ -341,6 +377,57 @@ async def test_fetch_mailbox_usage_report_falls_back_to_csv_on_400():
     assert rows[0]["storageUsedInBytes"] == 123
     assert rows[0]["archiveMailboxStorageUsedInBytes"] == 45
     assert rows[0]["isDeleted"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invalid_numbers():
+    """CSV fallback tolerates header case/BOM drift and invalid numeric fields."""
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+            self.status_code = status_code
+            self.text = text
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            csv_text = (
+                "\ufeffUser principal name, display name ,is deleted,storage used (byte),archive mailbox storage used (byte)\n"
+                "ALIAS@EXAMPLE.COM,Alice Alias,false,abc,\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with (
+        patch.object(
+            m365_service,
+            "_graph_get_all",
+            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
+        ),
+        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
+    ):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert rows == [
+        {
+            "userPrincipalName": "alias@example.com",
+            "displayName": "Alice Alias",
+            "storageUsedInBytes": 0,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "isDeleted": False,
+        }
+    ]
 
 
 @pytest.mark.anyio("asyncio")
