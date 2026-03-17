@@ -146,3 +146,85 @@ async def list_provisioned_company_ids() -> set[int]:
         "SELECT DISTINCT company_id FROM company_m365_credentials",
     )
     return {int(row["company_id"]) for row in rows}
+
+
+async def upsert_mailbox(
+    *,
+    company_id: int,
+    user_principal_name: str,
+    display_name: str,
+    mailbox_type: str,
+    storage_used_bytes: int,
+    archive_storage_used_bytes: int | None,
+    has_archive: bool,
+    forwarding_rule_count: int,
+) -> None:
+    """Insert or update a mailbox record for the given company."""
+    await db.execute(
+        """
+        INSERT INTO m365_mailboxes (
+            company_id, user_principal_name, display_name, mailbox_type,
+            storage_used_bytes, archive_storage_used_bytes, has_archive,
+            forwarding_rule_count, synced_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            display_name = VALUES(display_name),
+            mailbox_type = VALUES(mailbox_type),
+            storage_used_bytes = VALUES(storage_used_bytes),
+            archive_storage_used_bytes = VALUES(archive_storage_used_bytes),
+            has_archive = VALUES(has_archive),
+            forwarding_rule_count = VALUES(forwarding_rule_count),
+            synced_at = VALUES(synced_at)
+        """,
+        (
+            company_id,
+            user_principal_name,
+            display_name,
+            mailbox_type,
+            storage_used_bytes,
+            archive_storage_used_bytes,
+            int(has_archive),
+            forwarding_rule_count,
+            datetime.utcnow(),
+        ),
+    )
+
+
+async def delete_stale_mailboxes(company_id: int, current_upns: list[str]) -> None:
+    """Remove mailbox rows for UPNs that are no longer present in the tenant."""
+    if not current_upns:
+        await db.execute(
+            "DELETE FROM m365_mailboxes WHERE company_id = %s",
+            (company_id,),
+        )
+        return
+    placeholders = ", ".join(["%s"] * len(current_upns))
+    await db.execute(
+        f"DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ({placeholders})",
+        (company_id, *current_upns),
+    )
+
+
+async def get_mailboxes(company_id: int, mailbox_type: str) -> list[dict]:
+    """Return stored mailbox rows for the given company filtered by type."""
+    rows = await db.fetch_all(
+        """
+        SELECT * FROM m365_mailboxes
+        WHERE company_id = %s AND mailbox_type = %s
+        ORDER BY display_name ASC
+        """,
+        (company_id, mailbox_type),
+    )
+    return [dict(row) for row in rows]
+
+
+async def get_mailbox_synced_at(company_id: int) -> datetime | None:
+    """Return the most recent synced_at timestamp for the company's mailboxes."""
+    row = await db.fetch_one(
+        "SELECT MAX(synced_at) AS synced_at FROM m365_mailboxes WHERE company_id = %s",
+        (company_id,),
+    )
+    if row and row.get("synced_at"):
+        value = row["synced_at"]
+        return value if isinstance(value, datetime) else None
+    return None

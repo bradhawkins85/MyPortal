@@ -4674,6 +4674,67 @@ async def remove_benchmark_exclusion(
     return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/m365/mailboxes/users", response_class=HTMLResponse)
+async def m365_user_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    mailboxes = await m365_service.get_user_mailboxes(company_id)
+    synced_at = await m365_repo.get_mailbox_synced_at(company_id)
+    extra = {
+        "title": "User Mailboxes",
+        "company": company,
+        "mailboxes": mailboxes,
+        "synced_at": synced_at,
+        "has_credentials": bool(credentials),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/user_mailboxes.html", request, user, extra=extra)
+
+
+@app.get("/m365/mailboxes/shared", response_class=HTMLResponse)
+async def m365_shared_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    mailboxes = await m365_service.get_shared_mailboxes(company_id)
+    synced_at = await m365_repo.get_mailbox_synced_at(company_id)
+    extra = {
+        "title": "Shared Mailboxes",
+        "company": company,
+        "mailboxes": mailboxes,
+        "synced_at": synced_at,
+        "has_credentials": bool(credentials),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
+
+
+@app.post("/m365/mailboxes/sync", response_class=RedirectResponse)
+async def sync_m365_mailboxes(request: Request, redirect_to: str = Form("users", alias="redirectTo")):
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        total = await m365_service.sync_mailboxes(company_id)
+        dest = "shared" if redirect_to == "shared" else "users"
+        return RedirectResponse(
+            url=f"/m365/mailboxes/{dest}?success={quote(f'Sync complete – {total} mailboxes updated')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    except m365_service.M365Error as exc:
+        dest = "shared" if redirect_to == "shared" else "users"
+        return RedirectResponse(
+            url=f"/m365/mailboxes/{dest}?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
 
 @app.post("/m365/credentials", response_class=RedirectResponse)
 async def save_m365_credentials(
@@ -4740,8 +4801,13 @@ async def sync_m365(request: Request):
         await m365_service.sync_company_licenses(company_id)
     except m365_service.M365Error as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    mailboxes_synced = 0
+    try:
+        mailboxes_synced = await m365_service.sync_mailboxes(company_id)
+    except Exception:
+        pass
     log_info("Microsoft 365 license sync triggered", company_id=company_id, user_id=user.get("id"))
-    return JSONResponse({"success": True})
+    return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
 
 @app.get("/m365/connect")
