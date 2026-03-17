@@ -16,6 +16,7 @@ class ImportSummary:
     created: int
     updated: int
     skipped: int
+    removed: int = 0
 
     @property
     def total(self) -> int:
@@ -169,6 +170,7 @@ async def _import_from_syncro(company_id: int, syncro_id: str) -> ImportSummary:
                 manager_name=None,
                 account_action=None,
                 syncro_contact_id=str(contact.get("id")) if contact.get("id") else None,
+                source="syncro",
             )
             existing_staff.append(created_staff)
             created += 1
@@ -191,6 +193,7 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
     created = 0
     updated = 0
     skipped = 0
+    seen_emails: set[str] = set()
 
     for user in users:
         first_name = _normalise(user.get("givenName")) or None
@@ -222,6 +225,9 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
             last_name=last_name or "",
             email=email,
         )
+
+        if email:
+            seen_emails.add(email.lower())
 
         if existing:
             await staff_repo.update_staff(
@@ -268,9 +274,12 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 manager_name=None,
                 account_action=None,
                 syncro_contact_id=None,
+                source="m365",
             )
             existing_staff.append(created_staff)
             created += 1
+
+    removed = await staff_repo.delete_m365_staff_not_in(company_id, seen_emails)
 
     log_info(
         "Completed M365 directory staff import",
@@ -278,8 +287,9 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
         created=created,
         updated=updated,
         skipped=skipped,
+        removed=removed,
     )
-    return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped)
+    return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped, removed=removed)
 
 
 async def import_m365_contacts_for_company(company_id: int) -> ImportSummary:

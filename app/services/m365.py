@@ -1142,6 +1142,7 @@ async def _sync_staff_assignments(
                     manager_name=None,
                     account_action=None,
                     syncro_contact_id=None,
+                    source="m365",
                 )
                 staff = created
             assigned_emails.add(email)

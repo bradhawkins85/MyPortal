@@ -150,6 +150,10 @@ async def test_import_contacts_falls_back_to_m365_when_no_syncro(monkeypatch):
         return {**kwargs, "id": 200}
 
     monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
 
     summary = await staff_importer.import_contacts_for_company(2)
     assert summary.created == 1
@@ -194,6 +198,10 @@ async def test_import_m365_skips_users_without_name(monkeypatch):
         return {**kwargs, "id": 300}
 
     monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
 
     summary = await staff_importer.import_contacts_for_company(3)
     assert summary.skipped == 1
@@ -228,6 +236,10 @@ async def test_import_m365_updates_existing_staff(monkeypatch):
         updated_calls.append({"id": staff_id, **kwargs})
 
     monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
 
     summary = await staff_importer.import_contacts_for_company(4)
     assert summary.updated == 1
@@ -259,6 +271,10 @@ async def test_import_m365_contacts_bypasses_syncro_when_syncro_id_set(monkeypat
         return {**kwargs, "id": 500}
 
     monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
 
     # Syncro should never be called
     async def syncro_must_not_be_called(*_, **__):
@@ -284,6 +300,182 @@ async def test_import_m365_contacts_returns_empty_when_no_credentials(monkeypatc
     assert summary.updated == 0
     assert summary.skipped == 0
     assert summary.total == 0
+
+
+@pytest.mark.anyio
+async def test_import_m365_removes_m365_staff_not_in_m365(monkeypatch):
+    """Staff with source='m365' that are no longer returned by M365 should be deleted."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 10, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [{"givenName": "Alice", "surname": "Active", "mail": "alice@example.com"}]
+        ),
+    )
+    # Bob is a previously-synced M365 staff who has since left M365
+    existing = [
+        {"id": 1, "first_name": "Alice", "last_name": "Active", "email": "alice@example.com", "source": "m365"},
+        {"id": 2, "first_name": "Bob", "last_name": "Gone", "email": "bob@example.com", "source": "m365"},
+    ]
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return(existing),
+    )
+    updated_calls: list = []
+
+    async def fake_update_staff(staff_id, **kwargs):
+        updated_calls.append(staff_id)
+        return {**kwargs, "id": staff_id}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+
+    deleted: list[str] = []
+
+    async def fake_delete_m365_staff_not_in(company_id, keep_emails):
+        for member in existing:
+            if member.get("source") == "m365" and member["email"].lower() not in keep_emails:
+                deleted.append(member["email"])
+        return len(deleted)
+
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        fake_delete_m365_staff_not_in,
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(10)
+
+    assert "bob@example.com" in deleted
+    assert "alice@example.com" not in deleted
+    assert summary.removed == 1
+
+
+@pytest.mark.anyio
+async def test_import_m365_does_not_remove_manually_added_staff(monkeypatch):
+    """Staff with source='manual' must not be removed during M365 sync."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 11, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [{"givenName": "Alice", "surname": "Active", "mail": "alice@example.com"}]
+        ),
+    )
+    existing = [
+        {"id": 1, "first_name": "Alice", "last_name": "Active", "email": "alice@example.com", "source": "m365"},
+        {"id": 2, "first_name": "Charlie", "last_name": "Manual", "email": "charlie@example.com", "source": "manual"},
+    ]
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return(existing),
+    )
+
+    async def fake_update_staff(staff_id, **kwargs):
+        return {**kwargs, "id": staff_id}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+
+    deleted: list[str] = []
+
+    async def fake_delete_m365_staff_not_in(company_id, keep_emails):
+        for member in existing:
+            if member.get("source") == "m365" and member["email"].lower() not in keep_emails:
+                deleted.append(member["email"])
+        return len(deleted)
+
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        fake_delete_m365_staff_not_in,
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(11)
+
+    assert "charlie@example.com" not in deleted
+    assert summary.removed == 0
+
+
+@pytest.mark.anyio
+async def test_import_m365_new_staff_has_source_m365(monkeypatch):
+    """Newly created staff during M365 sync must have source='m365'."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 12, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [{"givenName": "Dana", "surname": "New", "mail": "dana@example.com"}]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return([]),
+    )
+
+    created_calls: list[dict] = []
+
+    async def fake_create_staff(**kwargs):
+        created_calls.append(kwargs)
+        return {**kwargs, "id": 600}
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    await staff_importer.import_m365_contacts_for_company(12)
+
+    assert len(created_calls) == 1
+    assert created_calls[0]["source"] == "m365"
+
+
+@pytest.mark.anyio
+async def test_import_syncro_new_staff_has_source_syncro(monkeypatch):
+    """Newly created staff during Syncro sync must have source='syncro'."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 13, "syncro_company_id": "syncro-abc"}),
+    )
+    monkeypatch.setattr(
+        "app.services.syncro.get_contacts",
+        lambda *_, **__: _async_return(
+            [{"id": 77, "first_name": "Eve", "last_name": "Syncro", "email": "eve@example.com"}]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return([]),
+    )
+
+    created_calls: list[dict] = []
+
+    async def fake_create_staff(**kwargs):
+        created_calls.append(kwargs)
+        return {**kwargs, "id": 700}
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+
+    await staff_importer.import_contacts_for_company(13)
+
+    assert len(created_calls) == 1
+    assert created_calls[0]["source"] == "syncro"
 
 
 # ---------------------------------------------------------------------------
