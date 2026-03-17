@@ -147,6 +147,34 @@
   </details>
   {% endif %}
 
+  {% if has_credentials and is_super_admin %}
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">Mailbox report privacy check</h3>
+    </header>
+    <div class="panel__body">
+      <p>
+        Microsoft 365 can conceal mailbox identifiers in usage reports when the admin centre privacy
+        option <em>Display concealed user, group, and site names in all reports</em> is enabled.
+        When active, mailbox sync will fail because real user addresses cannot be identified.
+      </p>
+      <p class="text-muted">
+        Use this check to confirm whether the privacy setting is interfering with mailbox sync.
+        If the check reports concealment, sign in to the
+        <a href="https://admin.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft 365 admin centre</a>,
+        go to <strong>Settings → Org settings → Services → Reports</strong> and disable
+        <em>Display concealed user, group, and site names in all reports</em>, then re-run the check.
+      </p>
+      <form method="post" action="/m365/checks/report-privacy" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--ghost">Check mailbox report privacy</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">How synchronisation works</h3>
