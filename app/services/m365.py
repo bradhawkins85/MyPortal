@@ -1948,14 +1948,40 @@ async def sync_mailboxes(company_id: int) -> int:
             ) from exc
         raise
 
+    def _looks_obfuscated_identifier(value: str) -> bool:
+        """Return True for report identifiers that look privacy-obfuscated.
+
+        Microsoft 365 usage reports can conceal mailbox/user identifiers using
+        deterministic hashes when the tenant privacy option "Display concealed
+        user, group, and site names in all reports" is enabled.  Those values
+        are typically long hex strings without an ``@`` sign and cannot be
+        reliably mapped back to real mailbox addresses.
+        """
+        candidate = str(value or "").strip().lower()
+        if not candidate or "@" in candidate:
+            return False
+        if len(candidate) < 24:
+            return False
+        return bool(re.fullmatch(r"[0-9a-f]+", candidate))
+
     # Build a lookup: lower-case UPN -> report entry (skip deleted mailboxes).
     report_by_identifier: dict[str, dict[str, Any]] = {}
     report_primary_upns: set[str] = set()
+    report_obfuscated_identifiers = 0
     for item in report_items:
         upn = (item.get("userPrincipalName") or "").lower().strip()
         if upn and not item.get("isDeleted"):
             report_by_identifier[upn] = item
             report_primary_upns.add(upn)
+            if _looks_obfuscated_identifier(upn):
+                report_obfuscated_identifiers += 1
+
+    if report_primary_upns and report_obfuscated_identifiers >= max(1, int(len(report_primary_upns) * 0.8)):
+        raise M365Error(
+            "Mailbox sync failed because Microsoft 365 reports are concealing mailbox identifiers. "
+            "Disable the Microsoft 365 admin center privacy option 'Display concealed user, group, and "
+            "site names in all reports', then run mailbox sync again."
+        )
 
     def _user_identifiers(user: dict[str, Any]) -> list[str]:
         identifiers: list[str] = []
