@@ -1867,14 +1867,32 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         except (TypeError, ValueError):
             return default
 
+    csv_text = csv_response.text
+    # Graph report downloads can be UTF-16 encoded without an explicit
+    # charset. httpx then decodes as UTF-8 and leaves NUL bytes in-place,
+    # which causes DictReader to miss headers/rows. Re-decode from raw bytes
+    # when that pattern is detected.
+    if "\x00" in csv_text:
+        for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                csv_text = csv_response.content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
     parsed_rows: list[dict[str, Any]] = []
-    reader = csv.DictReader(io.StringIO(csv_response.text))
+    reader = csv.DictReader(io.StringIO(csv_text))
     for row in reader:
         normalised_row = {
             _normalise_csv_key(key): value
             for key, value in row.items()
             if key is not None
         }
+        if not normalised_row:
+            continue
+        # Excel-style CSVs may include a dialect prefix row: "sep=,"
+        if "sep=" in normalised_row and len(normalised_row) == 1:
+            continue
         upn = str(normalised_row.get("user principal name") or "").strip().lower()
         if not upn:
             continue
