@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -23,6 +24,12 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
+
+# Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
+_PACKAGE_MAILBOX_RE = re.compile(
+    r"^package_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 # Microsoft Graph's own well-known app ID (constant across all tenants)
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
@@ -1907,10 +1914,12 @@ async def sync_mailboxes(company_id: int) -> int:
 
 
 async def get_user_mailboxes(company_id: int) -> list[dict[str, Any]]:
-    """Return stored user mailbox rows for the given company."""
-    return await m365_repo.get_mailboxes(company_id, "UserMailbox")
+    """Return stored user mailbox rows for the given company, excluding package mailboxes."""
+    rows = await m365_repo.get_mailboxes(company_id, "UserMailbox")
+    return [r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
 
 
 async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
-    """Return stored shared mailbox rows for the given company."""
-    return await m365_repo.get_mailboxes(company_id, "SharedMailbox")
+    """Return stored shared mailbox rows for the given company, excluding package mailboxes."""
+    rows = await m365_repo.get_mailboxes(company_id, "SharedMailbox")
+    return [r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
