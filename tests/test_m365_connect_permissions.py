@@ -230,7 +230,9 @@ async def test_provision_app_registration_skips_409_role_assignments():
             return {"secretText": "test-secret", "keyId": "key-id-1"}
         return {"id": "created-id", "appId": "new-client-id"}
 
-    async def mock_graph_get(token: str, url: str) -> dict:
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "filter=displayName" in url:
+            return {"value": []}
         if "servicePrincipals" in url and _GRAPH_APP_ID in url:
             return {"value": [{"id": "graph-sp-id"}]}
         return {"value": [{"id": "new-sp-id"}]}
