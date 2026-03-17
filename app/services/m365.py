@@ -1840,7 +1840,11 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         archive_bytes = _parse_int(
             item.get("archiveMailboxStorageUsedInBytes")
             if "archiveMailboxStorageUsedInBytes" in item
-            else normalised_item.get("archive mailbox storage used (byte)")
+            else (
+                normalised_item.get("archive mailbox storage used (byte)")
+                if "archive mailbox storage used (byte)" in normalised_item
+                else normalised_item.get("archive storage used (byte)")
+            )
         )
         is_deleted_raw = str(
             item.get("isDeleted")
