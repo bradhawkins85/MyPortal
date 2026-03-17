@@ -180,7 +180,9 @@ async def test_provision_app_registration_default_display_name():
             return _make_secret_data()
         return {}
 
-    async def mock_graph_get(token: str, url: str) -> dict:
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "filter=displayName" in url:
+            return {"value": []}
         return _make_graph_sp_response()
 
     with (
@@ -215,7 +217,9 @@ async def test_provision_app_registration_registers_redirect_uri():
             return _make_secret_data()
         return {}
 
-    async def mock_graph_get(token: str, url: str) -> dict:
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "filter=displayName" in url:
+            return {"value": []}
         return _make_graph_sp_response()
 
     redirect_uri = "https://myportal.example.com/m365/callback"
@@ -258,7 +262,9 @@ async def test_provision_app_registration_no_redirect_uri_when_not_provided():
             return _make_secret_data()
         return {}
 
-    async def mock_graph_get(token: str, url: str) -> dict:
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "filter=displayName" in url:
+            return {"value": []}
         return _make_graph_sp_response()
 
     with (
