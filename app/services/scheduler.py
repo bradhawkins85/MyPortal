@@ -329,6 +329,7 @@ class SchedulerService:
                                     "created": staff_summary.created,
                                     "updated": staff_summary.updated,
                                     "skipped": staff_summary.skipped,
+                                    "removed": staff_summary.removed,
                                     "total": staff_summary.total,
                                 },
                                 "mailboxes_synced": mailboxes_synced,
