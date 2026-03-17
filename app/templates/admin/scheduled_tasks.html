@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header__title-content">
+    <span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="management management--single" data-layout>
+  <section class="management__content">
+    <header class="management__header">
+      <div>
+        <h1 class="management__title">Scheduled Tasks</h1>
+        <p class="management__subtitle">Monitor and run all background scheduled tasks across every company and module.</p>
+      </div>
+      <div class="management__header-actions">
+        <a class="button button--ghost" href="/admin/automation">
+          Manage tasks
+        </a>
+      </div>
+      <form method="get" class="management__filters">
+        <label class="form-checkbox-label">
+          <input
+            type="checkbox"
+            name="show_inactive"
+            value="1"
+            class="form-checkbox"
+            {% if show_inactive %}checked{% endif %}
+            onchange="this.form.submit()"
+          />
+          <span class="form-checkbox-text">Show inactive tasks</span>
+        </label>
+      </form>
+    </header>
+
+    {% if success_message %}
+      <div class="alert alert--success" role="alert">{{ success_message }}</div>
+    {% endif %}
+    {% if error_message %}
+      <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+    {% endif %}
+
+    <div class="management__body">
+      <div class="management__toolbar">
+        <div class="management__toolbar-search">
+          <input
+            type="search"
+            class="form-input"
+            placeholder="Filter tasks"
+            aria-label="Filter tasks"
+            data-table-filter="scheduled-tasks-table"
+          />
+        </div>
+        <div class="management__toolbar-actions" data-scheduled-task-columns>
+          <button
+            type="button"
+            class="button button--ghost"
+            data-columns-toggle
+            aria-expanded="false"
+            aria-haspopup="true"
+          >
+            Columns
+          </button>
+          <div class="columns-panel" data-columns-panel hidden>
+            <fieldset>
+              <legend class="visually-hidden">Toggle columns</legend>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="id" checked />
+                <span class="form-checkbox-text">ID</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="name" checked disabled />
+                <span class="form-checkbox-text">Name</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="command" checked />
+                <span class="form-checkbox-text">Command</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="company" checked />
+                <span class="form-checkbox-text">Company</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="cron" checked />
+                <span class="form-checkbox-text">Schedule</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="active" checked />
+                <span class="form-checkbox-text">Active</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="last-run" checked />
+                <span class="form-checkbox-text">Last run</span>
+              </label>
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="scheduled-task-column-toggle" data-column="status" checked />
+                <span class="form-checkbox-text">Status</span>
+              </label>
+            </fieldset>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="table" id="scheduled-tasks-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="int" data-column="id">ID</th>
+              <th scope="col" data-sort="string" data-column="name">Name</th>
+              <th scope="col" data-sort="string" data-column="command">Command</th>
+              <th scope="col" data-sort="string" data-column="company">Company</th>
+              <th scope="col" data-sort="string" data-column="cron">Schedule</th>
+              <th scope="col" data-sort="string" data-column="active">Active</th>
+              <th scope="col" data-sort="date" data-column="last-run">Last run</th>
+              <th scope="col" data-sort="string" data-column="status">Status</th>
+              <th scope="col" class="table__actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if tasks %}
+              {% for task in tasks %}
+                <tr data-task='{{ task | tojson }}'>
+                  <td data-label="ID" data-column="id">{{ task.id }}</td>
+                  <td data-label="Name" data-column="name">{{ task.name }}</td>
+                  <td data-label="Command" data-column="command">
+                    <code>{{ task.command }}</code>
+                  </td>
+                  <td data-label="Company" data-column="company" data-value="{{ task.company_name }}">
+                    {% if task.company_edit_url %}
+                      <a href="{{ task.company_edit_url }}">{{ task.company_name }}</a>
+                    {% else %}
+                      {{ task.company_name }}
+                    {% endif %}
+                  </td>
+                  <td data-label="Schedule" data-column="cron">
+                    <code>{{ task.cron }}</code>
+                  </td>
+                  <td data-label="Active" data-column="active">
+                    <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
+                  </td>
+                  <td data-label="Last run" data-column="last-run" data-value="{{ task.last_run_iso or '' }}">
+                    {% if task.last_run_iso %}
+                      <span data-utc="{{ task.last_run_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">Never</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Status" data-column="status">
+                    {% if task.last_status %}
+                      <span class="tag {{ 'tag--success' if task.last_status == 'succeeded' else ('tag--danger' if task.last_status == 'failed' else 'tag--warning') }}">
+                        {{ task.last_status }}
+                      </span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="table__actions">
+                    <div class="table__action-buttons">
+                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                      <button type="button" class="button button--ghost" data-task-logs>View logs</button>
+                      {% if task.company_edit_url %}
+                        <a class="button button--ghost" href="{{ task.company_edit_url }}">Source</a>
+                      {% else %}
+                        <a class="button button--ghost" href="/admin/automation">Source</a>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="9" class="table__empty">
+                  {% if show_inactive %}
+                    No scheduled tasks configured yet.
+                  {% else %}
+                    No active scheduled tasks. Enable "Show inactive tasks" to review all entries.
+                  {% endif %}
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="task-logs-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close task logs</span>
+    </button>
+    <h2 class="modal__title" id="task-logs-title">Task run history</h2>
+    <div class="modal__body">
+      <p id="task-logs-description" class="modal__subtitle text-muted">
+        View the most recent executions for this scheduled task. All timestamps are displayed in your local timezone.
+      </p>
+      <div class="modal__controls">
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter runs"
+          aria-label="Filter task runs"
+          data-table-filter="task-logs-table"
+        />
+      </div>
+      <div class="table-wrapper">
+        <table class="table" id="task-logs-table" data-table>
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Status</th>
+              <th scope="col" data-sort="date">Started</th>
+              <th scope="col" data-sort="date">Finished</th>
+              <th scope="col" data-sort="number">Duration (ms)</th>
+              <th scope="col" data-sort="string">Details</th>
+            </tr>
+          </thead>
+          <tbody id="task-logs-body">
+            <tr>
+              <td colspan="5" class="table__empty" id="task-logs-empty">Select a task to view its recent runs.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/scheduled_task_columns.js') }}" defer></script>
+{% endblock %}
