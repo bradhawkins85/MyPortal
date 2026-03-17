@@ -332,8 +332,8 @@ async def test_get_user_mailboxes_keeps_non_package_similar_names():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_fetch_mailbox_usage_report_falls_back_to_csv_on_400():
-    """When JSON format is rejected with 400, mailbox report falls back to CSV export."""
+async def test_fetch_mailbox_usage_report_includes_archive_size():
+    """Mailbox report collects archive mailbox size from the CSV export."""
 
     class _FakeResponse:
         def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
@@ -363,14 +363,7 @@ async def test_fetch_mailbox_usage_report_falls_back_to_csv_on_400():
             )
             return _FakeResponse(200, text=csv_text)
 
-    with (
-        patch.object(
-            m365_service,
-            "_graph_get_all",
-            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
-        ),
-        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
-    ):
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
 
     assert len(rows) == 1
@@ -382,7 +375,7 @@ async def test_fetch_mailbox_usage_report_falls_back_to_csv_on_400():
 
 @pytest.mark.anyio("asyncio")
 async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invalid_numbers():
-    """CSV fallback tolerates header case/BOM drift and invalid numeric fields."""
+    """CSV export tolerates header case/BOM drift and invalid numeric fields."""
 
     class _FakeResponse:
         def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
@@ -411,14 +404,7 @@ async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invali
             )
             return _FakeResponse(200, text=csv_text)
 
-    with (
-        patch.object(
-            m365_service,
-            "_graph_get_all",
-            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
-        ),
-        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
-    ):
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
 
     assert rows == [
@@ -433,41 +419,45 @@ async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invali
 
 
 @pytest.mark.anyio("asyncio")
-async def test_fetch_mailbox_usage_report_uses_json_when_available():
-    """JSON mailbox report is returned directly when Graph accepts $format=application/json."""
-    report = [{"userPrincipalName": "user@example.com", "storageUsedInBytes": 5}]
-    with patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)):
-        rows = await m365_service._fetch_mailbox_usage_report("tok")
-    assert rows == [
-        {
-            "userPrincipalName": "user@example.com",
-            "displayName": "user@example.com",
-            "storageUsedInBytes": 5,
-            "archiveMailboxStorageUsedInBytes": 0,
-            "isDeleted": False,
-        }
-    ]
+async def test_fetch_mailbox_usage_report_returns_archive_size_from_csv():
+    """Archive mailbox size is collected from the CSV export."""
 
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
 
-@pytest.mark.anyio("asyncio")
-async def test_fetch_mailbox_usage_report_normalises_non_canonical_json_keys():
-    """JSON projection rows with CSV-style keys are normalised into expected schema."""
-    report = [
-        {
-            "User Principal Name": "USER@EXAMPLE.COM",
-            "Display Name": "User One",
-            "Storage Used (Byte)": "2048",
-            "Archive Mailbox Storage Used (Byte)": "1024",
-            "Is Deleted": "false",
-        }
-    ]
-    with patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=report)):
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            csv_text = (
+                "User Principal Name,Display Name,Is Deleted,Storage Used (Byte),"
+                "Archive Mailbox Storage Used (Byte)\n"
+                "user@example.com,User One,false,5,1024\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
+
     assert rows == [
         {
             "userPrincipalName": "user@example.com",
             "displayName": "User One",
-            "storageUsedInBytes": 2048,
+            "storageUsedInBytes": 5,
             "archiveMailboxStorageUsedInBytes": 1024,
             "isDeleted": False,
         }
@@ -476,7 +466,7 @@ async def test_fetch_mailbox_usage_report_normalises_non_canonical_json_keys():
 
 @pytest.mark.anyio("asyncio")
 async def test_fetch_mailbox_usage_report_csv_decodes_utf16_downloads():
-    """CSV fallback decodes UTF-16 report payloads without losing mailbox rows."""
+    """CSV export decodes UTF-16 report payloads without losing mailbox rows."""
 
     class _FakeResponse:
         def __init__(
@@ -513,14 +503,7 @@ async def test_fetch_mailbox_usage_report_csv_decodes_utf16_downloads():
             # the payload is UTF-16 but no charset is supplied.
             return _FakeResponse(200, text="\x00bad\x00decode", content=csv_text.encode("utf-16"))
 
-    with (
-        patch.object(
-            m365_service,
-            "_graph_get_all",
-            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
-        ),
-        patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
-    ):
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
 
     assert rows == [
