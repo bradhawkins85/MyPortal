@@ -45,7 +45,7 @@
       {% elif not mailboxes %}
       <p class="text-muted">No shared mailbox data found. Click <strong>Sync mailboxes</strong> to fetch the latest data from Microsoft 365.</p>
       {% else %}
-      <table class="table">
+      <table class="table" data-table>
         <thead>
           <tr>
             <th data-sort="string">Display Name</th>
@@ -74,4 +74,9 @@
       {% endif %}
     </div>
   </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
 {% endblock %}
