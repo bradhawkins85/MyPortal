@@ -2,6 +2,24 @@
 
 {% block title %}Office 365{% endblock %}
 
+{% block styles %}
+<style>
+  .provision-step {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .provision-step__label {
+    white-space: nowrap;
+    font-weight: 600;
+    min-width: 4rem;
+  }
+  .provision-step + .provision-step {
+    margin-top: 0.75rem;
+  }
+</style>
+{% endblock %}
+
 {% block header_actions %}
   {% if has_credentials %}
     <a class="button button--ghost" href="/m365/mailboxes/users">User Mailboxes</a>
@@ -63,10 +81,16 @@
     <div class="panel__body">
       <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The customer's Global Admin signs in to grant consent — no manual Azure portal steps required.</p>
       <div style="margin-top: 1rem;">
-        <a href="/m365/discover" class="button">Sign in as Global Admin</a>
+        <div class="provision-step">
+          <span class="provision-step__label">Step 1</span>
+          <a href="/m365/discover" class="button">Sign in as Global Admin</a>
+        </div>
         <p class="form-help" style="margin-top: 0.5rem;">The Global Admin signs in to identify the tenant automatically, then grants consent for the required permissions.</p>
         {% if has_credentials %}
-        <a href="/m365/connect" class="button" style="margin-top: 0.75rem;">Authorize portal access</a>
+        <div class="provision-step">
+          <span class="provision-step__label">Step 2</span>
+          <a href="/m365/connect" class="button">Authorise portal access</a>
+        </div>
         {% endif %}
       </div>
     </div>
@@ -74,56 +98,53 @@
   {% endif %}
 
   {% if is_super_admin %}
-  <section class="panel">
-    <details>
-      <summary class="panel__header" style="cursor: pointer; list-style: none; display: flex; align-items: center;">
-        <h3 class="panel__title">Manage credentials</h3>
-      </summary>
-      <div class="panel__body">
-        <form method="post" action="/m365/credentials" class="form-grid">
-          {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-          {% endif %}
-          <label class="form-field">
-            <span class="form-label">Tenant ID</span>
-            <input type="text" id="manage-cred-tenant-id" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
-          </label>
-          <label class="form-field">
-            <span class="form-label">Client ID</span>
-            <input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required />
-          </label>
-          <label class="form-field">
-            <span class="form-label">Client secret</span>
-            <input type="password" name="clientSecret" class="input" placeholder="Enter a new client secret" {% if not credential %}required{% endif %} />
-            <span class="form-help">Secrets are encrypted at rest; re-enter to rotate.</span>
-          </label>
-          <div class="form-actions">
-            <button type="submit" class="button">Save credentials</button>
-          </div>
-        </form>
-        {% if is_super_admin %}
-        <div style="margin-top: 0.75rem;">
-          <button type="button" class="button button--ghost" onclick="(function(){var t=document.getElementById('manage-cred-tenant-id').value.trim();if(!t){alert('Enter a Tenant ID first.');return;}window.location='/m365/provision?tenant_id='+encodeURIComponent(t);})()">Auto-provision with this Tenant ID</button>
-          <p class="form-help" style="margin-top: 0.25rem;">Uses the Tenant ID above to auto-provision the enterprise app.</p>
-        </div>
-        {% endif %}
-        {% if credential %}
-        <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
-          {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-          {% endif %}
-          <button type="submit" class="button button--ghost">Test connectivity</button>
-        </form>
-        <form method="post" action="/m365/credentials/delete" class="form-inline">
-          {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-          {% endif %}
-          <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
-        </form>
-        {% endif %}
+  <details class="card card--panel card-collapsible">
+    <summary class="card__header card__header--collapsible">
+      <div>
+        <h3 class="card__title">Manage credentials</h3>
       </div>
-    </details>
-  </section>
+      <div class="card__collapsible-meta" aria-hidden="true">
+        <span class="card__toggle-icon"></span>
+      </div>
+    </summary>
+    <div class="card-collapsible__content">
+      <form method="post" action="/m365/credentials" class="form-grid">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <label class="form-field">
+          <span class="form-label">Tenant ID</span>
+          <input type="text" id="manage-cred-tenant-id" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
+        </label>
+        <label class="form-field">
+          <span class="form-label">Client ID</span>
+          <input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required />
+        </label>
+        <label class="form-field">
+          <span class="form-label">Client secret</span>
+          <input type="password" name="clientSecret" class="input" placeholder="Enter a new client secret" {% if not credential %}required{% endif %} />
+          <span class="form-help">Secrets are encrypted at rest; re-enter to rotate.</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="button">Save credentials</button>
+        </div>
+      </form>
+      {% if credential %}
+      <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--ghost">Test connectivity</button>
+      </form>
+      <form method="post" action="/m365/credentials/delete" class="form-inline">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
   {% endif %}
 
   <section class="panel">
