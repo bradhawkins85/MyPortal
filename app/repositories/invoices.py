@@ -32,6 +32,14 @@ async def list_company_invoices(company_id: int) -> list[dict[str, Any]]:
     return [_normalise_invoice(row) for row in rows]
 
 
+async def list_company_invoices_by_status(company_id: int, status: str) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT * FROM invoices WHERE company_id = %s AND status = %s ORDER BY id",
+        (company_id, status),
+    )
+    return [_normalise_invoice(row) for row in rows]
+
+
 async def get_invoice_by_id(invoice_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
     return _normalise_invoice(row) if row else None

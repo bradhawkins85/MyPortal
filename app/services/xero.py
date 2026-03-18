@@ -13,6 +13,8 @@ from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
+from app.repositories import invoice_lines as invoice_lines_repo
+from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 from app.services import modules as modules_service
