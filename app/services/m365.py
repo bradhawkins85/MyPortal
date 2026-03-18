@@ -2028,12 +2028,12 @@ async def sync_mailboxes(company_id: int) -> int:
     application permission.  Forwarding rule counts default to 0 for shared
     mailboxes (and for user mailboxes where the rules endpoint is unavailable).
 
-    For each mailbox, the members of its backing M365 unified group are fetched
-    and stored in ``m365_mailbox_members``.  These are the users who have been
-    assigned full access to the mailbox.  This data is used by
-    ``get_mailbox_permissions()`` to report who can access any given mailbox
-    without a live Graph API round-trip at query time.  Run a mailbox sync to
-    refresh the data.
+    For each enabled user, their mail-enabled M365 group memberships are fetched
+    and stored in ``m365_mailbox_members`` (keyed by the group's primary SMTP
+    address).  This builds a reverse index – for each group-backed mailbox, who
+    are its members – so that ``get_mailbox_permissions()`` can report who can
+    access a given mailbox without a live Graph round-trip.  Run a mailbox sync
+    to refresh the data.
 
     Requires the ``Reports.Read.All`` and ``MailboxSettings.Read`` application
     permissions granted to the provisioned enterprise app.  Re-provision the
@@ -2141,21 +2141,19 @@ async def sync_mailboxes(company_id: int) -> int:
 
         fw_count = await _count_forwarding_rules(access_token, user["id"])
 
-        # Sync the users with full access to this mailbox by querying the
-        # members of its backing M365 group directly.  This surfaces who has
-        # been assigned access to the mailbox rather than relying on the
-        # reverse per-user group membership lookup.
-        mailbox_email = (user.get("mail") or preferred_upn).strip().lower()
-        mb_members = await _get_mailbox_group_members(access_token, mailbox_email)
-        for member in mb_members:
-            member_upn = (member.get("userPrincipalName") or "").strip().lower()
-            member_display = member.get("displayName") or member_upn
-            if member_upn:
+        # Sync which mailbox groups this user has access to via group membership.
+        # For each mail-enabled group the user belongs to, record a member row
+        # so that get_mailbox_permissions() can show who can access a mailbox
+        # without a live Graph round-trip.
+        user_groups = await _get_user_mail_enabled_groups(access_token, user["id"])
+        for group in user_groups:
+            group_email = (group.get("mail") or "").strip().lower()
+            if group_email:
                 await m365_repo.upsert_mailbox_member(
                     company_id=company_id,
-                    mailbox_email=mailbox_email,
-                    member_upn=member_upn,
-                    member_display_name=member_display,
+                    mailbox_email=group_email,
+                    member_upn=preferred_upn,
+                    member_display_name=user.get("displayName") or preferred_upn,
                     synced_at=member_sync_start,
                 )
 
@@ -2181,21 +2179,6 @@ async def sync_mailboxes(company_id: int) -> int:
         archive_bytes = int(archive_raw) if archive_raw else 0
         has_archive = bool(entry.get("hasArchive")) or archive_bytes > 0
         display_name = entry.get("displayName") or upn_lower
-
-        # Sync the users with full access to this shared mailbox by querying
-        # the members of its backing M365 group directly.
-        mb_members = await _get_mailbox_group_members(access_token, upn_lower)
-        for member in mb_members:
-            member_upn = (member.get("userPrincipalName") or "").strip().lower()
-            member_display = member.get("displayName") or member_upn
-            if member_upn:
-                await m365_repo.upsert_mailbox_member(
-                    company_id=company_id,
-                    mailbox_email=upn_lower,
-                    member_upn=member_upn,
-                    member_display_name=member_display,
-                    synced_at=member_sync_start,
-                )
 
         rows_to_upsert.append(
             {
