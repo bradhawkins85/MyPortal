@@ -36,23 +36,23 @@ def test_build_safe_error_path_filters_query_params():
 @pytest.mark.anyio("asyncio")
 async def test_render_error_page_hides_details_in_production_for_non_admin(monkeypatch):
     request = _make_request(query_string="password=123")
-    captured_extra = {}
+    captured_context = {}
 
     async def fake_get_optional_user(_request):
         return ({"id": 12, "is_super_admin": False}, None)
 
     async def fake_build_portal_context(_request, _user, *, extra=None):
-        captured_extra.update(extra or {})
         return {"request": request, **(extra or {})}
 
     monkeypatch.setattr(main, "_get_optional_user", fake_get_optional_user)
     monkeypatch.setattr(main, "_build_portal_context", fake_build_portal_context)
     monkeypatch.setattr(main.settings, "environment", "production")
-    monkeypatch.setattr(
-        main.templates,
-        "TemplateResponse",
-        lambda *_args, **_kwargs: {"ok": True},
-    )
+
+    def fake_template_response(_name, context, **_kwargs):
+        captured_context.update(context)
+        return {"ok": True}
+
+    monkeypatch.setattr(main.templates, "TemplateResponse", fake_template_response)
 
     await main._render_error_page(
         request,
@@ -63,10 +63,47 @@ async def test_render_error_page_hides_details_in_production_for_non_admin(monke
         detail="sensitive stack trace",
     )
 
-    assert captured_extra["error_detail"] is None
-    assert captured_extra["error_path"] == "/broken"
-    assert captured_extra["error_reference"] == "abc123ref"
+    assert captured_context["error_detail"] is None
+    assert captured_context["error_path"] == "/broken"
+    assert captured_context["error_reference"] == "abc123ref"
 
+
+@pytest.mark.anyio("asyncio")
+async def test_render_error_page_shows_details_for_company_admin_in_production(monkeypatch):
+    request = _make_request(query_string="password=123")
+    captured_context = {}
+
+    async def fake_get_optional_user(_request):
+        return ({"id": 12, "is_super_admin": False}, None)
+
+    async def fake_build_portal_context(_request, _user, *, extra=None):
+        return {
+            "request": request,
+            "is_super_admin": False,
+            "is_company_admin": True,
+            **(extra or {}),
+        }
+
+    monkeypatch.setattr(main, "_get_optional_user", fake_get_optional_user)
+    monkeypatch.setattr(main, "_build_portal_context", fake_build_portal_context)
+    monkeypatch.setattr(main.settings, "environment", "production")
+
+    def fake_template_response(_name, context, **_kwargs):
+        captured_context.update(context)
+        return {"ok": True}
+
+    monkeypatch.setattr(main.templates, "TemplateResponse", fake_template_response)
+
+    await main._render_error_page(
+        request,
+        status_code=500,
+        error_reference="abc123ref",
+        title="Something went wrong",
+        message="Broken",
+        detail="sensitive stack trace",
+    )
+
+    assert captured_context["error_detail"] == "sensitive stack trace"
 
 @pytest.mark.anyio("asyncio")
 async def test_handle_http_exception_logs_reference(monkeypatch):
