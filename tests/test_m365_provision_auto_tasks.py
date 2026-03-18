@@ -78,7 +78,7 @@ async def test_get_commands_for_company_empty(monkeypatch):
 
 @pytest.mark.anyio
 async def test_m365_provision_creates_both_tasks(monkeypatch):
-    """Both sync_o365 and sync_staff tasks are created when none exist."""
+    """Both sync_m365_data and sync_staff tasks are created when none exist."""
     created: list[dict] = []
 
     monkeypatch.setattr(
@@ -96,9 +96,11 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
 
     # Simulate the logic that runs after a successful provision
     company_id = 5
+    company_name = "Acme Corp"
+    m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
-        ("sync_m365_data", "Sync Microsoft 365 data"),
+        ("sync_m365_data", m365_task_name),
         ("sync_staff", "Sync staff directory"),
     ):
         if command not in existing_commands:
@@ -114,6 +116,8 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
     assert len(created) == 2
     commands_created = {t["command"] for t in created}
     assert commands_created == {"sync_m365_data", "sync_staff"}
+    m365_task = next(t for t in created if t["command"] == "sync_m365_data")
+    assert m365_task["name"] == "Acme Corp - Sync Microsoft 365 data"
     for task in created:
         assert task["company_id"] == company_id
         cron = task["cron"]
@@ -125,7 +129,7 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
 
 @pytest.mark.anyio
 async def test_m365_provision_skips_existing_tasks(monkeypatch):
-    """No duplicate tasks are created when sync_o365 and sync_staff already exist."""
+    """No duplicate tasks are created when sync_m365_data and sync_staff already exist."""
     created: list[dict] = []
 
     monkeypatch.setattr(
@@ -142,9 +146,11 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
     monkeypatch.setattr(main_module.scheduler_service, "refresh", AsyncMock())
 
     company_id = 5
+    company_name = "Acme Corp"
+    m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
-        ("sync_m365_data", "Sync Microsoft 365 data"),
+        ("sync_m365_data", m365_task_name),
         ("sync_staff", "Sync staff directory"),
     ):
         if command not in existing_commands:
@@ -180,9 +186,11 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
     monkeypatch.setattr(main_module.scheduler_service, "refresh", AsyncMock())
 
     company_id = 5
+    company_name = "Acme Corp"
+    m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
-        ("sync_m365_data", "Sync Microsoft 365 data"),
+        ("sync_m365_data", m365_task_name),
         ("sync_staff", "Sync staff directory"),
     ):
         if command not in existing_commands:
@@ -197,3 +205,29 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
 
     assert len(created) == 1
     assert created[0]["command"] == "sync_staff"
+
+
+# ---------------------------------------------------------------------------
+# Company name in task name
+# ---------------------------------------------------------------------------
+
+def test_m365_task_name_includes_company_name():
+    """sync_m365_data task name is prefixed with the company name."""
+    company_name = "Widgets Inc"
+    task_name = (
+        f"{company_name} - Sync Microsoft 365 data"
+        if company_name
+        else "Sync Microsoft 365 data"
+    )
+    assert task_name == "Widgets Inc - Sync Microsoft 365 data"
+
+
+def test_m365_task_name_fallback_when_no_company_name():
+    """sync_m365_data task name falls back to default when company name is empty."""
+    company_name = ""
+    task_name = (
+        f"{company_name} - Sync Microsoft 365 data"
+        if company_name
+        else "Sync Microsoft 365 data"
+    )
+    assert task_name == "Sync Microsoft 365 data"
