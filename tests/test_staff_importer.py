@@ -478,6 +478,280 @@ async def test_import_syncro_new_staff_has_source_syncro(monkeypatch):
     assert created_calls[0]["source"] == "syncro"
 
 
+@pytest.mark.anyio
+async def test_import_m365_disabled_account_marks_ex_staff(monkeypatch):
+    """M365 users with accountEnabled=False must be marked disabled and is_ex_staff=True."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 20, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [
+                {
+                    "givenName": "Frank",
+                    "surname": "Former",
+                    "mail": "frank@example.com",
+                    "accountEnabled": False,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return([]),
+    )
+    created_calls: list[dict] = []
+
+    async def fake_create_staff(**kwargs):
+        created_calls.append(kwargs)
+        return {**kwargs, "id": 800}
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(20)
+
+    assert summary.created == 1
+    assert len(created_calls) == 1
+    assert created_calls[0]["enabled"] is False
+    assert created_calls[0]["is_ex_staff"] is True
+
+
+@pytest.mark.anyio
+async def test_import_m365_enabled_account_not_ex_staff(monkeypatch):
+    """M365 users with accountEnabled=True must be enabled and not ex-staff."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 21, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [
+                {
+                    "givenName": "Grace",
+                    "surname": "Active",
+                    "mail": "grace@example.com",
+                    "accountEnabled": True,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return([]),
+    )
+    created_calls: list[dict] = []
+
+    async def fake_create_staff(**kwargs):
+        created_calls.append(kwargs)
+        return {**kwargs, "id": 900}
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(21)
+
+    assert summary.created == 1
+    assert len(created_calls) == 1
+    assert created_calls[0]["enabled"] is True
+    assert created_calls[0]["is_ex_staff"] is False
+
+
+@pytest.mark.anyio
+async def test_import_m365_updates_existing_to_ex_staff_when_disabled(monkeypatch):
+    """When an existing staff member's M365 account is disabled, they become ex-staff."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 22, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [
+                {
+                    "givenName": "Henry",
+                    "surname": "Left",
+                    "mail": "henry@example.com",
+                    "accountEnabled": False,
+                }
+            ]
+        ),
+    )
+    existing = [
+        {
+            "id": 55,
+            "first_name": "Henry",
+            "last_name": "Left",
+            "email": "henry@example.com",
+            "enabled": True,
+            "is_ex_staff": False,
+        }
+    ]
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return(existing),
+    )
+    updated_calls: list[dict] = []
+
+    async def fake_update_staff(staff_id, **kwargs):
+        updated_calls.append({"id": staff_id, **kwargs})
+        return {"id": staff_id, **kwargs}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(22)
+
+    assert summary.updated == 1
+    assert updated_calls[0]["id"] == 55
+    assert updated_calls[0]["enabled"] is False
+    assert updated_calls[0]["is_ex_staff"] is True
+
+
+@pytest.mark.anyio
+async def test_import_m365_clears_ex_staff_when_account_re_enabled(monkeypatch):
+    """When a previously disabled M365 account is re-enabled, ex-staff flag is cleared."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 23, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [
+                {
+                    "givenName": "Irene",
+                    "surname": "Returned",
+                    "mail": "irene@example.com",
+                    "accountEnabled": True,
+                }
+            ]
+        ),
+    )
+    existing = [
+        {
+            "id": 66,
+            "first_name": "Irene",
+            "last_name": "Returned",
+            "email": "irene@example.com",
+            "enabled": False,
+            "is_ex_staff": True,
+        }
+    ]
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return(existing),
+    )
+    updated_calls: list[dict] = []
+
+    async def fake_update_staff(staff_id, **kwargs):
+        updated_calls.append({"id": staff_id, **kwargs})
+        return {"id": staff_id, **kwargs}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(23)
+
+    assert summary.updated == 1
+    assert updated_calls[0]["id"] == 66
+    assert updated_calls[0]["enabled"] is True
+    assert updated_calls[0]["is_ex_staff"] is False
+
+
+@pytest.mark.anyio
+async def test_import_m365_disabled_account_kept_in_seen_emails(monkeypatch):
+    """Disabled M365 accounts are kept in seen_emails so they are NOT deleted."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 24, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [
+                {
+                    "givenName": "Jack",
+                    "surname": "Disabled",
+                    "mail": "jack@example.com",
+                    "accountEnabled": False,
+                }
+            ]
+        ),
+    )
+    existing = [
+        {
+            "id": 77,
+            "first_name": "Jack",
+            "last_name": "Disabled",
+            "email": "jack@example.com",
+            "enabled": True,
+            "is_ex_staff": False,
+            "source": "m365",
+        }
+    ]
+    monkeypatch.setattr(
+        "app.repositories.staff.list_staff",
+        lambda *_, **__: _async_return(existing),
+    )
+
+    async def fake_update_staff(staff_id, **kwargs):
+        return {"id": staff_id, **kwargs}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+
+    seen_emails_captured: list[set] = []
+
+    async def fake_delete_m365_staff_not_in(company_id, keep_emails):
+        seen_emails_captured.append(set(keep_emails))
+        return 0
+
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        fake_delete_m365_staff_not_in,
+    )
+
+    await staff_importer.import_m365_contacts_for_company(24)
+
+    assert len(seen_emails_captured) == 1
+    assert "jack@example.com" in seen_emails_captured[0]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
