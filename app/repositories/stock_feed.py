@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
@@ -57,6 +58,87 @@ async def get_price_history(sku: str) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+async def get_recent_dbp_trends(
+    skus: list[str], days: int = 30
+) -> dict[str, str | None]:
+    """Return the DBP change direction for each SKU within the last *days* days.
+
+    For each SKU the two most-recent price history records are examined.  If
+    the most recent record was created within *days* days **and** its DBP
+    differs from the previous record, a direction string is returned:
+
+    * ``"up"``   – the price increased.
+    * ``"down"`` – the price decreased.
+    * ``None``   – no change within the window, or insufficient history.
+    """
+    if not skus:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(skus))
+    rows = await db.fetch_all(
+        f"SELECT sku, dbp, recorded_at"
+        f" FROM stock_feed_price_history"
+        f" WHERE sku IN ({placeholders})"
+        f" ORDER BY sku ASC, recorded_at DESC, id DESC",
+        tuple(skus),
+    )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # Keep only the two most-recent records per SKU (rows are already sorted
+    # newest-first within each SKU group).
+    sku_records: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        sku = row["sku"]
+        bucket = sku_records.setdefault(sku, [])
+        if len(bucket) < 2:
+            bucket.append(row)
+
+    result: dict[str, str | None] = {}
+    for sku, records in sku_records.items():
+        if len(records) < 2:
+            result[sku] = None
+            continue
+
+        most_recent = records[0]
+        prev = records[1]
+
+        recorded_at: datetime | None = most_recent.get("recorded_at")
+        if recorded_at is None:
+            result[sku] = None
+            continue
+        if not isinstance(recorded_at, datetime):
+            try:
+                recorded_at = datetime.fromisoformat(str(recorded_at))
+            except ValueError:
+                result[sku] = None
+                continue
+        if recorded_at.tzinfo is None:
+            recorded_at = recorded_at.replace(tzinfo=timezone.utc)
+
+        if recorded_at < cutoff:
+            result[sku] = None
+            continue
+
+        current_dbp = (
+            Decimal(str(most_recent["dbp"])) if most_recent["dbp"] is not None else None
+        )
+        prev_dbp = (
+            Decimal(str(prev["dbp"])) if prev["dbp"] is not None else None
+        )
+
+        if current_dbp is None or prev_dbp is None:
+            result[sku] = None
+        elif current_dbp > prev_dbp:
+            result[sku] = "up"
+        elif current_dbp < prev_dbp:
+            result[sku] = "down"
+        else:
+            result[sku] = None
+
+    return result
 
 
 def _coerce_int(value: Any) -> int:
