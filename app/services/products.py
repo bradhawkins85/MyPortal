@@ -390,6 +390,18 @@ async def update_stock_feed() -> int:
         raise
 
     await stock_feed_repo.replace_feed(items)
+
+    # Record DBP price history for every item in the feed.
+    for item in items:
+        sku = str(item.get("sku") or "").strip()
+        if not sku:
+            continue
+        dbp = stock_feed_repo._coerce_decimal(item.get("dbp"))
+        try:
+            await stock_feed_repo.record_price_if_changed(sku, dbp)
+        except Exception as exc:  # pragma: no cover - best-effort
+            log_error("Failed to record price history", sku=sku, error=str(exc))
+
     log_info("Stock feed updated", item_count=len(items))
     return len(items)
 

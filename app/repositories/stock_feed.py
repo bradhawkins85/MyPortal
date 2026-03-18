@@ -6,6 +6,59 @@ from typing import Any, Mapping, Sequence
 from app.core.database import db
 
 
+# ---------------------------------------------------------------------------
+# Price history helpers
+# ---------------------------------------------------------------------------
+
+
+async def record_price_if_changed(sku: str, dbp: Decimal | None) -> bool:
+    """Record a DBP price entry for *sku* only when the price has changed.
+
+    The initial price for a newly-seen SKU is always recorded.  Subsequent
+    calls only insert a new row when *dbp* differs from the most recently
+    recorded value.
+
+    Returns ``True`` if a new row was written, ``False`` otherwise.
+    """
+    last_row = await db.fetch_one(
+        "SELECT dbp FROM stock_feed_price_history"
+        " WHERE sku = %s ORDER BY recorded_at DESC, id DESC LIMIT 1",
+        (sku,),
+    )
+
+    if last_row is not None:
+        last_dbp: Decimal | None = (
+            Decimal(str(last_row["dbp"])) if last_row["dbp"] is not None else None
+        )
+        if last_dbp == dbp:
+            return False
+
+    await db.execute(
+        "INSERT INTO stock_feed_price_history (sku, dbp) VALUES (%s, %s)",
+        (sku, dbp),
+    )
+    return True
+
+
+async def get_price_history(sku: str) -> list[dict[str, Any]]:
+    """Return all recorded DBP price entries for *sku* in ascending order."""
+    rows = await db.fetch_all(
+        "SELECT id, sku, dbp, recorded_at"
+        " FROM stock_feed_price_history"
+        " WHERE sku = %s ORDER BY recorded_at ASC, id ASC",
+        (sku,),
+    )
+    return [
+        {
+            "id": row["id"],
+            "sku": row["sku"],
+            "dbp": Decimal(str(row["dbp"])) if row["dbp"] is not None else None,
+            "recorded_at": row["recorded_at"],
+        }
+        for row in rows
+    ]
+
+
 def _coerce_int(value: Any) -> int:
     if value is None:
         return 0
