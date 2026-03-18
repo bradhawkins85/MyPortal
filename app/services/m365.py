@@ -1356,34 +1356,25 @@ async def test_connectivity(company_id: int) -> dict[str, Any]:
 
 
 async def get_all_users(company_id: int) -> list[dict[str, Any]]:
-    """Return all enabled M365 users for the given company.
+    """Return all M365 users for the given company, including disabled accounts.
 
     Fetches members from the Microsoft Graph ``/users`` endpoint and handles
     ``@odata.nextLink`` pagination so that tenants with more than the default
     page size are fully returned.
 
-    ``$filter=accountEnabled eq true`` is an advanced directory-object query
-    that requires the ``ConsistencyLevel: eventual`` request header and the
-    ``$count=true`` query parameter.  Without these, Microsoft Graph returns
-    403 Forbidden in many tenant configurations (application-permission context).
-    The same header must also be forwarded for every ``@odata.nextLink``
-    paginated request, otherwise subsequent pages will also fail.
+    The returned user objects include ``accountEnabled`` so callers can
+    distinguish active users from blocked/disabled (ex-staff) accounts.
     """
     access_token = await acquire_access_token(company_id)
-    # $count=true is required alongside ConsistencyLevel: eventual for advanced
-    # filter queries on directory objects.
     url = (
         "https://graph.microsoft.com/v1.0/users?"
         "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
         "mobilePhone,businessPhones,streetAddress,city,state,postalCode,country,"
-        "department,jobTitle,signInActivity&"
-        "$filter=accountEnabled eq true&"
-        "$count=true"
+        "department,jobTitle,signInActivity,accountEnabled"
     )
-    consistency_headers = {"ConsistencyLevel": "eventual"}
     users: list[dict[str, Any]] = []
     while url:
-        payload = await _graph_get(access_token, url, extra_headers=consistency_headers)
+        payload = await _graph_get(access_token, url)
         users.extend(payload.get("value", []))
         url = payload.get("@odata.nextLink")
     return users
@@ -2036,11 +2027,12 @@ async def sync_mailboxes(company_id: int) -> int:
                 identifiers.append(value)
         return identifiers
 
-    # Get all enabled users -> these are the user mailboxes.
+    # Get all users (enabled + disabled); mailboxes only exist for enabled accounts.
     users = await get_all_users(company_id)
     users_with_identifiers = [
         (u, _user_identifiers(u))
         for u in users
+        if u.get("accountEnabled", True)
     ]
     users_with_identifiers = [
         (user, identifiers)

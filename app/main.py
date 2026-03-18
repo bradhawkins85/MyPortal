@@ -8631,6 +8631,7 @@ async def staff_page(
     request: Request,
     enabled: str = "",
     department: str = "",
+    show_ex_staff: str = "",
 ):
     (
         user,
@@ -8656,11 +8657,14 @@ async def staff_page(
         enabled_filter = None
 
     department_filter = department.strip()
+    show_ex_staff_flag = show_ex_staff.strip() == "1"
 
     staff_members: list[dict[str, Any]] = []
     departments: list[str] = []
     if company_id is not None:
-        staff_members = await staff_repo.list_staff(company_id, enabled=enabled_filter)
+        staff_members = await staff_repo.list_staff(
+            company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
+        )
         if not is_super_admin and staff_permission in (1, 2):
             user_email = (user.get("email") or "").lower()
             current_staff = next(
@@ -8721,6 +8725,7 @@ async def staff_page(
         "staff_members": staff_members,
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
+        "show_ex_staff": show_ex_staff_flag,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -8866,6 +8871,7 @@ async def update_staff_member(staff_id: int, request: Request):
         date_onboarded=date_onboarded,
         date_offboarded=date_offboarded,
         enabled=enabled,
+        is_ex_staff=bool(existing.get("is_ex_staff", False)),
         street=street,
         city=city,
         state=state_val,

@@ -70,6 +70,12 @@
               <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
             </select>
           </div>
+          <div class="filters__group filters__group--checkbox">
+            <label class="checkbox">
+              <input type="checkbox" name="show_ex_staff" value="1" data-submit-on-change {% if show_ex_staff %}checked{% endif %} />
+              <span>Show Ex-Staff</span>
+            </label>
+          </div>
           {% if staff_permission == 3 and departments %}
             <div class="filters__group">
               <label class="form-label" for="staff-department-filter">Department</label>

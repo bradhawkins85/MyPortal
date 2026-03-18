@@ -99,6 +99,7 @@ async def update_staff(
         date_onboarded=data.get("date_onboarded"),
         date_offboarded=data.get("date_offboarded"),
         enabled=bool(data.get("enabled", True)),
+        is_ex_staff=bool(data.get("is_ex_staff", False)),
         street=data.get("street"),
         city=data.get("city"),
         state=data.get("state"),
