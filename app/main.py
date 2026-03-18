@@ -123,6 +123,7 @@ from app.repositories import notifications as notifications_repo
 from app.repositories import notification_preferences as notification_preferences_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
+from app.repositories import stock_feed as stock_feed_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import subscription_categories as subscription_categories_repo
@@ -6505,6 +6506,24 @@ async def admin_shop_product_detail_api(request: Request, product_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
     return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
+
+
+@app.get("/api/admin/shop/products/{product_id}/price-history", response_class=JSONResponse)
+async def admin_shop_product_price_history_api(request: Request, product_id: int):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    vendor_sku = str(product.get("vendor_sku") or "").strip()
+    if not vendor_sku:
+        return JSONResponse(content=[])
+
+    history = await stock_feed_repo.get_price_history(vendor_sku)
+    return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(history)))
 
 
 @app.get(

@@ -239,6 +239,7 @@
                     <button type="submit" class="button button--danger">Delete</button>
                   </form>
                   <button type="button" class="button button--ghost" data-product-visibility="{{ product.id }}">Visibility</button>
+                  <button type="button" class="button button--ghost" data-product-price-history="{{ product.id }}" data-product-sku="{{ product.vendor_sku or product.sku }}">Price History</button>
                 </div>
               </td>
             </tr>
@@ -555,6 +556,33 @@
     <div class="form-actions">
       <button type="button" class="button" id="description-editor-apply">Apply</button>
       <button type="button" class="button button--ghost" id="description-editor-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="price-history-modal" role="dialog" aria-modal="true" aria-labelledby="price-history-modal-title" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close price history</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="price-history-modal-title">DBP Price History</h2>
+    <p class="form-helper" id="price-history-sku-label"></p>
+    <p class="form-helper" id="price-history-loading-status" hidden>Loading price history…</p>
+    <div class="table-wrapper" id="price-history-table-wrapper" hidden>
+      <table class="table" id="price-history-table">
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">DBP (ex-GST)</th>
+          </tr>
+        </thead>
+        <tbody id="price-history-tbody"></tbody>
+      </table>
+    </div>
+    <p id="price-history-empty" hidden>No price history recorded for this item yet.</p>
+    <div class="form-actions">
+      <button type="button" class="button button--ghost" data-modal-close>Close</button>
     </div>
   </div>
 </div>
