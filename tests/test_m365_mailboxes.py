@@ -688,7 +688,7 @@ async def test_sync_mailboxes_has_archive_from_report_flag():
         await m365_service.sync_mailboxes(1)
 
     assert upserted[0]["has_archive"] is True
-    assert upserted[0]["archive_storage_used_bytes"] is None
+    assert upserted[0]["archive_storage_used_bytes"] == 0
 
 
 @pytest.mark.anyio("asyncio")
