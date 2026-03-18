@@ -1283,6 +1283,30 @@ def _get_status_phrase(status_code: int) -> str:
         return "Error"
 
 
+def _get_request_id(request: Request) -> str | None:
+    request_id = getattr(request.state, "request_id", None)
+    if isinstance(request_id, str) and request_id.strip():
+        return request_id
+    header_request_id = request.headers.get("x-request-id")
+    if header_request_id and header_request_id.strip():
+        return header_request_id.strip()
+    return None
+
+
+def _error_payload(*, detail: str, request_id: str | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"detail": detail}
+    if request_id:
+        payload["request_id"] = request_id
+        payload["error_reference"] = request_id
+    return payload
+
+
+def _apply_request_id_header(response: Response, request_id: str | None) -> Response:
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
+    return response
+
+
 def _format_error_detail(detail: Any) -> str | None:
     if detail is None:
         return None
@@ -1301,9 +1325,12 @@ async def _render_error_page(
     title: str | None = None,
     message: str,
     detail: str | None = None,
+    error_reference: str | None = None,
 ) -> HTMLResponse:
     status_message = _get_status_phrase(status_code)
     document_title = title or f"{status_code} {status_message}"
+    request_id = _get_request_id(request)
+    resolved_error_reference = error_reference or request_id
     try:
         user, _ = await _get_optional_user(request)
     except Exception as exc:  # pragma: no cover - defensive fallback
@@ -1320,6 +1347,8 @@ async def _render_error_page(
             "error_status_message": status_message,
             "error_detail": detail,
             "error_path": str(request.url),
+            "request_id": request_id,
+            "error_reference": resolved_error_reference,
         },
     )
     return templates.TemplateResponse(
@@ -1332,24 +1361,38 @@ async def _render_error_page(
 @app.exception_handler(RequestValidationError)
 async def handle_request_validation_error(request: Request, exc: RequestValidationError):
     path = request.url.path
+    request_id = _get_request_id(request)
     if path.startswith("/api/integration-modules/"):
         logger.warning(
             "Webhook payload validation failed",
+            request_id=request_id,
             path=path,
             errors=exc.errors(),
             content_type=request.headers.get("content-type"),
             user_agent=request.headers.get("user-agent"),
         )
-    return JSONResponse(
+    response = JSONResponse(
         content=jsonable_encoder({"detail": exc.errors()}),
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
+    return _apply_request_id_header(response, request_id)
 
 
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException):
+    request_id = _get_request_id(request)
     if _request_prefers_json(request) or not _request_accepts_html(request):
-        return await http_exception_handler(request, exc)
+        if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+            response = JSONResponse(
+                _error_payload(detail="Internal server error", request_id=request_id),
+                status_code=exc.status_code,
+            )
+            if exc.headers:
+                for header, value in exc.headers.items():
+                    response.headers[header] = value
+            return _apply_request_id_header(response, request_id)
+        response = await http_exception_handler(request, exc)
+        return _apply_request_id_header(response, request_id)
     detail_text = _format_error_detail(exc.detail)
     friendly_titles = {
         status.HTTP_404_NOT_FOUND: "Page not found",
@@ -1371,29 +1414,40 @@ async def handle_http_exception(request: Request, exc: HTTPException):
         title=friendly_titles.get(exc.status_code),
         message=message,
         detail=detail_for_template,
+        error_reference=request_id,
     )
     if exc.headers:
         for header, value in exc.headers.items():
             response.headers[header] = value
-    return response
+    return _apply_request_id_header(response, request_id)
 
 
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):  # pragma: no cover - defensive
-    log_error("Unhandled application error", error=str(exc), request_path=str(request.url))
+    request_id = _get_request_id(request)
+    log_error(
+        "Unhandled application error",
+        request_id=request_id,
+        error=str(exc),
+        request_path=str(request.url),
+    )
     if _request_prefers_json(request):
-        return JSONResponse(
-            {"detail": "Internal server error"},
+        response = JSONResponse(
+            _error_payload(detail="Internal server error", request_id=request_id),
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+        return _apply_request_id_header(response, request_id)
     if not _request_accepts_html(request):
-        return PlainTextResponse("Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    return await _render_error_page(
+        response = PlainTextResponse("Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return _apply_request_id_header(response, request_id)
+    response = await _render_error_page(
         request,
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         title="Something went wrong",
         message="We ran into a problem while loading this page. Try again, or pick another destination from the menu.",
+        error_reference=request_id,
     )
+    return _apply_request_id_header(response, request_id)
 
 
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:

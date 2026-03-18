@@ -31,6 +31,20 @@
     return getCookie('myportal_session_csrf');
   }
 
+  function formatErrorDetail(data, fallback) {
+    let detail = fallback;
+    if (data && data.detail) {
+      detail = Array.isArray(data.detail)
+        ? data.detail.map((entry) => entry.msg || entry).join(', ')
+        : data.detail;
+    }
+    const reference = data && (data.error_reference || data.request_id);
+    if (reference) {
+      return `${detail} (Reference: ${reference})`;
+    }
+    return detail;
+  }
+
   async function requestJson(url, options = {}) {
     const init = { ...options };
     if (!init.credentials) {
@@ -53,11 +67,7 @@
       let detail = `${response.status} ${response.statusText}`;
       try {
         const data = await response.json();
-        if (data && data.detail) {
-          detail = Array.isArray(data.detail)
-            ? data.detail.map((entry) => entry.msg || entry).join(', ')
-            : data.detail;
-        }
+        detail = formatErrorDetail(data, detail);
       } catch (error) {
         /* ignore */
       }

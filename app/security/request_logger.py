@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Iterable
+from uuid import uuid4
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -23,10 +24,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        
+        request_id = request.headers.get("x-request-id") or str(uuid4())
+        request.state.request_id = request_id
+
         # Skip logging for exempt paths (e.g., static files)
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
-            return await call_next(request)
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
 
         # Get client IP
         client_ip = request.headers.get("x-forwarded-for")
@@ -40,6 +45,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         log_debug(
             "Incoming request",
+            request_id=request_id,
             method=request.method,
             path=path,
             client_ip=client_ip,
@@ -53,6 +59,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             duration = time.time() - start_time
             log_error(
                 "Request raised unhandled exception",
+                request_id=request_id,
                 method=request.method,
                 path=path,
                 duration_ms=round(duration * 1000, 2),
@@ -74,6 +81,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         log_function(
             message,
+            request_id=request_id,
             method=request.method,
             path=path,
             status_code=response.status_code,
@@ -81,4 +89,5 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             client_ip=client_ip,
         )
 
+        response.headers["X-Request-ID"] = request_id
         return response
