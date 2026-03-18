@@ -814,6 +814,19 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     return await get_ticket(ticket_id)
 
 
+async def rename_xero_invoice_number(old_invoice_number: str, new_invoice_number: str) -> None:
+    """Update tickets that reference a local invoice number after Xero sync."""
+    await db.execute(
+        """
+        UPDATE tickets
+        SET xero_invoice_number = %s,
+            updated_at = UTC_TIMESTAMP(6)
+        WHERE xero_invoice_number = %s
+        """,
+        (new_invoice_number, old_invoice_number),
+    )
+
+
 async def set_ticket_status(
     ticket_id: int,
     status: str,
