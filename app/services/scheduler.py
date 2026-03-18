@@ -19,6 +19,7 @@ from app.services import asset_importer
 from app.services import automations as automations_service
 from app.services import company_id_lookup
 from app.services import imap as imap_service
+from app.services import invoice_generator as invoice_generator_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import products as products_service
@@ -372,6 +373,22 @@ class SchedulerService:
                                 or result.get("event_status")
                                 or ""
                             ).strip().lower()
+                            if result_status in {"failed", "error"}:
+                                status = "failed"
+                            elif result_status == "skipped":
+                                status = "skipped"
+                        else:
+                            details = None
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
+                elif command == "generate_invoice":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        result = await invoice_generator_service.generate_invoice(int(company_id))
+                        if result:
+                            details = json.dumps(result, default=str)
+                            result_status = str(result.get("status") or "").strip().lower()
                             if result_status in {"failed", "error"}:
                                 status = "failed"
                             elif result_status == "skipped":

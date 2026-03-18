@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <a href="/invoices" class="button button--secondary button--small">← Back to invoices</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">{{ invoice.invoice_number }}</h2>
+        <p class="card__subtitle">
+          {% if company %}{{ company.name }} · {% endif %}
+          {% if invoice.due_display %}Due {{ invoice.due_display }}{% else %}No due date{% endif %}
+        </p>
+      </div>
+      <div class="card__controls">
+        {% if invoice.status_slug %}
+          <span class="status {{ invoice.status_class }}">{{ invoice.status_display }}</span>
+        {% endif %}
+        <span class="tag tag--large">{{ invoice.amount_display }}</span>
+        {% if can_delete_invoices %}
+        <button type="button" class="button button--danger button--small" data-invoice-delete="{{ invoice.id }}">
+          Delete invoice
+        </button>
+        {% endif %}
+      </div>
+    </header>
+
+    {% if has_lines %}
+    <div class="table-wrapper">
+      <table class="table" id="lines-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Description</th>
+            <th scope="col" data-sort="string">Product code</th>
+            <th scope="col" data-sort="number" data-mobile-priority="essential">Qty</th>
+            <th scope="col" data-sort="number">Unit price</th>
+            <th scope="col" data-sort="number" data-mobile-priority="essential">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+          <tr>
+            <td data-label="Description">{{ line.description or '—' }}</td>
+            <td data-label="Product code">{{ line.product_code or '—' }}</td>
+            <td data-label="Qty" data-value="{{ line.quantity }}">{{ line.quantity }}</td>
+            <td data-label="Unit price" data-value="{{ line.unit_amount }}">{{ line.unit_amount_display }}</td>
+            <td data-label="Amount" data-value="{{ line.amount }}">{{ line.amount_display }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="4" class="table__total-label"><strong>Total</strong></td>
+            <td class="table__total-value"><strong>{{ invoice.amount_display }}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3 class="empty-state__title">No line items</h3>
+      <p class="empty-state__subtitle">This invoice has no line item details stored.</p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+<script>
+  (function () {
+    document.addEventListener('DOMContentLoaded', () => {
+      const deleteBtn = document.querySelector('[data-invoice-delete]');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async () => {
+          const invoiceId = deleteBtn.getAttribute('data-invoice-delete');
+          if (!invoiceId) return;
+          if (!window.confirm('Delete this invoice and all its line items?')) return;
+          try {
+            const response = await fetch(`/api/invoices/${invoiceId}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error('Failed to delete invoice');
+            window.location.href = '/invoices';
+          } catch (error) {
+            console.error(error);
+            window.alert('Unable to delete invoice. Please try again.');
+          }
+        });
+      }
+    });
+  })();
+</script>
+{% endblock %}
