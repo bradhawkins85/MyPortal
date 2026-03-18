@@ -1318,6 +1318,23 @@ def _format_error_detail(detail: Any) -> str | None:
         return str(detail)
 
 
+def _generate_error_reference() -> str:
+    return uuid4().hex[:12]
+
+
+def _get_safe_error_path(request: Request) -> str:
+    path = request.url.path.strip()
+    return path or "/"
+
+
+def _should_show_error_detail(*, request: Request, user: dict[str, Any] | None) -> bool:
+    if bool(getattr(request.app, "debug", False)):
+        return True
+    if settings.environment.strip().lower() != "production":
+        return True
+    return bool(user and user.get("is_super_admin"))
+
+
 async def _render_error_page(
     request: Request,
     *,
@@ -1330,12 +1347,19 @@ async def _render_error_page(
     status_message = _get_status_phrase(status_code)
     document_title = title or f"{status_code} {status_message}"
     request_id = _get_request_id(request)
-    resolved_error_reference = error_reference or request_id
+    resolved_error_reference = error_reference or _generate_error_reference()
     try:
         user, _ = await _get_optional_user(request)
     except Exception as exc:  # pragma: no cover - defensive fallback
-        log_error("Failed to load user context for error page", error=str(exc))
+        log_error(
+            "Failed to load user context for error page",
+            error=str(exc),
+            request_id=request_id,
+            error_reference=resolved_error_reference,
+            request_path=_get_safe_error_path(request),
+        )
         user = None
+    show_error_detail = _should_show_error_detail(request=request, user=user)
     context = await _build_portal_context(
         request,
         user,
@@ -1345,8 +1369,9 @@ async def _render_error_page(
             "error_message": message,
             "error_status_code": status_code,
             "error_status_message": status_message,
-            "error_detail": detail,
-            "error_path": str(request.url),
+            "error_detail": detail if show_error_detail else None,
+            "show_error_detail": show_error_detail,
+            "error_path": _get_safe_error_path(request),
             "request_id": request_id,
             "error_reference": resolved_error_reference,
         },
@@ -1381,6 +1406,7 @@ async def handle_request_validation_error(request: Request, exc: RequestValidati
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException):
     request_id = _get_request_id(request)
+    error_reference = _generate_error_reference()
     if _request_prefers_json(request) or not _request_accepts_html(request):
         if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
             response = JSONResponse(
@@ -1408,13 +1434,20 @@ async def handle_http_exception(request: Request, exc: HTTPException):
     detail_for_template = None
     if detail_text and detail_text != message:
         detail_for_template = detail_text
+    log_info(
+        "Rendering HTTP error page",
+        status_code=exc.status_code,
+        request_id=request_id,
+        error_reference=error_reference,
+        request_path=_get_safe_error_path(request),
+    )
     response = await _render_error_page(
         request,
         status_code=exc.status_code,
         title=friendly_titles.get(exc.status_code),
         message=message,
         detail=detail_for_template,
-        error_reference=request_id,
+        error_reference=error_reference,
     )
     if exc.headers:
         for header, value in exc.headers.items():
@@ -1425,11 +1458,13 @@ async def handle_http_exception(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):  # pragma: no cover - defensive
     request_id = _get_request_id(request)
+    error_reference = _generate_error_reference()
     log_error(
         "Unhandled application error",
         request_id=request_id,
+        error_reference=error_reference,
         error=str(exc),
-        request_path=str(request.url),
+        request_path=_get_safe_error_path(request),
     )
     if _request_prefers_json(request):
         response = JSONResponse(
@@ -1445,7 +1480,8 @@ async def handle_unexpected_exception(request: Request, exc: Exception):  # prag
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         title="Something went wrong",
         message="We ran into a problem while loading this page. Try again, or pick another destination from the menu.",
-        error_reference=request_id,
+        detail=_format_error_detail(exc),
+        error_reference=error_reference,
     )
     return _apply_request_id_header(response, request_id)
 
