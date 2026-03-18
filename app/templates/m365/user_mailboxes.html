@@ -84,20 +84,9 @@
                 data-perm-btn
                 data-upn="{{ mb.user_principal_name }}"
                 data-display-name="{{ mb.display_name or mb.user_principal_name }}"
-                data-section="can_access"
                 aria-haspopup="dialog"
                 aria-controls="mailbox-perm-modal"
-              >Mailboxes I can access</button>
-              <button
-                type="button"
-                class="button button--small"
-                data-perm-btn
-                data-upn="{{ mb.user_principal_name }}"
-                data-display-name="{{ mb.display_name or mb.user_principal_name }}"
-                data-section="accessible_by"
-                aria-haspopup="dialog"
-                aria-controls="mailbox-perm-modal"
-              >Mailboxes that can access me</button>
+              >Mailbox Permissions</button>
             </td>
           </tr>
           {% endfor %}
@@ -153,8 +142,6 @@
     var contentEl = document.getElementById('perm-content');
     var canAccessList = document.getElementById('perm-can-access');
     var accessibleByList = document.getElementById('perm-accessible-by');
-    var canAccessHeading = document.getElementById('perm-can-access-heading');
-    var accessibleByHeading = document.getElementById('perm-accessible-by-heading');
     var activeTrigger = null;
 
     function escapeHtml(str) {
@@ -213,7 +200,6 @@
       btn.addEventListener('click', function () {
         var upn = btn.getAttribute('data-upn');
         var displayName = btn.getAttribute('data-display-name');
-        var section = btn.getAttribute('data-section');
 
         titleEl.textContent = displayName;
         loadingEl.style.display = 'block';
@@ -233,8 +219,6 @@
             buildList(canAccessList, result.data.can_access, 'display_name', 'email');
             buildList(accessibleByList, result.data.accessible_by, 'display_name', 'upn');
             contentEl.style.display = 'block';
-            var target = section === 'accessible_by' ? accessibleByHeading : canAccessHeading;
-            if (target) { target.scrollIntoView({ block: 'nearest' }); }
           })
           .catch(function () {
             loadingEl.style.display = 'none';
