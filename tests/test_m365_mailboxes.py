@@ -121,7 +121,7 @@ async def test_sync_mailboxes_classifies_user_vs_shared():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -160,7 +160,7 @@ async def test_sync_mailboxes_matches_user_to_report_by_mail_alias():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -190,7 +190,7 @@ async def test_sync_mailboxes_stores_forwarding_rule_count():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=3)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -217,7 +217,7 @@ async def test_sync_mailboxes_archive_populated_when_present():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -245,7 +245,7 @@ async def test_sync_mailboxes_archive_none_when_absent():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -276,7 +276,7 @@ async def test_sync_mailboxes_skips_deleted_entries():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -702,7 +702,7 @@ async def test_sync_mailboxes_has_archive_from_report_flag():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -732,7 +732,7 @@ async def test_sync_mailboxes_has_archive_fallback_from_bytes():
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
     ):
@@ -869,7 +869,7 @@ async def test_sync_mailboxes_no_member_rows_when_user_has_no_groups():
         patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
         patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
         patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", side_effect=fake_upsert_member),
