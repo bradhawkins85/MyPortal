@@ -61,6 +61,7 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
         mapped["verification_code"] = None
     mapped["date_onboarded"] = _serialize_datetime(mapped.get("date_onboarded"))
     mapped["date_offboarded"] = _serialize_datetime(mapped.get("date_offboarded"))
+    mapped["m365_last_sign_in"] = _serialize_datetime(mapped.get("m365_last_sign_in"))
     return mapped
 
 
@@ -261,6 +262,7 @@ async def create_staff(
     account_action: str | None = None,
     syncro_contact_id: str | None = None,
     source: str = "manual",
+    m365_last_sign_in: datetime | None = None,
 ) -> dict[str, Any]:
     staff_id = await db.execute_returning_lastrowid(
         """
@@ -284,8 +286,9 @@ async def create_staff(
             manager_name,
             account_action,
             syncro_contact_id,
-            source
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            source,
+            m365_last_sign_in
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -308,6 +311,7 @@ async def create_staff(
             account_action,
             syncro_contact_id,
             source,
+            _coerce_datetime(m365_last_sign_in),
         ),
     )
     if not staff_id:
@@ -340,6 +344,7 @@ async def update_staff(
     manager_name: str | None,
     account_action: str | None,
     syncro_contact_id: str | None,
+    m365_last_sign_in: datetime | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
@@ -363,7 +368,8 @@ async def update_staff(
             org_company = %s,
             manager_name = %s,
             account_action = %s,
-            syncro_contact_id = %s
+            syncro_contact_id = %s,
+            m365_last_sign_in = COALESCE(%s, m365_last_sign_in)
         WHERE id = %s
         """,
         (
@@ -386,6 +392,7 @@ async def update_staff(
             manager_name,
             account_action,
             syncro_contact_id,
+            _coerce_datetime(m365_last_sign_in),
             staff_id,
         ),
     )
@@ -397,6 +404,14 @@ async def update_staff(
 
 async def delete_staff(staff_id: int) -> None:
     await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
+
+
+async def update_m365_last_sign_in(staff_id: int, last_sign_in: datetime | None) -> None:
+    """Update only the m365_last_sign_in field for a staff record."""
+    await db.execute(
+        "UPDATE staff SET m365_last_sign_in = %s WHERE id = %s",
+        (_coerce_datetime(last_sign_in), staff_id),
+    )
 
 
 async def delete_m365_staff_not_in(company_id: int, keep_emails: set[str]) -> int:

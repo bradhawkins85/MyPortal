@@ -140,6 +140,7 @@
       org_company: getField('edit-company'),
       manager_name: getField('edit-manager-name'),
       account_action: getField('edit-account-action'),
+      m365_last_sign_in: getField('edit-m365-last-sign-in'),
     };
 
     bindModalDismissal(editModal);
@@ -186,6 +187,7 @@
         if (editFields.account_action) {
           editFields.account_action.value = member.account_action || 'Onboard Requested';
         }
+        setValue(editFields.m365_last_sign_in, member.m365_last_sign_in ? member.m365_last_sign_in.replace('T', ' ').slice(0, 16) : '');
         openModal(editModal);
       });
     });
