@@ -222,6 +222,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
         m365_last_sign_in = m365_service.parse_graph_datetime(
             sign_in_activity.get("lastSignInDateTime")
         )
+        account_enabled = bool(user.get("accountEnabled", True))
+        is_ex_staff = not account_enabled
 
         existing = _find_existing_staff(
             existing_staff,
@@ -243,7 +245,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 mobile_phone=phone or existing.get("mobile_phone"),
                 date_onboarded=existing.get("date_onboarded"),
                 date_offboarded=existing.get("date_offboarded"),
-                enabled=bool(existing.get("enabled", True)),
+                enabled=account_enabled,
+                is_ex_staff=is_ex_staff,
                 street=street or existing.get("street"),
                 city=city or existing.get("city"),
                 state=state or existing.get("state"),
@@ -267,7 +270,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 mobile_phone=phone,
                 date_onboarded=None,
                 date_offboarded=None,
-                enabled=True,
+                enabled=account_enabled,
+                is_ex_staff=is_ex_staff,
                 street=street,
                 city=city,
                 state=state,

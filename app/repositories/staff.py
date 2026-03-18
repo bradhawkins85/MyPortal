@@ -55,6 +55,7 @@ def _serialize_datetime(value: Any) -> str | None:
 def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     mapped = dict(row)
     mapped["enabled"] = bool(int(mapped.get("enabled", 0)))
+    mapped["is_ex_staff"] = bool(int(mapped.get("is_ex_staff", 0)))
     if "company_id" in mapped and mapped["company_id"] is not None:
         mapped["company_id"] = int(mapped["company_id"])
     if "verification_code" in mapped and mapped["verification_code"] is None:
@@ -80,13 +81,15 @@ async def count_staff(company_id: int, *, enabled: bool | None = None) -> int:
 
 
 async def list_staff(
-    company_id: int, *, enabled: bool | None = None
+    company_id: int, *, enabled: bool | None = None, exclude_ex_staff: bool = False
 ) -> list[dict[str, Any]]:
     conditions = ["s.company_id = %s"]
     params: list[Any] = [company_id]
     if enabled is not None:
         conditions.append("s.enabled = %s")
         params.append(1 if enabled else 0)
+    if exclude_ex_staff:
+        conditions.append("s.is_ex_staff = 0")
     where_clause = " AND ".join(conditions)
     rows = await db.fetch_all(
         """
@@ -250,6 +253,7 @@ async def create_staff(
     date_onboarded: datetime | None = None,
     date_offboarded: datetime | None = None,
     enabled: bool = True,
+    is_ex_staff: bool = False,
     street: str | None = None,
     city: str | None = None,
     state: str | None = None,
@@ -275,6 +279,7 @@ async def create_staff(
             date_onboarded,
             date_offboarded,
             enabled,
+            is_ex_staff,
             street,
             city,
             state,
@@ -288,7 +293,7 @@ async def create_staff(
             syncro_contact_id,
             source,
             m365_last_sign_in
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -299,6 +304,7 @@ async def create_staff(
             _coerce_datetime(date_onboarded),
             _coerce_datetime(date_offboarded),
             1 if enabled else 0,
+            1 if is_ex_staff else 0,
             street,
             city,
             state,
@@ -333,6 +339,7 @@ async def update_staff(
     date_onboarded: datetime | None,
     date_offboarded: datetime | None,
     enabled: bool,
+    is_ex_staff: bool = False,
     street: str | None,
     city: str | None,
     state: str | None,
@@ -358,6 +365,7 @@ async def update_staff(
             date_onboarded = %s,
             date_offboarded = %s,
             enabled = %s,
+            is_ex_staff = %s,
             street = %s,
             city = %s,
             state = %s,
@@ -381,6 +389,7 @@ async def update_staff(
             _coerce_datetime(date_onboarded),
             _coerce_datetime(date_offboarded),
             1 if enabled else 0,
+            1 if is_ex_staff else 0,
             street,
             city,
             state,

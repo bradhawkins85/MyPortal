@@ -66,6 +66,7 @@ class StaffResponse(BaseModel):
     date_onboarded: Optional[datetime] = None
     date_offboarded: Optional[datetime] = None
     enabled: bool
+    is_ex_staff: bool = False
     street: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
