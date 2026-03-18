@@ -22,12 +22,13 @@ The endpoint accepts POST requests and responds with HTTP 202 to acknowledge
 callbacks from Xero. A lightweight GET handler is also available for diagnostic
 probes and returns HTTP 200 when the integration module is enabled.
 
-## Ticket billing controls
+## Invoice synchronisation
 
-Super administrators can fine tune which tickets are synchronised by supplying
-comma-separated technical statuses inside the **Billable ticket statuses**
-field. Only tickets matching one of the configured statuses are considered for
-invoicing during the scheduled synchronisation runs.
+The scheduled **Sync to Xero** commands now upload invoices that already exist
+inside MyPortal. After Xero accepts an invoice, MyPortal stores the returned
+Xero invoice identifier, marks the invoice as synchronised, and renames the
+local invoice number to match the Xero invoice number. Running the sync again
+only uploads invoices that do not already have a stored Xero invoice ID.
 
 ### Labour Type Rates
 
