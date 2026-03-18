@@ -1821,6 +1821,50 @@ async def _get_user_mail_enabled_groups(
     return [g for g in groups if g.get("mailEnabled") and g.get("mail")]
 
 
+async def _get_mailbox_group_members(
+    access_token: str, mailbox_email: str
+) -> list[dict[str, Any]]:
+    """Return user members of the M365 group backing the given mailbox.
+
+    Looks up the unified group whose ``mail`` address matches *mailbox_email*,
+    then fetches the direct members of that group.  Only ``#microsoft.graph.user``
+    objects are returned; nested groups, service principals and other non-user
+    member types are excluded.
+
+    Returns an empty list when no backing group is found or when any request
+    fails, so callers can treat any failure as *no members*.
+    """
+    # Find the unified group whose primary SMTP matches the mailbox address.
+    group_filter_url = (
+        "https://graph.microsoft.com/v1.0/groups"
+        f"?$filter=mail eq '{mailbox_email}'&$select=id,displayName"
+    )
+    try:
+        groups = await _graph_get_all(access_token, group_filter_url)
+    except M365Error:
+        return []
+
+    if not groups:
+        return []
+
+    group_id = groups[0].get("id")
+    if not group_id:
+        return []
+
+    # Fetch the direct members of the backing group.
+    members_url = (
+        f"https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+        "?$select=id,displayName,userPrincipalName,mail"
+    )
+    try:
+        members = await _graph_get_all(access_token, members_url)
+    except M365Error:
+        return []
+
+    # Return only user objects (exclude nested groups, service principals, etc.).
+    return [m for m in members if m.get("userPrincipalName")]
+
+
 async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]:
     """Return mailbox usage entries from Microsoft Graph Reports API.
 
@@ -1983,6 +2027,13 @@ async def sync_mailboxes(company_id: int) -> int:
     application permission.  Forwarding rule counts default to 0 for shared
     mailboxes (and for user mailboxes where the rules endpoint is unavailable).
 
+    For each mailbox, the members of its backing M365 unified group are fetched
+    and stored in ``m365_mailbox_members``.  These are the users who have been
+    assigned full access to the mailbox.  This data is used by
+    ``get_mailbox_permissions()`` to report who can access any given mailbox
+    without a live Graph API round-trip at query time.  Run a mailbox sync to
+    refresh the data.
+
     Requires the ``Reports.Read.All`` and ``MailboxSettings.Read`` application
     permissions granted to the provisioned enterprise app.  Re-provision the
     enterprise app to pick up these permissions if they were added after initial
@@ -2089,19 +2140,21 @@ async def sync_mailboxes(company_id: int) -> int:
 
         fw_count = await _count_forwarding_rules(access_token, user["id"])
 
-        # Sync the user's mail-enabled group memberships.  Each group email
-        # represents a mailbox the user can access; recording it in
-        # m365_mailbox_members lets get_mailbox_permissions() report who can
-        # access any given mailbox without a live Graph API round-trip.
-        mail_groups = await _get_user_mail_enabled_groups(access_token, user["id"])
-        for group in mail_groups:
-            group_email = (group.get("mail") or "").strip().lower()
-            if group_email:
+        # Sync the users with full access to this mailbox by querying the
+        # members of its backing M365 group directly.  This surfaces who has
+        # been assigned access to the mailbox rather than relying on the
+        # reverse per-user group membership lookup.
+        mailbox_email = (user.get("mail") or preferred_upn).strip().lower()
+        mb_members = await _get_mailbox_group_members(access_token, mailbox_email)
+        for member in mb_members:
+            member_upn = (member.get("userPrincipalName") or "").strip().lower()
+            member_display = member.get("displayName") or member_upn
+            if member_upn:
                 await m365_repo.upsert_mailbox_member(
                     company_id=company_id,
-                    mailbox_email=group_email,
-                    member_upn=preferred_upn,
-                    member_display_name=display_name,
+                    mailbox_email=mailbox_email,
+                    member_upn=member_upn,
+                    member_display_name=member_display,
                     synced_at=member_sync_start,
                 )
 
@@ -2127,6 +2180,21 @@ async def sync_mailboxes(company_id: int) -> int:
         archive_bytes = int(archive_raw) if archive_raw else 0
         has_archive = bool(entry.get("hasArchive")) or archive_bytes > 0
         display_name = entry.get("displayName") or upn_lower
+
+        # Sync the users with full access to this shared mailbox by querying
+        # the members of its backing M365 group directly.
+        mb_members = await _get_mailbox_group_members(access_token, upn_lower)
+        for member in mb_members:
+            member_upn = (member.get("userPrincipalName") or "").strip().lower()
+            member_display = member.get("displayName") or member_upn
+            if member_upn:
+                await m365_repo.upsert_mailbox_member(
+                    company_id=company_id,
+                    mailbox_email=upn_lower,
+                    member_upn=member_upn,
+                    member_display_name=member_display,
+                    synced_at=member_sync_start,
+                )
 
         rows_to_upsert.append(
             {
@@ -2223,13 +2291,12 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     a direct member of.  In Exchange Online, group membership on a group that
     backs a shared mailbox grants FullAccess.
 
-    **Mailboxes that can access me** – users who have access to this mailbox via
-    an M365 group they belong to.  During ``sync_mailboxes`` each user's
-    mail-enabled group memberships are fetched from Microsoft Graph and stored in
+    **Mailboxes that can access me** – users who have been assigned full access
+    to this mailbox.  During ``sync_mailboxes`` the members of each mailbox's
+    backing M365 group are fetched directly from Microsoft Graph and stored in
     the ``m365_mailbox_members`` table.  This function reads that cached data
-    (keyed by the mailbox's primary SMTP address) so the response is fast and
-    works for every mailbox in the tenant regardless of whether it is backed by
-    an M365 group.  Run a mailbox sync to refresh the data.
+    (keyed by the mailbox's primary SMTP address) so the response is fast.
+    Run a mailbox sync to refresh the data.
 
     Requires the ``Directory.Read.All`` application permission (already in
     ``_PROVISION_APP_ROLES``).
@@ -2287,11 +2354,10 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     # ------------------------------------------------------------------
     # "Mailboxes that can access me": from synced m365_mailbox_members data
     # ------------------------------------------------------------------
-    # During sync_mailboxes() each user's mail-enabled group memberships are
-    # stored in m365_mailbox_members keyed by the group's primary SMTP address.
-    # Querying by the resolved mailbox_email gives all users who belong to a
-    # group that backs this mailbox — this covers every mailbox in the tenant,
-    # not just those with a discoverable backing M365 group.
+    # During sync_mailboxes() the members of each mailbox's backing M365 group
+    # are fetched directly and stored in m365_mailbox_members keyed by the
+    # mailbox's primary SMTP address.  These are the users who have been
+    # assigned full access to the mailbox.
     members = await m365_repo.get_mailbox_members(company_id, mailbox_email)
     accessible_by: list[dict[str, Any]] = [
         {
