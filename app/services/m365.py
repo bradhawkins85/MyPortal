@@ -9,6 +9,7 @@ import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -2330,10 +2331,11 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     # used for a second DB member lookup because some tenants store a different
     # UPN in Exchange usage reports than the M365 group's primary email (e.g.
     # an onmicrosoft.com UPN vs a custom-domain group email address).
+    encoded_upn = quote(upn, safe="")
     try:
         user_data = await _graph_get(
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{upn}?$select=id,displayName,mail",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_upn}?$select=id,displayName,mail",
         )
     except M365Error:
         user_data = {}
