@@ -1336,14 +1336,15 @@ async def _render_error_page(
             "error_message": message,
             "error_status_code": status_code,
             "error_status_message": status_message,
-            "error_detail": detail
-            if settings.environment.lower() != "production"
-            or bool(user and (user.get("is_super_admin") or user.get("is_admin")))
-            else None,
             "error_path": _build_safe_error_path(request),
             "error_reference": error_reference,
         },
     )
+
+    show_error_detail = settings.environment.lower() != "production" or bool(
+        context.get("is_super_admin") or context.get("is_company_admin")
+    )
+    context["error_detail"] = detail if show_error_detail else None
     return templates.TemplateResponse(
         "errors/error.html",
         context,
