@@ -2186,8 +2186,17 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     shared mailbox grants FullAccess.  This reflects group-based delegations only.
 
     **Mailboxes that can access me** – members of the M365 group associated with
-    the given mailbox address, if one exists.  For traditional (non-group) shared
-    mailboxes or user mailboxes without a backing group this section will be empty.
+    the given mailbox address, if one exists.  The search uses the mailbox object's
+    primary SMTP address (``mail`` property) rather than the UPN so it is robust
+    to tenants where the Exchange report UPN differs from the group's primary email
+    (e.g. ``onmicrosoft.com`` UPN vs custom-domain group email).  Uses the
+    ``transitiveMembers`` endpoint so users nested inside sub-groups are also
+    returned.
+
+    For traditional (non-group-backed) shared mailboxes or user mailboxes without
+    a backing M365 group, ``accessible_by`` will be empty because Exchange
+    mailbox-level FullAccess permissions (set via ``Add-MailboxPermission``) are
+    not exposed through the Microsoft Graph directory API.
 
     Requires the ``Directory.Read.All`` application permission, which is already
     included in ``_PROVISION_APP_ROLES``.
@@ -2198,11 +2207,15 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     """
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
 
-    # Look up the user/mailbox directory object to get its stable ID.
+    # Look up the user/mailbox directory object to get its stable ID and primary
+    # SMTP address.  The primary SMTP address (mail) is used for the backing-group
+    # search because some tenants store a different UPN in Exchange usage reports
+    # than the M365 group's primary email (e.g. an onmicrosoft.com UPN vs a
+    # custom-domain group email address).
     try:
         user_data = await _graph_get(
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{upn}?$select=id,displayName",
+            f"https://graph.microsoft.com/v1.0/users/{upn}?$select=id,displayName,mail",
         )
     except M365Error:
         return {"can_access": [], "accessible_by": []}
@@ -2210,6 +2223,11 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     user_id = user_data.get("id")
     if not user_id:
         return {"can_access": [], "accessible_by": []}
+
+    # Prefer the user object's primary SMTP address when it is available; fall
+    # back to the UPN that was passed in (which is the value stored in the local
+    # mailbox table and may differ in domain suffix).
+    mailbox_email = user_data.get("mail") or upn
 
     # ------------------------------------------------------------------
     # "Mailboxes I can access": mail-enabled group memberships
@@ -2239,11 +2257,13 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     # ------------------------------------------------------------------
     accessible_by: list[dict[str, Any]] = []
     try:
-        # Find the M365 group whose primary email matches this mailbox UPN.
-        # $filter on 'mail' is an advanced query requiring ConsistencyLevel.
+        # Find the M365 group whose primary email matches this mailbox address.
+        # Use the resolved mailbox_email (primary SMTP) rather than the raw UPN
+        # so the filter works even when the stored UPN differs from the group's
+        # mail property.  $filter on 'mail' requires ConsistencyLevel: eventual.
         group_filter_url = (
             f"https://graph.microsoft.com/v1.0/groups"
-            f"?$filter=mail eq '{upn}'"
+            f"?$filter=mail eq '{mailbox_email}'"
             "&$select=id,displayName,mail"
             "&$count=true"
         )
@@ -2257,8 +2277,10 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
         if backing_groups:
             group_id = backing_groups[0].get("id")
             if group_id:
+                # Use transitiveMembers so users nested inside sub-groups are
+                # included, not just direct members of the top-level group.
                 members_url = (
-                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/transitiveMembers"
                     "?$select=id,displayName,userPrincipalName"
                 )
                 members = await _graph_get_all(access_token, members_url)
