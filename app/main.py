@@ -12151,6 +12151,19 @@ async def admin_shop_page(
         _vip_profit = shop_service.calculate_profit(product, is_vip=True)
         product["vip_profit"] = float(_vip_profit) if _vip_profit is not None else None
 
+    # Collect the SKU used for price-history look-ups (vendor_sku preferred).
+    history_skus = [
+        product["vendor_sku"] or product["sku"]
+        for product in products
+        if product.get("vendor_sku") or product.get("sku")
+    ]
+    dbp_trends: dict[str, str | None] = {}
+    if history_skus:
+        dbp_trends = await stock_feed_repo.get_recent_dbp_trends(history_skus)
+    for product in products:
+        lookup_sku = product.get("vendor_sku") or product.get("sku") or ""
+        product["dbp_trend"] = dbp_trends.get(lookup_sku)
+
     extra = {
         "title": "Shop admin",
         "categories": categories,
