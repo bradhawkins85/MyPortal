@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import require_issue_tracker_access
 from app.api.dependencies.database import require_database
-from app.core.logging import log_error, log_info
+from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
+from app.core.logging import log_info
 from app.repositories import companies as company_repo
 from app.repositories import issues as issues_repo
 from app.schemas.issues import (
@@ -135,7 +136,18 @@ async def create_issue(
     try:
         await issues_service.ensure_issue_name_available(payload.name)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Issue name validation failed",
+            error_id=error_id,
+            route="issues.create_issue",
+            issue_name=payload.name,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Issue name is invalid or already in use.",
+            error_id=error_id,
+        ) from exc
 
     try:
         issue = await issues_repo.create_issue(
@@ -145,8 +157,19 @@ async def create_issue(
             created_by=user_id,
         )
     except Exception as exc:  # pragma: no cover - integrity errors tested via FastAPI
-        log_error("Failed to create issue", error=str(exc))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to create issue") from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to create issue",
+            error_id=error_id,
+            route="issues.create_issue",
+            issue_name=payload.name,
+            created_by=user_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to create issue.",
+            error_id=error_id,
+        ) from exc
 
     try:
         issue_id = int(issue.get("issue_id"))
@@ -201,9 +224,26 @@ async def update_issue_status(
         )
     except ValueError as exc:
         message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+        lowered = message.lower()
+        if "issue" in lowered and "not found" in lowered:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found") from exc
+        if "company" in lowered and "not found" in lowered:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found") from exc
+        if "status" in lowered and "invalid" in lowered:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid issue status") from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to update issue status",
+            error_id=error_id,
+            route="issues.update_issue_status",
+            issue_name=payload.issue_name,
+            company_name=payload.company_name,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to update issue status.",
+            error_id=error_id,
+        ) from exc
 
     log_info(
         "Issue status updated",
@@ -247,7 +287,19 @@ async def update_issue(
         try:
             await issues_service.ensure_issue_name_available(payload.new_name, exclude_issue_id=issue_id)
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            error_id = new_error_id()
+            log_exception_with_error_id(
+                "Issue rename validation failed",
+                error_id=error_id,
+                route="issues.update_issue",
+                issue_id=issue_id,
+                new_name=payload.new_name,
+            )
+            raise build_client_http_error(
+                status.HTTP_400_BAD_REQUEST,
+                "Issue name is invalid or already in use.",
+                error_id=error_id,
+            ) from exc
         updates["name"] = payload.new_name
     if payload.new_slug is not None:
         updates["slug"] = payload.new_slug

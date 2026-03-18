@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
 from app.schemas.imap import (
     IMAPAccountCreate,
     IMAPAccountResponse,
@@ -35,7 +36,13 @@ async def create_account(
     try:
         account = await imap_service.create_account(data)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id("Failed to create IMAP account", error_id=error_id, route="imap.create_account")
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to create IMAP account. Please verify the account details and try again.",
+            error_id=error_id,
+        ) from exc
     return IMAPAccountResponse.model_validate(account)
 
 
@@ -67,7 +74,18 @@ async def update_account(
     try:
         account = await imap_service.update_account(account_id, data)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to update IMAP account",
+            error_id=error_id,
+            route="imap.update_account",
+            account_id=account_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to update IMAP account. Please verify the account details and try again.",
+            error_id=error_id,
+        ) from exc
     return IMAPAccountResponse.model_validate(account)
 
 
@@ -104,7 +122,29 @@ async def clone_account(
     try:
         account = await imap_service.clone_account(account_id)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to clone IMAP account",
+            error_id=error_id,
+            route="imap.clone_account",
+            account_id=account_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_404_NOT_FOUND,
+            "IMAP account not found.",
+            error_id=error_id,
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to clone IMAP account",
+            error_id=error_id,
+            route="imap.clone_account",
+            account_id=account_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to clone IMAP account.",
+            error_id=error_id,
+        ) from exc
     return IMAPAccountResponse.model_validate(account)
