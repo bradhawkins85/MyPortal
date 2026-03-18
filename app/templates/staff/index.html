@@ -86,46 +86,89 @@
             <input class="form-input" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
           </div>
         </form>
+        <div class="ticket-columns" data-staff-columns>
+          <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
+            <span>Columns</span>
+            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="ticket-columns__panel" data-columns-panel hidden>
+            <p class="ticket-columns__title">Toggle columns</p>
+            <div class="ticket-columns__options">
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="first-name" checked disabled />
+                First name
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="last-name" checked />
+                Last name
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="email" checked />
+                Email
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
+                Mobile
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
+                Code
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
+                Onboarded
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
+                O365 Last Sign In
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
+                Enabled
+              </label>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
     <div class="table-wrapper">
       <table class="table" id="staff-table" data-table>
         <thead>
           <tr>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">First name</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Last name</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Email</th>
-            <th scope="col" data-sort="string" data-mobile-priority="supporting">Mobile</th>
-            <th scope="col" data-sort="string">Code</th>
-            <th scope="col" data-sort="date" data-mobile-priority="supporting">Onboarded</th>
-            <th scope="col" data-sort="date">O365 Last Sign In</th>
-            <th scope="col" data-sort="string" data-mobile-priority="supporting">Enabled</th>
+            <th scope="col" data-sort="string" data-column="first-name" data-mobile-priority="essential">First name</th>
+            <th scope="col" data-sort="string" data-column="last-name" data-mobile-priority="essential">Last name</th>
+            <th scope="col" data-sort="string" data-column="email" data-mobile-priority="essential">Email</th>
+            <th scope="col" data-sort="string" data-column="mobile" data-mobile-priority="supporting">Mobile</th>
+            <th scope="col" data-sort="string" data-column="code">Code</th>
+            <th scope="col" data-sort="date" data-column="onboarded" data-mobile-priority="supporting">Onboarded</th>
+            <th scope="col" data-sort="date" data-column="m365-sign-in">O365 Last Sign In</th>
+            <th scope="col" data-sort="string" data-column="enabled" data-mobile-priority="supporting">Enabled</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for member in staff_members %}
             <tr data-staff-id="{{ member.id }}">
-              <td data-label="First name">{{ member.first_name }}</td>
-              <td data-label="Last name">{{ member.last_name }}</td>
-              <td data-label="Email">{{ member.email }}</td>
-              <td data-label="Mobile">{{ member.mobile_phone or '—' }}</td>
-              <td data-label="Verification code" class="verification-code">{{ member.verification_code or '—' }}</td>
-              <td data-label="Onboarded" data-value="{{ member.date_onboarded or '' }}" data-utc="{{ member.date_onboarded or '' }}">
+              <td data-label="First name" data-column="first-name">{{ member.first_name }}</td>
+              <td data-label="Last name" data-column="last-name">{{ member.last_name }}</td>
+              <td data-label="Email" data-column="email">{{ member.email }}</td>
+              <td data-label="Mobile" data-column="mobile">{{ member.mobile_phone or '—' }}</td>
+              <td data-label="Verification code" data-column="code" class="verification-code">{{ member.verification_code or '—' }}</td>
+              <td data-label="Onboarded" data-column="onboarded" data-value="{{ member.date_onboarded or '' }}" data-utc="{{ member.date_onboarded or '' }}">
                 {% if member.date_onboarded %}
                   {{ member.date_onboarded }}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <td data-label="O365 Last Sign In" data-value="{{ member.m365_last_sign_in or '' }}" data-utc="{{ member.m365_last_sign_in or '' }}">
+              <td data-label="O365 Last Sign In" data-column="m365-sign-in" data-value="{{ member.m365_last_sign_in or '' }}" data-utc="{{ member.m365_last_sign_in or '' }}">
                 {% if member.m365_last_sign_in %}
                   {{ member.m365_last_sign_in }}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <td data-label="Enabled">
+              <td data-label="Enabled" data-column="enabled">
                 <form action="/staff/enabled" method="post" class="inline-form">
                   {% include "partials/csrf.html" %}
                   <input type="hidden" name="staffId" value="{{ member.id }}" />
@@ -307,4 +350,5 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/staff.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/staff_columns.js') }}" defer></script>
 {% endblock %}
