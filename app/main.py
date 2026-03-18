@@ -5945,8 +5945,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Auto-create default sync tasks for the company if not already present.
         existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
         has_m365_sync_task = bool({"sync_m365_data", "sync_o365"} & existing_commands)
+        m365_task_name = (
+            f"{company_name} - Sync Microsoft 365 data"
+            if company_name
+            else "Sync Microsoft 365 data"
+        )
         for command, label in (
-            ("sync_m365_data", "Sync Microsoft 365 data"),
+            ("sync_m365_data", m365_task_name),
             ("sync_staff", "Sync staff directory"),
         ):
             if command == "sync_m365_data" and has_m365_sync_task:
