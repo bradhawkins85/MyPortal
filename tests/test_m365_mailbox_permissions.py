@@ -9,6 +9,8 @@ Covers:
 - Returns empty accessible_by when group filter returns no results
 - Returns empty accessible_by when group member fetch fails
 - Lists are sorted alphabetically by display_name
+- Group filter uses user object mail property (not raw UPN) to handle UPN/email mismatch
+- Uses transitiveMembers endpoint so nested group members are included
 """
 from __future__ import annotations
 
@@ -265,3 +267,113 @@ async def test_get_mailbox_permissions_excludes_members_without_upn():
 
     assert len(result["accessible_by"]) == 1
     assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_uses_mail_property_for_group_filter():
+    """Group filter uses the user object's mail property (primary SMTP), not the raw UPN.
+
+    Tenants where Exchange usage reports store an onmicrosoft.com UPN but the
+    M365 group's primary email is a custom domain would get no results with the
+    old implementation.  The fix reads the mail property from the user lookup
+    and uses that for the group filter.
+    """
+    # User object has a different mail address than the UPN passed in.
+    user_obj = {"id": "uid-shared", "displayName": "Help Desk", "mail": "helpdesk@company.com"}
+    backing_group = [{"id": "group-id", "displayName": "Help Desk", "mail": "helpdesk@company.com"}]
+    group_filter_resp = {"value": backing_group}
+    groups_empty: list[dict[str, Any]] = []
+    members = [_make_user("u1", "Alice", "alice@company.com")]
+
+    captured_urls: list[str] = []
+
+    def _graph_get_side_effect(token: str, url: str, *, extra_headers: Any = None) -> Any:
+        captured_urls.append(url)
+        if "groups?" in url:
+            return group_filter_resp
+        return user_obj
+
+    def _graph_get_all_side_effect(token: str, url: str) -> Any:
+        if "memberOf" in url:
+            return groups_empty
+        return members
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(side_effect=_graph_get_side_effect)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(side_effect=_graph_get_all_side_effect)),
+    ):
+        # UPN passed in uses onmicrosoft.com domain; group filter must use mail property.
+        result = await get_mailbox_permissions(1, "helpdesk@company.onmicrosoft.com")
+
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "alice@company.com"
+
+    # The group filter URL must use the mail property (helpdesk@company.com),
+    # not the raw UPN (helpdesk@company.onmicrosoft.com).
+    group_filter_url = next(u for u in captured_urls if "groups?" in u)
+    assert "helpdesk@company.com" in group_filter_url
+    assert "onmicrosoft.com" not in group_filter_url
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_falls_back_to_upn_when_mail_absent():
+    """When the user object has no mail property the raw UPN is used for the group filter."""
+    user_obj = {"id": "uid-shared", "displayName": "Shared"}  # no mail field
+    group_filter_resp = {"value": []}
+    groups_empty: list[dict[str, Any]] = []
+
+    captured_urls: list[str] = []
+
+    def _graph_get_side_effect(token: str, url: str, *, extra_headers: Any = None) -> Any:
+        captured_urls.append(url)
+        if "groups?" in url:
+            return group_filter_resp
+        return user_obj
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(side_effect=_graph_get_side_effect)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=groups_empty)),
+    ):
+        result = await get_mailbox_permissions(1, "shared@contoso.com")
+
+    assert result["accessible_by"] == []
+    group_filter_url = next(u for u in captured_urls if "groups?" in u)
+    assert "shared@contoso.com" in group_filter_url
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_uses_transitive_members_endpoint():
+    """The accessible_by query uses the transitiveMembers endpoint.
+
+    This ensures users nested inside sub-groups are included, not just direct
+    members of the top-level backing M365 group.
+    """
+    user_obj = {"id": "uid-shared", "displayName": "Shared Box", "mail": "shared@contoso.com"}
+    backing_group = [{"id": "group-shared", "displayName": "Shared Mailbox", "mail": "shared@contoso.com"}]
+    group_filter_resp = {"value": backing_group}
+    groups_empty: list[dict[str, Any]] = []
+    members = [_make_user("u1", "Bob", "bob@contoso.com")]
+
+    captured_get_all_urls: list[str] = []
+
+    def _graph_get_all_side_effect(token: str, url: str) -> Any:
+        captured_get_all_urls.append(url)
+        if "memberOf" in url:
+            return groups_empty
+        return members
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(side_effect=[user_obj, group_filter_resp])),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(side_effect=_graph_get_all_side_effect)),
+    ):
+        result = await get_mailbox_permissions(1, "shared@contoso.com")
+
+    assert len(result["accessible_by"]) == 1
+
+    # Verify that transitiveMembers (not members) was called.
+    members_url = next(u for u in captured_get_all_urls if "group" in u and "memberOf" not in u)
+    assert "transitiveMembers" in members_url
+    assert "/members" not in members_url.split("transitiveMembers")[0].split("/")[-1]
