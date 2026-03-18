@@ -228,3 +228,66 @@ async def get_mailbox_synced_at(company_id: int) -> datetime | None:
         value = row["synced_at"]
         return value if isinstance(value, datetime) else None
     return None
+
+
+async def upsert_mailbox_member(
+    *,
+    company_id: int,
+    mailbox_email: str,
+    member_upn: str,
+    member_display_name: str,
+    synced_at: datetime,
+) -> None:
+    """Insert or update a mailbox-member row for the given company."""
+    await db.execute(
+        """
+        INSERT INTO m365_mailbox_members (
+            company_id, mailbox_email, member_upn, member_display_name, synced_at
+        ) VALUES (%s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            member_display_name = VALUES(member_display_name),
+            synced_at = VALUES(synced_at)
+        """,
+        (
+            company_id,
+            mailbox_email,
+            member_upn,
+            member_display_name,
+            synced_at,
+        ),
+    )
+
+
+async def delete_stale_mailbox_members(
+    company_id: int, synced_before: datetime
+) -> None:
+    """Remove mailbox-member rows that were not touched in the current sync run.
+
+    All rows for *company_id* whose ``synced_at`` timestamp is older than
+    *synced_before* (the timestamp recorded at the start of the sync) are
+    deleted.  Rows written during the current run have ``synced_at >=
+    synced_before`` and are therefore retained.
+
+    Using a timestamp comparison avoids building a large ``NOT IN (...)``
+    clause that could degrade for tenants with many users and group memberships.
+    """
+    await db.execute(
+        "DELETE FROM m365_mailbox_members WHERE company_id = %s AND synced_at < %s",
+        (company_id, synced_before),
+    )
+
+
+async def get_mailbox_members(
+    company_id: int, mailbox_email: str
+) -> list[dict[str, Any]]:
+    """Return synced member rows for the given mailbox email address."""
+    rows = await db.fetch_all(
+        """
+        SELECT member_upn, member_display_name
+        FROM m365_mailbox_members
+        WHERE company_id = %s AND mailbox_email = %s
+        ORDER BY member_display_name ASC
+        """,
+        (company_id, mailbox_email),
+    )
+    return [dict(row) for row in rows]
