@@ -1827,7 +1827,11 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             if not value:
                 return default
             try:
-                return int(value)
+                # Use float() as an intermediate step so that values returned
+                # by the Graph CSV in floating-point notation
+                # (e.g. "5368709120.0" or "5.37E+09") are handled correctly.
+                # Plain integer strings are unaffected.
+                return int(float(value))
             except (TypeError, ValueError):
                 return default
 
@@ -1866,11 +1870,21 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             else normalised_item.get("is deleted")
             or "false"
         ).strip().lower()
+        # "Has Archive" (True/False) is a dedicated column in the Graph CSV
+        # report that indicates whether an online archive is provisioned,
+        # regardless of whether it currently holds any data.
+        has_archive_raw = str(
+            item.get("hasArchive")
+            if "hasArchive" in item
+            else normalised_item.get("has archive")
+            or "false"
+        ).strip().lower()
         return {
             "userPrincipalName": upn,
             "displayName": display_name,
             "storageUsedInBytes": storage_bytes,
             "archiveMailboxStorageUsedInBytes": archive_bytes,
+            "hasArchive": has_archive_raw in {"true", "1", "yes"},
             "isDeleted": is_deleted_raw in {"true", "1", "yes"},
         }
 
@@ -2047,6 +2061,10 @@ async def sync_mailboxes(company_id: int) -> int:
         storage_bytes = int(report_entry.get("storageUsedInBytes") or 0)
         archive_raw = report_entry.get("archiveMailboxStorageUsedInBytes")
         archive_bytes = int(archive_raw) if archive_raw else 0
+        # Use the dedicated "Has Archive" flag from the report when present;
+        # fall back to inferring from bytes > 0 so that non-zero archive
+        # storage is always captured even if the column is absent.
+        has_archive = bool(report_entry.get("hasArchive")) or archive_bytes > 0
         display_name = (
             user.get("displayName")
             or report_entry.get("displayName")
@@ -2062,7 +2080,7 @@ async def sync_mailboxes(company_id: int) -> int:
                 "mailbox_type": "UserMailbox",
                 "storage_used_bytes": storage_bytes,
                 "archive_storage_used_bytes": archive_bytes if archive_bytes > 0 else None,
-                "has_archive": archive_bytes > 0,
+                "has_archive": has_archive,
                 "forwarding_rule_count": fw_count,
             }
         )
@@ -2075,6 +2093,7 @@ async def sync_mailboxes(company_id: int) -> int:
         storage_bytes = int(entry.get("storageUsedInBytes") or 0)
         archive_raw = entry.get("archiveMailboxStorageUsedInBytes")
         archive_bytes = int(archive_raw) if archive_raw else 0
+        has_archive = bool(entry.get("hasArchive")) or archive_bytes > 0
         display_name = entry.get("displayName") or upn_lower
 
         rows_to_upsert.append(
@@ -2084,7 +2103,7 @@ async def sync_mailboxes(company_id: int) -> int:
                 "mailbox_type": "SharedMailbox",
                 "storage_used_bytes": storage_bytes,
                 "archive_storage_used_bytes": archive_bytes if archive_bytes > 0 else None,
-                "has_archive": archive_bytes > 0,
+                "has_archive": has_archive,
                 "forwarding_rule_count": 0,
             }
         )

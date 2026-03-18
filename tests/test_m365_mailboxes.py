@@ -83,12 +83,17 @@ def _make_report_entry(
     storage_bytes: int = 0,
     archive_bytes: int = 0,
     is_deleted: bool = False,
+    has_archive: bool | None = None,
 ) -> dict[str, Any]:
+    # When has_archive is not explicitly provided, infer it from archive_bytes
+    # (mirroring real report data where Has Archive follows the storage field).
+    inferred_has_archive = archive_bytes > 0 if has_archive is None else has_archive
     return {
         "userPrincipalName": upn,
         "displayName": display_name or upn,
         "storageUsedInBytes": storage_bytes,
         "archiveMailboxStorageUsedInBytes": archive_bytes or None,
+        "hasArchive": inferred_has_archive,
         "isDeleted": is_deleted,
     }
 
@@ -413,6 +418,7 @@ async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invali
             "displayName": "Alice Alias",
             "storageUsedInBytes": 0,
             "archiveMailboxStorageUsedInBytes": 0,
+            "hasArchive": False,
             "isDeleted": False,
         }
     ]
@@ -459,6 +465,7 @@ async def test_fetch_mailbox_usage_report_returns_archive_size_from_csv():
             "displayName": "User One",
             "storageUsedInBytes": 5,
             "archiveMailboxStorageUsedInBytes": 1024,
+            "hasArchive": False,
             "isDeleted": False,
         }
     ]
@@ -512,6 +519,7 @@ async def test_fetch_mailbox_usage_report_csv_decodes_utf16_downloads():
             "displayName": "Shared Team",
             "storageUsedInBytes": 2048,
             "archiveMailboxStorageUsedInBytes": 0,
+            "hasArchive": False,
             "isDeleted": False,
         }
     ]
@@ -567,3 +575,145 @@ async def test_fetch_mailbox_usage_report_csv_archive_storage_used_without_mailb
     assert rows[0]["storageUsedInBytes"] == 1073741824
     assert rows[0]["archiveMailboxStorageUsedInBytes"] == 524288000
     assert rows[0]["isDeleted"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_archive_float_string():
+    """Archive storage values returned as floating-point strings (e.g.
+    '5368709120.0') are parsed correctly."""
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            # Microsoft Graph can return storage values with a decimal suffix
+            # (e.g. "5368709120.0") for large archive mailboxes.
+            csv_text = (
+                "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
+                "Storage Used (Byte),Archive Storage Used (Byte)\n"
+                "2024-01-01,user@example.com,Alice,false,1073741824.0,5368709120.0\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert len(rows) == 1
+    assert rows[0]["storageUsedInBytes"] == 1073741824
+    assert rows[0]["archiveMailboxStorageUsedInBytes"] == 5368709120
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_has_archive_column():
+    """'Has Archive' column is read and returned as hasArchive in the
+    normalised entry, even when the archive storage byte count is zero."""
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+            csv_text = (
+                "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
+                "Storage Used (Byte),Archive Storage Used (Byte),Has Archive\n"
+                "2024-01-01,user@example.com,Alice,false,1073741824,0,True\n"
+                "2024-01-01,other@example.com,Bob,false,524288000,0,False\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert len(rows) == 2
+    alice = next(r for r in rows if r["userPrincipalName"] == "user@example.com")
+    bob = next(r for r in rows if r["userPrincipalName"] == "other@example.com")
+    assert alice["hasArchive"] is True
+    assert alice["archiveMailboxStorageUsedInBytes"] == 0
+    assert bob["hasArchive"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_has_archive_from_report_flag():
+    """has_archive is set True when the report's hasArchive flag is True even
+    if archive_storage_used_bytes is zero (e.g. newly provisioned archive)."""
+    report = [_make_report_entry("user@example.com", "Alice", storage_bytes=500, archive_bytes=0, has_archive=True)]
+    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    assert upserted[0]["has_archive"] is True
+    assert upserted[0]["archive_storage_used_bytes"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_has_archive_fallback_from_bytes():
+    """has_archive is set True when archive_bytes > 0, even if the report's
+    hasArchive flag is False (CSV did not include the Has Archive column)."""
+    # Simulate a CSV without a 'Has Archive' column: hasArchive=False but bytes non-zero
+    report = [_make_report_entry("user@example.com", "Alice", storage_bytes=500, archive_bytes=200, has_archive=False)]
+    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    # has_archive should be True because archive_bytes > 0 (fallback)
+    assert upserted[0]["has_archive"] is True
+    assert upserted[0]["archive_storage_used_bytes"] == 200
