@@ -98,6 +98,7 @@
             <th scope="col" data-sort="string" data-mobile-priority="supporting">Mobile</th>
             <th scope="col" data-sort="string">Code</th>
             <th scope="col" data-sort="date" data-mobile-priority="supporting">Onboarded</th>
+            <th scope="col" data-sort="date">O365 Last Sign In</th>
             <th scope="col" data-sort="string" data-mobile-priority="supporting">Enabled</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
@@ -113,6 +114,13 @@
               <td data-label="Onboarded" data-value="{{ member.date_onboarded or '' }}" data-utc="{{ member.date_onboarded or '' }}">
                 {% if member.date_onboarded %}
                   {{ member.date_onboarded }}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="O365 Last Sign In" data-value="{{ member.m365_last_sign_in or '' }}" data-utc="{{ member.m365_last_sign_in or '' }}">
+                {% if member.m365_last_sign_in %}
+                  {{ member.m365_last_sign_in }}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
@@ -149,7 +157,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="8" class="table__empty">No staff records found.</td>
+              <td colspan="9" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -276,6 +284,10 @@
           </div>
         </div>
       </fieldset>
+      <div class="form-field">
+        <label class="form-label" for="edit-m365-last-sign-in">O365 Last Sign In</label>
+        <input class="form-input" id="edit-m365-last-sign-in" readonly />
+      </div>
       <div class="form-actions">
         <button type="submit" class="button">Save changes</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
