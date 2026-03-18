@@ -103,3 +103,28 @@ async def patch_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
 
 async def delete_invoice(invoice_id: int) -> None:
     await db.execute("DELETE FROM invoices WHERE id = %s", (invoice_id,))
+
+
+async def get_max_invoice_seq(prefix: str) -> int:
+    """Return the highest sequence number used for invoice numbers starting with *prefix*.
+
+    Invoice numbers follow the pattern ``{prefix}NNNN`` (e.g. ``INV-202603-0012``).
+    Returns 0 when no matching invoice exists yet.
+    """
+    row = await db.fetch_one(
+        """
+        SELECT MAX(CAST(SUBSTRING(invoice_number, %s) AS UNSIGNED)) AS max_seq
+        FROM invoices
+        WHERE invoice_number LIKE %s
+        """,
+        (len(prefix) + 1, f"{prefix}%"),
+    )
+    if not row:
+        return 0
+    val = row.get("max_seq")
+    if val is None:
+        return 0
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return 0
