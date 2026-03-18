@@ -14,6 +14,7 @@ from app.api.dependencies.auth import (
     require_super_admin,
 )
 from app.api.dependencies.api_keys import get_optional_api_key
+from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
 from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
@@ -344,7 +345,17 @@ async def replace_ticket_statuses_endpoint(
     try:
         definitions = await tickets_service.replace_ticket_statuses(payload.statuses)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Ticket status configuration validation failed",
+            error_id=error_id,
+            route="tickets.replace_ticket_statuses",
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to update ticket status definitions.",
+            error_id=error_id,
+        ) from exc
     items = [
         TicketStatusDefinitionModel(
             tech_status=definition.tech_status,
@@ -476,9 +487,17 @@ async def create_ticket(
             try:
                 status_value = await tickets_service.validate_status_choice(payload.status)
             except ValueError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=str(exc),
+                error_id = new_error_id()
+                log_exception_with_error_id(
+                    "Ticket status validation failed",
+                    error_id=error_id,
+                    route="tickets.create_ticket",
+                    requested_status=payload.status,
+                )
+                raise build_client_http_error(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Invalid ticket status.",
+                    error_id=error_id,
                 ) from exc
         else:
             status_value = await tickets_service.resolve_status_or_default(None)
@@ -535,7 +554,19 @@ async def update_ticket(
         try:
             fields["status"] = await tickets_service.validate_status_choice(fields["status"])
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            error_id = new_error_id()
+            log_exception_with_error_id(
+                "Ticket status validation failed",
+                error_id=error_id,
+                route="tickets.update_ticket",
+                ticket_id=ticket_id,
+                requested_status=fields["status"],
+            )
+            raise build_client_http_error(
+                status.HTTP_400_BAD_REQUEST,
+                "Invalid ticket status.",
+                error_id=error_id,
+            ) from exc
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
     if description_value is not description_marker:
@@ -580,7 +611,17 @@ async def import_syncro_tickets_endpoint(
             end_id=payload.end_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Syncro import request validation failed",
+            error_id=error_id,
+            route="tickets.import_syncro_tickets",
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid Syncro import request.",
+            error_id=error_id,
+        ) from exc
     return SyncroTicketImportSummary(**summary.as_dict())
 
 
@@ -864,7 +905,17 @@ async def create_labour_type_endpoint(
     try:
         record = await labour_types_service.create_labour_type(code=payload.code, name=payload.name, rate=payload.rate)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Labour type validation failed",
+            error_id=error_id,
+            route="tickets.create_labour_type",
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to create labour type.",
+            error_id=error_id,
+        ) from exc
     return LabourTypeModel(**record)
 
 
@@ -882,7 +933,18 @@ async def update_labour_type_endpoint(
             rate=payload.rate,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Labour type validation failed",
+            error_id=error_id,
+            route="tickets.update_labour_type",
+            labour_type_id=labour_type_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to update labour type.",
+            error_id=error_id,
+        ) from exc
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found")
     return LabourTypeModel(**record)
@@ -1317,7 +1379,18 @@ async def split_ticket(
             new_subject=payload.new_subject,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Ticket split validation failed",
+            error_id=error_id,
+            route="tickets.split_ticket",
+            ticket_id=ticket_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to split ticket with the requested replies.",
+            error_id=error_id,
+        ) from exc
     
     if not original or not new_ticket:
         raise HTTPException(
@@ -1350,7 +1423,18 @@ async def merge_tickets(
             target_ticket_id=payload.target_ticket_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Ticket merge validation failed",
+            error_id=error_id,
+            route="tickets.merge_tickets",
+            target_ticket_id=payload.target_ticket_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to merge tickets with the requested inputs.",
+            error_id=error_id,
+        ) from exc
     
     if not merged_ticket:
         raise HTTPException(
