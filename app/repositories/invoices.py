@@ -21,6 +21,9 @@ def _normalise_invoice(row: dict[str, Any]) -> dict[str, Any]:
         invoice["due_date"] = due_date.date()
     elif due_date is None or isinstance(due_date, date):
         invoice["due_date"] = due_date
+    synced_at = invoice.get("synced_to_xero_at")
+    if synced_at is not None and not isinstance(synced_at, datetime):
+        invoice["synced_to_xero_at"] = datetime.fromisoformat(str(synced_at))
     return invoice
 
 
@@ -35,6 +38,20 @@ async def list_company_invoices(company_id: int) -> list[dict[str, Any]]:
 async def get_invoice_by_id(invoice_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
     return _normalise_invoice(row) if row else None
+
+
+async def list_unsynced_company_invoices(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM invoices
+        WHERE company_id = %s
+          AND COALESCE(TRIM(xero_invoice_id), '') = ''
+        ORDER BY due_date ASC, invoice_number ASC, id ASC
+        """,
+        (company_id,),
+    )
+    return [_normalise_invoice(row) for row in rows]
 
 
 async def create_invoice(
