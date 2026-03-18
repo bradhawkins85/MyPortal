@@ -29,7 +29,7 @@
             <code>{{ error_reference or request_id }}</code>
           </p>
         {% endif %}
-        {% if error_detail %}
+        {% if show_error_detail and error_detail %}
           <details class="error-details">
             <summary>Technical details</summary>
             <pre>{{ error_detail }}</pre>
