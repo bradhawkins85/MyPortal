@@ -23,6 +23,12 @@
           </button>
         </div>
         <p class="text-muted">Request: {{ error_path }}</p>
+        {% if error_reference or request_id %}
+          <p class="text-muted">
+            Support reference:
+            <code>{{ error_reference or request_id }}</code>
+          </p>
+        {% endif %}
         {% if error_detail %}
           <details class="error-details">
             <summary>Technical details</summary>
