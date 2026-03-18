@@ -4,7 +4,7 @@ Covers:
 - Returns correct can_access list from live mail-enabled group memberships
 - Ignores groups that are not mail-enabled
 - Returns correct accessible_by list from synced DB member data (m365_mailbox_members)
-- Returns empty lists when user lookup fails (M365Error)
+- Returns empty can_access but still serves accessible_by data when user lookup fails
 - Returns empty can_access when memberOf call fails; accessible_by still served from DB
 - Returns empty accessible_by when DB has no synced data
 - Lists are sorted alphabetically by display_name
@@ -189,8 +189,11 @@ async def test_get_mailbox_permissions_accessible_by_uses_mail_property_for_db_l
 
     assert len(result["accessible_by"]) == 1
     assert result["accessible_by"][0]["upn"] == "alice@company.com"
-    # DB was queried with the mail property, not the raw UPN
-    assert captured_db_email == ["helpdesk@company.com"]
+    # The raw mailbox UPN is checked first, then the canonical mail property.
+    assert captured_db_email == [
+        "helpdesk@company.onmicrosoft.com",
+        "helpdesk@company.com",
+    ]
 
 
 @pytest.mark.anyio("asyncio")
@@ -242,15 +245,46 @@ async def test_get_mailbox_permissions_accessible_by_display_name_fallback():
 
 @pytest.mark.anyio("asyncio")
 async def test_get_mailbox_permissions_returns_empty_on_user_lookup_failure():
-    """If the user lookup raises M365Error, both lists are empty."""
+    """If the user lookup raises M365Error, can_access is empty and DB-backed data still loads."""
+    db_members = [_db_member("delegate@contoso.com", "Delegate User")]
+
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(side_effect=M365Error("404"))),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
     ):
-        result = await get_mailbox_permissions(1, "missing@contoso.com")
+        result = await get_mailbox_permissions(1, "shared@contoso.com")
 
     assert result["can_access"] == []
-    assert result["accessible_by"] == []
+    assert result["accessible_by"] == [
+        {"display_name": "Delegate User", "upn": "delegate@contoso.com"}
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_accessible_by_combines_raw_upn_and_mail_lookups():
+    """accessible_by includes members found via both the requested mailbox UPN and the Graph mail value."""
+    user_obj = {"id": "uid-shared", "displayName": "Help Desk", "mail": "helpdesk@company.com"}
+
+    async def _fake_get_members(company_id: int, mailbox_email: str) -> list[dict]:
+        if mailbox_email == "helpdesk@company.onmicrosoft.com":
+            return [_db_member("raw@company.com", "Raw Lookup User")]
+        if mailbox_email == "helpdesk@company.com":
+            return [_db_member("mail@company.com", "Mail Lookup User")]
+        return []
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+    ):
+        result = await get_mailbox_permissions(1, "helpdesk@company.onmicrosoft.com")
+
+    assert result["accessible_by"] == [
+        {"display_name": "Mail Lookup User", "upn": "mail@company.com"},
+        {"display_name": "Raw Lookup User", "upn": "raw@company.com"},
+    ]
 
 
 @pytest.mark.anyio("asyncio")
