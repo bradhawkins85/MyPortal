@@ -2307,38 +2307,55 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     """
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
 
-    # Look up the user/mailbox directory object to get its stable ID and primary
-    # SMTP address.  The primary SMTP address (mail) is used for the DB member
-    # lookup because some tenants store a different UPN in Exchange usage reports
-    # than the M365 group's primary email (e.g. an onmicrosoft.com UPN vs a
-    # custom-domain group email address).
+    raw_mailbox_email = upn.lower().strip()
+    accessible_by_map: dict[str, dict[str, Any]] = {}
+
+    def _store_accessible_members(members: list[dict[str, Any]]) -> None:
+        for member in members:
+            member_upn = (member.get("member_upn") or "").strip().lower()
+            if not member_upn:
+                continue
+            accessible_by_map[member_upn] = {
+                "display_name": member.get("member_display_name") or member_upn,
+                "upn": member_upn,
+            }
+
+    # Start with the mailbox identifier requested by the UI so shared mailboxes
+    # can still show synced access data even when they are not resolvable via
+    # the /users Graph endpoint.
+    _store_accessible_members(await m365_repo.get_mailbox_members(company_id, raw_mailbox_email))
+
+    # Look up the user/mailbox directory object to get its stable ID and, when
+    # available, its primary SMTP address. The primary SMTP address (mail) is
+    # used for a second DB member lookup because some tenants store a different
+    # UPN in Exchange usage reports than the M365 group's primary email (e.g.
+    # an onmicrosoft.com UPN vs a custom-domain group email address).
     try:
         user_data = await _graph_get(
             access_token,
             f"https://graph.microsoft.com/v1.0/users/{upn}?$select=id,displayName,mail",
         )
     except M365Error:
-        return {"can_access": [], "accessible_by": []}
+        user_data = {}
 
-    user_id = user_data.get("id")
-    if not user_id:
-        return {"can_access": [], "accessible_by": []}
-
-    # Prefer the user object's primary SMTP address when it is available; fall
-    # back to the UPN that was passed in.
-    mailbox_email = (user_data.get("mail") or upn).lower().strip()
+    mailbox_email = (user_data.get("mail") or raw_mailbox_email).lower().strip()
+    if mailbox_email != raw_mailbox_email:
+        _store_accessible_members(await m365_repo.get_mailbox_members(company_id, mailbox_email))
 
     # ------------------------------------------------------------------
     # "Mailboxes I can access": live mail-enabled group memberships
     # ------------------------------------------------------------------
-    member_of_url = (
-        f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf"
-        "?$select=id,displayName,mail,mailEnabled"
-    )
-    try:
-        groups = await _graph_get_all(access_token, member_of_url)
-    except M365Error:
-        groups = []
+    user_id = user_data.get("id")
+    groups: list[dict[str, Any]] = []
+    if user_id:
+        member_of_url = (
+            f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf"
+            "?$select=id,displayName,mail,mailEnabled"
+        )
+        try:
+            groups = await _graph_get_all(access_token, member_of_url)
+        except M365Error:
+            groups = []
 
     can_access: list[dict[str, Any]] = []
     for group in groups:
@@ -2358,14 +2375,7 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     # are fetched directly and stored in m365_mailbox_members keyed by the
     # mailbox's primary SMTP address.  These are the users who have been
     # assigned full access to the mailbox.
-    members = await m365_repo.get_mailbox_members(company_id, mailbox_email)
-    accessible_by: list[dict[str, Any]] = [
-        {
-            "display_name": m.get("member_display_name") or m["member_upn"],
-            "upn": m["member_upn"],
-        }
-        for m in members
-    ]
+    accessible_by = list(accessible_by_map.values())
     accessible_by.sort(key=lambda x: x["display_name"].lower())
 
     return {"can_access": can_access, "accessible_by": accessible_by}
