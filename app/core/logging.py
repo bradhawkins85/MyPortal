@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -32,18 +33,58 @@ def configure_logging() -> None:
                 )
 
 
+def _sanitize_log_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _sanitize_log_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_log_value(item) for item in value]
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
+
+
+def _sanitize_log_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    return {str(key): _sanitize_log_value(value) for key, value in meta.items()}
+
+
 def _format_meta(meta: dict[str, Any]) -> str:
     return " ".join(f"{key}={meta[key]}" for key in sorted(meta))
 
 
-def log_error(message: str, **meta) -> None:
-    if meta:
-        logger.bind(**meta).error(f"{message} | {_format_meta(meta)}")
+def log_error(
+    message: str,
+    *,
+    exc: Exception | None = None,
+    include_traceback: bool = False,
+    **meta,
+) -> None:
+    if "exc_info" in meta:
+        include_traceback = include_traceback or bool(meta.pop("exc_info"))
+    sanitized_meta = _sanitize_log_meta(meta)
+    if exc is not None:
+        include_traceback = True
+        sanitized_meta.setdefault("error_type", type(exc).__name__)
+    if include_traceback:
+        bound_logger = logger.bind(**sanitized_meta) if sanitized_meta else logger
+        if sanitized_meta:
+            bound_logger.exception(f"{message} | {_format_meta(sanitized_meta)}")
+        else:
+            bound_logger.exception(message)
+        return
+    if sanitized_meta:
+        logger.bind(**sanitized_meta).error(f"{message} | {_format_meta(sanitized_meta)}")
     else:
         logger.error(message)
 
 
 def log_info(message: str, **meta) -> None:
+    meta = _sanitize_log_meta(meta)
     if meta:
         logger.bind(**meta).info(f"{message} | {_format_meta(meta)}")
     else:
@@ -51,6 +92,7 @@ def log_info(message: str, **meta) -> None:
 
 
 def log_warning(message: str, **meta) -> None:
+    meta = _sanitize_log_meta(meta)
     if meta:
         logger.bind(**meta).warning(f"{message} | {_format_meta(meta)}")
     else:
@@ -58,6 +100,7 @@ def log_warning(message: str, **meta) -> None:
 
 
 def log_debug(message: str, **meta) -> None:
+    meta = _sanitize_log_meta(meta)
     if meta:
         logger.bind(**meta).debug(f"{message} | {_format_meta(meta)}")
     else:
@@ -121,7 +164,7 @@ def log_audit_event(
         meta["ip"] = ip_address
 
     # Add any extra metadata
-    meta.update(extra_meta)
+    meta.update(_sanitize_log_meta(extra_meta))
 
     message = " ".join(parts)
     if meta:

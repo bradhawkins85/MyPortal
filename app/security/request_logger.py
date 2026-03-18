@@ -38,10 +38,16 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         # Log incoming request
         start_time = time.time()
+        request_id = request.headers.get("x-request-id") or request.headers.get("x-correlation-id")
+        user_id = getattr(request.state, "user_id", None)
+
         log_debug(
             "Incoming request",
+            event="request_started",
+            request_id=request_id,
             method=request.method,
             path=path,
+            user_id=user_id,
             client_ip=client_ip,
             user_agent=request.headers.get("user-agent", "unknown"),
         )
@@ -53,11 +59,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             duration = time.time() - start_time
             log_error(
                 "Request raised unhandled exception",
+                event="request_failed",
+                request_id=request_id,
                 method=request.method,
                 path=path,
+                user_id=user_id,
                 duration_ms=round(duration * 1000, 2),
                 client_ip=client_ip,
-                error=str(exc),
+                exc=exc,
             )
             raise
 
@@ -74,8 +83,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
         log_function(
             message,
+            event="request_completed",
+            request_id=request_id,
             method=request.method,
             path=path,
+            user_id=user_id,
             status_code=response.status_code,
             duration_ms=round(duration * 1000, 2),
             client_ip=client_ip,
