@@ -1379,7 +1379,14 @@ async def handle_http_exception(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):  # pragma: no cover - defensive
-    log_error("Unhandled application error", error=str(exc), request_path=str(request.url))
+    log_error(
+        "Unhandled application error",
+        event="unhandled_exception",
+        request_id=request.headers.get("x-request-id") or request.headers.get("x-correlation-id"),
+        path=request.url.path,
+        user_id=getattr(request.state, "user_id", None),
+        exc=exc,
+    )
     if _request_prefers_json(request):
         return JSONResponse(
             {"detail": "Internal server error"},
@@ -7829,8 +7836,15 @@ async def search_by_phone_number(request: Request):
             user_id=user.get("id"),
             company_ids=active_company_ids or None,
         )
-    except Exception as e:
-        log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
+    except Exception as exc:
+        log_error(
+            "Error searching tickets by phone number",
+            event="phone_search_failed",
+            request_id=request.headers.get("x-request-id") or request.headers.get("x-correlation-id"),
+            path=request.url.path,
+            user_id=user.get("id"),
+            exc=exc,
+        )
         # On error, redirect to tickets page with error message
         error_msg = quote("Failed to search tickets by phone number")
         return RedirectResponse(
@@ -13714,9 +13728,12 @@ async def _render_tickets_dashboard(
             except Exception as exc:
                 log_error(
                     "Error searching tickets by phone number",
+                    event="phone_search_failed",
+                    request_id=request.headers.get("x-request-id") or request.headers.get("x-correlation-id"),
+                    path=request.url.path,
+                    user_id=user.get("id"),
                     phone_number_provided=True,
-                    error=str(exc),
-                    exc_info=True
+                    exc=exc,
                 )
                 error_message = "Failed to search tickets by phone number. Please try again."
                 # Load normal dashboard on error
