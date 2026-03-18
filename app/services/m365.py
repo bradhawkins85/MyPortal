@@ -2079,7 +2079,7 @@ async def sync_mailboxes(company_id: int) -> int:
                 "display_name": display_name,
                 "mailbox_type": "UserMailbox",
                 "storage_used_bytes": storage_bytes,
-                "archive_storage_used_bytes": archive_bytes if archive_bytes > 0 else None,
+                "archive_storage_used_bytes": archive_bytes if has_archive else None,
                 "has_archive": has_archive,
                 "forwarding_rule_count": fw_count,
             }
@@ -2102,7 +2102,7 @@ async def sync_mailboxes(company_id: int) -> int:
                 "display_name": display_name,
                 "mailbox_type": "SharedMailbox",
                 "storage_used_bytes": storage_bytes,
-                "archive_storage_used_bytes": archive_bytes if archive_bytes > 0 else None,
+                "archive_storage_used_bytes": archive_bytes if has_archive else None,
                 "has_archive": has_archive,
                 "forwarding_rule_count": 0,
             }
