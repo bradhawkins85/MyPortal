@@ -396,7 +396,7 @@ async def update_stock_feed() -> int:
         sku = str(item.get("sku") or "").strip()
         if not sku:
             continue
-        dbp = stock_feed_repo._coerce_decimal(item.get("dbp"))
+        dbp = _to_decimal(item.get("dbp"))
         try:
             await stock_feed_repo.record_price_if_changed(sku, dbp)
         except Exception as exc:  # pragma: no cover - best-effort
