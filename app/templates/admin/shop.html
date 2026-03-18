@@ -177,6 +177,11 @@
               <td data-label="DBP" data-column="dbp" data-value="{{ product.buy_price if product.buy_price is not none else '' }}">
                 {% if product.buy_price is not none %}
                   ${{ '%.2f'|format(product.buy_price) }}
+                  {% if product.dbp_trend == 'up' %}
+                    <span class="text-danger" title="Price increased in the last 30 days">&#9650;</span>
+                  {% elif product.dbp_trend == 'down' %}
+                    <span class="text-success" title="Price decreased in the last 30 days">&#9660;</span>
+                  {% endif %}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
