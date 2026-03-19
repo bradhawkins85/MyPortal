@@ -7,6 +7,7 @@ Covers:
 - sync_mailboxes writes forwarding rules count for user mailboxes
 - get_user_mailboxes and get_shared_mailboxes delegate to the repository
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -15,7 +16,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import m365 as m365_service
-from app.services.m365 import M365Error, _count_forwarding_rules
+from app.services.m365 import (
+    M365Error,
+    _count_forwarding_rules,
+    _extract_direct_mailbox_permission_members,
+)
 
 
 @pytest.fixture
@@ -55,7 +60,9 @@ async def test_count_forwarding_rules_counts_redirect_to():
 @pytest.mark.anyio("asyncio")
 async def test_count_forwarding_rules_returns_zero_on_error():
     """Returns 0 when the Graph API raises M365Error (e.g. no mailbox)."""
-    with patch.object(m365_service, "_graph_get_all", AsyncMock(side_effect=M365Error("403"))):
+    with patch.object(
+        m365_service, "_graph_get_all", AsyncMock(side_effect=M365Error("403"))
+    ):
         count = await _count_forwarding_rules("token", "user-id")
     assert count == 0
 
@@ -115,15 +122,25 @@ async def test_sync_mailboxes_classifies_user_vs_shared():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         total = await m365_service.sync_mailboxes(1)
 
@@ -154,15 +171,25 @@ async def test_sync_mailboxes_matches_user_to_report_by_mail_alias():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         total = await m365_service.sync_mailboxes(1)
 
@@ -176,7 +203,9 @@ async def test_sync_mailboxes_matches_user_to_report_by_mail_alias():
 async def test_sync_mailboxes_stores_forwarding_rule_count():
     """Forwarding rule count from _count_forwarding_rules is stored for user mailboxes."""
     report = [_make_report_entry("user@example.com", "Alice")]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted: list[dict[str, Any]] = []
 
@@ -184,15 +213,25 @@ async def test_sync_mailboxes_stores_forwarding_rule_count():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=3)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=3)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -202,8 +241,14 @@ async def test_sync_mailboxes_stores_forwarding_rule_count():
 @pytest.mark.anyio("asyncio")
 async def test_sync_mailboxes_archive_populated_when_present():
     """archive_storage_used_bytes is populated when non-zero in the report."""
-    report = [_make_report_entry("user@example.com", "Alice", storage_bytes=500, archive_bytes=200)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    report = [
+        _make_report_entry(
+            "user@example.com", "Alice", storage_bytes=500, archive_bytes=200
+        )
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted: list[dict[str, Any]] = []
 
@@ -211,15 +256,25 @@ async def test_sync_mailboxes_archive_populated_when_present():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -231,7 +286,9 @@ async def test_sync_mailboxes_archive_populated_when_present():
 async def test_sync_mailboxes_archive_none_when_absent():
     """archive_storage_used_bytes is None when not present in the report."""
     report = [_make_report_entry("user@example.com", "Alice", storage_bytes=100)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted: list[dict[str, Any]] = []
 
@@ -239,15 +296,25 @@ async def test_sync_mailboxes_archive_none_when_absent():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -262,7 +329,9 @@ async def test_sync_mailboxes_skips_deleted_entries():
         _make_report_entry("user@example.com", "Alice", storage_bytes=100),
         _make_report_entry("deleted@example.com", "Gone", is_deleted=True),
     ]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted: list[dict[str, Any]] = []
 
@@ -270,15 +339,25 @@ async def test_sync_mailboxes_skips_deleted_entries():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         total = await m365_service.sync_mailboxes(1)
 
@@ -294,8 +373,16 @@ async def test_sync_mailboxes_skips_deleted_entries():
 @pytest.mark.anyio("asyncio")
 async def test_get_user_mailboxes_delegates_to_repo():
     """get_user_mailboxes calls m365_repo.get_mailboxes with 'UserMailbox'."""
-    fake_rows = [{"user_principal_name": "u@x.com", "mailbox_type": "UserMailbox", "display_name": "Alice"}]
-    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)) as mock_get:
+    fake_rows = [
+        {
+            "user_principal_name": "u@x.com",
+            "mailbox_type": "UserMailbox",
+            "display_name": "Alice",
+        }
+    ]
+    with patch.object(
+        m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)
+    ) as mock_get:
         result = await m365_service.get_user_mailboxes(42)
     mock_get.assert_called_once_with(42, "UserMailbox")
     assert result == fake_rows
@@ -304,8 +391,16 @@ async def test_get_user_mailboxes_delegates_to_repo():
 @pytest.mark.anyio("asyncio")
 async def test_get_shared_mailboxes_delegates_to_repo():
     """get_shared_mailboxes calls m365_repo.get_mailboxes with 'SharedMailbox'."""
-    fake_rows = [{"user_principal_name": "shared@x.com", "mailbox_type": "SharedMailbox", "display_name": "Shared Box"}]
-    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)) as mock_get:
+    fake_rows = [
+        {
+            "user_principal_name": "shared@x.com",
+            "mailbox_type": "SharedMailbox",
+            "display_name": "Shared Box",
+        }
+    ]
+    with patch.object(
+        m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)
+    ) as mock_get:
         result = await m365_service.get_shared_mailboxes(42)
     mock_get.assert_called_once_with(42, "SharedMailbox")
     assert result == fake_rows
@@ -316,10 +411,18 @@ async def test_get_user_mailboxes_filters_package_mailboxes():
     """get_user_mailboxes excludes mailboxes whose display_name matches the package_ UUID pattern."""
     fake_rows = [
         {"user_principal_name": "u@x.com", "display_name": "Alice"},
-        {"user_principal_name": "p@x.com", "display_name": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},
-        {"user_principal_name": "p2@x.com", "display_name": "package_61fd5e57-4ae4-431b-9f34-16dfeed01fbb"},
+        {
+            "user_principal_name": "p@x.com",
+            "display_name": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae",
+        },
+        {
+            "user_principal_name": "p2@x.com",
+            "display_name": "package_61fd5e57-4ae4-431b-9f34-16dfeed01fbb",
+        },
     ]
-    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)):
+    with patch.object(
+        m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)
+    ):
         result = await m365_service.get_user_mailboxes(42)
     assert len(result) == 1
     assert result[0]["display_name"] == "Alice"
@@ -330,9 +433,14 @@ async def test_get_shared_mailboxes_filters_package_mailboxes():
     """get_shared_mailboxes excludes mailboxes whose display_name matches the package_ UUID pattern."""
     fake_rows = [
         {"user_principal_name": "shared@x.com", "display_name": "Shared Box"},
-        {"user_principal_name": "pkg@x.com", "display_name": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},
+        {
+            "user_principal_name": "pkg@x.com",
+            "display_name": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae",
+        },
     ]
-    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)):
+    with patch.object(
+        m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)
+    ):
         result = await m365_service.get_shared_mailboxes(42)
     assert len(result) == 1
     assert result[0]["display_name"] == "Shared Box"
@@ -343,10 +451,18 @@ async def test_get_user_mailboxes_keeps_non_package_similar_names():
     """Mailboxes with names that look similar but don't match the pattern are kept."""
     fake_rows = [
         {"user_principal_name": "a@x.com", "display_name": "package_not-a-uuid"},
-        {"user_principal_name": "b@x.com", "display_name": "Package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},  # case-insensitive match → filtered
-        {"user_principal_name": "c@x.com", "display_name": "my_package_9024cbae-6e9a-4cee-934e-5f05143cd7ae"},  # prefix doesn't match
+        {
+            "user_principal_name": "b@x.com",
+            "display_name": "Package_9024cbae-6e9a-4cee-934e-5f05143cd7ae",
+        },  # case-insensitive match → filtered
+        {
+            "user_principal_name": "c@x.com",
+            "display_name": "my_package_9024cbae-6e9a-4cee-934e-5f05143cd7ae",
+        },  # prefix doesn't match
     ]
-    with patch.object(m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)):
+    with patch.object(
+        m365_service.m365_repo, "get_mailboxes", AsyncMock(return_value=fake_rows)
+    ):
         result = await m365_service.get_user_mailboxes(42)
     upns = {r["user_principal_name"] for r in result}
     assert "b@x.com" not in upns  # filtered (case-insensitive)
@@ -359,7 +475,12 @@ async def test_fetch_mailbox_usage_report_includes_archive_size():
     """Mailbox report collects archive mailbox size from the CSV export."""
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
             self.status_code = status_code
             self.text = text
             self.content = text.encode("utf-8")
@@ -378,7 +499,9 @@ async def test_fetch_mailbox_usage_report_includes_archive_size():
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             csv_text = (
                 "Report Refresh Date,User Principal Name,Display Name,Is Deleted,Storage Used (Byte),"
                 "Archive Mailbox Storage Used (Byte)\n"
@@ -401,7 +524,12 @@ async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invali
     """CSV export tolerates header case/BOM drift and invalid numeric fields."""
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
             self.status_code = status_code
             self.text = text
             self.content = text.encode("utf-8")
@@ -420,7 +548,9 @@ async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invali
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             csv_text = (
                 "\ufeffUser principal name, display name ,is deleted,storage used (byte),archive mailbox storage used (byte)\n"
                 "ALIAS@EXAMPLE.COM,Alice Alias,false,abc,\n"
@@ -447,7 +577,12 @@ async def test_fetch_mailbox_usage_report_returns_archive_size_from_csv():
     """Archive mailbox size is collected from the CSV export."""
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
             self.status_code = status_code
             self.text = text
             self.content = text.encode("utf-8")
@@ -466,7 +601,9 @@ async def test_fetch_mailbox_usage_report_returns_archive_size_from_csv():
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             csv_text = (
                 "User Principal Name,Display Name,Is Deleted,Storage Used (Byte),"
                 "Archive Mailbox Storage Used (Byte)\n"
@@ -519,14 +656,18 @@ async def test_fetch_mailbox_usage_report_csv_decodes_utf16_downloads():
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             csv_text = (
                 "User Principal Name,Display Name,Is Deleted,Storage Used (Byte),Archive Mailbox Storage Used (Byte)\n"
                 "shared@example.com,Shared Team,false,2048,0\n"
             )
             # Simulate httpx incorrectly exposing text with embedded NULs when
             # the payload is UTF-16 but no charset is supplied.
-            return _FakeResponse(200, text="\x00bad\x00decode", content=csv_text.encode("utf-16"))
+            return _FakeResponse(
+                200, text="\x00bad\x00decode", content=csv_text.encode("utf-16")
+            )
 
     with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
         rows = await m365_service._fetch_mailbox_usage_report("tok")
@@ -550,7 +691,12 @@ async def test_fetch_mailbox_usage_report_csv_archive_storage_used_without_mailb
     name used by the Microsoft Graph CSV export for getMailboxUsageDetail."""
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
             self.status_code = status_code
             self.text = text
             self.content = text.encode("utf-8")
@@ -569,7 +715,9 @@ async def test_fetch_mailbox_usage_report_csv_archive_storage_used_without_mailb
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             # Microsoft Graph CSV uses "Archive Storage Used (Byte)" (without "Mailbox")
             csv_text = (
                 "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
@@ -582,7 +730,11 @@ async def test_fetch_mailbox_usage_report_csv_archive_storage_used_without_mailb
         patch.object(
             m365_service,
             "_graph_get_all",
-            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (400)", http_status=400)),
+            AsyncMock(
+                side_effect=M365Error(
+                    "Microsoft Graph request failed (400)", http_status=400
+                )
+            ),
         ),
         patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient),
     ):
@@ -601,7 +753,12 @@ async def test_fetch_mailbox_usage_report_csv_archive_float_string():
     '5368709120.0') are parsed correctly."""
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
             self.status_code = status_code
             self.text = text
             self.content = text.encode("utf-8")
@@ -620,7 +777,9 @@ async def test_fetch_mailbox_usage_report_csv_archive_float_string():
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             # Microsoft Graph can return storage values with a decimal suffix
             # (e.g. "5368709120.0") for large archive mailboxes.
             csv_text = (
@@ -644,7 +803,12 @@ async def test_fetch_mailbox_usage_report_csv_has_archive_column():
     normalised entry, even when the archive storage byte count is zero."""
 
     class _FakeResponse:
-        def __init__(self, status_code: int, text: str = "", headers: dict[str, str] | None = None):
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
             self.status_code = status_code
             self.text = text
             self.content = text.encode("utf-8")
@@ -663,7 +827,9 @@ async def test_fetch_mailbox_usage_report_csv_has_archive_column():
         async def get(self, url: str, headers: dict[str, str] | None = None):
             self.calls += 1
             if self.calls == 1:
-                return _FakeResponse(302, headers={"Location": "https://download.example/report.csv"})
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
             csv_text = (
                 "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
                 "Storage Used (Byte),Archive Storage Used (Byte),Has Archive\n"
@@ -687,8 +853,18 @@ async def test_fetch_mailbox_usage_report_csv_has_archive_column():
 async def test_sync_mailboxes_has_archive_from_report_flag():
     """has_archive is set True when the report's hasArchive flag is True even
     if archive_storage_used_bytes is zero (e.g. newly provisioned archive)."""
-    report = [_make_report_entry("user@example.com", "Alice", storage_bytes=500, archive_bytes=0, has_archive=True)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    report = [
+        _make_report_entry(
+            "user@example.com",
+            "Alice",
+            storage_bytes=500,
+            archive_bytes=0,
+            has_archive=True,
+        )
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted: list[dict[str, Any]] = []
 
@@ -696,15 +872,25 @@ async def test_sync_mailboxes_has_archive_from_report_flag():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -717,8 +903,18 @@ async def test_sync_mailboxes_has_archive_fallback_from_bytes():
     """has_archive is set True when archive_bytes > 0, even if the report's
     hasArchive flag is False (CSV did not include the Has Archive column)."""
     # Simulate a CSV without a 'Has Archive' column: hasArchive=False but bytes non-zero
-    report = [_make_report_entry("user@example.com", "Alice", storage_bytes=500, archive_bytes=200, has_archive=False)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    report = [
+        _make_report_entry(
+            "user@example.com",
+            "Alice",
+            storage_bytes=500,
+            archive_bytes=200,
+            has_archive=False,
+        )
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted: list[dict[str, Any]] = []
 
@@ -726,15 +922,25 @@ async def test_sync_mailboxes_has_archive_fallback_from_bytes():
         upserted.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -752,9 +958,16 @@ async def test_sync_mailboxes_has_archive_fallback_from_bytes():
 async def test_sync_mailboxes_upserts_member_rows_for_user_groups():
     """For each mail-enabled group a user belongs to, a member row is upserted."""
     report = [_make_report_entry("user@example.com", "Alice", storage_bytes=100)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
     mail_groups = [
-        {"id": "g1", "displayName": "Shared Box", "mail": "shared@example.com", "mailEnabled": True},
+        {
+            "id": "g1",
+            "displayName": "Shared Box",
+            "mail": "shared@example.com",
+            "mailEnabled": True,
+        },
     ]
 
     upserted_members: list[dict] = []
@@ -763,15 +976,31 @@ async def test_sync_mailboxes_upserts_member_rows_for_user_groups():
         upserted_members.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=mail_groups)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(
+            m365_service,
+            "_get_user_mail_enabled_groups",
+            AsyncMock(return_value=mail_groups),
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service.m365_repo, "upsert_mailbox_member", side_effect=fake_upsert_member),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo,
+            "upsert_mailbox_member",
+            side_effect=fake_upsert_member,
+        ),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -785,10 +1014,22 @@ async def test_sync_mailboxes_upserts_member_rows_for_user_groups():
 async def test_sync_mailboxes_upserts_one_row_per_group():
     """A user in multiple groups produces one member row per group."""
     report = [_make_report_entry("user@example.com", "Alice", storage_bytes=100)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
     mail_groups = [
-        {"id": "g1", "displayName": "Sales", "mail": "sales@example.com", "mailEnabled": True},
-        {"id": "g2", "displayName": "Support", "mail": "support@example.com", "mailEnabled": True},
+        {
+            "id": "g1",
+            "displayName": "Sales",
+            "mail": "sales@example.com",
+            "mailEnabled": True,
+        },
+        {
+            "id": "g2",
+            "displayName": "Support",
+            "mail": "support@example.com",
+            "mailEnabled": True,
+        },
     ]
 
     upserted_members: list[dict] = []
@@ -797,15 +1038,31 @@ async def test_sync_mailboxes_upserts_one_row_per_group():
         upserted_members.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=mail_groups)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(
+            m365_service,
+            "_get_user_mail_enabled_groups",
+            AsyncMock(return_value=mail_groups),
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service.m365_repo, "upsert_mailbox_member", side_effect=fake_upsert_member),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo,
+            "upsert_mailbox_member",
+            side_effect=fake_upsert_member,
+        ),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
@@ -821,9 +1078,16 @@ async def test_sync_mailboxes_calls_delete_stale_members_with_sync_timestamp():
     from datetime import datetime
 
     report = [_make_report_entry("user@example.com", "Alice", storage_bytes=100)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
     mail_groups = [
-        {"id": "g1", "displayName": "Shared", "mail": "shared@example.com", "mailEnabled": True},
+        {
+            "id": "g1",
+            "displayName": "Shared",
+            "mail": "shared@example.com",
+            "mailEnabled": True,
+        },
     ]
 
     delete_calls: list = []
@@ -832,15 +1096,29 @@ async def test_sync_mailboxes_calls_delete_stale_members_with_sync_timestamp():
         delete_calls.append((company_id, synced_before))
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=mail_groups)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(
+            m365_service,
+            "_get_user_mail_enabled_groups",
+            AsyncMock(return_value=mail_groups),
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
         patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", side_effect=fake_delete),
+        patch.object(
+            m365_service.m365_repo,
+            "delete_stale_mailbox_members",
+            side_effect=fake_delete,
+        ),
     ):
         before = datetime.utcnow()
         await m365_service.sync_mailboxes(1)
@@ -857,7 +1135,9 @@ async def test_sync_mailboxes_calls_delete_stale_members_with_sync_timestamp():
 async def test_sync_mailboxes_no_member_rows_when_user_has_no_groups():
     """Users with no mail-enabled group memberships produce no member rows."""
     report = [_make_report_entry("user@example.com", "Alice", storage_bytes=100)]
-    users = [{"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
 
     upserted_members: list[dict] = []
 
@@ -865,16 +1145,135 @@ async def test_sync_mailboxes_no_member_rows_when_user_has_no_groups():
         upserted_members.append(kwargs)
 
     with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)),
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
-        patch.object(m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)),
-        patch.object(m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
         patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
-        patch.object(m365_service.m365_repo, "upsert_mailbox_member", side_effect=fake_upsert_member),
-        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo,
+            "upsert_mailbox_member",
+            side_effect=fake_upsert_member,
+        ),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
     ):
         await m365_service.sync_mailboxes(1)
 
     assert upserted_members == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_upserts_direct_user_mailbox_permissions():
+    """Direct user mailbox permissions are synced alongside group-based entries."""
+    report = [_make_report_entry("shared@example.com", "Shared Box", storage_bytes=100)]
+
+    upserted_members: list[dict] = []
+
+    async def fake_upsert_member(**kwargs: Any) -> None:
+        upserted_members.append(kwargs)
+
+    direct_permissions = {
+        "shared@example.com": [
+            {
+                "member_upn": "delegate@example.com",
+                "member_display_name": "Delegate User",
+            },
+        ]
+    }
+
+    with (
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service,
+            "_fetch_direct_mailbox_permission_members",
+            AsyncMock(return_value=direct_permissions),
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo,
+            "upsert_mailbox_member",
+            side_effect=fake_upsert_member,
+        ),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    assert upserted_members == [
+        {
+            "company_id": 1,
+            "mailbox_email": "shared@example.com",
+            "member_upn": "delegate@example.com",
+            "member_display_name": "Delegate User",
+            "synced_at": upserted_members[0]["synced_at"],
+        }
+    ]
+
+
+def test_extract_direct_mailbox_permission_members_filters_and_normalises():
+    """Snapshot mailbox permissions keep direct FullAccess users and discard denied/self entries."""
+    payload = {
+        "value": [
+            {
+                "identity": "shared@example.com",
+                "user": "Delegate User <delegate@example.com>",
+                "accessRights": ["FullAccess"],
+                "deny": False,
+            },
+            {
+                "identity": "shared@example.com",
+                "user": r"NT AUTHORITY\SELF",
+                "accessRights": ["FullAccess"],
+                "deny": False,
+            },
+            {
+                "identity": "shared@example.com",
+                "user": "Denied User <denied@example.com>",
+                "accessRights": ["FullAccess"],
+                "deny": True,
+            },
+            {
+                "identity": "shared@example.com",
+                "user": "Reader <reader@example.com>",
+                "accessRights": ["ReadPermission"],
+                "deny": False,
+            },
+            {
+                "identity": "other@example.com",
+                "user": "Other User <other@example.com>",
+                "accessRights": ["FullAccess"],
+                "deny": False,
+            },
+        ]
+    }
+
+    result = _extract_direct_mailbox_permission_members(payload, {"shared@example.com"})
+
+    assert result == {
+        "shared@example.com": [
+            {
+                "member_display_name": "Delegate User",
+                "member_upn": "delegate@example.com",
+            }
+        ]
+    }
