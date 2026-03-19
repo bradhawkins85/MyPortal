@@ -2604,7 +2604,7 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
 
     for candidate_email in all_emails:
         if candidate_email == raw_mailbox_email:
-            continue  # already fetched above
+            continue  # initial DB lookup above already covered this email
         _store_accessible_members(
             await m365_repo.get_mailbox_members(company_id, candidate_email)
         )
