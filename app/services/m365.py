@@ -2544,15 +2544,28 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     raw_mailbox_email = upn.lower().strip()
     accessible_by_map: dict[str, dict[str, Any]] = {}
 
+    def _store_accessible_member(display_name: str | None, member_upn: str | None) -> None:
+        normalised_upn = str(member_upn or "").strip().lower()
+        if not normalised_upn:
+            return
+        accessible_by_map[normalised_upn] = {
+            "display_name": str(display_name or "").strip() or normalised_upn,
+            "upn": normalised_upn,
+        }
+
     def _store_accessible_members(members: list[dict[str, Any]]) -> None:
         for member in members:
-            member_upn = (member.get("member_upn") or "").strip().lower()
-            if not member_upn:
-                continue
-            accessible_by_map[member_upn] = {
-                "display_name": member.get("member_display_name") or member_upn,
-                "upn": member_upn,
-            }
+            _store_accessible_member(
+                member.get("member_display_name"),
+                member.get("member_upn"),
+            )
+
+    def _store_group_members(members: list[dict[str, Any]]) -> None:
+        for member in members:
+            _store_accessible_member(
+                member.get("displayName") or member.get("mail"),
+                member.get("userPrincipalName") or member.get("mail"),
+            )
 
     # Start with the mailbox identifier requested by the UI so shared mailboxes
     # can still show synced access data even when they are not resolvable via
@@ -2579,6 +2592,16 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     if mailbox_email != raw_mailbox_email:
         _store_accessible_members(
             await m365_repo.get_mailbox_members(company_id, mailbox_email)
+        )
+
+    # Supplement cached data with a live lookup of the mailbox's backing M365
+    # group so mailbox-centric views stay accurate even when a mailbox sync has
+    # not run since the latest permission change.
+    for candidate_email in dict.fromkeys([raw_mailbox_email, mailbox_email]):
+        if not candidate_email:
+            continue
+        _store_group_members(
+            await _get_mailbox_group_members(access_token, candidate_email)
         )
 
     # ------------------------------------------------------------------
