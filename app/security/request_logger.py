@@ -59,12 +59,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             duration = time.time() - start_time
             log_error(
                 "Request raised unhandled exception",
+                exc=exc,
+                event="request.unhandled_exception",
                 request_id=request_id,
                 method=request.method,
                 path=path,
                 duration_ms=round(duration * 1000, 2),
                 client_ip=client_ip,
-                error=str(exc),
             )
             raise
 

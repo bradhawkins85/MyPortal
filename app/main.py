@@ -1462,10 +1462,11 @@ async def handle_unexpected_exception(request: Request, exc: Exception):  # prag
     error_reference = _generate_error_reference()
     log_error(
         "Unhandled application error",
+        exc=exc,
+        event="app.unhandled_exception",
         request_id=request_id,
         error_reference=error_reference,
-        error=str(exc),
-        request_path=_get_safe_error_path(request),
+        path=_get_safe_error_path(request),
     )
     if _request_prefers_json(request):
         response = JSONResponse(
@@ -8091,8 +8092,15 @@ async def search_by_phone_number(request: Request):
             user_id=user.get("id"),
             company_ids=active_company_ids or None,
         )
-    except Exception as e:
-        log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
+    except Exception as exc:
+        log_error(
+            "Error searching tickets by phone number",
+            exc=exc,
+            event="tickets.phone_search_failed",
+            request_id=_get_request_id(request),
+            path=request.url.path,
+            user_id=user.get("id"),
+        )
         # On error, redirect to tickets page with error message
         error_msg = quote("Failed to search tickets by phone number")
         return RedirectResponse(
@@ -14042,9 +14050,12 @@ async def _render_tickets_dashboard(
             except Exception as exc:
                 log_error(
                     "Error searching tickets by phone number",
+                    exc=exc,
+                    event="tickets.phone_search_failed",
+                    request_id=_get_request_id(request),
+                    path=request.url.path,
+                    user_id=user.get("id"),
                     phone_number_provided=True,
-                    error=str(exc),
-                    exc_info=True
                 )
                 error_message = "Failed to search tickets by phone number. Please try again."
                 # Load normal dashboard on error
