@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import csv
 import hashlib
@@ -66,7 +67,9 @@ PROVISION_SCOPE = (
 DISCOVER_SCOPE = "openid profile"
 
 # Scopes for CSP/Lighthouse GDAP sign-in (needs Directory.Read.All for /contracts)
-CSP_SCOPE = "https://graph.microsoft.com/Directory.Read.All openid profile offline_access"
+CSP_SCOPE = (
+    "https://graph.microsoft.com/Directory.Read.All openid profile offline_access"
+)
 
 # Module slug used to store the admin / CSP / Lighthouse partner app credentials
 _M365_ADMIN_MODULE_SLUG = "m365-admin"
@@ -121,7 +124,6 @@ class M365Error(RuntimeError):
         self.http_status: int | None = http_status
 
 
-
 def generate_pkce_pair() -> tuple[str, str]:
     """Generate a PKCE ``code_verifier`` / ``code_challenge`` pair.
 
@@ -129,7 +131,9 @@ def generate_pkce_pair() -> tuple[str, str]:
     is the URL-safe base64-encoded SHA-256 hash of the verifier (S256 method).
     The verifier is a 32-byte cryptographically random string.
     """
-    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    code_verifier = (
+        base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    )
     digest = hashlib.sha256(code_verifier.encode()).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
     return code_verifier, code_challenge
@@ -273,11 +277,15 @@ async def _exchange_token(
     expires_in = payload.get("expires_in")
     expires_at: datetime | None = None
     if isinstance(expires_in, (int, float)):
-        expires_at = datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(seconds=float(expires_in))
+        expires_at = datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(
+            seconds=float(expires_in)
+        )
     return access_token, str(new_refresh) if new_refresh else None, expires_at
 
 
-async def acquire_access_token(company_id: int, *, force_client_credentials: bool = False) -> str:
+async def acquire_access_token(
+    company_id: int, *, force_client_credentials: bool = False
+) -> str:
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("Microsoft 365 credentials have not been configured")
@@ -299,7 +307,10 @@ async def acquire_access_token(company_id: int, *, force_client_credentials: boo
         # token_expires_at is stored as a naive UTC datetime; compare likewise.
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         margin = timedelta(minutes=5)
-        if isinstance(stored_expires_at, datetime) and stored_expires_at - margin > now_utc:
+        if (
+            isinstance(stored_expires_at, datetime)
+            and stored_expires_at - margin > now_utc
+        ):
             log_info(
                 "M365 using cached access token",
                 company_id=company_id,
@@ -390,7 +401,12 @@ async def _graph_get(
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(url, headers=req_headers)
     if response.status_code != 200:
-        log_error("Microsoft Graph request failed", url=url, status=response.status_code, body=response.text)
+        log_error(
+            "Microsoft Graph request failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
         raise M365Error(
             f"Microsoft Graph request failed ({response.status_code})",
             http_status=response.status_code,
@@ -553,8 +569,7 @@ async def provision_app_registration(
             {
                 "resourceAppId": _GRAPH_APP_ID,
                 "resourceAccess": [
-                    {"id": role_id, "type": "Role"}
-                    for role_id in _PROVISION_APP_ROLES
+                    {"id": role_id, "type": "Role"} for role_id in _PROVISION_APP_ROLES
                 ],
             }
         ],
@@ -681,8 +696,6 @@ async def provision_app_registration(
         "client_secret_key_id": client_secret_key_id,
         "client_secret_expires_at": client_secret_expires_at,
     }
-
-
 
 
 async def renew_client_secret(company_id: int) -> None:
@@ -910,7 +923,10 @@ async def provision_csp_admin_app_registration(
                     # Delegated Directory.Read.All (for CSP sign-in by partner admins)
                     {"id": _DIRECTORY_READ_ALL_SCOPE_ID, "type": "Scope"},
                     # Application permissions (granted below)
-                    *[{"id": role_id, "type": "Role"} for role_id in _CSP_ADMIN_APP_ROLES],
+                    *[
+                        {"id": role_id, "type": "Role"}
+                        for role_id in _CSP_ADMIN_APP_ROLES
+                    ],
                 ],
             }
         ],
@@ -1047,7 +1063,8 @@ async def get_admin_m365_credentials() -> dict[str, Any] | None:
         "client_secret": client_secret,
         "tenant_id": str(settings.get("tenant_id") or "").strip() or None,
         "app_object_id": str(settings.get("app_object_id") or "").strip() or None,
-        "client_secret_key_id": str(settings.get("client_secret_key_id") or "").strip() or None,
+        "client_secret_key_id": str(settings.get("client_secret_key_id") or "").strip()
+        or None,
         "client_secret_expires_at": settings.get("client_secret_expires_at") or None,
     }
 
@@ -1088,7 +1105,9 @@ async def update_admin_m365_credentials(
         enabled=True,
         settings=new_settings,
     )
-    log_info("Updated M365 admin credentials in integration module", client_id=client_id)
+    log_info(
+        "Updated M365 admin credentials in integration module", client_id=client_id
+    )
 
 
 async def renew_admin_client_secret() -> None:
@@ -1221,7 +1240,11 @@ async def _sync_staff_assignments(
             extra_headers=consistency_headers,
         )
         for user in payload.get("value", []):
-            email = (user.get("mail") or user.get("userPrincipalName") or "").strip().lower()
+            email = (
+                (user.get("mail") or user.get("userPrincipalName") or "")
+                .strip()
+                .lower()
+            )
             if not email:
                 continue
             sign_in_activity = user.get("signInActivity") or {}
@@ -1230,7 +1253,9 @@ async def _sync_staff_assignments(
             staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
             if not staff:
                 first = (user.get("givenName") or "").strip() or "Unknown"
-                last = (user.get("surname") or "").strip() or user.get("displayName") or ""
+                last = (
+                    (user.get("surname") or "").strip() or user.get("displayName") or ""
+                )
                 created = await staff_repo.create_staff(
                     company_id=company_id,
                     first_name=first or "Unknown",
@@ -1256,7 +1281,9 @@ async def _sync_staff_assignments(
                 )
                 staff = created
             elif last_sign_in is not None:
-                await staff_repo.update_m365_last_sign_in(int(staff["id"]), last_sign_in)
+                await staff_repo.update_m365_last_sign_in(
+                    int(staff["id"]), last_sign_in
+                )
             assigned_emails.add(email)
             await license_repo.link_staff_to_license(int(staff["id"]), license_id)
         url = payload.get("@odata.nextLink")
@@ -1273,7 +1300,9 @@ async def _sync_staff_assignments(
 async def sync_company_licenses(company_id: int) -> None:
     log_info("M365 starting license synchronisation", company_id=company_id)
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
-    payload = await _graph_get(access_token, "https://graph.microsoft.com/v1.0/subscribedSkus")
+    payload = await _graph_get(
+        access_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
+    )
     synced_skus: set[str] = set()
     for sku in payload.get("value", []):
         part_number = str(sku.get("skuPartNumber") or "").strip()
@@ -1284,7 +1313,9 @@ async def sync_company_licenses(company_id: int) -> None:
         if part_number:
             app = await apps_repo.get_app_by_vendor_sku(part_number)
         name = app.get("name") if app else part_number or "Unknown SKU"
-        existing = await license_repo.get_license_by_company_and_sku(company_id, part_number)
+        existing = await license_repo.get_license_by_company_and_sku(
+            company_id, part_number
+        )
         if existing:
             await license_repo.update_license(
                 existing["id"],
@@ -1329,7 +1360,15 @@ async def sync_company_licenses(company_id: int) -> None:
         is_stale = sku not in synced_skus
         is_expired = expiry_date_only is not None and expiry_date_only < today
         if is_stale or is_expired:
-            reason = "expired" if is_expired and not is_stale else "not_in_tenant" if is_stale and not is_expired else "stale_and_expired"
+            reason = (
+                "expired"
+                if is_expired and not is_stale
+                else (
+                    "not_in_tenant"
+                    if is_stale and not is_expired
+                    else "stale_and_expired"
+                )
+            )
             await license_repo.delete_license(lic["id"])
             log_info(
                 "M365 removed stale or expired license",
@@ -1431,10 +1470,7 @@ async def _exchange_obo_token(
     expires_in = payload.get("expires_in")
     expires_at: datetime | None = None
     if isinstance(expires_in, (int, float)):
-        expires_at = (
-            datetime.now(timezone.utc)
-            + timedelta(seconds=float(expires_in))
-        )
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
     return access_token, str(new_refresh) if new_refresh else None, expires_at
 
 
@@ -1491,8 +1527,7 @@ async def verify_tenant_permissions(
         f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
     )
     assigned_roles: set[str] = {
-        str(a.get("appRoleId") or "")
-        for a in assignments_response.get("value", [])
+        str(a.get("appRoleId") or "") for a in assignments_response.get("value", [])
     }
 
     required_roles: set[str] = set(_PROVISION_APP_ROLES)
@@ -1639,8 +1674,7 @@ async def try_grant_missing_permissions(
             f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
         )
         assigned_roles: set[str] = {
-            str(a.get("appRoleId") or "")
-            for a in assignments_response.get("value", [])
+            str(a.get("appRoleId") or "") for a in assignments_response.get("value", [])
         }
 
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
@@ -1702,7 +1736,9 @@ async def try_grant_missing_permissions(
         return False
 
 
-async def ensure_service_principal_for_app(access_token: str, app_id: str) -> dict[str, Any]:
+async def ensure_service_principal_for_app(
+    access_token: str, app_id: str
+) -> dict[str, Any]:
     """Ensure an enterprise application (service principal) exists for ``app_id``.
 
     This is used by CSP/Lighthouse onboarding helpers so a Global Admin can
@@ -1771,7 +1807,6 @@ async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
         url = data.get("@odata.nextLink")
     customers.sort(key=lambda c: c["name"].lower())
     return customers
-
 
 
 async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
@@ -1874,9 +1909,12 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
     ``archiveMailboxStorageUsedInBytes`` field — archive mailbox size is only
     present in the CSV download.
     """
+
     def _normalise_report_item(item: dict[str, Any]) -> dict[str, Any] | None:
         def _normalise_key(key: str) -> str:
-            return " ".join(str(key or "").replace("\ufeff", "").strip().lower().split())
+            return " ".join(
+                str(key or "").replace("\ufeff", "").strip().lower().split()
+            )
 
         def _parse_int(raw: Any, default: int = 0) -> int:
             value = str(raw or "").replace(",", "").strip()
@@ -1893,18 +1931,20 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
 
         normalised_item = {_normalise_key(k): v for k, v in item.items()}
 
-        upn = str(
-            item.get("userPrincipalName")
-            or normalised_item.get("user principal name")
-            or ""
-        ).strip().lower()
+        upn = (
+            str(
+                item.get("userPrincipalName")
+                or normalised_item.get("user principal name")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
         if not upn:
             return None
 
         display_name = str(
-            item.get("displayName")
-            or normalised_item.get("display name")
-            or upn
+            item.get("displayName") or normalised_item.get("display name") or upn
         ).strip()
         storage_bytes = _parse_int(
             item.get("storageUsedInBytes")
@@ -1920,21 +1960,27 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
                 else normalised_item.get("archive storage used (byte)")
             )
         )
-        is_deleted_raw = str(
-            item.get("isDeleted")
-            if "isDeleted" in item
-            else normalised_item.get("is deleted")
-            or "false"
-        ).strip().lower()
+        is_deleted_raw = (
+            str(
+                item.get("isDeleted")
+                if "isDeleted" in item
+                else normalised_item.get("is deleted") or "false"
+            )
+            .strip()
+            .lower()
+        )
         # "Has Archive" (True/False) is a dedicated column in the Graph CSV
         # report that indicates whether an online archive is provisioned,
         # regardless of whether it currently holds any data.
-        has_archive_raw = str(
-            item.get("hasArchive")
-            if "hasArchive" in item
-            else normalised_item.get("has archive")
-            or "false"
-        ).strip().lower()
+        has_archive_raw = (
+            str(
+                item.get("hasArchive")
+                if "hasArchive" in item
+                else normalised_item.get("has archive") or "false"
+            )
+            .strip()
+            .lower()
+        )
         return {
             "userPrincipalName": upn,
             "displayName": display_name,
@@ -1945,8 +1991,7 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         }
 
     csv_report_url = (
-        "https://graph.microsoft.com/v1.0/reports/"
-        "getMailboxUsageDetail(period='D7')"
+        "https://graph.microsoft.com/v1.0/reports/" "getMailboxUsageDetail(period='D7')"
     )
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -2011,6 +2056,170 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         if normalised_row is not None:
             parsed_rows.append(normalised_row)
     return parsed_rows
+
+
+_DIRECT_MAILBOX_PERMISSION_RESOURCE = "microsoft.exchange.mailboxpermission"
+_DIRECT_MAILBOX_PERMISSION_SELF = "nt authority\\self"
+
+
+def _iter_direct_mailbox_permission_records(payload: Any) -> list[dict[str, Any]]:
+    """Extract mailboxPermission-like records from a UTCM snapshot payload."""
+    records: list[dict[str, Any]] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            keys = {str(key).lower() for key in node.keys()}
+            if {"identity", "user"}.issubset(keys) and (
+                "accessrights" in keys or "access_rights" in keys
+            ):
+                records.append(node)
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(payload)
+    return records
+
+
+def _normalise_direct_mailbox_permission_principal(user_value: str) -> tuple[str, str]:
+    """Convert a mailboxPermission user value into display/upn fields."""
+    candidate = str(user_value or "").strip()
+    if not candidate:
+        return "", ""
+
+    match = re.search(
+        r"([A-Z0-9._%+\-']+@[A-Z0-9.\-]+\.[A-Z]{2,})", candidate, re.IGNORECASE
+    )
+    if match:
+        upn = match.group(1).lower()
+        display_name = candidate.replace(match.group(1), "").strip(" <>()[]-	") or upn
+        return display_name, upn
+
+    lower_candidate = candidate.lower()
+    return candidate, lower_candidate
+
+
+def _extract_direct_mailbox_permission_members(
+    payload: Any,
+    mailbox_emails: set[str],
+) -> dict[str, list[dict[str, str]]]:
+    """Map mailbox emails to directly-assigned user permissions from a snapshot payload."""
+    normalised_mailboxes = {
+        str(email or "").strip().lower()
+        for email in mailbox_emails
+        if str(email or "").strip()
+    }
+    members_by_mailbox: dict[str, dict[str, dict[str, str]]] = {}
+
+    for record in _iter_direct_mailbox_permission_records(payload):
+        mailbox_email = str(record.get("identity") or "").strip().lower()
+        if mailbox_email not in normalised_mailboxes:
+            continue
+
+        access_rights_raw = record.get("accessRights")
+        if access_rights_raw is None:
+            access_rights_raw = record.get("access_rights")
+        if isinstance(access_rights_raw, str):
+            access_rights = [access_rights_raw]
+        elif isinstance(access_rights_raw, list):
+            access_rights = [str(item or "").strip() for item in access_rights_raw]
+        else:
+            access_rights = []
+        if not any(right.lower() == "fullaccess" for right in access_rights):
+            continue
+        if bool(record.get("deny")):
+            continue
+
+        user_value = str(record.get("user") or "").strip()
+        if not user_value or user_value.lower() == _DIRECT_MAILBOX_PERMISSION_SELF:
+            continue
+
+        display_name, member_upn = _normalise_direct_mailbox_permission_principal(
+            user_value
+        )
+        if not member_upn:
+            continue
+
+        mailbox_members = members_by_mailbox.setdefault(mailbox_email, {})
+        mailbox_members[member_upn] = {
+            "member_display_name": display_name or member_upn,
+            "member_upn": member_upn,
+        }
+
+    return {
+        mailbox: sorted(
+            members.values(), key=lambda item: item["member_display_name"].lower()
+        )
+        for mailbox, members in members_by_mailbox.items()
+    }
+
+
+async def _fetch_direct_mailbox_permission_members(
+    access_token: str,
+    mailbox_emails: set[str],
+) -> dict[str, list[dict[str, str]]]:
+    """Best-effort fetch of direct mailbox user assignments via UTCM snapshots.
+
+    This uses the Microsoft Graph beta configuration snapshot API to request the
+    ``microsoft.exchange.mailboxpermission`` resource, which includes direct
+    FullAccess mailbox assignments. The API is best-effort because tenants must
+    separately enable the required UTCM / Exchange permissions; failures should
+    not break mailbox sync.
+    """
+    if not mailbox_emails:
+        return {}
+
+    snapshot_job = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/beta/admin/configurationManagement/configurationSnapshots/createSnapshot",
+        {
+            "displayName": "MyPortal mailbox permission snapshot",
+            "description": "Mailbox permission sync",
+            "resources": [_DIRECT_MAILBOX_PERMISSION_RESOURCE],
+        },
+    )
+
+    job_id = str(snapshot_job.get("id") or "").strip()
+    if not job_id:
+        return {}
+
+    job_url = f"https://graph.microsoft.com/beta/admin/configurationManagement/configurationSnapshotJobs/{quote(job_id, safe='')}"
+    job_data = snapshot_job
+    for _ in range(10):
+        status = str(job_data.get("status") or "").strip().lower()
+        if status in {"succeeded", "partiallysuccessful", "partiallysuccessful"}:
+            break
+        if status in {"failed", "unknownfuturevalue"}:
+            return {}
+        await asyncio.sleep(1)
+        job_data = await _graph_get(access_token, job_url)
+    else:
+        return {}
+
+    resource_location = str(job_data.get("resourceLocation") or "").strip()
+    if not resource_location:
+        return {}
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.get(
+            resource_location, headers={"Authorization": f"Bearer {access_token}"}
+        )
+    if response.status_code != 200:
+        raise M365Error(
+            f"Microsoft Graph snapshot download failed ({response.status_code})",
+            http_status=response.status_code,
+        )
+
+    try:
+        snapshot_payload = response.json()
+    except ValueError as exc:  # pragma: no cover - defensive for unexpected payloads
+        raise M365Error(
+            "Microsoft Graph snapshot download returned invalid JSON"
+        ) from exc
+
+    return _extract_direct_mailbox_permission_members(snapshot_payload, mailbox_emails)
 
 
 async def sync_mailboxes(company_id: int) -> int:
@@ -2084,7 +2293,9 @@ async def sync_mailboxes(company_id: int) -> int:
             if _looks_obfuscated_identifier(upn):
                 report_obfuscated_identifiers += 1
 
-    if report_primary_upns and report_obfuscated_identifiers >= max(1, int(len(report_primary_upns) * 0.8)):
+    if report_primary_upns and report_obfuscated_identifiers >= max(
+        1, int(len(report_primary_upns) * 0.8)
+    ):
         raise M365Error(
             "Mailbox sync failed because Microsoft 365 reports are concealing mailbox identifiers. "
             "Disable the Microsoft 365 admin center privacy option 'Display concealed user, group, and "
@@ -2102,9 +2313,7 @@ async def sync_mailboxes(company_id: int) -> int:
     # Get all users (enabled + disabled); mailboxes only exist for enabled accounts.
     users = await get_all_users(company_id)
     users_with_identifiers = [
-        (u, _user_identifiers(u))
-        for u in users
-        if u.get("accountEnabled", True)
+        (u, _user_identifiers(u)) for u in users if u.get("accountEnabled", True)
     ]
     users_with_identifiers = [
         (user, identifiers)
@@ -2122,7 +2331,14 @@ async def sync_mailboxes(company_id: int) -> int:
     # --- User mailboxes ---
     for user, identifiers in users_with_identifiers:
         preferred_upn = identifiers[0]
-        report_entry = next((report_by_identifier.get(key) for key in identifiers if key in report_by_identifier), {})
+        report_entry = next(
+            (
+                report_by_identifier.get(key)
+                for key in identifiers
+                if key in report_by_identifier
+            ),
+            {},
+        )
         report_upn = str(report_entry.get("userPrincipalName") or "").strip().lower()
         if report_upn:
             matched_report_upns.add(report_upn)
@@ -2134,9 +2350,7 @@ async def sync_mailboxes(company_id: int) -> int:
         # storage is always captured even if the column is absent.
         has_archive = bool(report_entry.get("hasArchive")) or archive_bytes > 0
         display_name = (
-            user.get("displayName")
-            or report_entry.get("displayName")
-            or preferred_upn
+            user.get("displayName") or report_entry.get("displayName") or preferred_upn
         )
 
         fw_count = await _count_forwarding_rules(access_token, user["id"])
@@ -2192,6 +2406,34 @@ async def sync_mailboxes(company_id: int) -> int:
             }
         )
 
+    mailbox_emails = {
+        str(row["user_principal_name"] or "").strip().lower()
+        for row in rows_to_upsert
+        if str(row["user_principal_name"] or "").strip()
+    }
+    direct_members_by_mailbox: dict[str, list[dict[str, str]]] = {}
+    if mailbox_emails:
+        try:
+            direct_members_by_mailbox = await _fetch_direct_mailbox_permission_members(
+                access_token, mailbox_emails
+            )
+        except Exception as exc:
+            log_info(
+                "Skipping direct mailbox permission sync; UTCM snapshot unavailable",
+                company_id=company_id,
+                error=str(exc),
+            )
+
+    for mailbox_email, members in direct_members_by_mailbox.items():
+        for member in members:
+            await m365_repo.upsert_mailbox_member(
+                company_id=company_id,
+                mailbox_email=mailbox_email,
+                member_upn=member["member_upn"],
+                member_display_name=member["member_display_name"],
+                synced_at=member_sync_start,
+            )
+
     # Upsert all rows into the database.
     for row in rows_to_upsert:
         await m365_repo.upsert_mailbox(company_id=company_id, **row)
@@ -2209,8 +2451,12 @@ async def sync_mailboxes(company_id: int) -> int:
         "M365 mailbox sync complete",
         company_id=company_id,
         total=len(rows_to_upsert),
-        user_mailboxes=sum(1 for r in rows_to_upsert if r["mailbox_type"] == "UserMailbox"),
-        shared_mailboxes=sum(1 for r in rows_to_upsert if r["mailbox_type"] == "SharedMailbox"),
+        user_mailboxes=sum(
+            1 for r in rows_to_upsert if r["mailbox_type"] == "UserMailbox"
+        ),
+        shared_mailboxes=sum(
+            1 for r in rows_to_upsert if r["mailbox_type"] == "SharedMailbox"
+        ),
     )
     return len(rows_to_upsert)
 
@@ -2256,13 +2502,17 @@ async def check_report_privacy(company_id: int) -> bool:
 async def get_user_mailboxes(company_id: int) -> list[dict[str, Any]]:
     """Return stored user mailbox rows for the given company, excluding package mailboxes."""
     rows = await m365_repo.get_mailboxes(company_id, "UserMailbox")
-    return [r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
+    return [
+        r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")
+    ]
 
 
 async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
     """Return stored shared mailbox rows for the given company, excluding package mailboxes."""
     rows = await m365_repo.get_mailboxes(company_id, "SharedMailbox")
-    return [r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
+    return [
+        r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")
+    ]
 
 
 async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
@@ -2307,7 +2557,9 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     # Start with the mailbox identifier requested by the UI so shared mailboxes
     # can still show synced access data even when they are not resolvable via
     # the /users Graph endpoint.
-    _store_accessible_members(await m365_repo.get_mailbox_members(company_id, raw_mailbox_email))
+    _store_accessible_members(
+        await m365_repo.get_mailbox_members(company_id, raw_mailbox_email)
+    )
 
     # Look up the user/mailbox directory object to get its stable ID and, when
     # available, its primary SMTP address. The primary SMTP address (mail) is
@@ -2325,7 +2577,9 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
 
     mailbox_email = (user_data.get("mail") or raw_mailbox_email).lower().strip()
     if mailbox_email != raw_mailbox_email:
-        _store_accessible_members(await m365_repo.get_mailbox_members(company_id, mailbox_email))
+        _store_accessible_members(
+            await m365_repo.get_mailbox_members(company_id, mailbox_email)
+        )
 
     # ------------------------------------------------------------------
     # "Mailboxes I can access": live mail-enabled group memberships
