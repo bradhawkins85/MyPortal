@@ -21,13 +21,28 @@ def _normalise_license(row: dict[str, Any]) -> dict[str, Any]:
     return normalised
 
 
+_ALLOCATED_SUBQUERY = """
+    (SELECT COUNT(DISTINCT s.id)
+     FROM staff AS s
+     WHERE s.id IN (
+         SELECT sl2.staff_id FROM staff_licenses AS sl2 WHERE sl2.license_id = l.id
+         UNION
+         SELECT ogm.staff_id
+         FROM group_licenses AS gl
+         INNER JOIN office_group_members AS ogm ON ogm.group_id = gl.group_id
+         WHERE gl.license_id = l.id
+     )
+    )
+"""
+
+
 async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        """
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name, COUNT(DISTINCT sl.staff_id) AS allocated
+        f"""
+        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+               {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
-        LEFT JOIN staff_licenses AS sl ON sl.license_id = l.id
         WHERE l.company_id = %s
         GROUP BY l.id
         ORDER BY display_name, l.name
@@ -39,11 +54,11 @@ async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
 
 async def list_all_licenses() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        """
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name, COUNT(DISTINCT sl.staff_id) AS allocated
+        f"""
+        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+               {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
-        LEFT JOIN staff_licenses AS sl ON sl.license_id = l.id
         GROUP BY l.id
         ORDER BY l.company_id, display_name
         """,
@@ -53,11 +68,11 @@ async def list_all_licenses() -> list[dict[str, Any]]:
 
 async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        """
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name, COUNT(DISTINCT sl.staff_id) AS allocated
+        f"""
+        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+               {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
-        LEFT JOIN staff_licenses AS sl ON sl.license_id = l.id
         WHERE l.id = %s
         GROUP BY l.id
         """,
@@ -68,11 +83,11 @@ async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
 
 async def get_license_by_company_and_sku(company_id: int, sku: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        """
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name, COUNT(DISTINCT sl.staff_id) AS allocated
+        f"""
+        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+               {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
-        LEFT JOIN staff_licenses AS sl ON sl.license_id = l.id
         WHERE l.company_id = %s AND l.platform = %s
         GROUP BY l.id
         """,
@@ -152,15 +167,52 @@ async def delete_license(license_id: int) -> None:
 async def list_staff_for_license(license_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT s.id, s.first_name, s.last_name, s.email
-        FROM staff_licenses AS sl
-        INNER JOIN staff AS s ON s.id = sl.staff_id
-        WHERE sl.license_id = %s
+        SELECT DISTINCT s.id, s.first_name, s.last_name, s.email
+        FROM staff AS s
+        WHERE s.id IN (
+            SELECT sl.staff_id FROM staff_licenses AS sl WHERE sl.license_id = %s
+            UNION
+            SELECT ogm.staff_id
+            FROM group_licenses AS gl
+            INNER JOIN office_group_members AS ogm ON ogm.group_id = gl.group_id
+            WHERE gl.license_id = %s
+        )
         ORDER BY s.last_name, s.first_name
+        """,
+        (license_id, license_id),
+    )
+    return [dict(row) for row in rows]
+
+
+async def list_groups_for_license(license_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT og.id, og.name
+        FROM group_licenses AS gl
+        INNER JOIN office_groups AS og ON og.id = gl.group_id
+        WHERE gl.license_id = %s
+        ORDER BY og.name
         """,
         (license_id,),
     )
     return [dict(row) for row in rows]
+
+
+async def link_group_to_license(group_id: int, license_id: int) -> None:
+    await db.execute(
+        """
+        INSERT IGNORE INTO group_licenses (group_id, license_id)
+        VALUES (%s, %s)
+        """,
+        (group_id, license_id),
+    )
+
+
+async def unlink_group_from_license(group_id: int, license_id: int) -> None:
+    await db.execute(
+        "DELETE FROM group_licenses WHERE group_id = %s AND license_id = %s",
+        (group_id, license_id),
+    )
 
 
 async def link_staff_to_license(staff_id: int, license_id: int) -> None:
