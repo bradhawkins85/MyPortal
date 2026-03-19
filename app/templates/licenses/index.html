@@ -40,10 +40,12 @@
         <tbody>
           {% for license in licenses %}
           <tr>
-            <td data-column="display_name" data-value="{{ license.display_name or license.name }}">{{ license.display_name or license.name }}</td>
+            <td data-column="display_name" data-value="{{ license.display_name or license.name }}">
+              <button type="button" class="link" data-license-users="{{ license.id }}" data-license-name="{{ license.display_name or license.name }}">{{ license.display_name or license.name }}</button>
+            </td>
             <td data-column="count" data-value="{{ license.count }}">{{ license.count }}</td>
             <td data-column="allocated" data-value="{{ license.allocated }}">
-              <button type="button" class="link" data-license-allocated="{{ license.id }}">{{ license.allocated }}</button>
+              <button type="button" class="link" data-license-allocated="{{ license.id }}" data-license-name="{{ license.display_name or license.name }}">{{ license.allocated }}</button>
             </td>
             <td data-column="expiry_display" data-value="{{ license.expiry_display or '' }}">{{ license.expiry_display or '—' }}</td>
             <td data-column="contract_term" data-value="{{ license.contract_term or '' }}">{{ license.contract_term or '—' }}</td>
@@ -70,7 +72,7 @@
 <dialog id="allocated-dialog" class="dialog">
   <form method="dialog" class="dialog__container">
     <header class="dialog__header">
-      <h3 class="dialog__title">Allocated staff</h3>
+      <h3 class="dialog__title" id="allocated-dialog-title">Assigned users</h3>
       <button type="submit" class="dialog__close" aria-label="Close">
         <span aria-hidden="true">&times;</span>
       </button>
@@ -94,8 +96,6 @@
     const filterInput = document.getElementById('license-filter');
     const table = document.querySelector('[data-license-table]');
     const toast = document.getElementById('license-toast');
-    const allocatedDialog = document.getElementById('allocated-dialog');
-    const allocatedList = document.getElementById('allocated-list');
 
     function showToast(message, type = 'info') {
       if (!toast) return;
@@ -188,32 +188,49 @@
       });
     });
 
-    document.querySelectorAll('[data-license-allocated]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        try {
-          const response = await fetch(`/licenses/${button.dataset.licenseAllocated}/allocated`);
-          if (!response.ok) throw new Error('Request failed');
-          const data = await response.json();
-          allocatedList.innerHTML = '';
-          if (data.length === 0) {
-            const li = document.createElement('li');
-            li.textContent = 'No staff currently allocated.';
-            allocatedList.appendChild(li);
-          } else {
-            data.forEach((member) => {
-              const li = document.createElement('li');
-              const email = member.email ? ` (${member.email})` : '';
-              li.textContent = `${member.first_name || ''} ${member.last_name || ''}${email}`.trim();
-              allocatedList.appendChild(li);
-            });
-          }
-          if (typeof allocatedDialog.showModal === 'function') {
-            allocatedDialog.showModal();
-          }
-        } catch (err) {
-          console.error(err);
-          showToast('Unable to load allocation details.', 'error');
+    const allocatedDialog = document.getElementById('allocated-dialog');
+    const allocatedList = document.getElementById('allocated-list');
+    const allocatedDialogTitle = document.getElementById('allocated-dialog-title');
+
+    async function showLicenseUsers(licenseId, licenseName) {
+      try {
+        const response = await fetch(`/licenses/${licenseId}/allocated`);
+        if (!response.ok) throw new Error('Request failed');
+        const data = await response.json();
+        allocatedList.innerHTML = '';
+        if (allocatedDialogTitle) {
+          allocatedDialogTitle.textContent = licenseName || 'Assigned users';
         }
+        if (data.length === 0) {
+          const li = document.createElement('li');
+          li.textContent = 'No staff currently allocated.';
+          allocatedList.appendChild(li);
+        } else {
+          data.forEach((member) => {
+            const li = document.createElement('li');
+            const email = member.email ? ` (${member.email})` : '';
+            li.textContent = `${member.first_name || ''} ${member.last_name || ''}${email}`.trim();
+            allocatedList.appendChild(li);
+          });
+        }
+        if (typeof allocatedDialog.showModal === 'function') {
+          allocatedDialog.showModal();
+        }
+      } catch (err) {
+        console.error(err);
+        showToast('Unable to load allocation details.', 'error');
+      }
+    }
+
+    document.querySelectorAll('[data-license-users]').forEach((button) => {
+      button.addEventListener('click', () => {
+        showLicenseUsers(button.dataset.licenseUsers, button.dataset.licenseName);
+      });
+    });
+
+    document.querySelectorAll('[data-license-allocated]').forEach((button) => {
+      button.addEventListener('click', () => {
+        showLicenseUsers(button.dataset.licenseAllocated, button.dataset.licenseName);
       });
     });
 
