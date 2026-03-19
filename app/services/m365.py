@@ -2583,21 +2583,36 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     try:
         user_data = await _graph_get(
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{encoded_upn}?$select=id,displayName,mail",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_upn}?$select=id,displayName,mail,proxyAddresses",
         )
     except M365Error:
         user_data = {}
 
     mailbox_email = (user_data.get("mail") or raw_mailbox_email).lower().strip()
-    if mailbox_email != raw_mailbox_email:
+
+    # Build a de-duplicated, ordered collection of every known email alias for
+    # this mailbox.  proxyAddresses include all SMTP aliases (primary +
+    # secondary) so the DB and live lookups can match even when the group email
+    # used during sync differs from the UPN shown in usage reports.
+    all_emails: dict[str, None] = dict.fromkeys([raw_mailbox_email, mailbox_email])
+    for proxy in user_data.get("proxyAddresses") or []:
+        proxy_str = str(proxy or "")
+        if proxy_str.lower().startswith("smtp:"):
+            alias = proxy_str[5:].strip().lower()
+            if alias:
+                all_emails[alias] = None
+
+    for candidate_email in all_emails:
+        if candidate_email == raw_mailbox_email:
+            continue  # already fetched above
         _store_accessible_members(
-            await m365_repo.get_mailbox_members(company_id, mailbox_email)
+            await m365_repo.get_mailbox_members(company_id, candidate_email)
         )
 
     # Supplement cached data with a live lookup of the mailbox's backing M365
     # group so mailbox-centric views stay accurate even when a mailbox sync has
     # not run since the latest permission change.
-    for candidate_email in dict.fromkeys([raw_mailbox_email, mailbox_email]):
+    for candidate_email in all_emails:
         if not candidate_email:
             continue
         _store_group_members(

@@ -11,6 +11,7 @@ Covers:
 - accessible_by DB lookup uses user object mail property (not raw UPN)
 - accessible_by falls back to UPN for DB lookup when mail property is absent
 - accessible_by uses member_upn as display_name fallback when member_display_name is empty
+- accessible_by uses proxyAddresses to find members stored under alternate email aliases
 """
 from __future__ import annotations
 
@@ -347,3 +348,119 @@ async def test_get_mailbox_permissions_lists_sorted_alphabetically():
     assert result["can_access"][1]["display_name"] == "Zebra Mailbox"
     assert result["accessible_by"][0]["display_name"] == "Aaron"
     assert result["accessible_by"][1]["display_name"] == "Zoe"
+
+
+# ---------------------------------------------------------------------------
+# accessible_by – proxyAddresses alias matching
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_accessible_by_uses_proxy_addresses():
+    """accessible_by finds members stored under a proxyAddresses alias.
+
+    When the sync stores members keyed by an M365 group's onmicrosoft.com
+    address but the UI passes the custom-domain UPN, proxyAddresses bridges
+    the gap by providing the alternate email that matches the DB key.
+    """
+    user_obj = {
+        "id": "uid-shared",
+        "displayName": "Payroll",
+        "mail": "payroll@company.com.au",
+        "proxyAddresses": [
+            "SMTP:payroll@company.com.au",
+            "smtp:payroll@company.onmicrosoft.com",
+        ],
+    }
+
+    async def _fake_get_members(company_id: int, mailbox_email: str) -> list[dict]:
+        if mailbox_email == "payroll@company.onmicrosoft.com":
+            return [_db_member("employee1@company.com.au", "Employee One")]
+        return []
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+    ):
+        result = await get_mailbox_permissions(1, "payroll@company.com.au")
+
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "employee1@company.com.au"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_proxy_addresses_deduplicates_members():
+    """Members found via multiple alias lookups are de-duplicated in accessible_by."""
+    user_obj = {
+        "id": "uid-shared",
+        "displayName": "Payroll",
+        "mail": "payroll@company.com.au",
+        "proxyAddresses": [
+            "SMTP:payroll@company.com.au",
+            "smtp:payroll@company.onmicrosoft.com",
+        ],
+    }
+
+    async def _fake_get_members(company_id: int, mailbox_email: str) -> list[dict]:
+        # Same member appears under both email keys
+        if mailbox_email in ("payroll@company.com.au", "payroll@company.onmicrosoft.com"):
+            return [_db_member("employee1@company.com.au", "Employee One")]
+        return []
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+    ):
+        result = await get_mailbox_permissions(1, "payroll@company.com.au")
+
+    # Employee1 should appear exactly once despite being found via multiple lookups.
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "employee1@company.com.au"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_proxy_addresses_live_group_lookup():
+    """Live group member lookup also uses proxyAddresses aliases.
+
+    When the backing M365 group email differs from the mailbox UPN, the live
+    _get_mailbox_group_members call should try the alias from proxyAddresses
+    to find the group.
+    """
+    user_obj = {
+        "id": "uid-shared",
+        "displayName": "Payroll",
+        "mail": "payroll@company.com.au",
+        "proxyAddresses": [
+            "SMTP:payroll@company.com.au",
+            "smtp:payroll@company.onmicrosoft.com",
+        ],
+    }
+
+    captured_group_lookups: list[str] = []
+
+    async def _fake_group_members(access_token: str, email: str) -> list[dict]:
+        captured_group_lookups.append(email)
+        if email == "payroll@company.onmicrosoft.com":
+            return [{"displayName": "Employee One", "userPrincipalName": "employee1@company.com.au"}]
+        return []
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(side_effect=_fake_group_members)),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+    ):
+        result = await get_mailbox_permissions(1, "payroll@company.com.au")
+
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "employee1@company.com.au"
+    # Both the primary email and the onmicrosoft alias should have been tried.
+    assert "payroll@company.com.au" in captured_group_lookups
+    assert "payroll@company.onmicrosoft.com" in captured_group_lookups
