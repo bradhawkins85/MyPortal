@@ -2644,20 +2644,24 @@ async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
 async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     """Return mailbox permission details for a given UPN.
 
-    Queries Microsoft Graph for **Mailboxes I can access** and reads
-    pre-computed DB data for **Mailboxes that can access me**.
+    Queries Microsoft Graph for **Mailboxes I can access** and combines
+    pre-computed DB data with a live Exchange Online lookup for **Users
+    that can access me**.
 
     **Mailboxes I can access** – mail-enabled M365 groups the given identity is
     a direct member of.  In Exchange Online, group membership on a group that
     backs a shared mailbox grants FullAccess.
 
-    **Mailboxes that can access me** – users who have been assigned full access
-    to this mailbox.  During ``sync_mailboxes`` the members of each mailbox's
-    backing M365 group and direct FullAccess permissions (via Exchange Online
-    ``Get-MailboxPermission``) are stored in the ``m365_mailbox_members``
-    table.  This function reads that cached data (keyed by the mailbox's
-    primary SMTP address) so the response is fast.
-    Run a mailbox sync to refresh the data.
+    **Users that can access me** – users who have been assigned full access
+    to this mailbox.  Data is gathered from three sources:
+
+    1. Pre-synced ``m365_mailbox_members`` rows written by ``sync_mailboxes``
+       (group memberships and previous Exchange Online sync results).
+    2. A live lookup of the M365 group backing the mailbox (if any).
+    3. A live Exchange Online ``Get-MailboxPermission`` call that returns
+       direct FullAccess assignments.  This ensures results appear even
+       when a mailbox sync has not run or Exchange Online was unavailable
+       during the last sync.
 
     Requires the ``Directory.Read.All`` application permission (already in
     ``_PROVISION_APP_ROLES``).
@@ -2746,6 +2750,19 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
             await _get_mailbox_group_members(access_token, candidate_email)
         )
 
+    # Supplement with a live Exchange Online Get-MailboxPermission lookup so
+    # that direct FullAccess assignments appear even when a mailbox sync has
+    # not run or the sync's Exchange Online step was unavailable.
+    try:
+        exo_token, effective_tenant_id = await _acquire_exo_access_token(company_id)
+        records = await _exo_get_mailbox_permission(
+            exo_token, effective_tenant_id, raw_mailbox_email
+        )
+        for member in _parse_exo_mailbox_permission_records(raw_mailbox_email, records):
+            _store_accessible_member(member["member_display_name"], member["member_upn"])
+    except Exception:
+        pass  # Best-effort; DB and group data already collected above
+
     # ------------------------------------------------------------------
     # "Mailboxes I can access": live mail-enabled group memberships
     # ------------------------------------------------------------------
@@ -2773,12 +2790,9 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     can_access.sort(key=lambda x: x["display_name"].lower())
 
     # ------------------------------------------------------------------
-    # "Mailboxes that can access me": from synced m365_mailbox_members data
+    # "Users that can access me": from synced data, live group members,
+    # and live Exchange Online Get-MailboxPermission results
     # ------------------------------------------------------------------
-    # During sync_mailboxes() the members of each mailbox's backing M365 group
-    # are fetched directly and stored in m365_mailbox_members keyed by the
-    # mailbox's primary SMTP address.  These are the users who have been
-    # assigned full access to the mailbox.
     accessible_by = list(accessible_by_map.values())
     accessible_by.sort(key=lambda x: x["display_name"].lower())
 
