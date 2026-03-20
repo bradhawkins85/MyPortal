@@ -73,6 +73,7 @@ async def test_get_mailbox_permissions_can_access_returns_mail_enabled_groups():
         patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=groups)),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
@@ -97,6 +98,7 @@ async def test_get_mailbox_permissions_ignores_non_mail_enabled_groups():
         patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=groups)),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
@@ -188,6 +190,7 @@ async def test_get_mailbox_permissions_empty_accessible_by_when_no_db_data():
         patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
@@ -247,6 +250,7 @@ async def test_get_mailbox_permissions_accessible_by_falls_back_to_upn_when_mail
         patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+        patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -575,3 +579,88 @@ async def test_get_mailbox_permissions_accessible_by_exo_failure_silent():
     # DB data still present despite EXO failure
     assert len(result["accessible_by"]) == 1
     assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
+
+
+# ---------------------------------------------------------------------------
+# accessible_by – local-part fallback when Graph API user lookup fails
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_local_part_fallback_when_graph_fails():
+    """When the Graph user lookup fails and no exact DB match exists, the local-part
+    fallback finds members stored under a different domain variant of the same
+    mailbox email (e.g. group email vs onmicrosoft.com UPN).
+    """
+    fallback_members = [
+        _db_member("employee1@company.com.au", "Employee One"),
+    ]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(side_effect=M365Error("404"))),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(
+            m365_repo,
+            "get_mailbox_members_by_local_part",
+            AsyncMock(return_value=fallback_members),
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "payroll@company.onmicrosoft.com")
+
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "employee1@company.com.au"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_local_part_fallback_not_triggered_when_data_found():
+    """The local-part fallback is NOT invoked when earlier sources already found data."""
+    user_obj = {"id": "uid-shared", "displayName": "Shared", "mail": "shared@contoso.com"}
+    db_members = [_db_member("bob@contoso.com", "Bob")]
+    fallback_called = False
+
+    async def _fake_fallback(company_id: int, local_part: str) -> list[dict]:
+        nonlocal fallback_called
+        fallback_called = True
+        return [_db_member("should-not-appear@contoso.com", "Phantom")]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(side_effect=_fake_fallback)),
+    ):
+        result = await get_mailbox_permissions(1, "shared@contoso.com")
+
+    assert not fallback_called
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_local_part_fallback_deduplicates():
+    """The local-part fallback result is de-duplicated with any data already collected."""
+    # Graph API fails so proxy addresses are unavailable
+    fallback_members = [
+        _db_member("alice@company.com", "Alice"),
+        _db_member("bob@company.com", "Bob"),
+    ]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(side_effect=M365Error("404"))),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(
+            m365_repo,
+            "get_mailbox_members_by_local_part",
+            AsyncMock(return_value=fallback_members),
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "support@contoso.onmicrosoft.com")
+
+    upns = {item["upn"] for item in result["accessible_by"]}
+    assert upns == {"alice@company.com", "bob@company.com"}

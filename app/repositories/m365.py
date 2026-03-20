@@ -291,3 +291,29 @@ async def get_mailbox_members(
         (company_id, mailbox_email),
     )
     return [dict(row) for row in rows]
+
+
+async def get_mailbox_members_by_local_part(
+    company_id: int, local_part: str
+) -> list[dict[str, Any]]:
+    """Return synced member rows for mailbox emails sharing the given local part.
+
+    This is a fallback when the exact ``mailbox_email`` lookup returns no results
+    and the live Graph API call to resolve proxy addresses has failed.  It finds
+    member rows stored under any email alias that shares the same local part (the
+    portion before ``@``).  The ``local_part`` is escaped for SQL ``LIKE`` before
+    use.
+    """
+    # Escape SQL LIKE wildcards in the local part to prevent unintended matching.
+    escaped = local_part.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = escaped + "@%"
+    rows = await db.fetch_all(
+        """
+        SELECT DISTINCT member_upn, member_display_name
+        FROM m365_mailbox_members
+        WHERE company_id = %s AND mailbox_email LIKE %s ESCAPE '\\\\'
+        ORDER BY member_display_name ASC
+        """,
+        (company_id, pattern),
+    )
+    return [dict(row) for row in rows]
