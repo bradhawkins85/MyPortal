@@ -27,6 +27,15 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 
+# Exchange Online (Office 365 Exchange Online) service principal app ID and scope.
+# Used to acquire app-only tokens for Exchange Online PowerShell REST API calls
+# (e.g. Get-MailboxPermission) which are not available via Microsoft Graph.
+_EXO_APP_ID = "00000002-0000-0ff1-ce00-000000000000"
+_EXO_SCOPE = "https://outlook.office365.com/.default"
+# Exchange.ManageAsApp application role – grants app-only access to Exchange Online
+# PowerShell cmdlets when combined with an appropriate Exchange RBAC role assignment.
+_EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
+
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 _PACKAGE_MAILBOX_RE = re.compile(
     r"^package_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -238,14 +247,16 @@ async def _exchange_token(
     client_id: str,
     client_secret: str,
     refresh_token: str | None,
+    scope: str | None = None,
 ) -> tuple[str, str | None, datetime | None]:
     token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    effective_scope = scope or _GRAPH_SCOPE
     data: dict[str, Any]
     if refresh_token:
         data = {
             "client_id": client_id,
             "client_secret": client_secret,
-            "scope": f"{_GRAPH_SCOPE} offline_access",
+            "scope": f"{effective_scope} offline_access",
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
@@ -253,7 +264,7 @@ async def _exchange_token(
         data = {
             "client_id": client_id,
             "client_secret": client_secret,
-            "scope": _GRAPH_SCOPE,
+            "scope": effective_scope,
             "grant_type": "client_credentials",
         }
 
@@ -385,6 +396,34 @@ async def acquire_access_token(
         refresh_token=_encrypt(refresh),
         access_token=_encrypt(access_token),
         token_expires_at=expires_value,
+    )
+    return access_token
+
+
+async def _acquire_exo_access_token(company_id: int) -> str:
+    """Acquire an app-only access token for the Exchange Online PowerShell REST API.
+
+    Uses the ``client_credentials`` grant with the Exchange Online scope
+    (``https://outlook.office365.com/.default``).  The provisioned app must have
+    the ``Exchange.ManageAsApp`` application permission and be assigned an
+    appropriate Exchange RBAC role (e.g. Exchange Administrator) in the tenant.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("Microsoft 365 credentials have not been configured")
+
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = csp_tenant_id or tenant_id
+
+    access_token, _, _ = await _exchange_token(
+        tenant_id=effective_tenant_id,
+        client_id=client_id,
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=None,
+        scope=_EXO_SCOPE,
     )
     return access_token
 
@@ -571,7 +610,13 @@ async def provision_app_registration(
                 "resourceAccess": [
                     {"id": role_id, "type": "Role"} for role_id in _PROVISION_APP_ROLES
                 ],
-            }
+            },
+            {
+                "resourceAppId": _EXO_APP_ID,
+                "resourceAccess": [
+                    {"id": _EXO_MANAGE_AS_APP_ROLE, "type": "Role"},
+                ],
+            },
         ],
     }
     if redirect_uri:
@@ -635,6 +680,57 @@ async def provision_app_registration(
         "Granted admin consent for provisioned M365 app",
         sp_object_id=sp_object_id,
     )
+
+    # 4b. Grant Exchange Online Exchange.ManageAsApp role (best-effort).
+    # This enables Get-MailboxPermission via the Exchange Online PowerShell
+    # REST API.  The grant is non-fatal so provisioning still succeeds even
+    # when the Exchange Online service principal is absent from the tenant.
+    try:
+        exo_sp_response = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{_EXO_APP_ID}'&$select=id",
+        )
+        exo_sp_list = exo_sp_response.get("value", [])
+        if exo_sp_list:
+            exo_sp_id: str = exo_sp_list[0]["id"]
+            try:
+                await _graph_post(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                    {
+                        "principalId": sp_object_id,
+                        "resourceId": exo_sp_id,
+                        "appRoleId": _EXO_MANAGE_AS_APP_ROLE,
+                    },
+                )
+                log_info(
+                    "Granted Exchange.ManageAsApp role",
+                    sp_object_id=sp_object_id,
+                )
+            except M365Error as exc:
+                if exc.http_status == 409:
+                    log_info(
+                        "Exchange.ManageAsApp role already assigned, skipping",
+                        sp_object_id=sp_object_id,
+                    )
+                else:
+                    log_error(
+                        "Failed to grant Exchange.ManageAsApp role; "
+                        "Get-MailboxPermission will not be available",
+                        error=str(exc),
+                    )
+        else:
+            log_info(
+                "Exchange Online service principal not found in tenant; "
+                "skipping Exchange.ManageAsApp role grant",
+            )
+    except M365Error as exc:
+        log_error(
+            "Failed to look up Exchange Online service principal; "
+            "Get-MailboxPermission will not be available",
+            error=str(exc),
+        )
 
     # 5. Add the service principal as an owner of the app registration so it
     #    can call addPassword on itself (Application.ReadWrite.OwnedBy requires ownership).
@@ -1725,8 +1821,45 @@ async def try_grant_missing_permissions(
                 company_id=company_id,
                 granted_roles=granted,
             )
-            return True
-        return False
+
+        # Best-effort: also grant Exchange.ManageAsApp if not already assigned.
+        if _EXO_MANAGE_AS_APP_ROLE not in assigned_roles:
+            try:
+                exo_sp_response = await _graph_get(
+                    access_token,
+                    "https://graph.microsoft.com/v1.0/servicePrincipals"
+                    f"?$filter=appId eq '{_EXO_APP_ID}'&$select=id",
+                )
+                exo_sp_list = exo_sp_response.get("value", [])
+                if exo_sp_list:
+                    exo_sp_id: str = exo_sp_list[0]["id"]
+                    try:
+                        await _graph_post(
+                            access_token,
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            {
+                                "principalId": sp_object_id,
+                                "resourceId": exo_sp_id,
+                                "appRoleId": _EXO_MANAGE_AS_APP_ROLE,
+                            },
+                        )
+                        granted.append(_EXO_MANAGE_AS_APP_ROLE)
+                        log_info(
+                            "Granted Exchange.ManageAsApp via connect flow",
+                            company_id=company_id,
+                        )
+                    except M365Error as exc:
+                        if exc.http_status != 409:
+                            log_error(
+                                "try_grant_missing_permissions: "
+                                "failed to grant Exchange.ManageAsApp",
+                                company_id=company_id,
+                                error=str(exc),
+                            )
+            except M365Error:
+                pass  # Exchange Online SP lookup failed; non-fatal
+
+        return bool(granted)
     except Exception as exc:  # noqa: BLE001
         log_error(
             "try_grant_missing_permissions: unexpected error",
@@ -2058,29 +2191,7 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
     return parsed_rows
 
 
-_DIRECT_MAILBOX_PERMISSION_RESOURCE = "microsoft.exchange.mailboxpermission"
 _DIRECT_MAILBOX_PERMISSION_SELF = "nt authority\\self"
-
-
-def _iter_direct_mailbox_permission_records(payload: Any) -> list[dict[str, Any]]:
-    """Extract mailboxPermission-like records from a UTCM snapshot payload."""
-    records: list[dict[str, Any]] = []
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, dict):
-            keys = {str(key).lower() for key in node.keys()}
-            if {"identity", "user"}.issubset(keys) and (
-                "accessrights" in keys or "access_rights" in keys
-            ):
-                records.append(node)
-            for value in node.values():
-                _walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                _walk(item)
-
-    _walk(payload)
-    return records
 
 
 def _normalise_direct_mailbox_permission_principal(user_value: str) -> tuple[str, str]:
@@ -2101,24 +2212,21 @@ def _normalise_direct_mailbox_permission_principal(user_value: str) -> tuple[str
     return candidate, lower_candidate
 
 
-def _extract_direct_mailbox_permission_members(
-    payload: Any,
-    mailbox_emails: set[str],
-) -> dict[str, list[dict[str, str]]]:
-    """Map mailbox emails to directly-assigned user permissions from a snapshot payload."""
-    normalised_mailboxes = {
-        str(email or "").strip().lower()
-        for email in mailbox_emails
-        if str(email or "").strip()
-    }
-    members_by_mailbox: dict[str, dict[str, dict[str, str]]] = {}
+def _parse_exo_mailbox_permission_records(
+    mailbox_email: str,
+    records: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Parse Get-MailboxPermission response records into member dicts.
 
-    for record in _iter_direct_mailbox_permission_records(payload):
-        mailbox_email = str(record.get("identity") or "").strip().lower()
-        if mailbox_email not in normalised_mailboxes:
-            continue
+    Filters to FullAccess, non-deny, non-self entries and returns a list of
+    ``{"member_display_name": ..., "member_upn": ...}`` dicts.
+    """
+    members: dict[str, dict[str, str]] = {}
 
-        access_rights_raw = record.get("accessRights")
+    for record in records:
+        access_rights_raw = record.get("AccessRights")
+        if access_rights_raw is None:
+            access_rights_raw = record.get("accessRights")
         if access_rights_raw is None:
             access_rights_raw = record.get("access_rights")
         if isinstance(access_rights_raw, str):
@@ -2129,10 +2237,14 @@ def _extract_direct_mailbox_permission_members(
             access_rights = []
         if not any(right.lower() == "fullaccess" for right in access_rights):
             continue
-        if bool(record.get("deny")):
+
+        deny = record.get("Deny") if record.get("Deny") is not None else record.get("deny")
+        if bool(deny):
             continue
 
-        user_value = str(record.get("user") or "").strip()
+        user_value = str(
+            record.get("User") or record.get("user") or ""
+        ).strip()
         if not user_value or user_value.lower() == _DIRECT_MAILBOX_PERMISSION_SELF:
             continue
 
@@ -2142,84 +2254,94 @@ def _extract_direct_mailbox_permission_members(
         if not member_upn:
             continue
 
-        mailbox_members = members_by_mailbox.setdefault(mailbox_email, {})
-        mailbox_members[member_upn] = {
+        members[member_upn] = {
             "member_display_name": display_name or member_upn,
             "member_upn": member_upn,
         }
 
-    return {
-        mailbox: sorted(
-            members.values(), key=lambda item: item["member_display_name"].lower()
-        )
-        for mailbox, members in members_by_mailbox.items()
+    return sorted(members.values(), key=lambda item: item["member_display_name"].lower())
+
+
+async def _exo_get_mailbox_permission(
+    exo_token: str,
+    tenant_id: str,
+    mailbox_email: str,
+) -> list[dict[str, Any]]:
+    """Call Get-MailboxPermission for a single mailbox via Exchange Online REST API.
+
+    Uses the Exchange Online PowerShell REST ``InvokeCommand`` endpoint to run
+    ``Get-MailboxPermission -Identity <mailbox_email>``.  Returns the raw
+    ``value`` list from the response, or an empty list on failure.
+    """
+    url = (
+        f"https://outlook.office365.com/adminapi/beta/"
+        f"{quote(tenant_id, safe='')}/InvokeCommand"
+    )
+    payload = {
+        "CmdletInput": {
+            "CmdletName": "Get-MailboxPermission",
+            "Parameters": {"Identity": mailbox_email},
+        }
     }
+    headers = {
+        "Authorization": f"Bearer {exo_token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers=headers, json=payload)
+    if response.status_code != 200:
+        return []
+    try:
+        data = response.json()
+    except ValueError:
+        return []
+    return data.get("value") or []
 
 
-async def _fetch_direct_mailbox_permission_members(
-    access_token: str,
+async def _fetch_exo_mailbox_permissions(
+    company_id: int,
     mailbox_emails: set[str],
 ) -> dict[str, list[dict[str, str]]]:
-    """Best-effort fetch of direct mailbox user assignments via UTCM snapshots.
+    """Fetch FullAccess mailbox permissions via Exchange Online Get-MailboxPermission.
 
-    This uses the Microsoft Graph beta configuration snapshot API to request the
-    ``microsoft.exchange.mailboxpermission`` resource, which includes direct
-    FullAccess mailbox assignments. The API is best-effort because tenants must
-    separately enable the required UTCM / Exchange permissions; failures should
-    not break mailbox sync.
+    Acquires an Exchange Online app-only token and calls
+    ``Get-MailboxPermission`` for each mailbox via the Exchange Online
+    PowerShell REST API.  This is the reliable method for retrieving direct
+    FullAccess assignments, as Microsoft Graph does not expose this data.
+
+    Returns a dict mapping lowercase mailbox emails to lists of member dicts
+    (``member_display_name``, ``member_upn``).  The function is best-effort:
+    if the Exchange Online token cannot be acquired or individual mailbox
+    queries fail, those mailboxes are silently skipped.
     """
     if not mailbox_emails:
         return {}
 
-    snapshot_job = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/beta/admin/configurationManagement/configurationSnapshots/createSnapshot",
-        {
-            "displayName": "MyPortal mailbox permission snapshot",
-            "description": "Mailbox permission sync",
-            "resources": [_DIRECT_MAILBOX_PERMISSION_RESOURCE],
-        },
-    )
-
-    job_id = str(snapshot_job.get("id") or "").strip()
-    if not job_id:
-        return {}
-
-    job_url = f"https://graph.microsoft.com/beta/admin/configurationManagement/configurationSnapshotJobs/{quote(job_id, safe='')}"
-    job_data = snapshot_job
-    for _ in range(10):
-        status = str(job_data.get("status") or "").strip().lower()
-        if status in {"succeeded", "partiallysuccessful", "partiallysuccessful"}:
-            break
-        if status in {"failed", "unknownfuturevalue"}:
-            return {}
-        await asyncio.sleep(1)
-        job_data = await _graph_get(access_token, job_url)
-    else:
-        return {}
-
-    resource_location = str(job_data.get("resourceLocation") or "").strip()
-    if not resource_location:
-        return {}
-
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(
-            resource_location, headers={"Authorization": f"Bearer {access_token}"}
-        )
-    if response.status_code != 200:
-        raise M365Error(
-            f"Microsoft Graph snapshot download failed ({response.status_code})",
-            http_status=response.status_code,
-        )
-
     try:
-        snapshot_payload = response.json()
-    except ValueError as exc:  # pragma: no cover - defensive for unexpected payloads
-        raise M365Error(
-            "Microsoft Graph snapshot download returned invalid JSON"
-        ) from exc
+        exo_token = await _acquire_exo_access_token(company_id)
+    except M365Error:
+        return {}
 
-    return _extract_direct_mailbox_permission_members(snapshot_payload, mailbox_emails)
+    creds = await get_credentials(company_id)
+    if not creds:
+        return {}
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = csp_tenant_id or tenant_id
+
+    members_by_mailbox: dict[str, list[dict[str, str]]] = {}
+    for mailbox_email in mailbox_emails:
+        normalised = str(mailbox_email or "").strip().lower()
+        if not normalised:
+            continue
+        records = await _exo_get_mailbox_permission(
+            exo_token, effective_tenant_id, normalised
+        )
+        parsed = _parse_exo_mailbox_permission_records(normalised, records)
+        if parsed:
+            members_by_mailbox[normalised] = parsed
+
+    return members_by_mailbox
 
 
 async def sync_mailboxes(company_id: int) -> int:
@@ -2243,6 +2365,14 @@ async def sync_mailboxes(company_id: int) -> int:
     are its members – so that ``get_mailbox_permissions()`` can report who can
     access a given mailbox without a live Graph round-trip.  Run a mailbox sync
     to refresh the data.
+
+    Direct FullAccess mailbox permissions (assigned outside of group membership)
+    are fetched via the Exchange Online PowerShell REST API using
+    ``Get-MailboxPermission``.  This requires the ``Exchange.ManageAsApp``
+    application permission and an appropriate Exchange RBAC role (e.g. Exchange
+    Administrator) assigned to the provisioned service principal.  If Exchange
+    Online access is unavailable, group-membership-based permissions are still
+    synced.
 
     Requires the ``Reports.Read.All`` and ``MailboxSettings.Read`` application
     permissions granted to the provisioned enterprise app.  Re-provision the
@@ -2414,12 +2544,13 @@ async def sync_mailboxes(company_id: int) -> int:
     direct_members_by_mailbox: dict[str, list[dict[str, str]]] = {}
     if mailbox_emails:
         try:
-            direct_members_by_mailbox = await _fetch_direct_mailbox_permission_members(
-                access_token, mailbox_emails
+            direct_members_by_mailbox = await _fetch_exo_mailbox_permissions(
+                company_id, mailbox_emails
             )
         except Exception as exc:
             log_info(
-                "Skipping direct mailbox permission sync; UTCM snapshot unavailable",
+                "Skipping direct mailbox permission sync; "
+                "Exchange Online PowerShell unavailable",
                 company_id=company_id,
                 error=str(exc),
             )
@@ -2527,9 +2658,10 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
 
     **Mailboxes that can access me** – users who have been assigned full access
     to this mailbox.  During ``sync_mailboxes`` the members of each mailbox's
-    backing M365 group are fetched directly from Microsoft Graph and stored in
-    the ``m365_mailbox_members`` table.  This function reads that cached data
-    (keyed by the mailbox's primary SMTP address) so the response is fast.
+    backing M365 group and direct FullAccess permissions (via Exchange Online
+    ``Get-MailboxPermission``) are stored in the ``m365_mailbox_members``
+    table.  This function reads that cached data (keyed by the mailbox's
+    primary SMTP address) so the response is fast.
     Run a mailbox sync to refresh the data.
 
     Requires the ``Directory.Read.All`` application permission (already in
