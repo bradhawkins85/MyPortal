@@ -19,7 +19,7 @@ from app.services import m365 as m365_service
 from app.services.m365 import (
     M365Error,
     _count_forwarding_rules,
-    _extract_direct_mailbox_permission_members,
+    _parse_exo_mailbox_permission_records,
 )
 
 
@@ -1203,7 +1203,7 @@ async def test_sync_mailboxes_upserts_direct_user_mailbox_permissions():
         patch.object(m365_service, "get_all_users", AsyncMock(return_value=[])),
         patch.object(
             m365_service,
-            "_fetch_direct_mailbox_permission_members",
+            "_fetch_exo_mailbox_permissions",
             AsyncMock(return_value=direct_permissions),
         ),
         patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
@@ -1230,50 +1230,36 @@ async def test_sync_mailboxes_upserts_direct_user_mailbox_permissions():
     ]
 
 
-def test_extract_direct_mailbox_permission_members_filters_and_normalises():
-    """Snapshot mailbox permissions keep direct FullAccess users and discard denied/self entries."""
-    payload = {
-        "value": [
-            {
-                "identity": "shared@example.com",
-                "user": "Delegate User <delegate@example.com>",
-                "accessRights": ["FullAccess"],
-                "deny": False,
-            },
-            {
-                "identity": "shared@example.com",
-                "user": r"NT AUTHORITY\SELF",
-                "accessRights": ["FullAccess"],
-                "deny": False,
-            },
-            {
-                "identity": "shared@example.com",
-                "user": "Denied User <denied@example.com>",
-                "accessRights": ["FullAccess"],
-                "deny": True,
-            },
-            {
-                "identity": "shared@example.com",
-                "user": "Reader <reader@example.com>",
-                "accessRights": ["ReadPermission"],
-                "deny": False,
-            },
-            {
-                "identity": "other@example.com",
-                "user": "Other User <other@example.com>",
-                "accessRights": ["FullAccess"],
-                "deny": False,
-            },
-        ]
-    }
+def test_parse_exo_mailbox_permission_records_filters_and_normalises():
+    """EXO mailbox permission records keep FullAccess users and discard denied/self entries."""
+    records = [
+        {
+            "User": "Delegate User <delegate@example.com>",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+        {
+            "User": r"NT AUTHORITY\SELF",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+        {
+            "User": "Denied User <denied@example.com>",
+            "AccessRights": ["FullAccess"],
+            "Deny": True,
+        },
+        {
+            "User": "Reader <reader@example.com>",
+            "AccessRights": ["ReadPermission"],
+            "Deny": False,
+        },
+    ]
 
-    result = _extract_direct_mailbox_permission_members(payload, {"shared@example.com"})
+    result = _parse_exo_mailbox_permission_records("shared@example.com", records)
 
-    assert result == {
-        "shared@example.com": [
-            {
-                "member_display_name": "Delegate User",
-                "member_upn": "delegate@example.com",
-            }
-        ]
-    }
+    assert result == [
+        {
+            "member_display_name": "Delegate User",
+            "member_upn": "delegate@example.com",
+        }
+    ]
