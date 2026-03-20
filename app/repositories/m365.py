@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -304,8 +305,9 @@ async def get_mailbox_members_by_local_part(
     portion before ``@``).  The ``local_part`` is escaped for SQL ``LIKE`` before
     use.
     """
-    # Escape SQL LIKE wildcards in the local part to prevent unintended matching.
-    escaped = local_part.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    # Single-pass escape of SQL LIKE wildcards (\ % _) to prevent unintended
+    # matching.  Each special character is prefixed with the ESCAPE character \.
+    escaped = re.sub(r"([\\%_])", r"\\\1", local_part)
     pattern = escaped + "@%"
     rows = await db.fetch_all(
         """

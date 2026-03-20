@@ -638,6 +638,9 @@ async def test_get_mailbox_permissions_local_part_fallback_not_triggered_when_da
     assert not fallback_called
     assert len(result["accessible_by"]) == 1
     assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
+    assert "should-not-appear@contoso.com" not in {
+        item["upn"] for item in result["accessible_by"]
+    }
 
 
 @pytest.mark.anyio("asyncio")
