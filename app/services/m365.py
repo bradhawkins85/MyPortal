@@ -2451,7 +2451,12 @@ async def sync_mailboxes(company_id: int) -> int:
     # Record the time before any member upserts so we can purge rows that
     # were not touched in this sync run using a simple timestamp comparison
     # (avoids building a large NOT IN clause for big tenants).
-    member_sync_start = datetime.utcnow()
+    # Truncate microseconds so the value stored in MySQL's DATETIME column
+    # (which has only second precision) matches the value used in the stale
+    # cleanup comparison.  Without this, MySQL may round the inserted value
+    # down while comparing against the full-precision Python datetime,
+    # causing freshly inserted rows to be deleted.
+    member_sync_start = datetime.utcnow().replace(microsecond=0)
 
     # --- User mailboxes ---
     for user, identifiers in users_with_identifiers:
