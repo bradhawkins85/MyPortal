@@ -181,7 +181,7 @@ async def test_try_grant_missing_permissions_continues_on_partial_failure():
         )
 
     # At least the second role should have been attempted
-    assert call_count == 2, "Both missing roles should be attempted even when first fails"
+    assert call_count == 3, "Both missing Graph roles and EXO role should be attempted even when first fails"
     # The second role succeeded, so result should be True
     assert result is True, "Should return True when at least one permission was granted"
 
@@ -248,9 +248,9 @@ async def test_provision_app_registration_skips_409_role_assignments():
 
     assert result["client_id"] == "new-client-id"
     assert result["client_secret"] == "test-secret"
-    # All roles should have been attempted (not stopped at the first 409)
+    # All roles should have been attempted (Graph roles + Exchange.ManageAsApp)
     role_assignment_calls = [c for c in post_calls if "appRoleAssignments" in c["url"]]
-    assert len(role_assignment_calls) == len(_PROVISION_APP_ROLES), (
+    assert len(role_assignment_calls) == len(_PROVISION_APP_ROLES) + 1, (
         "All role assignments must be attempted even when the first returns 409"
     )
 
