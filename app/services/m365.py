@@ -2458,6 +2458,11 @@ async def sync_mailboxes(company_id: int) -> int:
     # causing freshly inserted rows to be deleted.
     member_sync_start = datetime.utcnow().replace(microsecond=0)
 
+    # In-memory cache of group_email → list of (member_upn, member_display_name)
+    # built alongside the user-centric sync so that we can cross-reference
+    # shared mailbox UPNs with group members without extra API calls.
+    group_member_cache: dict[str, list[tuple[str, str]]] = {}
+
     # --- User mailboxes ---
     for user, identifiers in users_with_identifiers:
         preferred_upn = identifiers[0]
@@ -2500,6 +2505,9 @@ async def sync_mailboxes(company_id: int) -> int:
                     member_display_name=user.get("displayName") or preferred_upn,
                     synced_at=member_sync_start,
                 )
+                group_member_cache.setdefault(group_email, []).append(
+                    (preferred_upn, user.get("displayName") or preferred_upn)
+                )
 
         rows_to_upsert.append(
             {
@@ -2535,6 +2543,62 @@ async def sync_mailboxes(company_id: int) -> int:
                 "forwarding_rule_count": 0,
             }
         )
+
+    # --- Cross-reference shared mailbox UPNs with group member cache ---
+    # Group membership rows were stored above keyed by the group's primary SMTP
+    # address (group_email).  When a shared mailbox UPN differs from the group
+    # email (e.g. an onmicrosoft.com UPN vs. a custom-domain group address),
+    # get_mailbox_permissions() needs to find those rows via proxy-address
+    # resolution – which requires a live Graph API call that can fail.
+    #
+    # To make the data available under the shared mailbox UPN without depending
+    # on a live call at query time, resolve each shared mailbox's email aliases
+    # now and copy matching group-member entries to the mailbox UPN.
+    if group_member_cache:
+        for row in rows_to_upsert:
+            if row["mailbox_type"] != "SharedMailbox":
+                continue
+            mb_upn = row["user_principal_name"]
+            if mb_upn in group_member_cache:
+                # Already stored under the correct key – nothing to do.
+                continue
+
+            # Resolve the shared mailbox's email aliases.
+            try:
+                mb_user = await _graph_get(
+                    access_token,
+                    (
+                        f"https://graph.microsoft.com/v1.0/users/"
+                        f"{quote(mb_upn, safe='')}"
+                        "?$select=mail,proxyAddresses"
+                    ),
+                )
+            except M365Error:
+                mb_user = {}
+
+            aliases: set[str] = set()
+            mb_mail = (mb_user.get("mail") or "").strip().lower()
+            if mb_mail and mb_mail != mb_upn:
+                aliases.add(mb_mail)
+            for proxy in mb_user.get("proxyAddresses") or []:
+                proxy_str = str(proxy or "")
+                if proxy_str.lower().startswith("smtp:"):
+                    alias = proxy_str[5:].strip().lower()
+                    if alias and alias != mb_upn:
+                        aliases.add(alias)
+
+            for alias in aliases:
+                cached_members = group_member_cache.get(alias)
+                if not cached_members:
+                    continue
+                for member_upn, member_display in cached_members:
+                    await m365_repo.upsert_mailbox_member(
+                        company_id=company_id,
+                        mailbox_email=mb_upn,
+                        member_upn=member_upn,
+                        member_display_name=member_display,
+                        synced_at=member_sync_start,
+                    )
 
     mailbox_emails = {
         str(row["user_principal_name"] or "").strip().lower()
@@ -2767,6 +2831,21 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
             _store_accessible_member(member["member_display_name"], member["member_upn"])
     except Exception:
         pass  # Best-effort; DB and group data already collected above
+
+    # Fallback: if all previous sources yielded nothing and the Graph API
+    # user lookup failed (so proxy-address resolution was unavailable), try a
+    # local-part-based DB search.  This catches the common case where group
+    # membership data was synced under a different domain variant of the same
+    # mailbox (e.g. group email is sales@contoso.com but the report UPN is
+    # sales@contoso.onmicrosoft.com).
+    if not accessible_by_map and "@" in raw_mailbox_email:
+        local_part = raw_mailbox_email.split("@", 1)[0]
+        if local_part:
+            _store_accessible_members(
+                await m365_repo.get_mailbox_members_by_local_part(
+                    company_id, local_part
+                )
+            )
 
     # ------------------------------------------------------------------
     # "Mailboxes I can access": live mail-enabled group memberships
