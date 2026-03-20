@@ -12,6 +12,9 @@ Covers:
 - accessible_by falls back to UPN for DB lookup when mail property is absent
 - accessible_by uses member_upn as display_name fallback when member_display_name is empty
 - accessible_by uses proxyAddresses to find members stored under alternate email aliases
+- accessible_by includes results from live Exchange Online Get-MailboxPermission
+- accessible_by de-duplicates live EXO results with DB members
+- accessible_by still returns DB data when EXO token acquisition fails
 """
 from __future__ import annotations
 
@@ -464,3 +467,111 @@ async def test_get_mailbox_permissions_proxy_addresses_live_group_lookup():
     # Both the primary email and the onmicrosoft alias should have been tried.
     assert "payroll@company.com.au" in captured_group_lookups
     assert "payroll@company.onmicrosoft.com" in captured_group_lookups
+
+
+# ---------------------------------------------------------------------------
+# accessible_by – live Exchange Online Get-MailboxPermission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_accessible_by_includes_live_exo_permissions():
+    """accessible_by includes results from a live EXO Get-MailboxPermission call."""
+    user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
+    exo_records = [
+        {
+            "User": "Bob Delegate <bob@contoso.com>",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-tok", "tenant-id")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_mailbox_permission",
+            AsyncMock(return_value=exo_records),
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "alice@contoso.com")
+
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
+    assert result["accessible_by"][0]["display_name"] == "Bob Delegate"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_accessible_by_exo_supplements_db_data():
+    """Live EXO results merge with DB members; duplicates are de-duplicated."""
+    user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
+    db_members = [_db_member("bob@contoso.com", "Bob Smith")]
+    exo_records = [
+        {
+            "User": "Bob Smith <bob@contoso.com>",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+        {
+            "User": "Carol Jones <carol@contoso.com>",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-tok", "tenant-id")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_mailbox_permission",
+            AsyncMock(return_value=exo_records),
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "alice@contoso.com")
+
+    # Bob appears once (de-duplicated), Carol added from live EXO
+    upns = {item["upn"] for item in result["accessible_by"]}
+    assert upns == {"bob@contoso.com", "carol@contoso.com"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_accessible_by_exo_failure_silent():
+    """When EXO token acquisition fails, accessible_by still returns DB data."""
+    user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
+    db_members = [_db_member("bob@contoso.com", "Bob Smith")]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(side_effect=M365Error("EXO unavailable")),
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "alice@contoso.com")
+
+    # DB data still present despite EXO failure
+    assert len(result["accessible_by"]) == 1
+    assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
