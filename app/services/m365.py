@@ -400,13 +400,15 @@ async def acquire_access_token(
     return access_token
 
 
-async def _acquire_exo_access_token(company_id: int) -> str:
+async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     """Acquire an app-only access token for the Exchange Online PowerShell REST API.
 
     Uses the ``client_credentials`` grant with the Exchange Online scope
     (``https://outlook.office365.com/.default``).  The provisioned app must have
     the ``Exchange.ManageAsApp`` application permission and be assigned an
     appropriate Exchange RBAC role (e.g. Exchange Administrator) in the tenant.
+
+    :returns: A tuple of ``(access_token, effective_tenant_id)``.
     """
     creds = await get_credentials(company_id)
     if not creds:
@@ -425,7 +427,7 @@ async def _acquire_exo_access_token(company_id: int) -> str:
         refresh_token=None,
         scope=_EXO_SCOPE,
     )
-    return access_token
+    return access_token, effective_tenant_id
 
 
 async def _graph_get(
@@ -2318,16 +2320,9 @@ async def _fetch_exo_mailbox_permissions(
         return {}
 
     try:
-        exo_token = await _acquire_exo_access_token(company_id)
+        exo_token, effective_tenant_id = await _acquire_exo_access_token(company_id)
     except M365Error:
         return {}
-
-    creds = await get_credentials(company_id)
-    if not creds:
-        return {}
-    tenant_id = str(creds.get("tenant_id") or "").strip()
-    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or tenant_id
 
     members_by_mailbox: dict[str, list[dict[str, str]]] = {}
     for mailbox_email in mailbox_emails:

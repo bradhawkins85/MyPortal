@@ -244,16 +244,7 @@ async def test_fetch_exo_mailbox_permissions_returns_members():
         patch.object(
             m365_service,
             "_acquire_exo_access_token",
-            AsyncMock(return_value="exo-tok"),
-        ),
-        patch.object(
-            m365_service,
-            "get_credentials",
-            AsyncMock(return_value={"tenant_id": "tid", "client_id": "cid", "client_secret": "cs"}),
-        ),
-        patch(
-            "app.repositories.companies.get_company_csp_tenant_id",
-            AsyncMock(return_value=None),
+            AsyncMock(return_value=("exo-tok", "tid")),
         ),
         patch.object(
             m365_service,
@@ -300,16 +291,7 @@ async def test_fetch_exo_mailbox_permissions_skips_failed_mailboxes():
         patch.object(
             m365_service,
             "_acquire_exo_access_token",
-            AsyncMock(return_value="exo-tok"),
-        ),
-        patch.object(
-            m365_service,
-            "get_credentials",
-            AsyncMock(return_value={"tenant_id": "tid", "client_id": "cid", "client_secret": "cs"}),
-        ),
-        patch(
-            "app.repositories.companies.get_company_csp_tenant_id",
-            AsyncMock(return_value=None),
+            AsyncMock(return_value=("exo-tok", "tid")),
         ),
         patch.object(
             m365_service,
@@ -340,8 +322,6 @@ async def test_exchange_token_uses_custom_scope():
         "access_token": "test-token",
         "expires_in": 3600,
     }
-
-    original_post = httpx.AsyncClient.post
 
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
