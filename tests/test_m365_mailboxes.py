@@ -1127,8 +1127,82 @@ async def test_sync_mailboxes_calls_delete_stale_members_with_sync_timestamp():
     company_id, synced_before = delete_calls[0]
     assert company_id == 1
     # synced_before should be a datetime at or after the time we recorded
+    # (truncated to the second, so compare with truncated before)
     assert isinstance(synced_before, datetime)
-    assert synced_before >= before
+    assert synced_before >= before.replace(microsecond=0)
+    # Microseconds must be zero so the value stored in MySQL's DATETIME
+    # column (second precision) exactly matches the comparison parameter
+    # used by delete_stale_mailbox_members.
+    assert synced_before.microsecond == 0
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_member_synced_at_has_no_microseconds():
+    """Upserted member rows use a synced_at with zero microseconds.
+
+    MySQL DATETIME columns have second precision.  If the Python datetime
+    has non-zero microseconds, MySQL rounds the INSERT value to the
+    nearest second but compares with the full-precision parameter in the
+    subsequent DELETE.  This mismatch causes freshly inserted rows to be
+    deleted.  Verifying microsecond=0 prevents this regression.
+    """
+    from datetime import datetime as dt_cls
+
+    report = [_make_report_entry("user@example.com", "Alice", storage_bytes=100)]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
+    mail_groups = [
+        {
+            "id": "g1",
+            "displayName": "Shared Box",
+            "mail": "shared@example.com",
+            "mailEnabled": True,
+        },
+    ]
+
+    upserted_members: list[dict] = []
+
+    async def fake_upsert_member(**kwargs: Any) -> None:
+        upserted_members.append(kwargs)
+
+    with (
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(
+            m365_service,
+            "_get_user_mail_enabled_groups",
+            AsyncMock(return_value=mail_groups),
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", AsyncMock()),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo,
+            "upsert_mailbox_member",
+            side_effect=fake_upsert_member,
+        ),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    assert len(upserted_members) == 1
+    synced_at = upserted_members[0]["synced_at"]
+    assert isinstance(synced_at, dt_cls)
+    assert synced_at.microsecond == 0, (
+        "synced_at must have zero microseconds to avoid MySQL DATETIME "
+        "precision mismatch that causes delete_stale_mailbox_members to "
+        "delete freshly inserted rows"
+    )
 
 
 @pytest.mark.anyio("asyncio")
