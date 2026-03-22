@@ -15,7 +15,7 @@ from urllib.parse import quote
 import httpx
 
 from app.core.config import get_settings
-from app.core.logging import log_error, log_info
+from app.core.logging import log_error, log_info, log_warning
 from app.repositories import apps as apps_repo
 from app.repositories import companies as companies_repo
 from app.repositories import licenses as license_repo
@@ -1950,7 +1950,11 @@ async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
     Queries the ``/mailFolders/inbox/messageRules`` endpoint for the given user
     and counts rules that have ``forwardTo``, ``redirectTo``, or
     ``forwardAsAttachmentTo`` actions populated.  Returns 0 if the endpoint is
-    unavailable (e.g. the mailbox does not exist or permissions are missing).
+    unavailable (e.g. the mailbox does not exist).
+
+    A 403 (access denied) response is **re-raised** so that the caller can
+    detect a missing ``MailboxSettings.Read`` permission and skip remaining
+    users instead of repeating failing requests for every mailbox.
     """
     url = (
         f"https://graph.microsoft.com/v1.0/users/{user_id}"
@@ -1958,7 +1962,9 @@ async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
     )
     try:
         rules = await _graph_get_all(access_token, url)
-    except M365Error:
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise
         return 0
     count = 0
     for rule in rules:
@@ -2463,6 +2469,12 @@ async def sync_mailboxes(company_id: int) -> int:
     # shared mailbox UPNs with group members without extra API calls.
     group_member_cache: dict[str, list[tuple[str, str]]] = {}
 
+    # Track whether the messageRules endpoint returned 403, which means the
+    # MailboxSettings.Read permission is missing.  Once detected on the first
+    # user, skip forwarding-rule checks for all remaining users to avoid
+    # repeating N failing API calls (they would all fail identically).
+    rules_permission_denied = False
+
     # --- User mailboxes ---
     for user, identifiers in users_with_identifiers:
         preferred_upn = identifiers[0]
@@ -2488,7 +2500,21 @@ async def sync_mailboxes(company_id: int) -> int:
             user.get("displayName") or report_entry.get("displayName") or preferred_upn
         )
 
-        fw_count = await _count_forwarding_rules(access_token, user["id"])
+        fw_count = 0
+        if not rules_permission_denied:
+            try:
+                fw_count = await _count_forwarding_rules(access_token, user["id"])
+            except M365Error as exc:
+                if exc.http_status == 403:
+                    rules_permission_denied = True
+                    log_warning(
+                        "Skipping forwarding-rule checks for all mailboxes – "
+                        "the enterprise app is missing the MailboxSettings.Read "
+                        "permission. Re-provision the enterprise app to grant "
+                        "the required permissions.",
+                    )
+                else:
+                    raise
 
         # Sync which mailbox groups this user has access to via group membership.
         # For each mail-enabled group the user belongs to, record a member row
