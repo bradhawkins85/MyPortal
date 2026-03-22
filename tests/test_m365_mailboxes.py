@@ -58,13 +58,24 @@ async def test_count_forwarding_rules_counts_redirect_to():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_count_forwarding_rules_returns_zero_on_error():
-    """Returns 0 when the Graph API raises M365Error (e.g. no mailbox)."""
+async def test_count_forwarding_rules_returns_zero_on_non_403_error():
+    """Returns 0 when the Graph API raises a non-403 M365Error (e.g. no mailbox)."""
     with patch.object(
-        m365_service, "_graph_get_all", AsyncMock(side_effect=M365Error("403"))
+        m365_service, "_graph_get_all", AsyncMock(side_effect=M365Error("not found", http_status=404))
     ):
         count = await _count_forwarding_rules("token", "user-id")
     assert count == 0
+
+
+@pytest.mark.anyio("asyncio")
+async def test_count_forwarding_rules_reraises_403():
+    """A 403 from the Graph API is re-raised so the caller can detect missing permissions."""
+    with patch.object(
+        m365_service, "_graph_get_all", AsyncMock(side_effect=M365Error("access denied", http_status=403))
+    ):
+        with pytest.raises(M365Error) as exc_info:
+            await _count_forwarding_rules("token", "user-id")
+    assert exc_info.value.http_status == 403
 
 
 @pytest.mark.anyio("asyncio")
@@ -1337,3 +1348,60 @@ def test_parse_exo_mailbox_permission_records_filters_and_normalises():
             "member_upn": "delegate@example.com",
         }
     ]
+
+
+# ---------------------------------------------------------------------------
+# sync_mailboxes – 403 from messageRules skips remaining users
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_skips_forwarding_rules_on_403():
+    """A 403 from _count_forwarding_rules skips remaining users instead of repeating failing calls."""
+    report = [
+        _make_report_entry("user1@example.com", "Alice", storage_bytes=100),
+        _make_report_entry("user2@example.com", "Bob", storage_bytes=200),
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user1@example.com", "displayName": "Alice"},
+        {"id": "u2", "userPrincipalName": "user2@example.com", "displayName": "Bob"},
+    ]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    # _count_forwarding_rules raises 403 on the first call
+    fw_mock = AsyncMock(side_effect=M365Error("access denied", http_status=403))
+
+    with (
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(m365_service, "_count_forwarding_rules", fw_mock),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
+    ):
+        total = await m365_service.sync_mailboxes(1)
+
+    # Sync should complete (not abort) and both mailboxes should be upserted
+    assert total == 2
+    # _count_forwarding_rules should only be called ONCE (for the first user),
+    # because the 403 should cause remaining users to be skipped.
+    assert fw_mock.call_count == 1
+    # Both user mailboxes should have forwarding_rule_count = 0
+    for row in upserted:
+        if row["mailbox_type"] == "UserMailbox":
+            assert row["forwarding_rule_count"] == 0
