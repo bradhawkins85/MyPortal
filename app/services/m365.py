@@ -1789,55 +1789,57 @@ async def try_grant_missing_permissions(
 
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
         missing: list[str] = sorted(required_roles - assigned_roles)
-        if not missing:
+        exo_needed = _EXO_MANAGE_AS_APP_ROLE not in assigned_roles
+        if not missing and not exo_needed:
             return False
 
-        # Locate the Microsoft Graph service principal in this tenant
-        graph_sp_response = await _graph_get(
-            access_token,
-            "https://graph.microsoft.com/v1.0/servicePrincipals"
-            f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
-        )
-        graph_sp_list = graph_sp_response.get("value", [])
-        if not graph_sp_list:
-            log_info(
-                "try_grant_missing_permissions: Graph SP not found",
-                company_id=company_id,
-            )
-            return False
-        graph_sp_id: str = graph_sp_list[0]["id"]
-
-        # Grant each missing role assignment
         granted: list[str] = []
-        for role_id in missing:
-            try:
-                await _graph_post(
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                    {
-                        "principalId": sp_object_id,
-                        "resourceId": graph_sp_id,
-                        "appRoleId": role_id,
-                    },
-                )
-                granted.append(role_id)
-            except M365Error as exc:
-                log_error(
-                    "try_grant_missing_permissions: failed to grant role",
-                    company_id=company_id,
-                    role_id=role_id,
-                    error=str(exc),
-                )
 
-        if granted:
-            log_info(
-                "Granted missing M365 permissions via connect flow",
-                company_id=company_id,
-                granted_roles=granted,
+        # Grant each missing Graph role assignment
+        if missing:
+            # Locate the Microsoft Graph service principal in this tenant
+            graph_sp_response = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/servicePrincipals"
+                f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
             )
+            graph_sp_list = graph_sp_response.get("value", [])
+            if not graph_sp_list:
+                log_info(
+                    "try_grant_missing_permissions: Graph SP not found",
+                    company_id=company_id,
+                )
+            else:
+                graph_sp_id: str = graph_sp_list[0]["id"]
+                for role_id in missing:
+                    try:
+                        await _graph_post(
+                            access_token,
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            {
+                                "principalId": sp_object_id,
+                                "resourceId": graph_sp_id,
+                                "appRoleId": role_id,
+                            },
+                        )
+                        granted.append(role_id)
+                    except M365Error as exc:
+                        log_error(
+                            "try_grant_missing_permissions: failed to grant role",
+                            company_id=company_id,
+                            role_id=role_id,
+                            error=str(exc),
+                        )
+
+            if granted:
+                log_info(
+                    "Granted missing M365 permissions via connect flow",
+                    company_id=company_id,
+                    granted_roles=granted,
+                )
 
         # Best-effort: also grant Exchange.ManageAsApp if not already assigned.
-        if _EXO_MANAGE_AS_APP_ROLE not in assigned_roles:
+        if exo_needed:
             try:
                 exo_sp_response = await _graph_get(
                     access_token,
