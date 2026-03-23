@@ -1,16 +1,12 @@
-"""Tests that the connect callback clears the cached delegated access token when
-new permissions are successfully granted via try_grant_missing_permissions.
+"""Tests that the connect callback always clears the delegated access token and
+uses it only transiently for try_grant_missing_permissions.
 
-After an administrator re-authorises via 'Authorize portal access', the connect
-callback stores a delegated access token.  Delegated tokens do NOT include
-application permissions such as Reports.Read.All.  If try_grant_missing_permissions
-just added Reports.Read.All to the app's appRoleAssignments, the cached delegated
-token would cause mailbox sync to keep failing (403) for up to ~1 hour until it
-expires.
-
-The fix: when new permissions are granted, immediately clear the cached access_token
-so the next sync acquires a fresh client_credentials token that includes the new
-application permissions.
+The connect flow now requests narrow delegated scopes (CONNECT_SCOPE) that are
+only useful for granting missing application permissions.  The delegated token
+is never cached – it is used in-memory for try_grant_missing_permissions() and
+the stored access_token is always set to None so that subsequent syncs acquire
+a fresh client_credentials token carrying the full set of application
+permissions.
 """
 from __future__ import annotations
 
@@ -43,7 +39,7 @@ async def async_client():
 
 
 # ---------------------------------------------------------------------------
-# Connect callback – access token cleared when new permissions are granted
+# Connect callback – access token always cleared; permissions still granted
 # ---------------------------------------------------------------------------
 
 
@@ -52,7 +48,7 @@ async def test_connect_callback_clears_access_token_when_permissions_granted(
     async_client,
 ):
     """When try_grant_missing_permissions grants new permissions, the cached
-    access_token is cleared so the next sync uses client_credentials."""
+    access_token is still None (never stored) and permissions are granted."""
     state = _signed_state(
         {
             "company_id": 1,
@@ -96,13 +92,18 @@ async def test_connect_callback_clears_access_token_when_permissions_granted(
         }
         return mock_resp
 
+    grant_calls: list[dict] = []
+
+    async def fake_grant(company_id, access_token):
+        grant_calls.append({"company_id": company_id, "access_token": access_token})
+        return True  # permissions were granted
+
     with (
         patch("app.main.m365_repo.update_tokens", side_effect=fake_update_tokens),
         patch("app.main.m365_service.get_credentials", AsyncMock(return_value=fake_creds)),
         patch(
             "app.main.m365_service.try_grant_missing_permissions",
-            new_callable=AsyncMock,
-            return_value=True,  # permissions were granted
+            side_effect=fake_grant,
         ),
         patch("app.main.httpx.AsyncClient") as mock_http,
     ):
@@ -118,39 +119,34 @@ async def test_connect_callback_clears_access_token_when_permissions_granted(
 
     assert response.status_code == 303
 
-    # There should be two update_tokens calls:
-    # 1st: stores the connect-flow tokens (access_token + refresh_token)
-    # 2nd: clears the access_token after granting new permissions
-    assert len(update_tokens_calls) == 2, (
-        f"Expected 2 update_tokens calls (store + clear), got {len(update_tokens_calls)}"
+    # There should be exactly one update_tokens call that stores the
+    # refresh_token but never the delegated access_token.
+    assert len(update_tokens_calls) == 1, (
+        f"Expected 1 update_tokens call, got {len(update_tokens_calls)}"
     )
 
-    first_call = update_tokens_calls[0]
-    assert first_call["access_token"] is not None, (
-        "First call should store the delegated access_token"
+    call = update_tokens_calls[0]
+    assert call["access_token"] is None, (
+        "Delegated access_token must never be cached – always set to None"
     )
-    assert first_call["refresh_token"] is not None, (
-        "First call should store the refresh_token"
+    assert call["refresh_token"] is not None, (
+        "refresh_token must be stored for future client_credentials acquisition"
+    )
+    assert call["token_expires_at"] is None, (
+        "token_expires_at must be None when access_token is not cached"
     )
 
-    second_call = update_tokens_calls[1]
-    assert second_call["access_token"] is None, (
-        "Second call must clear access_token (set to None) after granting new permissions"
-    )
-    assert second_call["refresh_token"] is not None, (
-        "Second call must preserve the refresh_token"
-    )
-    assert second_call["token_expires_at"] is None, (
-        "Second call must clear token_expires_at"
-    )
+    # try_grant_missing_permissions must be called with the in-memory token
+    assert len(grant_calls) == 1
+    assert grant_calls[0]["access_token"] == "delegated-token-abc"
 
 
 @pytest.mark.anyio("asyncio")
-async def test_connect_callback_does_not_clear_access_token_when_no_new_permissions(
+async def test_connect_callback_clears_access_token_even_when_no_new_permissions(
     async_client,
 ):
     """When try_grant_missing_permissions returns False (no new grants),
-    the access_token is NOT cleared – no extra update_tokens call needed."""
+    the access_token is still not cached – always None."""
     state = _signed_state(
         {
             "company_id": 1,
@@ -214,10 +210,35 @@ async def test_connect_callback_does_not_clear_access_token_when_no_new_permissi
 
     assert response.status_code == 303
 
-    # Only one update_tokens call expected (the initial token storage)
+    # Only one update_tokens call – access_token always None
     assert len(update_tokens_calls) == 1, (
-        f"Expected exactly 1 update_tokens call when no new permissions; got {len(update_tokens_calls)}"
+        f"Expected exactly 1 update_tokens call; got {len(update_tokens_calls)}"
     )
-    assert update_tokens_calls[0]["access_token"] is not None, (
-        "The access_token must be stored (not cleared) when no permissions were newly granted"
+    assert update_tokens_calls[0]["access_token"] is None, (
+        "Delegated access_token must never be cached – always None"
     )
+
+
+# ---------------------------------------------------------------------------
+# CONNECT_SCOPE constant – must include permissions for try_grant_missing_permissions
+# ---------------------------------------------------------------------------
+
+
+def test_connect_scope_includes_approle_assignment_write():
+    """CONNECT_SCOPE must include AppRoleAssignment.ReadWrite.All for granting app roles."""
+    assert "AppRoleAssignment.ReadWrite.All" in m365_service.CONNECT_SCOPE
+
+
+def test_connect_scope_includes_directory_read():
+    """CONNECT_SCOPE must include Directory.Read.All for service principal lookups."""
+    assert "Directory.Read.All" in m365_service.CONNECT_SCOPE
+
+
+def test_connect_scope_includes_offline_access():
+    """CONNECT_SCOPE must include offline_access for refresh token."""
+    assert "offline_access" in m365_service.CONNECT_SCOPE
+
+
+def test_connect_scope_does_not_use_default():
+    """CONNECT_SCOPE must NOT use /.default (which only grants pre-configured permissions)."""
+    assert ".default" not in m365_service.CONNECT_SCOPE

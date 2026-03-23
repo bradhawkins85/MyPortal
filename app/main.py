@@ -5091,7 +5091,7 @@ async def m365_connect(request: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": "offline_access https://graph.microsoft.com/.default",
+        "scope": m365_service.CONNECT_SCOPE,
         "state": state,
         "prompt": "consent",
     }
@@ -5992,7 +5992,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "scope": "offline_access https://graph.microsoft.com/.default",
+        "scope": m365_service.CONNECT_SCOPE,
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
@@ -6013,8 +6013,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     await m365_repo.update_tokens(
         company_id=company_id,
         refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
-        access_token=encrypt_secret(access_token) if access_token else None,
-        token_expires_at=expires_at.replace(tzinfo=None) if expires_at else None,
+        access_token=None,
+        token_expires_at=None,
     )
     # Best-effort: grant any newly-required app role assignments (e.g. the
     # permissions added for mailbox sync) using the admin's delegated token.
@@ -6026,20 +6026,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             access_token=access_token,
         )
         if new_permissions_granted:
-            # Clear the cached delegated access token so that the next sync
-            # acquires a fresh client_credentials token that includes the
-            # newly-granted application permissions (e.g. Reports.Read.All).
-            # The delegated token stored above does not carry application
-            # permissions, so leaving it cached would cause mailbox sync to
-            # continue failing until the token expires naturally (~1 hour).
-            await m365_repo.update_tokens(
-                company_id=company_id,
-                refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
-                access_token=None,
-                token_expires_at=None,
-            )
             log_info(
-                "Cleared cached access token after granting missing M365 permissions",
+                "Granted missing M365 permissions via connect flow",
                 company_id=company_id,
             )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)

@@ -72,6 +72,18 @@ PROVISION_SCOPE = (
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All offline_access"
 )
 
+# Delegated scopes requested during the "Authorize portal access" (connect) flow.
+# The connect callback calls try_grant_missing_permissions() which needs
+# AppRoleAssignment.ReadWrite.All to add any newly-required application permissions
+# (e.g. MailboxSettings.Read) and Directory.Read.All to look up service principals.
+# Using explicit scopes instead of ``/.default`` ensures the admin grants these
+# delegated permissions even if they are not statically configured on the enterprise
+# app registration (Microsoft Entra ID dynamic consent).
+CONNECT_SCOPE = (
+    "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
+    "https://graph.microsoft.com/Directory.Read.All offline_access"
+)
+
 # Minimal scopes used for the tenant-discovery sign-in step
 DISCOVER_SCOPE = "openid profile"
 
