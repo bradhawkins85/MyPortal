@@ -35,6 +35,11 @@ _EXO_SCOPE = "https://outlook.office365.com/.default"
 # Exchange.ManageAsApp application role – grants app-only access to Exchange Online
 # PowerShell cmdlets when combined with an appropriate Exchange RBAC role assignment.
 _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
+# Azure AD built-in Exchange Administrator directory role template ID.
+# Assigning this role (or a suitable Exchange RBAC role) to the app's service
+# principal is required *in addition to* the Exchange.ManageAsApp app role for
+# Exchange Online PowerShell REST API access (e.g. Get-MailboxPermission).
+_EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 _PACKAGE_MAILBOX_RE = re.compile(
@@ -69,19 +74,23 @@ _PROVISION_APP_ROLES: list[str] = [
 # OAuth scopes requested during the admin-consent provisioning flow
 PROVISION_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
-    "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All offline_access"
+    "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
 )
 
 # Delegated scopes requested during the "Authorize portal access" (connect) flow.
 # The connect callback calls try_grant_missing_permissions() which needs
 # AppRoleAssignment.ReadWrite.All to add any newly-required application permissions
-# (e.g. MailboxSettings.Read) and Directory.Read.All to look up service principals.
+# (e.g. MailboxSettings.Read), Directory.Read.All to look up service principals,
+# and RoleManagement.ReadWrite.Directory to assign the Exchange Administrator
+# directory role required for Exchange Online PowerShell access.
 # Using explicit scopes instead of ``/.default`` ensures the admin grants these
 # delegated permissions even if they are not statically configured on the enterprise
 # app registration (Microsoft Entra ID dynamic consent).
 CONNECT_SCOPE = (
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
-    "https://graph.microsoft.com/Directory.Read.All offline_access"
+    "https://graph.microsoft.com/Directory.Read.All "
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
 )
 
 # Minimal scopes used for the tenant-discovery sign-in step
@@ -745,6 +754,11 @@ async def provision_app_registration(
             "Get-MailboxPermission will not be available",
             error=str(exc),
         )
+
+    # 4c. Assign Exchange Administrator directory role (best-effort).
+    # Exchange Online PowerShell cmdlets require an Exchange RBAC role in
+    # addition to the Exchange.ManageAsApp app role.
+    await _ensure_exchange_admin_role(access_token, sp_object_id)
 
     # 5. Add the service principal as an owner of the app registration so it
     #    can call addPassword on itself (Application.ReadWrite.OwnedBy requires ownership).
@@ -1735,6 +1749,58 @@ async def verify_tenant_permissions(
     }
 
 
+async def _ensure_exchange_admin_role(
+    access_token: str,
+    sp_object_id: str,
+) -> bool:
+    """Best-effort: assign the Exchange Administrator directory role to *sp_object_id*.
+
+    The Exchange Online PowerShell REST API requires the calling service
+    principal to hold both the ``Exchange.ManageAsApp`` app role **and** an
+    Exchange RBAC role (e.g. Exchange Administrator).  This helper assigns the
+    built-in Exchange Administrator directory role so that cmdlets like
+    ``Get-MailboxPermission`` succeed.
+
+    Returns ``True`` if the role was newly assigned, ``False`` otherwise.
+    Failures are logged but never raised.
+    """
+    try:
+        # Check whether the role is already assigned to this service principal.
+        safe_sp_id = quote(sp_object_id, safe="")
+        existing = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{safe_sp_id}' "
+            f"and roleDefinitionId eq '{_EXO_ADMIN_ROLE_TEMPLATE_ID}'",
+        )
+        if existing.get("value"):
+            return False  # already assigned
+
+        await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments",
+            {
+                "principalId": sp_object_id,
+                "roleDefinitionId": _EXO_ADMIN_ROLE_TEMPLATE_ID,
+                "directoryScopeId": "/",
+            },
+        )
+        log_info(
+            "Assigned Exchange Administrator directory role",
+            sp_object_id=sp_object_id,
+        )
+        return True
+    except M365Error as exc:
+        log_error(
+            "Failed to assign Exchange Administrator directory role; "
+            "Get-MailboxPermission may return 403. Assign the role manually "
+            "via Microsoft Entra ID > Roles and administrators > Exchange Administrator.",
+            sp_object_id=sp_object_id,
+            error=str(exc),
+        )
+        return False
+
+
 async def try_grant_missing_permissions(
     company_id: int,
     access_token: str,
@@ -1790,8 +1856,6 @@ async def try_grant_missing_permissions(
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
         missing: list[str] = sorted(required_roles - assigned_roles)
         exo_needed = _EXO_MANAGE_AS_APP_ROLE not in assigned_roles
-        if not missing and not exo_needed:
-            return False
 
         granted: list[str] = []
 
@@ -1874,6 +1938,12 @@ async def try_grant_missing_permissions(
                             )
             except M365Error:
                 pass  # Exchange Online SP lookup failed; non-fatal
+
+        # Best-effort: assign the Exchange Administrator directory role so that
+        # Exchange Online PowerShell cmdlets (Get-MailboxPermission) succeed.
+        # This is required in addition to Exchange.ManageAsApp.
+        if await _ensure_exchange_admin_role(access_token, sp_object_id):
+            granted.append("exchange-admin-role")
 
         return bool(granted)
     except Exception as exc:  # noqa: BLE001
