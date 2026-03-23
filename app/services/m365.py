@@ -2308,10 +2308,19 @@ async def _exo_get_mailbox_permission(
     }
     headers = {
         "Authorization": f"Bearer {exo_token}",
+        "Accept-Encoding": "identity",
         "Content-Type": "application/json; charset=utf-8",
     }
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.DecodingError as exc:
+        log_warning(
+            "Exchange Online Get-MailboxPermission request decode failed",
+            mailbox_email=mailbox_email,
+            error=str(exc),
+        )
+        return []
     if response.status_code != 200:
         try:
             body = response.text[:500] if response.text else ""
