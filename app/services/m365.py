@@ -63,7 +63,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "b0afded3-3588-46d8-8b3d-9842eff778da",  # AuditLog.Read.All
     # Additional permissions for mailbox reporting:
     "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
-    "3b55498e-47ec-484f-8136-9013221c06a9",  # MailboxSettings.Read
+    "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
