@@ -2313,11 +2313,15 @@ async def _exo_get_mailbox_permission(
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, headers=headers, json=payload)
     if response.status_code != 200:
+        try:
+            body = response.text[:500] if response.text else ""
+        except httpx.DecodingError:
+            body = "(decompression failed)"
         log_warning(
             "Exchange Online Get-MailboxPermission failed",
             mailbox_email=mailbox_email,
             status=response.status_code,
-            body=response.text[:500] if response.text else "",
+            body=body,
         )
         return []
     try:
