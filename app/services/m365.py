@@ -2322,10 +2322,11 @@ async def _exo_get_mailbox_permission(
         return []
     try:
         data = response.json()
-    except ValueError:
+    except (ValueError, httpx.DecodingError) as exc:
         log_warning(
-            "Exchange Online Get-MailboxPermission returned invalid JSON",
+            "Exchange Online Get-MailboxPermission response parse failed",
             mailbox_email=mailbox_email,
+            error=str(exc),
         )
         return []
     records = data.get("value") or []
