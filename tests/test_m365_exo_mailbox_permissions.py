@@ -7,6 +7,7 @@ Covers:
 - _fetch_exo_mailbox_permissions skips mailboxes whose API call fails
 - _exo_get_mailbox_permission returns empty list on non-200 responses
 - _exo_get_mailbox_permission returns empty list on invalid JSON
+- _exo_get_mailbox_permission returns empty list on decompression errors
 - sync_mailboxes calls _fetch_exo_mailbox_permissions instead of UTCM snapshots
 - _exchange_token uses custom scope when provided
 """
@@ -257,6 +258,28 @@ async def test_exo_get_mailbox_permission_returns_empty_on_invalid_json():
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.side_effect = ValueError("bad json")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_on_decompression_error():
+    """Decompression errors (e.g. corrupt gzip) return an empty list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.side_effect = httpx.DecodingError(
+        "Error -3 while decompressing data: incorrect header check"
+    )
 
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
