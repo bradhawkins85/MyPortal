@@ -2324,10 +2324,6 @@ async def _exo_get_mailbox_permission(
         )
         return []
     if response.status_code != 200:
-        try:
-            body = response.text[:500] if response.text else ""
-        except httpx.DecodingError:
-            body = "(decompression failed)"
         if response.status_code == 403:
             raise M365Error(
                 f"Exchange Online Get-MailboxPermission returned 403 for "
@@ -2335,6 +2331,10 @@ async def _exo_get_mailbox_permission(
                 f"permission and an Exchange RBAC role (e.g. Exchange Administrator).",
                 http_status=403,
             )
+        try:
+            body = response.text[:500] if response.text else ""
+        except httpx.DecodingError:
+            body = "(decompression failed)"
         log_warning(
             "Exchange Online Get-MailboxPermission failed",
             mailbox_email=mailbox_email,
