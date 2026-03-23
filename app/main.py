@@ -4889,26 +4889,27 @@ async def m365_shared_mailboxes_page(request: Request, error: str | None = None,
     return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
 
 
-@app.post("/m365/mailboxes/sync", response_class=RedirectResponse)
-async def sync_m365_mailboxes(request: Request, redirect_to: str = Form("users", alias="redirectTo")):
+@app.post("/m365/mailboxes/sync", response_class=JSONResponse, tags=["Microsoft 365"])
+async def sync_m365_mailboxes(request: Request):
+    """Queue the sync_m365_data scheduled task for this company in the background.
+
+    Returns 202 Accepted immediately so the browser never waits for the long-running
+    sync and never hits a gateway timeout.
+    """
     user, membership, _, company_id, redirect = await _load_license_context(request)
     if redirect:
-        return redirect
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
-    try:
-        total = await m365_service.sync_mailboxes(company_id)
-        dest = "shared" if redirect_to == "shared" else "users"
-        return RedirectResponse(
-            url=f"/m365/mailboxes/{dest}?success={quote(f'Sync complete – {total} mailboxes updated')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    except m365_service.M365Error as exc:
-        dest = "shared" if redirect_to == "shared" else "users"
-        return RedirectResponse(
-            url=f"/m365/mailboxes/{dest}?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+    task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_data")
+    if task is None:
+        task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_o365")
+    if task is not None:
+        asyncio.create_task(scheduler_service.run_now(task["id"]))
+    else:
+        asyncio.create_task(m365_service.sync_mailboxes(company_id))
+    log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"))
+    return JSONResponse({"queued": True}, status_code=202)
 
 
 @app.get("/m365/mailboxes/permissions", response_class=JSONResponse, tags=["Microsoft 365"])
