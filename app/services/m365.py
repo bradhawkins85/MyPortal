@@ -2324,6 +2324,13 @@ async def _exo_get_mailbox_permission(
         )
         return []
     if response.status_code != 200:
+        if response.status_code == 403:
+            raise M365Error(
+                f"Exchange Online Get-MailboxPermission returned 403 for "
+                f"{mailbox_email}. Ensure the app has the Exchange.ManageAsApp "
+                f"permission and an Exchange RBAC role (e.g. Exchange Administrator).",
+                http_status=403,
+            )
         try:
             body = response.text[:500] if response.text else ""
         except httpx.DecodingError:
@@ -2383,9 +2390,20 @@ async def _fetch_exo_mailbox_permissions(
         normalised = str(mailbox_email or "").strip().lower()
         if not normalised:
             continue
-        records = await _exo_get_mailbox_permission(
-            exo_token, effective_tenant_id, normalised
-        )
+        try:
+            records = await _exo_get_mailbox_permission(
+                exo_token, effective_tenant_id, normalised
+            )
+        except M365Error as exc:
+            if exc.http_status == 403:
+                log_warning(
+                    "Exchange Online Get-MailboxPermission returned 403 – "
+                    "skipping remaining mailboxes. Ensure the app has the "
+                    "Exchange.ManageAsApp permission and an Exchange RBAC role.",
+                    mailbox_email=normalised,
+                )
+                break
+            raise
         parsed = _parse_exo_mailbox_permission_records(normalised, records)
         if parsed:
             members_by_mailbox[normalised] = parsed
