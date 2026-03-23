@@ -253,6 +253,31 @@ async def test_exo_get_mailbox_permission_returns_empty_on_non_200():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_on_non_200_with_decompression_error():
+    """Non-200 responses with corrupt gzip body return an empty list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    # Simulate .text raising DecodingError when accessed
+    type(mock_response).text = property(
+        lambda self: (_ for _ in ()).throw(
+            httpx.DecodingError("Error -3 while decompressing data: incorrect header check")
+        )
+    )
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
 async def test_exo_get_mailbox_permission_returns_empty_on_invalid_json():
     """Invalid JSON responses return an empty list."""
     mock_response = MagicMock()
