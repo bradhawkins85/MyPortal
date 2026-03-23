@@ -2251,7 +2251,7 @@ def _parse_exo_mailbox_permission_records(
             access_rights_raw = record.get("access_rights")
         # Handle nested object format: {"value": [...]} or {"@odata.type": ..., "value": [...]}
         if isinstance(access_rights_raw, dict):
-            access_rights_raw = access_rights_raw.get("value")
+            access_rights_raw = access_rights_raw.get("value") or []
         if isinstance(access_rights_raw, str):
             access_rights = [access_rights_raw]
         elif isinstance(access_rights_raw, list):
