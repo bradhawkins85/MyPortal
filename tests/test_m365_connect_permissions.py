@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services import m365 as m365_service
-from app.services.m365 import _PROVISION_APP_ROLES, M365Error
+from app.services.m365 import _PROVISION_APP_ROLES, M365Error, _EXO_MANAGE_AS_APP_ROLE
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ async def test_try_grant_missing_permissions_grants_missing_roles():
 @pytest.mark.anyio("asyncio")
 async def test_try_grant_missing_permissions_noop_when_all_present():
     """No Graph POST calls when all required permissions are already assigned."""
-    all_roles = list(_PROVISION_APP_ROLES)
+    all_roles = list(_PROVISION_APP_ROLES) + [_EXO_MANAGE_AS_APP_ROLE]
 
     post_calls: list[str] = []
 
@@ -113,6 +113,51 @@ async def test_try_grant_missing_permissions_noop_when_all_present():
 
     assert result is False, "Should return False when no permissions were missing"
     assert post_calls == [], "No appRoleAssignment POSTs expected when all roles are present"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_grants_exo_when_graph_complete():
+    """EXO Exchange.ManageAsApp is granted even when all Graph roles are present.
+
+    Regression test: previously the function returned early when all
+    _PROVISION_APP_ROLES were assigned, skipping the Exchange.ManageAsApp
+    grant.  This caused Get-MailboxPermission to fail with 403.
+    """
+    # All Graph roles present, but EXO role is missing
+    all_graph_roles = list(_PROVISION_APP_ROLES)
+
+    granted: list[dict] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return _assignments_response(all_graph_roles)
+        if _EXO_APP_ID in url:
+            return {"value": [{"id": "exo-sp-id"}]}
+        # service principal lookup for the company app
+        return _sp_response("sp-123")
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        granted.append(payload)
+        return {"id": "new-assignment"}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service.try_grant_missing_permissions(
+            company_id=1,
+            access_token="admin-token",
+        )
+
+    assert result is True, "Should return True when EXO permission was granted"
+    assert len(granted) == 1, "Only one grant call expected (Exchange.ManageAsApp)"
+    assert granted[0]["appRoleId"] == _EXO_MANAGE_AS_APP_ROLE, (
+        "The granted role must be Exchange.ManageAsApp"
+    )
+    assert granted[0]["resourceId"] == "exo-sp-id", (
+        "The grant must target the Exchange Online service principal"
+    )
 
 
 @pytest.mark.anyio("asyncio")
@@ -312,4 +357,4 @@ def test_provision_app_roles_includes_mailbox_settings_read():
 # Import the _GRAPH_APP_ID constant used in mock
 # ---------------------------------------------------------------------------
 
-from app.services.m365 import _GRAPH_APP_ID  # noqa: E402
+from app.services.m365 import _GRAPH_APP_ID, _EXO_APP_ID  # noqa: E402
