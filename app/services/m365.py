@@ -1766,10 +1766,11 @@ async def _ensure_exchange_admin_role(
     """
     try:
         # Check whether the role is already assigned to this service principal.
+        safe_sp_id = quote(sp_object_id, safe="")
         existing = await _graph_get(
             access_token,
             "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
-            f"?$filter=principalId eq '{sp_object_id}' "
+            f"?$filter=principalId eq '{safe_sp_id}' "
             f"and roleDefinitionId eq '{_EXO_ADMIN_ROLE_TEMPLATE_ID}'",
         )
         if existing.get("value"):

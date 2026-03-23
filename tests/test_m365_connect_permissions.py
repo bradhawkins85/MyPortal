@@ -450,12 +450,12 @@ async def test_ensure_exchange_admin_role_logs_on_failure():
 @pytest.mark.anyio("asyncio")
 async def test_try_grant_missing_permissions_assigns_exchange_admin_role():
     """Exchange Administrator directory role is assigned during connect flow."""
-    all_roles = list(_PROVISION_APP_ROLES) + [_EXO_MANAGE_AS_APP_ROLE]
+    assigned_app_roles = list(_PROVISION_APP_ROLES) + [_EXO_MANAGE_AS_APP_ROLE]
     posted: list[dict] = []
 
     async def mock_graph_get(token: str, url: str) -> dict:
         if "appRoleAssignments" in url:
-            return _assignments_response(all_roles)
+            return _assignments_response(assigned_app_roles)
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": []}  # Exchange Admin role not assigned
         return _sp_response()
