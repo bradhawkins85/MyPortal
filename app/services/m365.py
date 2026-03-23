@@ -2249,6 +2249,9 @@ def _parse_exo_mailbox_permission_records(
             access_rights_raw = record.get("accessRights")
         if access_rights_raw is None:
             access_rights_raw = record.get("access_rights")
+        # Handle nested object format: {"value": [...]} or {"@odata.type": ..., "value": [...]}
+        if isinstance(access_rights_raw, dict):
+            access_rights_raw = access_rights_raw.get("value") or []
         if isinstance(access_rights_raw, str):
             access_rights = [access_rights_raw]
         elif isinstance(access_rights_raw, list):
@@ -2310,12 +2313,29 @@ async def _exo_get_mailbox_permission(
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, headers=headers, json=payload)
     if response.status_code != 200:
+        log_warning(
+            "Exchange Online Get-MailboxPermission failed",
+            mailbox_email=mailbox_email,
+            status=response.status_code,
+            body=response.text[:500] if response.text else "",
+        )
         return []
     try:
         data = response.json()
     except ValueError:
+        log_warning(
+            "Exchange Online Get-MailboxPermission returned invalid JSON",
+            mailbox_email=mailbox_email,
+        )
         return []
-    return data.get("value") or []
+    records = data.get("value") or []
+    if records:
+        log_info(
+            "Exchange Online Get-MailboxPermission returned records",
+            mailbox_email=mailbox_email,
+            record_count=len(records),
+        )
+    return records
 
 
 async def _fetch_exo_mailbox_permissions(
@@ -2867,8 +2887,12 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
         )
         for member in _parse_exo_mailbox_permission_records(raw_mailbox_email, records):
             _store_accessible_member(member["member_display_name"], member["member_upn"])
-    except Exception:
-        pass  # Best-effort; DB and group data already collected above
+    except Exception as exc:
+        log_warning(
+            "Live Exchange Online mailbox permission lookup failed",
+            mailbox_email=raw_mailbox_email,
+            error=str(exc),
+        )
 
     # Fallback: if all previous sources yielded nothing and the Graph API
     # user lookup failed (so proxy-address resolution was unavailable), try a
