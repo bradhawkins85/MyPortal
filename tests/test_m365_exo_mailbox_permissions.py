@@ -99,6 +99,19 @@ def test_parse_exo_records_handles_nested_object_with_odata_type():
     assert result[0]["member_upn"] == "admin@contoso.com"
 
 
+def test_parse_exo_records_handles_dict_without_value_key():
+    """AccessRights as a dict without 'value' key is treated as empty."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": {"@odata.type": "#Collection(String)"},  # no value key
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
 def test_parse_exo_records_skips_deny_entries():
     """Deny=True entries are excluded."""
     records = [
