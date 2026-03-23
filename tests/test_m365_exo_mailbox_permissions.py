@@ -253,7 +253,7 @@ async def test_exo_get_mailbox_permission_returns_empty_on_non_200():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_exo_get_mailbox_permission_returns_empty_on_non_200_with_decompression_error():
+async def test_exo_get_mailbox_permission_non_200_decompression_error():
     """Non-200 responses with corrupt gzip body return an empty list."""
     mock_response = MagicMock()
     mock_response.status_code = 500
