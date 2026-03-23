@@ -4,13 +4,7 @@
 
 {% block header_actions %}
   {% if has_credentials %}
-  <form method="post" action="/m365/mailboxes/sync" style="display:inline">
-    {% if csrf_token %}
-    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-    {% endif %}
-    <input type="hidden" name="redirectTo" value="shared" />
-    <button type="submit" class="button">Sync mailboxes</button>
-  </form>
+  <button type="button" class="button" id="sync-mailboxes-btn" data-sync-mailboxes>Sync mailboxes</button>
   {% endif %}
 {% endblock %}
 
@@ -121,6 +115,36 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script>
+  (function () {
+    var syncBtn = document.querySelector('[data-sync-mailboxes]');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', function () {
+        syncBtn.disabled = true;
+        var originalText = syncBtn.textContent;
+        fetch('/m365/mailboxes/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'{% if csrf_token %},
+            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+          }
+        })
+        .then(function (resp) { return resp.json(); })
+        .then(function () {
+          syncBtn.textContent = '\u2713 Sync started';
+          setTimeout(function () {
+            syncBtn.textContent = originalText;
+            syncBtn.disabled = false;
+          }, 3000);
+        })
+        .catch(function () {
+          syncBtn.textContent = originalText;
+          syncBtn.disabled = false;
+        });
+      });
+    }
+  }());
+  </script>
   <script>
   (function () {
     var modal = document.getElementById('mailbox-perm-modal');
