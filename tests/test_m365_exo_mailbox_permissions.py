@@ -68,6 +68,37 @@ def test_parse_exo_records_handles_string_access_rights():
     assert result[0]["member_upn"] == "admin@contoso.com"
 
 
+def test_parse_exo_records_handles_nested_object_access_rights():
+    """AccessRights as a nested object with 'value' array is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": {"value": ["FullAccess"]},
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_handles_nested_object_with_odata_type():
+    """AccessRights as a nested object with @odata.type and 'value' is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": {
+                "@odata.type": "#Collection(String)",
+                "value": ["FullAccess"],
+            },
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
 def test_parse_exo_records_skips_deny_entries():
     """Deny=True entries are excluded."""
     records = [
