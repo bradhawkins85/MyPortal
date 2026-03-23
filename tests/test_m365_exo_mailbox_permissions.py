@@ -272,6 +272,8 @@ async def test_exo_get_mailbox_permission_raises_on_403():
             )
 
     assert exc_info.value.http_status == 403
+    assert "Exchange.ManageAsApp" in str(exc_info.value)
+    assert "Exchange RBAC role" in str(exc_info.value)
 
 
 @pytest.mark.anyio("asyncio")
