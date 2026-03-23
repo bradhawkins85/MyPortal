@@ -235,9 +235,10 @@ async def test_exo_get_mailbox_permission_returns_value_on_success():
 
 @pytest.mark.anyio("asyncio")
 async def test_exo_get_mailbox_permission_returns_empty_on_non_200():
-    """Non-200 responses return an empty list."""
+    """Non-200, non-403 responses return an empty list."""
     mock_response = MagicMock()
-    mock_response.status_code = 403
+    mock_response.status_code = 500
+    mock_response.text = "Internal Server Error"
 
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -250,6 +251,27 @@ async def test_exo_get_mailbox_permission_returns_empty_on_non_200():
         )
 
     assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_raises_on_403():
+    """403 responses raise M365Error with http_status=403."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(M365Error) as exc_info:
+            await m365_service._exo_get_mailbox_permission(
+                "token", "tenant-id", "shared@contoso.com"
+            )
+
+    assert exc_info.value.http_status == 403
 
 
 @pytest.mark.anyio("asyncio")
@@ -419,6 +441,32 @@ async def test_fetch_exo_mailbox_permissions_skips_failed_mailboxes():
         )
 
     assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_mailbox_permissions_stops_on_403():
+    """When first mailbox returns 403, remaining mailboxes are skipped."""
+    mock_get = AsyncMock(side_effect=M365Error("forbidden", http_status=403))
+
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-tok", "tid")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_mailbox_permission",
+            mock_get,
+        ),
+    ):
+        result = await m365_service._fetch_exo_mailbox_permissions(
+            1, {"a@contoso.com", "b@contoso.com", "c@contoso.com"}
+        )
+
+    assert result == {}
+    # Should have called only once then stopped, not 3 times
+    assert mock_get.await_count == 1
 
 
 # ---------------------------------------------------------------------------
