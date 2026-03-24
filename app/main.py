@@ -17004,24 +17004,17 @@ async def admin_create_m365_mail_account(request: Request):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
     company_id = form.get("companyId")
-    if company_id in (None, ""):
-        return await _render_m365_mail_dashboard(
-            request,
-            current_user,
-            success_message=None,
-            error_message="Company is required for Office 365 mailboxes.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-    try:
-        data["company_id"] = int(company_id)
-    except (TypeError, ValueError):
-        return await _render_m365_mail_dashboard(
-            request,
-            current_user,
-            success_message=None,
-            error_message="Company selection is invalid.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+    if company_id not in (None, ""):
+        try:
+            data["company_id"] = int(company_id)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                success_message=None,
+                error_message="Company selection is invalid.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     try:
         account = await m365_mail_service.create_account(data)
     except ValueError as exc:
@@ -17091,25 +17084,19 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
             )
     company_id = form.get("companyId")
     if company_id in (None, ""):
-        return await _render_m365_mail_dashboard(
-            request,
-            current_user,
-            editing_account_id=account_id,
-            success_message=None,
-            error_message="Company is required for Office 365 mailboxes.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-    try:
-        updates["company_id"] = int(company_id)
-    except (TypeError, ValueError):
-        return await _render_m365_mail_dashboard(
-            request,
-            current_user,
-            editing_account_id=account_id,
-            success_message=None,
-            error_message="Company selection is invalid.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+        updates["company_id"] = None
+    else:
+        try:
+            updates["company_id"] = int(company_id)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                editing_account_id=account_id,
+                success_message=None,
+                error_message="Company selection is invalid.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     try:
         account = await m365_mail_service.update_account(account_id, updates)
     except ValueError as exc:

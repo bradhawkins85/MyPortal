@@ -112,9 +112,9 @@ def test_build_filter_context_empty_recipients():
 # ---------------------------------------------------------------------------
 
 
-async def test_create_account_requires_company(monkeypatch):
-    """create_account raises ValueError when company_id is missing."""
-    with pytest.raises(ValueError, match="Company is required"):
+async def test_create_account_accepts_none_company(monkeypatch):
+    """create_account allows company_id to be None."""
+    with pytest.raises(ValueError, match="User principal name"):
         await m365_mail.create_account({"name": "Test", "company_id": None})
 
 
@@ -142,8 +142,8 @@ async def test_update_account_not_found(monkeypatch):
         await m365_mail.update_account(999, {"name": "Updated"})
 
 
-async def test_update_account_requires_company(monkeypatch):
-    """update_account raises ValueError when company_id is empty."""
+async def test_update_account_clears_company(monkeypatch):
+    """update_account allows clearing company_id to None."""
 
     async def fake_get_account(account_id: int):
         return {
@@ -153,10 +153,26 @@ async def test_update_account_requires_company(monkeypatch):
             "user_principal_name": "test@example.com",
         }
 
-    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    updated_fields: dict = {}
 
-    with pytest.raises(ValueError, match="Company is required"):
-        await m365_mail.update_account(1, {"company_id": ""})
+    async def fake_update_account(account_id: int, **fields):
+        updated_fields.update(fields)
+        return {
+            "id": 1,
+            "name": "Test",
+            "company_id": None,
+            "user_principal_name": "test@example.com",
+        }
+
+    async def fake_ensure_scheduled_task(account):
+        return account
+
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(m365_mail, "_ensure_scheduled_task", fake_ensure_scheduled_task)
+
+    result = await m365_mail.update_account(1, {"company_id": ""})
+    assert updated_fields.get("company_id") is None
 
 
 async def test_clone_account_not_found(monkeypatch):
@@ -232,8 +248,8 @@ async def test_sync_account_skips_inactive_account(monkeypatch):
     assert result["reason"] == "Account inactive"
 
 
-async def test_sync_account_error_no_company(monkeypatch):
-    """sync_account returns error when no company is linked."""
+async def test_sync_account_error_no_credentials(monkeypatch):
+    """sync_account returns error when no company is linked and no M365 credentials exist."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -247,13 +263,65 @@ async def test_sync_account_error_no_company(monkeypatch):
             "user_principal_name": "user@example.com",
         }
 
+    async def fake_list_provisioned():
+        return set()
+
     monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_repo, "list_provisioned_company_ids", fake_list_provisioned)
 
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "error"
-    assert "company" in result["error"].lower()
+    assert "credentials" in result["error"].lower()
+
+
+async def test_sync_account_uses_provisioned_company_when_none(monkeypatch):
+    """sync_account uses a provisioned company for auth when account has no company_id."""
+    monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": 1,
+            "active": True,
+            "company_id": None,
+            "user_principal_name": "user@example.com",
+            "folder": "Inbox",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_list_provisioned():
+        return {10, 20}
+
+    acquired_company_ids: list[int] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        acquired_company_ids.append(company_id)
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {"value": []}
+
+    async def fake_update_account(account_id, **fields):
+        return None
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_repo, "list_provisioned_company_ids", fake_list_provisioned)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert acquired_company_ids == [10]  # Should pick min(provisioned)
 
 
 async def test_sync_account_error_no_upn(monkeypatch):
@@ -432,7 +500,114 @@ async def test_sync_account_processes_messages(monkeypatch):
     assert recorded_messages[0]["status"] == "imported"
 
 
-async def test_sync_account_skips_already_imported(monkeypatch):
+async def test_sync_account_no_company_resolves_from_email(monkeypatch):
+    """sync_account with no company_id resolves ticket entities from email domain only."""
+    monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": 1,
+            "active": True,
+            "company_id": None,
+            "user_principal_name": "user@example.com",
+            "folder": "Inbox",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_list_provisioned():
+        return {7}
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-access-token"
+
+    graph_messages = {
+        "value": [
+            {
+                "id": "msg-002",
+                "internetMessageId": "<msg002@example.com>",
+                "subject": "Help request",
+                "body": {"contentType": "html", "content": "<p>Need help</p>"},
+                "from": {
+                    "emailAddress": {"name": "Contact", "address": "contact@customer.com"}
+                },
+                "toRecipients": [],
+                "ccRecipients": [],
+                "bccRecipients": [],
+                "replyTo": [],
+                "isRead": False,
+                "receivedDateTime": "2026-01-20T14:00:00Z",
+                "hasAttachments": False,
+                "internetMessageHeaders": [],
+            }
+        ],
+    }
+
+    async def fake_graph_get(access_token: str, url: str):
+        return graph_messages
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return None
+
+    recorded_messages: list[dict] = []
+
+    async def fake_upsert_message(**kwargs):
+        recorded_messages.append(kwargs)
+
+    async def fake_update_account(account_id: int, **fields):
+        return None
+
+    resolve_calls: list[dict] = []
+
+    async def fake_resolve_ticket_entities(from_header, *, default_company_id=None):
+        resolve_calls.append({"from_header": from_header, "default_company_id": default_company_id})
+        return 42, 99  # Resolved from email domain
+
+    async def fake_find_existing_ticket(subject, from_email, **kwargs):
+        return None
+
+    created_tickets: list[dict] = []
+
+    async def fake_create_ticket(**kwargs):
+        created_tickets.append(kwargs)
+        return {"id": 200, "ticket_number": "T-200"}
+
+    async def fake_refresh_ai_summary(ticket_id):
+        pass
+
+    async def fake_refresh_ai_tags(ticket_id):
+        pass
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_repo, "list_provisioned_company_ids", fake_list_provisioned)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_upsert_message)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
+    monkeypatch.setattr(m365_mail, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
+    monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ai_summary)
+    monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ai_tags)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert result["processed"] == 1
+    # Entity resolution should have been called with default_company_id=None
+    assert len(resolve_calls) == 1
+    assert resolve_calls[0]["default_company_id"] is None
+    # Ticket should use the company resolved from email domain
+    assert len(created_tickets) == 1
+    assert created_tickets[0]["company_id"] == 42
+    assert created_tickets[0]["requester_id"] == 99
     """sync_account skips messages already imported."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 

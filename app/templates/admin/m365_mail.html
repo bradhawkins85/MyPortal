@@ -31,13 +31,13 @@
         </div>
         <label class="form-field">
           <span class="form-label">Company</span>
-          <select name="companyId" class="form-input" required>
-            <option value="">Select company</option>
+          <select name="companyId" class="form-input">
+            <option value="">— None —</option>
             {% for company in companies %}
               <option value="{{ company.id }}" {% if is_editing and company.id == editing_account.company_id %}selected{% endif %}>{{ company.name }}</option>
             {% endfor %}
           </select>
-          <span class="form-help">The company must have Microsoft 365 credentials configured.</span>
+          <span class="form-help">Optional. When not set, the ticket company and contact are resolved from the sender's email domain.</span>
         </label>
         <label class="form-field">
           <span class="form-label">User principal name (email)</span>
