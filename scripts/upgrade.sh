@@ -394,7 +394,10 @@ install_dependencies() {
   fi
 
   echo "Installing updated dependencies…"
-  "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"
+  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"; then
+    echo "Error: Dependency installation failed." >&2
+    return 1
+  fi
 }
 
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
