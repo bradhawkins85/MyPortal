@@ -608,6 +608,9 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
     assert len(created_tickets) == 1
     assert created_tickets[0]["company_id"] == 42
     assert created_tickets[0]["requester_id"] == 99
+
+
+async def test_sync_account_skips_already_imported(monkeypatch):
     """sync_account skips messages already imported."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
