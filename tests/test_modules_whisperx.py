@@ -150,29 +150,7 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
     client_factory = _AsyncClientFactory(whisperx_response)
     monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
 
-    # Patch upload directory to tmp_path
-    monkeypatch.setattr(modules.Path, "__new__", modules.Path.__new__)
-    # We need to ensure the handler finds the file in tmp_path.
-    # The handler constructs: Path(__file__).parent.parent / "static" / "uploads" / "tickets"
-    # We'll monkeypatch the file lookup by placing our file and adjusting the handler's path.
-    # Simpler: override the computed upload dir inside the function.
-    original_invoke = modules._invoke_whisperx
-
-    async def patched_invoke(settings, payload, *, event_future=None):
-        # Temporarily replace Path resolution
-        import app.services.modules as mod
-        orig_path = mod.Path
-
-        class PatchedPath(type(tmp_path)):
-            pass
-
-        # Instead of overriding Path, let's just make the file exist in the expected location
-        # We'll monkeypatch by replacing the relevant part of the module
-        # Actually the simplest is to just symlink. Let's use a different approach:
-        # create the expected directory structure
-        pass
-
-    # Actually, simpler approach: create the expected directory + file
+    # Place file in the expected upload directory
     upload_dir = Path(modules.__file__).parent.parent / "static" / "uploads" / "tickets"
     upload_dir.mkdir(parents=True, exist_ok=True)
     target_file = upload_dir / "abc123.wav"
