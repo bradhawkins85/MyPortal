@@ -6,9 +6,11 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import secrets
 import shutil
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
@@ -2361,10 +2363,17 @@ def _parse_exo_mailbox_permission_records(
 # PowerShell script executed by _pwsh_get_mailbox_permission.  Parameters
 # (token, organization, identity) are passed via stdin as JSON so that the
 # access token never appears on the process command line.
+#
+# Warning, verbose and progress preferences are silenced so that module-loading
+# chatter (e.g. PowerShellGet / NuGet resource strings) is not written to
+# stderr or the system journal.
 _PWSH_EXO_SCRIPT = """\
 $ErrorActionPreference = 'Stop'
+$WarningPreference = 'SilentlyContinue'
+$VerbosePreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
 $d = [System.Console]::In.ReadToEnd() | ConvertFrom-Json
-Import-Module ExchangeOnlineManagement -ErrorAction Stop
+Import-Module ExchangeOnlineManagement -ErrorAction Stop -WarningAction SilentlyContinue
 $s = ConvertTo-SecureString -String $d.token -AsPlainText -Force
 Connect-ExchangeOnline -AccessToken $s -Organization $d.organization -ShowBanner:$false -CommandName Get-MailboxPermission
 try {
@@ -2385,6 +2394,45 @@ try {
     Disconnect-ExchangeOnline -Confirm:$false 2>$null
 }
 """
+
+# Lazily-created path to a temporary ``powershell.config.json`` file that
+# disables ScriptBlock Logging.  Without this, ``Import-Module
+# ExchangeOnlineManagement`` causes PowerShell to write thousands of lines
+# of ScriptBlock compilation detail to the system journal at *Warning*
+# level – the noise reported in the "Errors when loading mailbox
+# permissions" issue.
+_pwsh_settings_path: str | None = None
+
+
+def _get_pwsh_settings_path() -> str:
+    """Return (creating if needed) a ``powershell.config.json`` temp file.
+
+    The file sets ``LogLevel`` to ``Error`` and disables ScriptBlock and
+    Module Logging so that the pwsh subprocess does not flood the system
+    journal with module-compilation detail warnings.
+
+    Only one file is created per application lifetime and is cached in the
+    module-level ``_pwsh_settings_path`` variable.
+    """
+    global _pwsh_settings_path  # noqa: PLW0603
+    if _pwsh_settings_path and os.path.isfile(_pwsh_settings_path):
+        return _pwsh_settings_path
+
+    settings = {
+        "LogLevel": "Error",
+        "ScriptBlockLogging": {
+            "EnableScriptBlockLogging": False,
+            "EnableScriptBlockInvocationLogging": False,
+        },
+        "ModuleLogging": {
+            "EnableModuleLogging": False,
+        },
+    }
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="myportal-pwsh-")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(settings, fh)
+    _pwsh_settings_path = path
+    return path
 
 
 async def _pwsh_get_mailbox_permission(
@@ -2419,9 +2467,13 @@ async def _pwsh_get_mailbox_permission(
         "identity": mailbox_email,
     })
 
+    settings_file = _get_pwsh_settings_path()
+
     try:
         process = await asyncio.create_subprocess_exec(
-            pwsh_path, "-NoProfile", "-NonInteractive", "-Command", _PWSH_EXO_SCRIPT,
+            pwsh_path, "-NoProfile", "-NonInteractive",
+            "-SettingsFile", settings_file,
+            "-Command", _PWSH_EXO_SCRIPT,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
