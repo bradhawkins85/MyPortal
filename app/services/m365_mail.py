@@ -18,7 +18,6 @@ from app.services import modules as modules_service
 from app.services import system_state
 from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
-from app.services.scheduler import scheduler_service
 
 # Reuse filter helpers from the IMAP module so we share the same filter DSL.
 from app.services.imap import (
@@ -55,6 +54,8 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
 
 
 async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any]:
+    from app.services.scheduler import scheduler_service
+
     account_id = account.get("id")
     if account_id is None:
         return account
@@ -249,6 +250,8 @@ async def clone_account(account_id: int) -> dict[str, Any]:
 
 
 async def delete_account(account_id: int) -> None:
+    from app.services.scheduler import scheduler_service
+
     existing = await mail_repo.get_account(account_id)
     if not existing:
         return
