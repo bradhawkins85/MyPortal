@@ -2533,12 +2533,12 @@ async def _exo_get_mailbox_permission(
             pwsh_records = await _pwsh_get_mailbox_permission(
                 exo_token, tenant_id, mailbox_email
             )
-            if pwsh_records:
-                return pwsh_records
             # pwsh_records is None when PowerShell is not installed –
             # degrade gracefully instead of raising an error.
             if pwsh_records is None:
                 return []
+            if pwsh_records:
+                return pwsh_records
             raise M365Error(
                 f"Exchange Online Get-MailboxPermission returned 403 for "
                 f"{mailbox_email}. Ensure the app has the Exchange.ManageAsApp "
