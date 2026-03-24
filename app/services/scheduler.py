@@ -487,6 +487,22 @@ class SchedulerService:
                     else:
                         result = await imap_service.sync_account(account_id)
                         details = json.dumps(result, default=str) if result else None
+                elif isinstance(command, str) and command.startswith("m365_mail_sync:"):
+                    try:
+                        account_id = int(command.split(":", 1)[1])
+                    except (IndexError, ValueError):
+                        status = "skipped"
+                        details = "Invalid M365 mail account reference"
+                        log_error(
+                            "Invalid M365 mail sync command",
+                            task_id=task_id,
+                            command=command,
+                        )
+                    else:
+                        from app.services import m365_mail as m365_mail_service
+
+                        result = await m365_mail_service.sync_account(account_id)
+                        details = json.dumps(result, default=str) if result else None
                 elif command == "send_price_change_notifications":
                     result = await subscription_price_changes.send_price_change_notifications()
                     details = json.dumps(result, default=str)
