@@ -8,11 +8,15 @@ Covers:
 - _exo_get_mailbox_permission returns empty list on non-200 responses
 - _exo_get_mailbox_permission returns empty list on invalid JSON
 - _exo_get_mailbox_permission returns empty list on decompression errors
+- _exo_get_mailbox_permission falls back to PowerShell subprocess on REST 403
+- _pwsh_get_mailbox_permission runs Get-MailboxPermission via PowerShell subprocess
 - sync_mailboxes calls _fetch_exo_mailbox_permissions instead of UTCM snapshots
 - _exchange_token uses custom scope when provided
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -255,7 +259,7 @@ async def test_exo_get_mailbox_permission_returns_empty_on_non_200():
 
 @pytest.mark.anyio("asyncio")
 async def test_exo_get_mailbox_permission_raises_on_403():
-    """403 responses raise M365Error with http_status=403."""
+    """403 responses raise M365Error with http_status=403 when PowerShell fallback also fails."""
     mock_response = MagicMock()
     mock_response.status_code = 403
     mock_response.text = ""
@@ -266,10 +270,15 @@ async def test_exo_get_mailbox_permission_raises_on_403():
     mock_client.post = AsyncMock(return_value=mock_response)
 
     with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
-        with pytest.raises(M365Error) as exc_info:
-            await m365_service._exo_get_mailbox_permission(
-                "token", "tenant-id", "shared@contoso.com"
-            )
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=[]),
+        ):
+            with pytest.raises(M365Error) as exc_info:
+                await m365_service._exo_get_mailbox_permission(
+                    "token", "tenant-id", "shared@contoso.com"
+                )
 
     assert exc_info.value.http_status == 403
     assert "Exchange.ManageAsApp" in str(exc_info.value)
@@ -545,3 +554,249 @@ async def test_exchange_token_defaults_to_graph_scope():
     assert token == "test-token"
     assert len(captured_data) == 1
     assert captured_data[0]["scope"] == "https://graph.microsoft.com/.default"
+
+
+# ---------------------------------------------------------------------------
+# _pwsh_get_mailbox_permission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_records():
+    """PowerShell subprocess returns parsed mailbox permission records."""
+    pwsh_output = json.dumps([
+        {
+            "Identity": "shared@contoso.com",
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+            "IsInherited": False,
+        }
+    ])
+
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(pwsh_output.encode(), b"")
+    )
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert len(result) == 1
+    assert result[0]["User"] == "admin@contoso.com"
+    assert result[0]["AccessRights"] == ["FullAccess"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_when_no_pwsh():
+    """Returns empty list when PowerShell is not installed."""
+    with patch("shutil.which", return_value=None):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_subprocess_error():
+    """Non-zero exit code from PowerShell returns empty list."""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(b"", b"Connect-ExchangeOnline: Access denied")
+    )
+    mock_process.returncode = 1
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_timeout():
+    """Timeout during PowerShell execution returns empty list."""
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(side_effect=asyncio.TimeoutError()),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_invalid_json():
+    """Invalid JSON output from PowerShell returns empty list."""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(b"not valid json", b"")
+    )
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_wraps_single_object():
+    """Single dict result from PowerShell is wrapped in a list."""
+    pwsh_output = json.dumps({
+        "Identity": "shared@contoso.com",
+        "User": "admin@contoso.com",
+        "AccessRights": ["FullAccess"],
+        "Deny": False,
+        "IsInherited": False,
+    })
+
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(pwsh_output.encode(), b"")
+    )
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0]["User"] == "admin@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_os_error():
+    """OSError when spawning subprocess returns empty list."""
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(side_effect=OSError("No such file")),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_empty_stdout():
+    """Empty stdout from PowerShell (no permissions) returns empty list."""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(return_value=(b"", b""))
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _exo_get_mailbox_permission PowerShell fallback on 403
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_fallback_to_pwsh_on_403():
+    """REST 403 triggers PowerShell fallback; records returned on success."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    pwsh_records = [
+        {"User": "admin@contoso.com", "AccessRights": ["FullAccess"], "Deny": False}
+    ]
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=pwsh_records),
+        ) as mock_pwsh:
+            result = await m365_service._exo_get_mailbox_permission(
+                "token", "tenant-id", "shared@contoso.com"
+            )
+
+    assert result == pwsh_records
+    mock_pwsh.assert_awaited_once_with("token", "tenant-id", "shared@contoso.com")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_raises_when_pwsh_also_fails():
+    """REST 403 followed by PowerShell failure raises M365Error."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=[]),
+        ):
+            with pytest.raises(M365Error) as exc_info:
+                await m365_service._exo_get_mailbox_permission(
+                    "token", "tenant-id", "shared@contoso.com"
+                )
+
+    assert exc_info.value.http_status == 403

@@ -8,6 +8,7 @@ import io
 import json
 import re
 import secrets
+import shutil
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
@@ -2357,6 +2358,129 @@ def _parse_exo_mailbox_permission_records(
     return sorted(members.values(), key=lambda item: item["member_display_name"].lower())
 
 
+# PowerShell script executed by _pwsh_get_mailbox_permission.  Parameters
+# (token, organization, identity) are passed via stdin as JSON so that the
+# access token never appears on the process command line.
+_PWSH_EXO_SCRIPT = """\
+$ErrorActionPreference = 'Stop'
+$d = [System.Console]::In.ReadToEnd() | ConvertFrom-Json
+Import-Module ExchangeOnlineManagement -ErrorAction Stop
+$s = ConvertTo-SecureString -String $d.token -AsPlainText -Force
+Connect-ExchangeOnline -AccessToken $s -Organization $d.organization -ShowBanner:$false -CommandName Get-MailboxPermission
+try {
+    $perms = Get-MailboxPermission -Identity $d.identity -ErrorAction Stop
+    if ($perms) {
+        $out = @($perms | ForEach-Object {
+            [ordered]@{
+                Identity     = $_.Identity.ToString()
+                User         = $_.User.ToString()
+                AccessRights = @($_.AccessRights)
+                Deny         = [bool]$_.Deny
+                IsInherited  = [bool]$_.IsInherited
+            }
+        })
+        ConvertTo-Json -InputObject $out -Compress -Depth 3
+    }
+} finally {
+    Disconnect-ExchangeOnline -Confirm:$false 2>$null
+}
+"""
+
+
+async def _pwsh_get_mailbox_permission(
+    exo_token: str,
+    tenant_id: str,
+    mailbox_email: str,
+) -> list[dict[str, Any]]:
+    """Run ``Get-MailboxPermission`` via a PowerShell subprocess fallback.
+
+    Launches ``pwsh`` (PowerShell Core) with the ``ExchangeOnlineManagement``
+    module, connects using the supplied app-only access token, and executes
+    ``Get-MailboxPermission -Identity <mailbox_email>``.
+
+    Parameters are passed securely via *stdin* as JSON so that the access token
+    never appears on the command line.
+
+    Returns the permission records as a list of dicts compatible with
+    :func:`_parse_exo_mailbox_permission_records`, or an empty list when
+    PowerShell is unavailable, the module is missing, or the cmdlet fails.
+    """
+    pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh_path:
+        log_info(
+            "PowerShell (pwsh) not found – skipping Get-MailboxPermission fallback"
+        )
+        return []
+
+    stdin_payload = json.dumps({
+        "token": exo_token,
+        "organization": tenant_id,
+        "identity": mailbox_email,
+    })
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            pwsh_path, "-NoProfile", "-NonInteractive", "-Command", _PWSH_EXO_SCRIPT,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(input=stdin_payload.encode()),
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        log_warning(
+            "PowerShell Get-MailboxPermission timed out",
+            mailbox_email=mailbox_email,
+        )
+        return []
+    except OSError as exc:
+        log_warning(
+            "PowerShell Get-MailboxPermission subprocess failed to start",
+            mailbox_email=mailbox_email,
+            error=str(exc),
+        )
+        return []
+
+    if process.returncode != 0:
+        stderr_text = (stderr.decode(errors="replace").strip()[:500]) if stderr else ""
+        log_warning(
+            "PowerShell Get-MailboxPermission exited with error",
+            mailbox_email=mailbox_email,
+            exit_code=process.returncode,
+            stderr=stderr_text,
+        )
+        return []
+
+    stdout_text = (stdout.decode(errors="replace").strip()) if stdout else ""
+    if not stdout_text:
+        return []
+
+    try:
+        data = json.loads(stdout_text)
+    except json.JSONDecodeError as exc:
+        log_warning(
+            "PowerShell Get-MailboxPermission JSON parse failed",
+            mailbox_email=mailbox_email,
+            error=str(exc),
+        )
+        return []
+
+    # PowerShell ConvertTo-Json returns a single object for single results
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return []
+
+    log_info(
+        "PowerShell Get-MailboxPermission returned records",
+        mailbox_email=mailbox_email,
+        record_count=len(data),
+    )
+    return data
+
+
 async def _exo_get_mailbox_permission(
     exo_token: str,
     tenant_id: str,
@@ -2365,8 +2489,12 @@ async def _exo_get_mailbox_permission(
     """Call Get-MailboxPermission for a single mailbox via Exchange Online REST API.
 
     Uses the Exchange Online PowerShell REST ``InvokeCommand`` endpoint to run
-    ``Get-MailboxPermission -Identity <mailbox_email>``.  Returns the raw
-    ``value`` list from the response, or an empty list on failure.
+    ``Get-MailboxPermission -Identity <mailbox_email>``.  If the REST API
+    returns 403, a PowerShell subprocess fallback is attempted via
+    :func:`_pwsh_get_mailbox_permission` before raising.
+
+    Returns the raw ``value`` list from the response, or an empty list on
+    failure.
     """
     url = (
         f"https://outlook.office365.com/adminapi/beta/"
@@ -2395,6 +2523,17 @@ async def _exo_get_mailbox_permission(
         return []
     if response.status_code != 200:
         if response.status_code == 403:
+            # REST API returned 403 – try PowerShell subprocess fallback.
+            log_warning(
+                "Exchange Online REST API returned 403 for Get-MailboxPermission "
+                "– attempting PowerShell subprocess fallback",
+                mailbox_email=mailbox_email,
+            )
+            pwsh_records = await _pwsh_get_mailbox_permission(
+                exo_token, tenant_id, mailbox_email
+            )
+            if pwsh_records:
+                return pwsh_records
             raise M365Error(
                 f"Exchange Online Get-MailboxPermission returned 403 for "
                 f"{mailbox_email}. Ensure the app has the Exchange.ManageAsApp "
