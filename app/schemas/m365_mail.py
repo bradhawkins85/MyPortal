@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class M365MailAccountBase(BaseModel):
     name: str = Field(..., max_length=255)
-    company_id: int
+    company_id: int | None = None
     user_principal_name: str = Field(..., max_length=255)
     mailbox_type: str = Field("user", max_length=32)
     folder: str = Field("Inbox", max_length=255)
@@ -43,7 +43,7 @@ class M365MailAccountUpdate(BaseModel):
 class M365MailAccountResponse(BaseModel):
     id: int
     name: str
-    company_id: int
+    company_id: int | None
     user_principal_name: str
     mailbox_type: str
     folder: str
