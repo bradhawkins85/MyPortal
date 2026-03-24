@@ -2410,6 +2410,9 @@ def _get_pwsh_settings_path() -> str:
     The file sets ``LogLevel`` to ``Error`` and disables ScriptBlock and
     Module Logging so that the pwsh subprocess does not flood the system
     journal with module-compilation detail warnings.
+
+    Only one file is created per application lifetime and is cached in the
+    module-level ``_pwsh_settings_path`` variable.
     """
     global _pwsh_settings_path  # noqa: PLW0603
     if _pwsh_settings_path and os.path.isfile(_pwsh_settings_path):
@@ -2426,12 +2429,8 @@ def _get_pwsh_settings_path() -> str:
         },
     }
     fd, path = tempfile.mkstemp(suffix=".json", prefix="myportal-pwsh-")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            json.dump(settings, fh)
-    except Exception:
-        os.close(fd)
-        raise
+    with os.fdopen(fd, "w") as fh:
+        json.dump(settings, fh)
     _pwsh_settings_path = path
     return path
 
