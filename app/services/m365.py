@@ -2405,8 +2405,8 @@ async def _pwsh_get_mailbox_permission(
     :func:`_parse_exo_mailbox_permission_records`, or an empty list when
     PowerShell is unavailable, the module is missing, or the cmdlet fails.
     """
-    pwsh = shutil.which("pwsh") or shutil.which("powershell")
-    if not pwsh:
+    pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh_path:
         log_info(
             "PowerShell (pwsh) not found – skipping Get-MailboxPermission fallback"
         )
@@ -2420,7 +2420,7 @@ async def _pwsh_get_mailbox_permission(
 
     try:
         process = await asyncio.create_subprocess_exec(
-            pwsh, "-NoProfile", "-NonInteractive", "-Command", _PWSH_EXO_SCRIPT,
+            pwsh_path, "-NoProfile", "-NonInteractive", "-Command", _PWSH_EXO_SCRIPT,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
