@@ -142,11 +142,106 @@ install_dependencies() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# PowerShell Core (pwsh) – optional dependency for Exchange Online fallback
+# ---------------------------------------------------------------------------
+
+install_pwsh() {
+  # Skip if pwsh is already available.
+  if command -v pwsh >/dev/null 2>&1; then
+    echo "PowerShell Core (pwsh) is already installed." >&2
+    return
+  fi
+
+  # Only attempt installation on Debian/Ubuntu where apt-get is available.
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Warning: apt-get not found – skipping PowerShell Core installation." >&2
+    echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
+    return
+  fi
+
+  echo "Installing PowerShell Core (pwsh)…" >&2
+
+  # Packages required to register the Microsoft package repository.
+  apt-get update -qq
+  apt-get install -y -qq apt-transport-https software-properties-common wget
+
+  # Detect the running distribution.  /etc/os-release is standard on all
+  # systemd-based distributions.
+  local version_id=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    version_id="${VERSION_ID:-}"
+  fi
+
+  if [[ -z "$version_id" ]]; then
+    echo "Warning: Unable to determine OS version – skipping PowerShell Core installation." >&2
+    echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
+    return
+  fi
+
+  # Register the Microsoft package repository.
+  local pkg_url="https://packages.microsoft.com/config/ubuntu/${version_id}/packages-microsoft-prod.deb"
+  local tmp_deb
+  tmp_deb=$(mktemp /tmp/packages-microsoft-prod.XXXXXX.deb)
+  if ! wget -q -O "$tmp_deb" "$pkg_url"; then
+    rm -f "$tmp_deb"
+    echo "Warning: Failed to download Microsoft package list for Ubuntu ${version_id}." >&2
+    echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
+    return
+  fi
+  dpkg -i "$tmp_deb"
+  rm -f "$tmp_deb"
+
+  apt-get update -qq
+  apt-get install -y -qq powershell
+
+  if command -v pwsh >/dev/null 2>&1; then
+    echo "PowerShell Core installed successfully." >&2
+  else
+    echo "Warning: PowerShell Core package installed but pwsh not found on PATH." >&2
+  fi
+}
+
+install_exo_module() {
+  local pwsh_bin
+  pwsh_bin=$(command -v pwsh 2>/dev/null || true)
+
+  if [[ -z "$pwsh_bin" ]]; then
+    echo "Warning: pwsh not available – skipping ExchangeOnlineManagement module install." >&2
+    return
+  fi
+
+  # Check if the module is already installed.
+  if "$pwsh_bin" -NoProfile -NonInteractive -Command \
+      'if (Get-Module -ListAvailable -Name ExchangeOnlineManagement) { exit 0 } else { exit 1 }' \
+      2>/dev/null; then
+    echo "ExchangeOnlineManagement PowerShell module is already installed." >&2
+    return
+  fi
+
+  echo "Installing ExchangeOnlineManagement PowerShell module…" >&2
+
+  "$pwsh_bin" -NoProfile -NonInteractive -Command \
+    'Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; Install-Module -Name ExchangeOnlineManagement -Scope AllUsers -Force -AllowClobber'
+
+  if "$pwsh_bin" -NoProfile -NonInteractive -Command \
+      'if (Get-Module -ListAvailable -Name ExchangeOnlineManagement) { exit 0 } else { exit 1 }' \
+      2>/dev/null; then
+    echo "ExchangeOnlineManagement module installed successfully." >&2
+  else
+    echo "Warning: ExchangeOnlineManagement module installation may have failed." >&2
+  fi
+}
+
 ensure_env_file
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
 ensure_env_default "UVICORN_AUTO_UPDATE_ENABLED" "true"
 ensure_env_default "UVICORN_AUTO_UPDATE_ATTEMPTS" "2"
 ensure_env_default "UVICORN_AUTO_UPDATE_RETRY_DELAY" "5"
+install_pwsh
+install_exo_module
 ensure_virtualenv
 install_dependencies
 
