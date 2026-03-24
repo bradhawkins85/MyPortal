@@ -2391,7 +2391,7 @@ async def _pwsh_get_mailbox_permission(
     exo_token: str,
     tenant_id: str,
     mailbox_email: str,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | None:
     """Run ``Get-MailboxPermission`` via a PowerShell subprocess fallback.
 
     Launches ``pwsh`` (PowerShell Core) with the ``ExchangeOnlineManagement``
@@ -2402,15 +2402,16 @@ async def _pwsh_get_mailbox_permission(
     never appears on the command line.
 
     Returns the permission records as a list of dicts compatible with
-    :func:`_parse_exo_mailbox_permission_records`, or an empty list when
-    PowerShell is unavailable, the module is missing, or the cmdlet fails.
+    :func:`_parse_exo_mailbox_permission_records`, ``None`` when PowerShell is
+    not installed, or an empty list when the module is missing or the cmdlet
+    fails.
     """
     pwsh_path = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh_path:
         log_info(
             "PowerShell (pwsh) not found – skipping Get-MailboxPermission fallback"
         )
-        return []
+        return None
 
     stdin_payload = json.dumps({
         "token": exo_token,
@@ -2534,6 +2535,10 @@ async def _exo_get_mailbox_permission(
             )
             if pwsh_records:
                 return pwsh_records
+            # pwsh_records is None when PowerShell is not installed –
+            # degrade gracefully instead of raising an error.
+            if pwsh_records is None:
+                return []
             raise M365Error(
                 f"Exchange Online Get-MailboxPermission returned 403 for "
                 f"{mailbox_email}. Ensure the app has the Exchange.ManageAsApp "

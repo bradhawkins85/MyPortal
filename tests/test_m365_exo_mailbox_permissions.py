@@ -597,14 +597,14 @@ async def test_pwsh_get_mailbox_permission_returns_records():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_pwsh_get_mailbox_permission_returns_empty_when_no_pwsh():
-    """Returns empty list when PowerShell is not installed."""
+async def test_pwsh_get_mailbox_permission_returns_none_when_no_pwsh():
+    """Returns None when PowerShell is not installed."""
     with patch("shutil.which", return_value=None):
         result = await m365_service._pwsh_get_mailbox_permission(
             "token", "tenant-id", "shared@contoso.com"
         )
 
-    assert result == []
+    assert result is None
 
 
 @pytest.mark.anyio("asyncio")
@@ -800,3 +800,28 @@ async def test_exo_get_mailbox_permission_raises_when_pwsh_also_fails():
                 )
 
     assert exc_info.value.http_status == 403
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_when_pwsh_not_found():
+    """REST 403 with PowerShell not installed returns empty list without raising."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=None),
+        ):
+            result = await m365_service._exo_get_mailbox_permission(
+                "token", "tenant-id", "shared@contoso.com"
+            )
+
+    assert result == []
