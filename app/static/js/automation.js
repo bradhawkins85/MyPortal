@@ -469,6 +469,23 @@
         }),
       },
     ],
+    whisperx: [
+      {
+        label: 'Transcribe voicemail attachments and add internal note',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          add_note: true,
+        }),
+      },
+      {
+        label: 'Transcribe with language override (no note)',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          add_note: false,
+          language: 'en',
+        }),
+      },
+    ],
   };
 
   function getCookie(name) {
