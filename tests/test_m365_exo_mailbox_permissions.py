@@ -29,6 +29,8 @@ import pytest
 from app.services import m365 as m365_service
 from app.services.m365 import (
     M365Error,
+    _coerce_exo_bool,
+    _coerce_exo_string,
     _get_pwsh_settings_path,
     _parse_exo_mailbox_permission_records,
 )
@@ -209,6 +211,129 @@ def test_parse_exo_records_empty_user_skipped():
     ]
     result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
     assert result == []
+
+
+def test_parse_exo_records_deny_string_false_not_filtered():
+    """Deny serialised as the string 'False' must not filter the record out."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": "False",
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_deny_string_true_filtered():
+    """Deny serialised as the string 'True' should filter the record out."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": "True",
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
+def test_parse_exo_records_deny_nested_object():
+    """Deny serialised as a nested OData object is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": {"@odata.type": "#Boolean", "value": False},
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_access_rights_nested_list_items():
+    """AccessRights list containing nested objects is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": [{"@odata.type": "#EnumValue", "value": "FullAccess"}],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_access_rights_curly_brace_wrapper():
+    """AccessRights value wrapped in curly braces (PowerShell format) is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": "{FullAccess}",
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object():
+    """User serialised as a nested OData object is handled."""
+    records = [
+        {
+            "User": {"@odata.type": "#UserPrincipal", "value": "admin@contoso.com"},
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object_raw_identity():
+    """User serialised with RawIdentity key is handled."""
+    records = [
+        {
+            "User": {"RawIdentity": "admin@contoso.com"},
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_combined_rest_api_format():
+    """Full REST API record with string Deny and nested AccessRights is handled."""
+    records = [
+        {
+            "@odata.type": "#Microsoft.Exchange.Management.RecipientTasks.MailboxPermission",
+            "Identity": "alarms@company.com",
+            "User": "Brad Hawkins <brad@company.com>",
+            "AccessRights": {"@odata.type": "#Collection(String)", "value": ["FullAccess"]},
+            "Deny": "False",
+            "IsInherited": False,
+        },
+        {
+            "@odata.type": "#Microsoft.Exchange.Management.RecipientTasks.MailboxPermission",
+            "Identity": "alarms@company.com",
+            "User": "NT AUTHORITY\\SELF",
+            "AccessRights": {"@odata.type": "#Collection(String)", "value": ["FullAccess"]},
+            "Deny": "False",
+            "IsInherited": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("alarms@company.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "brad@company.com"
+    assert result[0]["member_display_name"] == "Brad Hawkins"
 
 
 # ---------------------------------------------------------------------------
