@@ -483,6 +483,15 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "m365-mail",
+        "name": "Office 365 Mailbox Import",
+        "description": "Import support emails from Microsoft 365 mailboxes into the ticketing queue.",
+        "icon": "📬",
+        "settings": {
+            "manage_url": "/admin/modules/m365-mail",
+        },
+    },
+    {
         "slug": "tacticalrmm",
         "name": "Tactical RMM",
         "description": "Call Tactical RMM webhook endpoints for automation actions.",
@@ -806,6 +815,9 @@ def _coerce_settings(
         )
     elif slug == "imap":
         manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
+        merged.update({"manage_url": manage_url})
+    elif slug == "m365-mail":
+        manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/m365-mail"
         merged.update({"manage_url": manage_url})
     elif slug == "chatgpt-mcp":
         overrides = payload or {}
