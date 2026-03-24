@@ -10,6 +10,8 @@ Covers:
 - _exo_get_mailbox_permission returns empty list on decompression errors
 - _exo_get_mailbox_permission falls back to PowerShell subprocess on REST 403
 - _pwsh_get_mailbox_permission runs Get-MailboxPermission via PowerShell subprocess
+- _pwsh_get_mailbox_permission passes -SettingsFile to suppress ScriptBlock Logging
+- _get_pwsh_settings_path creates and caches a PowerShell settings temp file
 - sync_mailboxes calls _fetch_exo_mailbox_permissions instead of UTCM snapshots
 - _exchange_token uses custom scope when provided
 """
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +29,7 @@ import pytest
 from app.services import m365 as m365_service
 from app.services.m365 import (
     M365Error,
+    _get_pwsh_settings_path,
     _parse_exo_mailbox_permission_records,
 )
 
@@ -557,8 +561,79 @@ async def test_exchange_token_defaults_to_graph_scope():
 
 
 # ---------------------------------------------------------------------------
+# _get_pwsh_settings_path
+# ---------------------------------------------------------------------------
+
+
+def test_get_pwsh_settings_path_creates_json_file():
+    """_get_pwsh_settings_path creates a temp file with correct settings."""
+    # Reset the cached path so the function creates a new file.
+    original = m365_service._pwsh_settings_path
+    try:
+        m365_service._pwsh_settings_path = None
+        path = _get_pwsh_settings_path()
+        assert os.path.isfile(path)
+        with open(path) as fh:
+            data = json.load(fh)
+        assert data["LogLevel"] == "Error"
+        assert data["ScriptBlockLogging"]["EnableScriptBlockLogging"] is False
+        assert data["ModuleLogging"]["EnableModuleLogging"] is False
+    finally:
+        m365_service._pwsh_settings_path = original
+
+
+def test_get_pwsh_settings_path_returns_cached_path():
+    """Subsequent calls return the same cached file path."""
+    original = m365_service._pwsh_settings_path
+    try:
+        m365_service._pwsh_settings_path = None
+        path1 = _get_pwsh_settings_path()
+        path2 = _get_pwsh_settings_path()
+        assert path1 == path2
+    finally:
+        m365_service._pwsh_settings_path = original
+
+
+# ---------------------------------------------------------------------------
 # _pwsh_get_mailbox_permission
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_passes_settings_file():
+    """PowerShell subprocess is invoked with -SettingsFile to suppress logging."""
+    pwsh_output = json.dumps([
+        {
+            "Identity": "shared@contoso.com",
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+            "IsInherited": False,
+        }
+    ])
+
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(pwsh_output.encode(), b"")
+    )
+    mock_process.returncode = 0
+
+    mock_exec = AsyncMock(return_value=mock_process)
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch("asyncio.create_subprocess_exec", mock_exec),
+    ):
+        await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    # Verify -SettingsFile was passed in the subprocess arguments.
+    call_args = mock_exec.call_args[0]
+    assert "-SettingsFile" in call_args
+    settings_idx = call_args.index("-SettingsFile")
+    settings_path = call_args[settings_idx + 1]
+    assert os.path.isfile(settings_path)
 
 
 @pytest.mark.anyio("asyncio")
