@@ -163,8 +163,14 @@ install_pwsh() {
   echo "Installing PowerShell Core (pwsh)…" >&2
 
   # Packages required to register the Microsoft package repository.
-  apt-get update -qq
-  apt-get install -y -qq apt-transport-https software-properties-common wget
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed – skipping PowerShell Core installation." >&2
+    return
+  fi
+  if ! apt-get install -y -qq apt-transport-https software-properties-common wget; then
+    echo "Warning: Failed to install prerequisite packages – skipping PowerShell Core installation." >&2
+    return
+  fi
 
   # Detect the running distribution.  /etc/os-release is standard on all
   # systemd-based distributions.
@@ -194,8 +200,15 @@ install_pwsh() {
   dpkg -i "$tmp_deb"
   rm -f "$tmp_deb"
 
-  apt-get update -qq
-  apt-get install -y -qq powershell
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed after adding Microsoft repository." >&2
+    return
+  fi
+  if ! apt-get install -y -qq powershell; then
+    echo "Warning: Failed to install powershell package." >&2
+    echo "Install PowerShell Core manually: https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell" >&2
+    return
+  fi
 
   if command -v pwsh >/dev/null 2>&1; then
     echo "PowerShell Core installed successfully." >&2
@@ -224,7 +237,7 @@ install_exo_module() {
   echo "Installing ExchangeOnlineManagement PowerShell module…" >&2
 
   "$pwsh_bin" -NoProfile -NonInteractive -Command \
-    'Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; Install-Module -Name ExchangeOnlineManagement -Scope AllUsers -Force -AllowClobber'
+    'Install-Module -Name ExchangeOnlineManagement -Repository PSGallery -Scope AllUsers -Force -AllowClobber'
 
   if "$pwsh_bin" -NoProfile -NonInteractive -Command \
       'if (Get-Module -ListAvailable -Name ExchangeOnlineManagement) { exit 0 } else { exit 1 }' \
