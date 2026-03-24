@@ -2307,6 +2307,34 @@ def _normalise_direct_mailbox_permission_principal(user_value: str) -> tuple[str
     return candidate, lower_candidate
 
 
+def _coerce_exo_bool(value: Any) -> bool:
+    """Coerce an Exchange Online REST API value to a Python bool.
+
+    The InvokeCommand endpoint may serialize booleans as JSON booleans, as
+    strings (``"True"``/``"False"``), or as nested objects
+    (``{"value": true}``).  Plain ``bool(val)`` would treat the non-empty
+    string ``"False"`` as truthy, so explicit handling is required.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        value = value.get("value", False)
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
+def _coerce_exo_string(value: Any) -> str:
+    """Coerce an Exchange Online REST API value to a plain string.
+
+    The InvokeCommand endpoint may serialize simple string properties as a
+    plain JSON string or as a nested object (``{"value": "..."}``).
+    """
+    if isinstance(value, dict):
+        value = value.get("value") or value.get("RawIdentity") or ""
+    return str(value or "").strip()
+
+
 def _parse_exo_mailbox_permission_records(
     mailbox_email: str,
     records: list[dict[str, Any]],
@@ -2330,19 +2358,24 @@ def _parse_exo_mailbox_permission_records(
         if isinstance(access_rights_raw, str):
             access_rights = [access_rights_raw]
         elif isinstance(access_rights_raw, list):
-            access_rights = [str(item or "").strip() for item in access_rights_raw]
+            access_rights = []
+            for item in access_rights_raw:
+                if isinstance(item, dict):
+                    item = item.get("value", "")
+                access_rights.append(str(item or "").strip())
         else:
             access_rights = []
-        if not any(right.lower() == "fullaccess" for right in access_rights):
+        if not any(
+            right.strip("{}").lower() == "fullaccess" for right in access_rights
+        ):
             continue
 
-        deny = record.get("Deny") if record.get("Deny") is not None else record.get("deny")
-        if bool(deny):
+        deny_raw = record.get("Deny") if record.get("Deny") is not None else record.get("deny")
+        if _coerce_exo_bool(deny_raw):
             continue
 
-        user_value = str(
-            record.get("User") or record.get("user") or ""
-        ).strip()
+        user_raw = record.get("User") or record.get("user") or ""
+        user_value = _coerce_exo_string(user_raw)
         if not user_value or user_value.lower() == _DIRECT_MAILBOX_PERMISSION_SELF:
             continue
 
