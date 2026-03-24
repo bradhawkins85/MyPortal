@@ -41,7 +41,7 @@
           {% for license in licenses %}
           <tr>
             <td data-column="display_name" data-value="{{ license.display_name or license.name }}">
-              <button type="button" class="link" data-license-users="{{ license.id }}" data-license-name="{{ license.display_name or license.name }}">{{ license.display_name or license.name }}</button>
+              {{ license.display_name or license.name }}
             </td>
             <td data-column="count" data-value="{{ license.count }}">{{ license.count }}</td>
             <td data-column="allocated" data-value="{{ license.allocated }}">
@@ -221,12 +221,6 @@
         showToast('Unable to load allocation details.', 'error');
       }
     }
-
-    document.querySelectorAll('[data-license-users]').forEach((button) => {
-      button.addEventListener('click', () => {
-        showLicenseUsers(button.dataset.licenseUsers, button.dataset.licenseName);
-      });
-    });
 
     document.querySelectorAll('[data-license-allocated]').forEach((button) => {
       button.addEventListener('click', () => {
