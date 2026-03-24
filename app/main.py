@@ -76,6 +76,7 @@ from app.api.routes import (
     message_templates as message_templates_api,
     mcp as mcp_api,
     imap as imap_api,
+    m365_mail as m365_mail_api,
     modules as modules_api,
     notifications,
     orders as orders_api,
@@ -166,6 +167,7 @@ from app.services import company_domains
 from app.services import company_access
 from app.services import email as email_service
 from app.services import imap as imap_service
+from app.services import m365_mail as m365_mail_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
@@ -887,6 +889,7 @@ app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 app.include_router(imap_api.router)
+app.include_router(m365_mail_api.router)
 app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
@@ -16910,6 +16913,328 @@ async def admin_sync_imap_account(account_id: int, request: Request):
     message = quote(f"IMAP sync imported {processed} message{'s' if processed != 1 else ''}.")
     return RedirectResponse(
         url=f"/admin/modules/imap?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Office 365 Mail Import admin routes
+# ---------------------------------------------------------------------------
+
+
+async def _render_m365_mail_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    editing_account_id: int | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    accounts = await m365_mail_service.list_accounts()
+    editing_account = None
+    if editing_account_id is not None:
+        for account in accounts:
+            if account.get("id") == editing_account_id:
+                editing_account = account
+                break
+        if not editing_account:
+            editing_account = await m365_mail_service.get_account(editing_account_id)
+    companies = await company_repo.list_companies()
+    extra = {
+        "title": "Office 365 mailboxes",
+        "accounts": accounts,
+        "editing_account": editing_account,
+        "companies": companies,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/m365_mail.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+@app.get("/admin/modules/m365-mail", response_class=HTMLResponse)
+async def admin_m365_mail_accounts_page(
+    request: Request,
+    account_id: int | None = Query(default=None, alias="accountId"),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_m365_mail_dashboard(
+        request,
+        current_user,
+        editing_account_id=account_id,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts", response_class=HTMLResponse)
+async def admin_create_m365_mail_account(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    data: dict[str, Any] = {
+        "name": form.get("name", ""),
+        "user_principal_name": form.get("userPrincipalName", ""),
+        "mailbox_type": form.get("mailboxType", "user"),
+        "folder": form.get("folder", ""),
+        "schedule_cron": form.get("scheduleCron", ""),
+        "filter_query": form.get("filterQuery"),
+        "process_unread_only": _form_bool(form, "processUnreadOnly"),
+        "mark_as_read": _form_bool(form, "markAsRead"),
+        "sync_known_only": _form_bool(form, "syncKnownOnly"),
+        "active": _form_bool(form, "active"),
+    }
+    priority_value = form.get("priority")
+    if priority_value not in (None, ""):
+        try:
+            data["priority"] = int(priority_value)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                success_message=None,
+                error_message="Priority must be a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    company_id = form.get("companyId")
+    if company_id in (None, ""):
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Company is required for Office 365 mailboxes.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        data["company_id"] = int(company_id)
+    except (TypeError, ValueError):
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Company selection is invalid.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        account = await m365_mail_service.create_account(data)
+    except ValueError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create M365 mail account", error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to create the Office 365 mail account. Please verify the configuration and try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    message = quote(f"Mailbox {account.get('name') or account.get('user_principal_name') or 'created'} added.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}", response_class=HTMLResponse)
+async def admin_update_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    updates: dict[str, Any] = {}
+    for field in ("name", "userPrincipalName", "mailboxType"):
+        if field in form:
+            value = form.get(field)
+            if value is None:
+                continue
+            if field == "userPrincipalName":
+                updates["user_principal_name"] = value
+            elif field == "mailboxType":
+                updates["mailbox_type"] = value
+            else:
+                updates[field] = value
+    if "folder" in form:
+        updates["folder"] = form.get("folder")
+    if "scheduleCron" in form:
+        updates["schedule_cron"] = form.get("scheduleCron")
+    if "filterQuery" in form:
+        updates["filter_query"] = form.get("filterQuery")
+    updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
+    updates["mark_as_read"] = _form_bool(form, "markAsRead")
+    updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
+    updates["active"] = _form_bool(form, "active")
+    priority_value = form.get("priority")
+    if priority_value not in (None, ""):
+        try:
+            updates["priority"] = int(priority_value)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                editing_account_id=account_id,
+                success_message=None,
+                error_message="Priority must be a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    company_id = form.get("companyId")
+    if company_id in (None, ""):
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message="Company is required for Office 365 mailboxes.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        updates["company_id"] = int(company_id)
+    except (TypeError, ValueError):
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message="Company selection is invalid.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        account = await m365_mail_service.update_account(account_id, updates)
+    except ValueError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to update M365 mail account", account_id=account_id, error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message="Unable to update the Office 365 mail account. Please review the settings and try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    message = quote(f"Mailbox {account.get('name') or account.get('user_principal_name') or account_id} updated.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/clone", response_class=HTMLResponse)
+async def admin_clone_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        account = await m365_mail_service.clone_account(account_id)
+    except LookupError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    except ValueError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to clone M365 mail account", account_id=account_id, error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to clone the Office 365 mail account at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    label = account.get("name") or f"Mailbox {account_id} copy"
+    message = quote(f"Mailbox {label} cloned.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/delete", response_class=HTMLResponse)
+async def admin_delete_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await m365_mail_service.get_account(account_id)
+    try:
+        await m365_mail_service.delete_account(account_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to delete M365 mail account", account_id=account_id, error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to delete the Office 365 mail account at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    label = account.get("name") if account else f"#{account_id}"
+    message = quote(f"Mailbox {label} deleted.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/sync", response_class=HTMLResponse)
+async def admin_sync_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await m365_mail_service.sync_account(account_id)
+    status_value = str(result.get("status") or "").lower()
+    processed = int(result.get("processed") or 0)
+    error_count = len(result.get("errors") or [])
+    if status_value in {"error"}:
+        message = result.get("error") or "Office 365 mail synchronisation failed."
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote(message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if status_value == "skipped":
+        message = result.get("reason") or "Office 365 mail synchronisation skipped."
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote(message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if status_value == "completed_with_errors" and error_count:
+        message = quote(
+            f"Office 365 mail sync completed with {error_count} issue{'s' if error_count != 1 else ''}. Imported {processed} messages."
+        )
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?success={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    message = quote(f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

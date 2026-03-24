@@ -19,6 +19,7 @@ from app.services import asset_importer
 from app.services import automations as automations_service
 from app.services import company_id_lookup
 from app.services import imap as imap_service
+from app.services import m365_mail as m365_mail_service
 from app.services import invoice_generator as invoice_generator_service
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
@@ -486,6 +487,20 @@ class SchedulerService:
                         )
                     else:
                         result = await imap_service.sync_account(account_id)
+                        details = json.dumps(result, default=str) if result else None
+                elif isinstance(command, str) and command.startswith("m365_mail_sync:"):
+                    try:
+                        account_id = int(command.split(":", 1)[1])
+                    except (IndexError, ValueError):
+                        status = "skipped"
+                        details = "Invalid M365 mail account reference"
+                        log_error(
+                            "Invalid M365 mail sync command",
+                            task_id=task_id,
+                            command=command,
+                        )
+                    else:
+                        result = await m365_mail_service.sync_account(account_id)
                         details = json.dumps(result, default=str) if result else None
                 elif command == "send_price_change_notifications":
                     result = await subscription_price_changes.send_price_change_notifications()
