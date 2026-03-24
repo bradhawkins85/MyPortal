@@ -387,9 +387,20 @@ update_version_file() {
   echo "Updated version.txt to ${version}."
 }
 
+install_dependencies() {
+  if [[ -z "$PYTHON_INTERPRETER" ]]; then
+    echo "Warning: Unable to locate a Python interpreter; skipping dependency installation." >&2
+    return 1
+  fi
+
+  echo "Installing updated dependencies…"
+  "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"
+}
+
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
   update_version_file
+  install_dependencies
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     mark_restart_required
   else
@@ -398,6 +409,7 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
 elif [[ "$FORCE_RESTART" == "1" ]]; then
   echo "No repository changes detected but FORCE_RESTART=1; flagging dependency install and service restart."
   update_version_file
+  install_dependencies
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     mark_restart_required
   else
