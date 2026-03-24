@@ -15,6 +15,8 @@ Covers:
 """
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -562,9 +564,7 @@ async def test_exchange_token_defaults_to_graph_scope():
 @pytest.mark.anyio("asyncio")
 async def test_pwsh_get_mailbox_permission_returns_records():
     """PowerShell subprocess returns parsed mailbox permission records."""
-    import json as _json
-
-    pwsh_output = _json.dumps([
+    pwsh_output = json.dumps([
         {
             "Identity": "shared@contoso.com",
             "User": "admin@contoso.com",
@@ -633,13 +633,11 @@ async def test_pwsh_get_mailbox_permission_returns_empty_on_subprocess_error():
 @pytest.mark.anyio("asyncio")
 async def test_pwsh_get_mailbox_permission_returns_empty_on_timeout():
     """Timeout during PowerShell execution returns empty list."""
-    import asyncio as _asyncio
-
     with (
         patch("shutil.which", return_value="/usr/bin/pwsh"),
         patch(
             "asyncio.create_subprocess_exec",
-            AsyncMock(side_effect=_asyncio.TimeoutError()),
+            AsyncMock(side_effect=asyncio.TimeoutError()),
         ),
     ):
         result = await m365_service._pwsh_get_mailbox_permission(
@@ -675,9 +673,7 @@ async def test_pwsh_get_mailbox_permission_returns_empty_on_invalid_json():
 @pytest.mark.anyio("asyncio")
 async def test_pwsh_get_mailbox_permission_wraps_single_object():
     """Single dict result from PowerShell is wrapped in a list."""
-    import json as _json
-
-    pwsh_output = _json.dumps({
+    pwsh_output = json.dumps({
         "Identity": "shared@contoso.com",
         "User": "admin@contoso.com",
         "AccessRights": ["FullAccess"],
