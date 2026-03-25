@@ -21,7 +21,7 @@ from itsdangerous import BadSignature
 from app.main import app, m365_callback
 from app.services import m365 as m365_service
 
-AZURE_CLI_CLIENT_ID = m365_service._AZURE_CLI_CLIENT_ID  # type: ignore[attr-defined]
+AZURE_CLI_CLIENT_ID = m365_service.AZURE_CLI_CLIENT_ID
 
 
 # ---------------------------------------------------------------------------
