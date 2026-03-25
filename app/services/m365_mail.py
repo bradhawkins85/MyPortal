@@ -4,7 +4,7 @@ import base64
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -661,16 +661,18 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         # Build the messages URL
         # For both user and shared mailboxes the Graph API uses /users/{upn}/...
         messages_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(folder, safe='')}/messages"
-        params = [
-            "$top=50",
-            "$orderby=receivedDateTime asc",
-            "$select=id,subject,body,from,toRecipients,ccRecipients,bccRecipients,"
-            "replyTo,internetMessageHeaders,internetMessageId,isRead,receivedDateTime,"
-            "hasAttachments,conversationId",
-        ]
+        query_params = {
+            "$top": "50",
+            "$orderby": "receivedDateTime asc",
+            "$select": (
+                "id,subject,body,from,toRecipients,ccRecipients,bccRecipients,"
+                "replyTo,internetMessageHeaders,internetMessageId,isRead,receivedDateTime,"
+                "hasAttachments,conversationId"
+            ),
+        }
         if process_unread_only:
-            params.append("$filter=isRead eq false")
-        full_url = messages_url + "?" + "&".join(params)
+            query_params["$filter"] = "isRead eq false"
+        full_url = messages_url + "?" + urlencode(query_params, quote_via=quote, safe="$,")
 
         # Paginate through all messages
         remediation_attempted = False
