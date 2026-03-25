@@ -3713,7 +3713,7 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
-        "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
+        "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -4771,15 +4771,36 @@ async def m365_page(request: Request, error: str | None = None, success: str | N
             "client_id": credentials.get("client_id"),
             "token_expires_at": expires_display,
         }
+
+    # Fetch per-company admin credentials for super admins
+    admin_credential_view = None
+    if user.get("is_super_admin"):
+        admin_creds = await m365_service.get_company_admin_credentials(company_id)
+        if admin_creds:
+            admin_expires = admin_creds.get("client_secret_expires_at")
+            if isinstance(admin_expires, datetime):
+                admin_expires_display = admin_expires.replace(tzinfo=timezone.utc).isoformat()
+            elif admin_expires:
+                admin_expires_display = str(admin_expires)
+            else:
+                admin_expires_display = None
+            admin_credential_view = {
+                "client_id": admin_creds.get("client_id"),
+                "tenant_id": admin_creds.get("tenant_id"),
+                "client_secret_expires_at": admin_expires_display,
+            }
+
     extra = {
         "title": "Office 365",
         "company": company,
         "credential": credential_view,
+        "admin_credential": admin_credential_view,
         "error": error,
         "success": success,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
-        "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
+        "has_admin_credentials": bool(admin_credential_view),
+        "admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
 
@@ -5036,6 +5057,55 @@ async def delete_m365_credentials(request: Request):
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/m365/admin-credentials", response_class=RedirectResponse)
+async def save_m365_admin_credentials(
+    request: Request,
+    client_id: str = Form(..., alias="adminClientId"),
+    client_secret: str = Form("", alias="adminClientSecret"),
+    tenant_id: str = Form("", alias="adminTenantId"),
+):
+    """Save per-company M365 admin enterprise app credentials."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    # Only update if client_secret is provided (non-empty)
+    # If empty, we might be updating other fields only
+    existing = await m365_service.get_company_admin_credentials(company_id)
+    if existing and not client_secret.strip():
+        # Keep existing secret when none provided
+        client_secret = existing.get("client_secret", "")
+
+    if not client_id.strip() or not client_secret.strip():
+        encoded = urlencode({"error": "Admin Client ID and Client Secret are required."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+
+    await m365_service.upsert_company_admin_credentials(
+        company_id=company_id,
+        client_id=client_id.strip(),
+        client_secret=client_secret.strip(),
+        tenant_id=tenant_id.strip() if tenant_id.strip() else None,
+    )
+    log_info("M365 admin credentials updated", company_id=company_id, user_id=user.get("id"))
+    encoded = urlencode({"success": "Admin credentials saved successfully."})
+    return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/admin-credentials/delete", response_class=RedirectResponse)
+async def delete_m365_admin_credentials(request: Request):
+    """Delete per-company M365 admin enterprise app credentials."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await m365_service.delete_company_admin_credentials(company_id)
+    log_info("M365 admin credentials deleted", company_id=company_id, user_id=user.get("id"))
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.post("/m365/test", response_class=RedirectResponse)
 async def test_m365_connectivity(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
@@ -5132,7 +5202,7 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         }
     )
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5183,7 +5253,7 @@ async def admin_company_m365_provision(
         }
     )
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5207,18 +5277,28 @@ async def admin_company_m365_provision(
 
 
 
-async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
+async def _get_m365_admin_credentials(company_id: int | None = None) -> tuple[str | None, str | None]:
     """Return (client_id, client_secret) for the M365 admin app flow.
 
-    Reads from the ``m365-admin`` integration module first so that admins can
-    configure the credentials through the UI.  Falls back to the environment
-    variables ``M365_ADMIN_CLIENT_ID`` / ``M365_ADMIN_CLIENT_SECRET`` for
-    backwards-compatibility with existing deployments.
+    Resolution order:
+    1. Per-company admin credentials from company_m365_credentials (if company_id provided).
+    2. Global ``m365-admin`` integration module settings.
+    3. Environment variables ``M365_ADMIN_CLIENT_ID`` / ``M365_ADMIN_CLIENT_SECRET``.
 
     The ``client_secret`` is decrypted if it was stored as ciphertext;
     plaintext values (manually configured) are returned unchanged because
     :func:`decrypt_secret` is a no-op for non-ciphertext strings.
     """
+    # 1. Per-company admin credentials (when company_id is provided)
+    if company_id is not None:
+        company_admin_creds = await m365_service.get_company_admin_credentials(company_id)
+        if company_admin_creds:
+            client_id = company_admin_creds.get("client_id")
+            client_secret = company_admin_creds.get("client_secret")
+            if client_id and client_secret:
+                return client_id, client_secret
+
+    # 2. Global module credentials
     try:
         module = await modules_service.get_module("m365-admin", redact=False)
     except RuntimeError:
@@ -5230,7 +5310,8 @@ async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
         if client_id and raw_secret:
             client_secret = decrypt_secret(raw_secret)
             return client_id, client_secret
-    # Fall back to environment variables
+
+    # 3. Fall back to environment variables
     return settings.m365_admin_client_id or None, settings.m365_admin_client_secret or None
 
 
@@ -5255,7 +5336,7 @@ async def m365_discover(request: Request):
     # which occurs when the configured admin client_id belongs to a public
     # PKCE app rather than a confidential app.
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = await m365_service.get_effective_pkce_client_id()
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(company_id)
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5296,7 +5377,7 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     # credentials are configured.  See the /m365/discover handler for the
     # full rationale (avoids AADSTS700025 on reprovision with public client).
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = await m365_service.get_effective_pkce_client_id()
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(company_id)
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5386,7 +5467,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
         token_data = {
-            "client_id": await m365_service.get_effective_pkce_client_id(),
+            "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id) if company_id else await m365_service.get_effective_pkce_client_id(),
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5462,7 +5543,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        _discover_cid, _discover_csec = await _get_m365_admin_credentials()
+        _discover_cid, _discover_csec = await _get_m365_admin_credentials(company_id)
 
         code_verifier: str | None = state_data.get("code_verifier")
         token_endpoint = (
@@ -5470,7 +5551,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": await m365_service.get_effective_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5577,7 +5658,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data = {
-                "client_id": await m365_service.get_effective_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5587,7 +5668,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         else:
             # Backward-compatibility: fall back to admin credentials when no
             # code_verifier is present (e.g. old state tokens in flight).
-            _provision_cid, _provision_csec = await _get_m365_admin_credentials()
+            _provision_cid, _provision_csec = await _get_m365_admin_credentials(company_id)
             if not _provision_cid or not _provision_csec:
                 return _provision_error("Admin M365 credentials are not configured.")
             token_data = {
@@ -16962,16 +17043,18 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
             url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
+    company_id = account.get("company_id")
     redirect_uri = _build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
     state = oauth_state_serializer.dumps({
         "user_id": current_user.get("id"),
         "flow": "m365_mail_auth",
         "account_id": account_id,
+        "company_id": company_id,
         "code_verifier": code_verifier,
     })
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id) if company_id else await m365_service.get_effective_pkce_client_id(),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
