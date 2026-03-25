@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse, urlencode
 
 from httpx import AsyncClient as HttpxAsyncClient
 from starlette.requests import Request
+from itsdangerous import BadSignature
 
 from app.main import app, m365_callback
 from app.services import m365 as m365_service
@@ -620,7 +621,7 @@ async def test_callback_error_aadsts700016_with_unparseable_state_still_clears_g
     )
 
     with (
-        patch("app.main.oauth_state_serializer.loads", side_effect=Exception("bad state")),
+        patch("app.main.oauth_state_serializer.loads", side_effect=BadSignature("bad state")),
         patch.object(
             m365_service, "clear_company_pkce_client_id", new_callable=AsyncMock
         ) as mock_clear_company,
