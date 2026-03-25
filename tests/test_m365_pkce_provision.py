@@ -561,7 +561,7 @@ async def test_callback_error_aadsts700016_without_company_id_skips_company_clea
 
 
 @pytest.mark.anyio("asyncio")
-async def test_callback_error_aadsts700016_with_non_int_company_id_skips_company_clear():
+async def test_callback_error_aadsts700016_invalid_company_id_skips_company_clear():
     """Non-integer company_id should not attempt per-company clear."""
     state = _signed_state({"company_id": "abc", "flow": "discover"})
     error_param = "invalid_client"
