@@ -141,9 +141,40 @@ def get_pkce_client_id() -> str:
     to fail with ``AADSTS700016``.  In those cases, create a new app registration
     in your Azure AD tenant, enable *Allow public client flows*, and set
     ``M365_PKCE_CLIENT_ID`` to its Application (client) ID.
+
+    For most deployments, use :func:`get_effective_pkce_client_id` instead,
+    which also checks the auto-provisioned PKCE client stored in the database
+    before falling back to this env-var lookup.
     """
     configured = str(get_settings().m365_pkce_client_id or "").strip()
     return configured if configured else _AZURE_CLI_CLIENT_ID
+
+
+async def get_effective_pkce_client_id() -> str:
+    """Return the best available PKCE public-client app ID.
+
+    Resolution order:
+    1. Auto-provisioned PKCE client stored in the ``m365-admin`` module settings
+       (created automatically during :func:`provision_csp_admin_app_registration`).
+    2. Operator-configured ``M365_PKCE_CLIENT_ID`` environment variable.
+    3. Well-known Azure CLI public client (``_AZURE_CLI_CLIENT_ID``).
+
+    Using the auto-provisioned value ensures that the system always uses a
+    freshly-created, valid app registration even when the previously configured
+    PKCE client has been deleted from Azure AD.
+    """
+    # 1. Check the auto-provisioned value stored in module settings
+    try:
+        creds = await get_admin_m365_credentials()
+    except Exception:
+        creds = None
+    if creds:
+        stored = str(creds.get("pkce_client_id") or "").strip()
+        if stored:
+            return stored
+
+    # 2. Operator-configured env var / Azure CLI fallback
+    return get_pkce_client_id()
 
 
 class M365Error(RuntimeError):
@@ -1206,6 +1237,29 @@ async def provision_csp_admin_app_registration(
         expires_at=secret_expiry_str,
     )
 
+    # 7. Create a PKCE public-client app registration for the bootstrap flows.
+    # This multi-tenant public client is used to drive the discover/provision
+    # OAuth flows without needing to pre-configure an app registration in every
+    # customer tenant.  The resulting client_id is stored alongside the CSP admin
+    # credentials so that subsequent bootstrap flows use it automatically instead
+    # of falling back to the shared Azure CLI public client.
+    try:
+        pkce_client_id = await provision_pkce_public_client_app(
+            access_token=access_token,
+            display_name="MyPortal Bootstrap",
+            redirect_uri=redirect_uri,
+        )
+    except M365Error as exc:
+        # PKCE app creation is best-effort: log the error and continue so that
+        # provisioning still succeeds.  The Azure CLI fallback will be used for
+        # PKCE operations until the admin re-provisions.
+        log_error(
+            "Failed to create PKCE public client app during CSP admin provisioning; "
+            "bootstrap flows will fall back to the Azure CLI public client",
+            error=str(exc),
+        )
+        pkce_client_id = None
+
     return {
         "tenant_id": tenant_id,
         "client_id": client_id,
@@ -1213,7 +1267,52 @@ async def provision_csp_admin_app_registration(
         "app_object_id": app_object_id,
         "client_secret_key_id": client_secret_key_id,
         "client_secret_expires_at": client_secret_expires_at,
+        "pkce_client_id": pkce_client_id,
     }
+
+
+async def provision_pkce_public_client_app(
+    *,
+    access_token: str,
+    display_name: str = "MyPortal Bootstrap",
+    redirect_uri: str | None = None,
+) -> str:
+    """Create a multi-tenant public-client app registration for PKCE bootstrap flows.
+
+    The resulting app is used as the OAuth client in the discover and provision
+    flows so that the customer's Global Admin can authenticate without the app
+    needing to be registered in every customer tenant.
+
+    :param access_token: A delegated token with ``Application.ReadWrite.All``
+        permission (obtained via the CSP admin provision OAuth flow).
+    :param display_name: Display name for the new app registration.
+    :param redirect_uri: The redirect URI to register on the app.  Should match
+        the ``redirect_uri`` used in the OAuth flows (i.e. the ``/m365/callback``
+        endpoint of this MyPortal instance).
+    :returns: The Application (client) ID of the newly created registration.
+    """
+    await _delete_existing_apps_by_display_name(access_token, display_name)
+
+    app_payload: dict[str, Any] = {
+        "displayName": display_name,
+        # AzureADMultipleOrgs enables sign-in for users from any Azure AD tenant
+        # so that customer Global Admins can authenticate via /organizations endpoint
+        # without the app needing to be registered in their tenant.
+        "signInAudience": "AzureADMultipleOrgs",
+        # Enable PKCE / device code / native-app flows (no client secret required).
+        "isFallbackPublicClient": True,
+    }
+    if redirect_uri:
+        app_payload["publicClient"] = {"redirectUris": [redirect_uri]}
+
+    app_data = await _graph_post(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications",
+        app_payload,
+    )
+    client_id: str = app_data["appId"]
+    log_info("Provisioned M365 PKCE public client app", client_id=client_id)
+    return client_id
 
 
 async def get_admin_m365_credentials() -> dict[str, Any] | None:
@@ -1242,6 +1341,7 @@ async def get_admin_m365_credentials() -> dict[str, Any] | None:
         "client_secret_key_id": str(settings.get("client_secret_key_id") or "").strip()
         or None,
         "client_secret_expires_at": settings.get("client_secret_expires_at") or None,
+        "pkce_client_id": str(settings.get("pkce_client_id") or "").strip() or None,
     }
 
 
@@ -1253,6 +1353,7 @@ async def update_admin_m365_credentials(
     app_object_id: str | None = None,
     client_secret_key_id: str | None = None,
     client_secret_expires_at: datetime | None = None,
+    pkce_client_id: str | None = None,
 ) -> None:
     """Persist CSP/Lighthouse admin app credentials to the ``m365-admin`` module.
 
@@ -1275,6 +1376,8 @@ async def update_admin_m365_credentials(
         new_settings["client_secret_key_id"] = client_secret_key_id
     if client_secret_expires_at is not None:
         new_settings["client_secret_expires_at"] = client_secret_expires_at.isoformat()
+    if pkce_client_id is not None:
+        new_settings["pkce_client_id"] = pkce_client_id
 
     await modules_repo.update_module(
         _M365_ADMIN_MODULE_SLUG,

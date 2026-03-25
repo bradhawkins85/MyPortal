@@ -781,3 +781,247 @@ def test_get_pkce_client_id_strips_whitespace():
         result = m365_service.get_pkce_client_id()
 
     assert result == "my-custom-pkce-app-client-id"
+
+
+# ---------------------------------------------------------------------------
+# Tests: provision_pkce_public_client_app
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_pkce_public_client_app_returns_client_id():
+    """provision_pkce_public_client_app returns the app's client ID."""
+    pkce_app_id = "pkce-app-client-id"
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        if "/applications" in url:
+            return {"id": "pkce-app-obj-id", "appId": pkce_app_id}
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        result = await m365_service.provision_pkce_public_client_app(
+            access_token="tok",
+            redirect_uri="https://example.com/m365/callback",
+        )
+
+    assert result == pkce_app_id
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_pkce_public_client_app_uses_multi_tenant_audience():
+    """provision_pkce_public_client_app creates the app as AzureADMultipleOrgs."""
+    created_payloads: list[dict] = []
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        if "/applications" in url:
+            created_payloads.append(payload)
+            return {"id": "pkce-app-obj-id", "appId": "pkce-app-client-id"}
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.provision_pkce_public_client_app(access_token="tok")
+
+    assert len(created_payloads) == 1
+    payload = created_payloads[0]
+    assert payload["signInAudience"] == "AzureADMultipleOrgs", \
+        "PKCE app must be multi-tenant so any Global Admin can sign in via /organizations endpoint"
+    assert payload.get("isFallbackPublicClient") is True, \
+        "PKCE app must enable public client flows (no client secret required)"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_pkce_public_client_app_registers_redirect_uri():
+    """provision_pkce_public_client_app registers the redirect URI on the public client."""
+    created_payloads: list[dict] = []
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        if "/applications" in url:
+            created_payloads.append(payload)
+            return {"id": "pkce-app-obj-id", "appId": "pkce-app-client-id"}
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.provision_pkce_public_client_app(
+            access_token="tok",
+            redirect_uri="https://example.com/m365/callback",
+        )
+
+    assert len(created_payloads) == 1
+    payload = created_payloads[0]
+    assert "publicClient" in payload, "Redirect URI must be on publicClient, not web"
+    assert "https://example.com/m365/callback" in payload["publicClient"]["redirectUris"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_pkce_public_client_app_omits_redirect_when_not_given():
+    """provision_pkce_public_client_app omits publicClient when no redirect URI given."""
+    created_payloads: list[dict] = []
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        if "/applications" in url:
+            created_payloads.append(payload)
+            return {"id": "pkce-app-obj-id", "appId": "pkce-app-client-id"}
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.provision_pkce_public_client_app(access_token="tok")
+
+    assert len(created_payloads) == 1
+    payload = created_payloads[0]
+    assert "publicClient" not in payload
+
+
+@pytest.mark.anyio("asyncio")
+async def test_csp_admin_provision_also_creates_pkce_app():
+    """provision_csp_admin_app_registration creates a PKCE public client app and returns its ID."""
+    pkce_app_id = "new-pkce-app-client-id"
+    call_count = 0
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        nonlocal call_count
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
+            call_count += 1
+            # First call: CSP admin app; second call: PKCE app
+            if call_count == 1:
+                return {"id": "csp-admin-app-obj-id", "appId": "csp-admin-client-id"}
+            return {"id": "pkce-app-obj-id", "appId": pkce_app_id}
+        if "/servicePrincipals" in url and "appRoleAssignments" not in url:
+            return {"id": "csp-admin-sp-id"}
+        if "appRoleAssignments" in url:
+            return {"id": "assignment-id"}
+        if "owners/$ref" in url:
+            return {}
+        if "addPassword" in url:
+            return {"secretText": "secret", "keyId": "key-id"}
+        return {}
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "servicePrincipals" in url:
+            return {"value": [{"id": "graph-sp-id"}]}
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        result = await m365_service.provision_csp_admin_app_registration(
+            access_token="tok",
+            tenant_id="partner-tenant-id",
+        )
+
+    assert result.get("pkce_client_id") == pkce_app_id
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_effective_pkce_client_id
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_get_effective_pkce_client_id_uses_stored_pkce_client():
+    """get_effective_pkce_client_id returns the auto-provisioned PKCE client from DB."""
+    stored_pkce_id = "auto-provisioned-pkce-client-id"
+
+    with (
+        patch.object(
+            m365_service,
+            "get_admin_m365_credentials",
+            new_callable=AsyncMock,
+            return_value={
+                "client_id": "admin-client-id",
+                "client_secret": "admin-secret",
+                "pkce_client_id": stored_pkce_id,
+            },
+        ),
+    ):
+        result = await m365_service.get_effective_pkce_client_id()
+
+    assert result == stored_pkce_id
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_effective_pkce_client_id_falls_back_to_env_var():
+    """get_effective_pkce_client_id falls back to env var when DB has no PKCE client."""
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = "env-pkce-client-id"
+
+    with (
+        patch.object(
+            m365_service,
+            "get_admin_m365_credentials",
+            new_callable=AsyncMock,
+            return_value={"client_id": "admin-client-id", "client_secret": "s", "pkce_client_id": None},
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        result = await m365_service.get_effective_pkce_client_id()
+
+    assert result == "env-pkce-client-id"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_effective_pkce_client_id_falls_back_to_azure_cli():
+    """get_effective_pkce_client_id falls back to Azure CLI when nothing is configured."""
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = None
+
+    with (
+        patch.object(
+            m365_service,
+            "get_admin_m365_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        result = await m365_service.get_effective_pkce_client_id()
+
+    assert result == m365_service._AZURE_CLI_CLIENT_ID
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_effective_pkce_client_id_stored_takes_priority_over_env_var():
+    """get_effective_pkce_client_id prefers DB value over env var."""
+    stored_pkce_id = "db-provisioned-pkce-client-id"
+    mock_settings = MagicMock()
+    mock_settings.m365_pkce_client_id = "env-pkce-client-id"
+
+    with (
+        patch.object(
+            m365_service,
+            "get_admin_m365_credentials",
+            new_callable=AsyncMock,
+            return_value={
+                "client_id": "admin-client-id",
+                "client_secret": "s",
+                "pkce_client_id": stored_pkce_id,
+            },
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        result = await m365_service.get_effective_pkce_client_id()
+
+    assert result == stored_pkce_id, \
+        "Auto-provisioned PKCE client should take priority over env var"
