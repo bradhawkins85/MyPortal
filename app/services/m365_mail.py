@@ -610,7 +610,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     process_unread_only = bool(account.get("process_unread_only", True))
     mark_as_read = bool(account.get("mark_as_read", True))
 
-    # Per-account delegated tokens take priority over company/CSP credentials.
+    # Per-account delegated tokens take priority over company credentials.
     # When the admin has signed in directly for this mailbox, the account
     # stores its own refresh_token and we use that instead.
     using_delegated = _account_has_delegated_tokens(account)
@@ -632,7 +632,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 ),
             }
     else:
-        # Fall back to company/CSP credentials (legacy flow)
+        # Fall back to company credentials (per-tenant enterprise app)
         if auth_company_id is None:
             provisioned = await m365_repo.list_provisioned_company_ids()
             if provisioned:

@@ -251,14 +251,6 @@
           {% else %}
           <p class="text-muted">No Microsoft 365 credentials linked to this company.</p>
           {% endif %}
-          {% if company.csp_tenant_id %}
-          <dl class="definition-list" style="margin-top: 0.75rem;">
-            <div class="definition-list__item">
-              <dt>CSP tenant ID</dt>
-              <dd><code>{{ company.csp_tenant_id }}</code></dd>
-            </div>
-          </dl>
-          {% endif %}
           <form action="/admin/companies/{{ company.id }}/m365-credentials" method="post" class="form" autocomplete="off">
             {% include "partials/csrf.html" %}
             <div class="form-field">
