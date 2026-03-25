@@ -414,3 +414,44 @@ async def test_sync_account_encodes_upn_in_graph_url(monkeypatch):
     # The '@' in the UPN must be percent-encoded
     assert "user%40example.com" in captured_urls[0]
     assert "user@example.com" not in captured_urls[0]
+
+
+# ---------------------------------------------------------------------------
+# Query parameter encoding: spaces must be percent-encoded
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_account_url_encodes_query_params(monkeypatch):
+    """Spaces in $orderby and $filter must be percent-encoded to avoid 400 errors."""
+    _patch_common(monkeypatch)
+
+    captured_urls: list[str] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        captured_urls.append(url)
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_access_token", fake_acquire_token
+    )
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert len(captured_urls) == 1
+    url = captured_urls[0]
+    # Spaces in $orderby value must be percent-encoded
+    assert "receivedDateTime%20asc" in url
+    assert "receivedDateTime asc" not in url
+    # Spaces in $filter value must be percent-encoded
+    assert "isRead%20eq%20false" in url
+    assert "isRead eq false" not in url
+    # OData $ prefix and commas in $select must NOT be encoded
+    assert "$top=" in url
+    assert "$orderby=" in url
+    assert "$select=" in url
+    assert "id,subject,body" in url
