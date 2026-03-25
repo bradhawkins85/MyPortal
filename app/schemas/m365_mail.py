@@ -56,6 +56,7 @@ class M365MailAccountResponse(BaseModel):
     priority: int
     last_synced_at: datetime | None
     scheduled_task_id: int | None
+    auth_status: str | None = None
 
     model_config = {
         "from_attributes": True,
