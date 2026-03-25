@@ -45,6 +45,7 @@ async def test_sync_account_403_returns_actionable_error(monkeypatch):
     error_msg = result["errors"][0]["error"]
     assert "403 Forbidden" in error_msg
     assert "Mail.ReadWrite" in error_msg
+    assert "Global Administrator" in error_msg
 
 
 async def test_sync_account_403_non_403_error_not_intercepted(monkeypatch):
