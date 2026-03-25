@@ -4,6 +4,8 @@
 
 MyPortal uses a **multi-tenant PKCE public-client app registration** in your CSP / Lighthouse partner tenant to drive the tenant-discovery and provisioning OAuth sign-in flows.  Because it is a public client (no secret), it uses PKCE (Proof Key for Code Exchange, RFC 7636) to secure the authorization code exchange.
 
+When you run the in-app provisioning flow (`/m365/discover` → `/m365/provision`), MyPortal now uses a **URL-driven Graph API call** to automatically create a dedicated PKCE public client for that customer and stores its Application (client) ID against the company. No manual Azure portal steps are required unless you prefer to supply your own app ID.
+
 This app is created **automatically** the first time you provision the M365 integration via **Admin → Modules → m365-admin → Re-provision PKCE app**.  The provisioned Application (client) ID is stored in the module settings and used for all subsequent sign-in flows.
 
 ---
@@ -27,7 +29,7 @@ You may need to re-create the PKCE app if:
 4. Ensure the **Application (client) ID** and **Client secret** fields contain valid CSP / Lighthouse partner app credentials.
 5. Click **Re-provision PKCE app**.
 6. You will be redirected to Microsoft's sign-in page.  Sign in with your CSP / Lighthouse partner tenant **Global Administrator** account and grant consent.
-7. MyPortal stores the new PKCE Application (client) ID automatically and displays it in the module settings.
+7. MyPortal stores the new PKCE Application (client) ID automatically and displays it in the module settings. Per-company provisioning also creates a dedicated PKCE client for that customer automatically.
 
 > **Note:** The "Re-provision PKCE app" button calls `/admin/csp/provision`, which creates a fresh PKCE public-client registration in your partner tenant and stores its `appId` in the m365-admin module settings.
 

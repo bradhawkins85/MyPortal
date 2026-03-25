@@ -5825,6 +5825,29 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             client_id=provision_result["client_id"],
         )
 
+        # Best-effort: provision a dedicated PKCE public client for this company
+        try:
+            await m365_service.auto_provision_company_pkce_client_id(
+                company_id,
+                redirect_uri=redirect_uri,
+                company_admin_creds={
+                    "tenant_id": effective_tenant_id,
+                    "client_id": provision_result["client_id"],
+                    "client_secret": provision_result["client_secret"],
+                    "app_object_id": provision_result.get("app_object_id"),
+                    "client_secret_key_id": provision_result.get("client_secret_key_id"),
+                    "client_secret_expires_at": provision_result.get(
+                        "client_secret_expires_at"
+                    ),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - best-effort helper
+            log_warning(
+                "Per-company PKCE auto-provision failed after M365 app provisioning",
+                company_id=company_id,
+                error=str(exc),
+            )
+
         # Auto-create default sync tasks for the company if not already present.
         existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
         has_m365_sync_task = bool({"sync_m365_data", "sync_o365"} & existing_commands)
