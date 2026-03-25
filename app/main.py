@@ -5204,17 +5204,6 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
     )
-    if m365_service.is_azure_cli_pkce_fallback(oauth_client_id):
-        encoded = urlencode(
-            {
-                "error": (
-                    "Global admin sign-in requires a dedicated PKCE app. "
-                    "Configure M365_PKCE_CLIENT_ID (or complete M365 admin provisioning) "
-                    "and try again."
-                )
-            }
-        )
-        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     params = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -5269,14 +5258,6 @@ async def admin_company_m365_provision(
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
     )
-    if m365_service.is_azure_cli_pkce_fallback(oauth_client_id):
-        return _company_edit_redirect(
-            company_id=company_id,
-            error=(
-                "Global admin sign-in requires a dedicated PKCE app. Configure "
-                "M365_PKCE_CLIENT_ID (or complete M365 admin provisioning) and try again."
-            ),
-        )
     params = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -5364,17 +5345,6 @@ async def m365_discover(request: Request):
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
     )
-    if m365_service.is_azure_cli_pkce_fallback(oauth_client_id):
-        encoded = urlencode(
-            {
-                "error": (
-                    "Global admin sign-in requires a dedicated PKCE app. "
-                    "Configure M365_PKCE_CLIENT_ID (or complete M365 admin provisioning) "
-                    "and try again."
-                )
-            }
-        )
-        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5418,14 +5388,6 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
     )
-    if m365_service.is_azure_cli_pkce_fallback(oauth_client_id):
-        return _company_edit_redirect(
-            company_id=company_id,
-            error=(
-                "Global admin sign-in requires a dedicated PKCE app. Configure "
-                "M365_PKCE_CLIENT_ID (or complete M365 admin provisioning) and try again."
-            ),
-        )
 
     state_payload: dict = {
         "company_id": company_id,
