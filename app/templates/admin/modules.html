@@ -481,6 +481,15 @@
                   Once configured, use the Microsoft 365 page to sign in with your partner account and manage customer tenants.
                 </p>
               </div>
+              <div class="form-field">
+                <p class="form-label">PKCE app</p>
+                {% if settings.pkce_client_id %}
+                  <p class="form-help">Auto-provisioned PKCE app ID: <code>{{ settings.pkce_client_id }}</code></p>
+                {% else %}
+                  <p class="form-help form-help--error">No PKCE app is configured. Sign-in flows will fall back to the Azure CLI public client, which may fail with <strong>AADSTS700016</strong> if your tenant restricts third-party apps.</p>
+                  <p class="form-help form-help--error">Use the re-provision button below to create a dedicated PKCE app automatically.</p>
+                {% endif %}
+              </div>
             {% else %}
               {% for key, value in settings.items() %}
                 <div class="form-field">
@@ -494,6 +503,37 @@
               <button type="submit" class="button">Save settings</button>
             </div>
           </form>
+
+          {% if module.slug == 'm365-admin' %}
+            <div class="card__form">
+              <div class="form-field">
+                <p class="form-label">Re-provision PKCE app</p>
+                <p class="form-help">Sign in as a CSP / Lighthouse partner admin to automatically create (or replace) a PKCE public-client app registration in your partner tenant. This is required for the tenant-discovery and provisioning sign-in flows.</p>
+              </div>
+              <div class="form-actions">
+                <a href="/admin/csp/provision" class="button button--secondary">Re-provision PKCE app</a>
+              </div>
+            </div>
+            <div class="card__form">
+              <details>
+                <summary class="form-label" style="cursor: pointer; user-select: none;">Manual PKCE app setup instructions</summary>
+                <div class="form-field" style="margin-top: 0.75rem;">
+                  <p class="form-help">If automatic provisioning is not available, create the PKCE app registration manually in Azure AD:</p>
+                  <ol class="form-help" style="padding-left: 1.25rem; margin-top: 0.5rem;">
+                    <li>Sign in to the <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer">Azure portal</a> with your CSP / Lighthouse partner tenant Global Admin account.</li>
+                    <li>Go to <strong>Azure Active Directory → App registrations → New registration</strong>.</li>
+                    <li>Set a display name, e.g. <em>MyPortal Bootstrap</em>.</li>
+                    <li>Under <strong>Supported account types</strong>, choose <strong>Accounts in any organizational directory (Any Azure AD directory – Multitenant)</strong>.</li>
+                    <li>Under <strong>Redirect URI</strong>, choose <strong>Public client/native (mobile &amp; desktop)</strong> and enter: <code>{{ request.url_for('m365_callback') }}</code></li>
+                    <li>Click <strong>Register</strong>.</li>
+                    <li>On the app's <strong>Authentication</strong> blade, scroll to <strong>Advanced settings</strong> and set <strong>Allow public client flows</strong> to <strong>Yes</strong>. Save.</li>
+                    <li>Copy the <strong>Application (client) ID</strong> and set it as the <code>M365_PKCE_CLIENT_ID</code> environment variable.</li>
+                  </ol>
+                  <p class="form-help" style="margin-top: 0.5rem;">A PowerShell script for automated creation is available at <code>scripts/create-m365-pkce-app.ps1</code> in the MyPortal repository.</p>
+                </div>
+              </details>
+            </div>
+          {% endif %}
 
           {% if module.slug == 'syncro' %}
             <form action="/admin/syncro/import-companies" method="post" class="form card__form" data-syncro-company-import>
