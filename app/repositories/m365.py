@@ -9,7 +9,13 @@ from app.core.database import db
 
 def _normalise(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
-    for key in ("token_expires_at", "client_secret_expires_at", "created_at", "updated_at"):
+    for key in (
+        "token_expires_at",
+        "client_secret_expires_at",
+        "admin_secret_expires_at",
+        "created_at",
+        "updated_at",
+    ):
         value = normalised.get(key)
         if isinstance(value, datetime):
             normalised[key] = value.replace(tzinfo=None)
@@ -319,3 +325,131 @@ async def get_mailbox_members_by_local_part(
         (company_id, pattern),
     )
     return [dict(row) for row in rows]
+
+
+async def get_admin_credentials(company_id: int) -> dict[str, Any] | None:
+    """Retrieve the M365 admin app credentials for a specific company.
+
+    Returns a dict with admin_client_id, admin_client_secret, admin_tenant_id,
+    admin_app_object_id, admin_secret_key_id, admin_secret_expires_at, and
+    pkce_client_id fields if configured, or None if no admin credentials exist.
+    """
+    row = await db.fetch_one(
+        """
+        SELECT admin_client_id, admin_client_secret, admin_tenant_id,
+               admin_app_object_id, admin_secret_key_id, admin_secret_expires_at,
+               pkce_client_id
+        FROM company_m365_credentials
+        WHERE company_id = %s
+          AND admin_client_id IS NOT NULL
+          AND admin_client_id != ''
+        """,
+        (company_id,),
+    )
+    if not row:
+        return None
+    result = dict(row)
+    # Normalise datetime field
+    if result.get("admin_secret_expires_at"):
+        value = result["admin_secret_expires_at"]
+        if isinstance(value, datetime):
+            result["admin_secret_expires_at"] = value.replace(tzinfo=None)
+    return result
+
+
+async def upsert_admin_credentials(
+    *,
+    company_id: int,
+    admin_client_id: str,
+    admin_client_secret: str,
+    admin_tenant_id: str | None = None,
+    admin_app_object_id: str | None = None,
+    admin_secret_key_id: str | None = None,
+    admin_secret_expires_at: datetime | None = None,
+    pkce_client_id: str | None = None,
+) -> None:
+    """Store or update M365 admin app credentials for a company.
+
+    This upserts the admin credential columns in company_m365_credentials.
+    If the company row doesn't exist yet, it requires at least a placeholder
+    tenant_id/client_id for the customer credentials.
+    """
+    # Check if row exists first
+    existing = await get_credentials(company_id)
+    if existing:
+        # Update existing row with admin credentials
+        await db.execute(
+            """
+            UPDATE company_m365_credentials
+            SET admin_client_id = %s,
+                admin_client_secret = %s,
+                admin_tenant_id = %s,
+                admin_app_object_id = %s,
+                admin_secret_key_id = %s,
+                admin_secret_expires_at = %s,
+                pkce_client_id = %s
+            WHERE company_id = %s
+            """,
+            (
+                admin_client_id,
+                admin_client_secret,
+                admin_tenant_id,
+                admin_app_object_id,
+                admin_secret_key_id,
+                admin_secret_expires_at,
+                pkce_client_id,
+                company_id,
+            ),
+        )
+    else:
+        # Insert new row with admin credentials (using placeholder customer creds)
+        await db.execute(
+            """
+            INSERT INTO company_m365_credentials (
+                company_id, tenant_id, client_id, client_secret,
+                admin_client_id, admin_client_secret, admin_tenant_id,
+                admin_app_object_id, admin_secret_key_id, admin_secret_expires_at,
+                pkce_client_id
+            ) VALUES (%s, '', '', '', %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                company_id,
+                admin_client_id,
+                admin_client_secret,
+                admin_tenant_id,
+                admin_app_object_id,
+                admin_secret_key_id,
+                admin_secret_expires_at,
+                pkce_client_id,
+            ),
+        )
+
+
+async def delete_admin_credentials(company_id: int) -> None:
+    """Clear the M365 admin app credentials for a company."""
+    await db.execute(
+        """
+        UPDATE company_m365_credentials
+        SET admin_client_id = NULL,
+            admin_client_secret = NULL,
+            admin_tenant_id = NULL,
+            admin_app_object_id = NULL,
+            admin_secret_key_id = NULL,
+            admin_secret_expires_at = NULL,
+            pkce_client_id = NULL
+        WHERE company_id = %s
+        """,
+        (company_id,),
+    )
+
+
+async def update_pkce_client_id(company_id: int, pkce_client_id: str | None) -> None:
+    """Update the PKCE client ID for a company."""
+    await db.execute(
+        """
+        UPDATE company_m365_credentials
+        SET pkce_client_id = %s
+        WHERE company_id = %s
+        """,
+        (pkce_client_id, company_id),
+    )

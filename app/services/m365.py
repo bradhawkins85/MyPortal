@@ -1163,6 +1163,146 @@ async def clear_pkce_client_id() -> None:
     log_info("Cleared stale M365 PKCE client ID from admin settings")
 
 
+async def get_company_admin_credentials(company_id: int) -> dict[str, Any] | None:
+    """Return the per-company M365 admin app credentials, or ``None``.
+
+    Reads admin credentials from the company_m365_credentials table.  The
+    ``admin_client_secret`` field is decrypted if it was stored as ciphertext.
+
+    Returns a dict with client_id, client_secret, tenant_id, app_object_id,
+    client_secret_key_id, client_secret_expires_at, and pkce_client_id keys
+    (matching the structure returned by get_admin_m365_credentials) or None
+    if no per-company admin credentials are configured.
+    """
+    creds = await m365_repo.get_admin_credentials(company_id)
+    if not creds:
+        return None
+
+    admin_client_id = str(creds.get("admin_client_id") or "").strip() or None
+    raw_secret = str(creds.get("admin_client_secret") or "").strip() or None
+    if not admin_client_id or not raw_secret:
+        return None
+
+    # decrypt_secret returns the value unchanged if not ciphertext
+    client_secret = decrypt_secret(raw_secret)
+    return {
+        "client_id": admin_client_id,
+        "client_secret": client_secret,
+        "tenant_id": str(creds.get("admin_tenant_id") or "").strip() or None,
+        "app_object_id": str(creds.get("admin_app_object_id") or "").strip() or None,
+        "client_secret_key_id": str(creds.get("admin_secret_key_id") or "").strip()
+        or None,
+        "client_secret_expires_at": creds.get("admin_secret_expires_at") or None,
+        "pkce_client_id": str(creds.get("pkce_client_id") or "").strip() or None,
+    }
+
+
+async def upsert_company_admin_credentials(
+    *,
+    company_id: int,
+    client_id: str,
+    client_secret: str,
+    tenant_id: str | None = None,
+    app_object_id: str | None = None,
+    client_secret_key_id: str | None = None,
+    client_secret_expires_at: datetime | None = None,
+    pkce_client_id: str | None = None,
+) -> None:
+    """Store or update per-company M365 admin app credentials.
+
+    The ``client_secret`` is encrypted before storage.
+    """
+    await m365_repo.upsert_admin_credentials(
+        company_id=company_id,
+        admin_client_id=client_id,
+        admin_client_secret=encrypt_secret(client_secret),
+        admin_tenant_id=tenant_id,
+        admin_app_object_id=app_object_id,
+        admin_secret_key_id=client_secret_key_id,
+        admin_secret_expires_at=client_secret_expires_at,
+        pkce_client_id=pkce_client_id,
+    )
+    log_info(
+        "Updated per-company M365 admin credentials",
+        company_id=company_id,
+        client_id=client_id,
+    )
+
+
+async def delete_company_admin_credentials(company_id: int) -> None:
+    """Remove per-company M365 admin app credentials."""
+    await m365_repo.delete_admin_credentials(company_id)
+    log_info("Deleted per-company M365 admin credentials", company_id=company_id)
+
+
+async def get_effective_admin_credentials(company_id: int) -> dict[str, Any] | None:
+    """Return the best available M365 admin app credentials.
+
+    Resolution order:
+    1. Per-company admin credentials from company_m365_credentials table.
+    2. Global admin credentials from the m365-admin integration module.
+    3. Environment variables (M365_ADMIN_CLIENT_ID, M365_ADMIN_CLIENT_SECRET).
+
+    Returns a dict with client_id, client_secret, and other credential fields,
+    or None if no admin credentials are configured at any level.
+    """
+    # 1. Per-company admin credentials
+    company_creds = await get_company_admin_credentials(company_id)
+    if company_creds and company_creds.get("client_id") and company_creds.get("client_secret"):
+        return company_creds
+
+    # 2. Global module credentials
+    module_creds = await get_admin_m365_credentials()
+    if module_creds and module_creds.get("client_id") and module_creds.get("client_secret"):
+        return module_creds
+
+    # 3. Environment variables
+    settings = get_settings()
+    env_client_id = settings.m365_admin_client_id
+    env_client_secret = settings.m365_admin_client_secret
+    if env_client_id and env_client_secret:
+        return {
+            "client_id": env_client_id,
+            "client_secret": env_client_secret,
+            "tenant_id": None,
+            "app_object_id": None,
+            "client_secret_key_id": None,
+            "client_secret_expires_at": None,
+            "pkce_client_id": None,
+        }
+
+    return None
+
+
+async def get_effective_pkce_client_id_for_company(company_id: int) -> str:
+    """Return the best available PKCE public-client app ID for a specific company.
+
+    Resolution order:
+    1. Per-company PKCE client stored in company_m365_credentials.
+    2. Auto-provisioned PKCE client from the m365-admin module settings.
+    3. Operator-configured M365_PKCE_CLIENT_ID environment variable.
+    4. Well-known Azure CLI public client (_AZURE_CLI_CLIENT_ID).
+    """
+    # 1. Per-company PKCE client
+    company_creds = await get_company_admin_credentials(company_id)
+    if company_creds:
+        stored = str(company_creds.get("pkce_client_id") or "").strip()
+        if stored:
+            return stored
+
+    # 2+ falls through to existing function
+    return await get_effective_pkce_client_id()
+
+
+async def clear_company_pkce_client_id(company_id: int) -> None:
+    """Remove the per-company PKCE client ID.
+
+    Called when the stored PKCE app registration has been deleted from Azure AD.
+    """
+    await m365_repo.update_pkce_client_id(company_id, None)
+    log_info("Cleared per-company M365 PKCE client ID", company_id=company_id)
+
+
 async def _sync_staff_assignments(
     *,
     company_id: int,
