@@ -488,6 +488,7 @@ async def test_provision_callback_persists_token_tenant_when_it_differs_from_sta
 async def test_callback_error_aadsts700016_clears_company_pkce():
     """AADSTS700016 errors should clear per-company and global PKCE IDs."""
     state = _signed_state({"company_id": 123, "flow": "discover"})
+    error_param = "invalid_client"
     request = Request(
         {
             "type": "http",
@@ -495,7 +496,7 @@ async def test_callback_error_aadsts700016_clears_company_pkce():
             "path": "/m365/callback",
             "query_string": urlencode(
                 {
-                    "error": "invalid_client",
+                    "error": error_param,
                     "error_description": "AADSTS700016: Application not found",
                     "state": state,
                 }
@@ -513,7 +514,7 @@ async def test_callback_error_aadsts700016_clears_company_pkce():
         ) as mock_clear_global,
     ):
         response = await m365_callback(
-            request, state=state, error=request.query_params["error"]
+            request, state=state, error=error_param
         )
 
     assert response.status_code == 303
