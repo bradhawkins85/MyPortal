@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -15,6 +15,7 @@ from app.repositories import m365 as m365_repo
 from app.repositories import m365_mail_accounts as mail_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import tickets as tickets_repo
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import system_state
@@ -52,6 +53,146 @@ _403_ERROR_MESSAGE = (
     "then retry the sync."
 )
 
+# Delegated OAuth scope for the per-account sign-in flow.  Mail.ReadWrite
+# allows reading and marking messages as read.  offline_access provides the
+# refresh_token we store for background syncs.
+DELEGATED_MAIL_SCOPE = (
+    "https://graph.microsoft.com/Mail.ReadWrite "
+    "https://graph.microsoft.com/User.Read "
+    "offline_access openid profile"
+)
+
+
+# ---------------------------------------------------------------------------
+# Per-account delegated token helpers
+# ---------------------------------------------------------------------------
+
+
+def _account_has_delegated_tokens(account: Mapping[str, Any]) -> bool:
+    """Return True when an account stores its own refresh token."""
+    return bool(account.get("refresh_token"))
+
+
+def account_auth_status(account: Mapping[str, Any]) -> str:
+    """Return a human-readable auth status string for the account."""
+    if _account_has_delegated_tokens(account):
+        return "signed_in"
+    if account.get("company_id"):
+        return "company_credentials"
+    return "not_configured"
+
+
+def enrich_account_response(account: dict[str, Any]) -> dict[str, Any]:
+    """Add computed fields before returning an account to the API/template."""
+    account = dict(account)
+    account["auth_status"] = account_auth_status(account)
+    # Never leak tokens to the frontend
+    account.pop("refresh_token", None)
+    account.pop("access_token", None)
+    return account
+
+
+async def store_delegated_tokens(
+    account_id: int,
+    *,
+    tenant_id: str,
+    refresh_token: str,
+    access_token: str,
+    expires_at: datetime | None,
+) -> dict[str, Any] | None:
+    """Store encrypted delegated OAuth tokens on a mail account."""
+    return await mail_repo.update_account_tokens(
+        account_id,
+        tenant_id=tenant_id,
+        refresh_token=encrypt_secret(refresh_token),
+        access_token=encrypt_secret(access_token),
+        token_expires_at=expires_at,
+    )
+
+
+async def clear_delegated_tokens(account_id: int) -> dict[str, Any] | None:
+    """Remove per-account delegated tokens (disconnect)."""
+    return await mail_repo.clear_account_tokens(account_id)
+
+
+async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
+    """Acquire a Graph API access token using the account's own delegated tokens.
+
+    If the cached access token is still valid it is returned immediately.
+    Otherwise the stored refresh token is exchanged for a new access token at
+    the Microsoft token endpoint.  The new tokens are persisted (encrypted)
+    back to the database.
+
+    Raises ``M365Error`` when the refresh token exchange fails.
+    """
+    account_id = int(account["id"])
+
+    # Try the cached access token (5-minute safety margin)
+    cached_token = account.get("access_token")
+    expires_at = account.get("token_expires_at")
+    if cached_token and expires_at:
+        margin = datetime.now(timezone.utc) + timedelta(minutes=5)
+        if expires_at > margin:
+            return decrypt_secret(cached_token)
+
+    refresh_token = account.get("refresh_token")
+    if not refresh_token:
+        raise M365Error("No delegated refresh token stored for this mail account")
+
+    tenant_id = _normalise_string(account.get("tenant_id"))
+    if not tenant_id:
+        raise M365Error("No tenant ID stored for this mail account")
+
+    decrypted_refresh = decrypt_secret(refresh_token)
+
+    # Use the PKCE public client to exchange the refresh token — no
+    # client_secret required (public client flow).
+    token_endpoint = (
+        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    )
+    data = {
+        "client_id": m365_service.get_pkce_client_id(),
+        "grant_type": "refresh_token",
+        "refresh_token": decrypted_refresh,
+        "scope": DELEGATED_MAIL_SCOPE,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(token_endpoint, data=data)
+
+    if response.status_code != 200:
+        log_error(
+            "Failed to refresh delegated token for M365 mail account",
+            account_id=account_id,
+            status=response.status_code,
+            body=response.text[:500] if response.text else "",
+        )
+        raise M365Error(
+            "Unable to refresh delegated access token. "
+            "The user may need to sign in again.",
+            http_status=response.status_code,
+        )
+
+    payload = response.json()
+    new_access = str(payload.get("access_token", ""))
+    new_refresh = payload.get("refresh_token")
+    expires_in = payload.get("expires_in")
+    new_expires: datetime | None = None
+    if isinstance(expires_in, (int, float)):
+        new_expires = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
+
+    # Persist the refreshed tokens.  When the token endpoint returns a new
+    # refresh_token, encrypt and store it.  Otherwise keep the original.
+    stored_refresh = encrypt_secret(str(new_refresh)) if new_refresh else refresh_token
+    await mail_repo.update_account_tokens(
+        account_id,
+        tenant_id=tenant_id,
+        refresh_token=stored_refresh,
+        access_token=encrypt_secret(new_access),
+        token_expires_at=new_expires,
+    )
+
+    return new_access
+
 
 # ---------------------------------------------------------------------------
 # Account management
@@ -59,11 +200,13 @@ _403_ERROR_MESSAGE = (
 
 
 async def list_accounts() -> list[dict[str, Any]]:
-    return await mail_repo.list_accounts()
+    accounts = await mail_repo.list_accounts()
+    return [enrich_account_response(a) for a in accounts]
 
 
 async def get_account(account_id: int) -> dict[str, Any] | None:
-    return await mail_repo.get_account(account_id)
+    account = await mail_repo.get_account(account_id)
+    return enrich_account_response(account) if account else None
 
 
 async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -159,7 +302,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         await modules_service.update_module(_MODULE_SLUG, enabled=True)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to enable M365 mail module after account creation", error=str(exc))
-    return account
+    return enrich_account_response(account)
 
 
 async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -215,7 +358,7 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
     if not updated:
         raise RuntimeError("Unable to update Office 365 mail account")
     updated = await _ensure_scheduled_task(updated)
-    return updated
+    return enrich_account_response(updated)
 
 
 async def clone_account(account_id: int) -> dict[str, Any]:
@@ -259,7 +402,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
     if not account:
         raise RuntimeError("Failed to clone Office 365 mail account")
     account = await _ensure_scheduled_task(account)
-    return account
+    return enrich_account_response(account)
 
 
 async def delete_account(account_id: int) -> None:
@@ -460,16 +603,6 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     company_id = account.get("company_id")
     auth_company_id = _int_or_none(company_id)
 
-    # When no company is linked, try any company with M365 credentials for
-    # authentication only.  Ticket entity resolution will still rely on the
-    # sender's email domain rather than the account's company.
-    if auth_company_id is None:
-        provisioned = await m365_repo.list_provisioned_company_ids()
-        if provisioned:
-            auth_company_id = min(provisioned)
-        else:
-            return {"status": "error", "error": "No Microsoft 365 credentials configured"}
-
     upn = _normalise_string(account.get("user_principal_name"))
     if not upn:
         return {"status": "error", "error": "User principal name not configured"}
@@ -478,19 +611,48 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     process_unread_only = bool(account.get("process_unread_only", True))
     mark_as_read = bool(account.get("mark_as_read", True))
 
-    # Acquire an app-only Graph token for the company's M365 tenant
-    try:
-        access_token = await m365_service.acquire_access_token(
-            int(auth_company_id), force_client_credentials=True
-        )
-    except Exception as exc:
-        log_error(
-            "Unable to acquire M365 access token for mail sync",
-            account_id=account_id,
-            company_id=auth_company_id,
-            error=str(exc),
-        )
-        return {"status": "error", "error": f"Unable to authenticate with Microsoft 365: {exc}"}
+    # Per-account delegated tokens take priority over company/CSP credentials.
+    # When the admin has signed in directly for this mailbox, the account
+    # stores its own refresh_token and we use that instead.
+    using_delegated = _account_has_delegated_tokens(account)
+
+    if using_delegated:
+        try:
+            access_token = await _acquire_delegated_access_token(account)
+        except Exception as exc:
+            log_error(
+                "Unable to acquire delegated access token for mail sync",
+                account_id=account_id,
+                error=str(exc),
+            )
+            return {
+                "status": "error",
+                "error": (
+                    "Unable to authenticate with the signed-in user credentials. "
+                    "The user may need to sign in again."
+                ),
+            }
+    else:
+        # Fall back to company/CSP credentials (legacy flow)
+        if auth_company_id is None:
+            provisioned = await m365_repo.list_provisioned_company_ids()
+            if provisioned:
+                auth_company_id = min(provisioned)
+            else:
+                return {"status": "error", "error": "No Microsoft 365 credentials configured. Please sign in to authorize access to the mailbox."}
+
+        try:
+            access_token = await m365_service.acquire_access_token(
+                int(auth_company_id), force_client_credentials=True
+            )
+        except Exception as exc:
+            log_error(
+                "Unable to acquire M365 access token for mail sync",
+                account_id=account_id,
+                company_id=auth_company_id,
+                error=str(exc),
+            )
+            return {"status": "error", "error": f"Unable to authenticate with Microsoft 365: {exc}"}
 
     processed = 0
     errors: list[dict[str, Any]] = []
@@ -516,7 +678,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
-                if exc.http_status == 403 and not remediation_attempted:
+                if exc.http_status == 403 and not remediation_attempted and not using_delegated:
                     remediation_attempted = True
                     log_error(
                         "Failed to fetch messages from M365 mailbox",
@@ -576,8 +738,17 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 if exc.http_status == 403:
-                    # Already attempted remediation; fail with actionable message
-                    errors.append({"error": _403_ERROR_MESSAGE})
+                    # Already attempted remediation (or using delegated tokens); fail with actionable message
+                    if using_delegated:
+                        errors.append({
+                            "error": (
+                                "Mail sync failed (403 Forbidden). The signed-in user "
+                                "may not have access to this mailbox. Please sign in "
+                                "again with a user that has access."
+                            )
+                        })
+                    else:
+                        errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 log_error(
                     "Failed to fetch messages from M365 mailbox",

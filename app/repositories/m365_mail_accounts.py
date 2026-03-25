@@ -25,7 +25,7 @@ def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
     for key in ("process_unread_only", "mark_as_read", "sync_known_only", "active"):
         if key in account:
             account[key] = bool(int(account[key]))
-    for key in ("last_synced_at", "created_at", "updated_at"):
+    for key in ("last_synced_at", "token_expires_at", "created_at", "updated_at"):
         if key in account:
             account[key] = _make_aware(account.get(key))
     raw_filter = account.get("filter_query")
@@ -123,6 +123,7 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         if key not in {
             "name",
             "company_id",
+            "tenant_id",
             "user_principal_name",
             "mailbox_type",
             "folder",
@@ -135,13 +136,16 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
             "scheduled_task_id",
             "last_synced_at",
             "priority",
+            "refresh_token",
+            "access_token",
+            "token_expires_at",
         }:
             continue
         if key in {"process_unread_only", "mark_as_read", "sync_known_only", "active"}:
             assignments.append(f"{key} = %s")
             params.append(1 if value else 0)
-        elif key == "last_synced_at":
-            assignments.append("last_synced_at = %s")
+        elif key in ("last_synced_at", "token_expires_at"):
+            assignments.append(f"{key} = %s")
             if isinstance(value, datetime):
                 params.append(value.replace(tzinfo=None))
             else:
@@ -159,6 +163,50 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
     await db.execute(
         f"UPDATE m365_mail_accounts SET {', '.join(assignments)} WHERE id = %s",
         tuple(params),
+    )
+    return await get_account(account_id)
+
+
+async def update_account_tokens(
+    account_id: int,
+    *,
+    tenant_id: str | None,
+    refresh_token: str | None,
+    access_token: str | None,
+    token_expires_at: datetime | None,
+) -> dict[str, Any] | None:
+    """Update only the OAuth token columns for a mail account."""
+    expires_value = None
+    if isinstance(token_expires_at, datetime):
+        expires_value = token_expires_at.replace(tzinfo=None)
+    await db.execute(
+        """
+        UPDATE m365_mail_accounts
+        SET tenant_id = %s,
+            refresh_token = %s,
+            access_token = %s,
+            token_expires_at = %s,
+            updated_at = UTC_TIMESTAMP(6)
+        WHERE id = %s
+        """,
+        (tenant_id, refresh_token, access_token, expires_value, account_id),
+    )
+    return await get_account(account_id)
+
+
+async def clear_account_tokens(account_id: int) -> dict[str, Any] | None:
+    """Remove the per-account OAuth tokens (disconnect)."""
+    await db.execute(
+        """
+        UPDATE m365_mail_accounts
+        SET tenant_id = NULL,
+            refresh_token = NULL,
+            access_token = NULL,
+            token_expires_at = NULL,
+            updated_at = UTC_TIMESTAMP(6)
+        WHERE id = %s
+        """,
+        (account_id,),
     )
     return await get_account(account_id)
 
