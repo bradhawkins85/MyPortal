@@ -256,6 +256,8 @@ async def _auto_provision_company_pkce_client_id(
     Falls back silently on any failure so the caller can continue with existing
     resolution logic.
     """
+    # Internal helper so tests can patch the shared implementation while the
+    # public wrapper remains stable for route handlers.
     if not redirect_uri:
         return None
 
