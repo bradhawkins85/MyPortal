@@ -73,7 +73,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
     "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
     # Permission for Office 365 Mailbox Import (m365-mail module):
-    "810c84a8-4a9e-49e6-bf7d-12d183f40d01",  # Mail.Read
+    "e2a3a72e-5f79-4c64-b1b1-878b674786c9",  # Mail.ReadWrite
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
@@ -417,9 +417,20 @@ async def acquire_access_token(
     expires_value = None
     if expires_at:
         expires_value = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+    # When using the client_credentials grant (force_client_credentials), the
+    # refresh token is not consumed or replaced.  Preserve the existing stored
+    # value so that future delegated operations (e.g. auto-granting missing
+    # permissions on a 403) can still use it.  Only overwrite when a real
+    # refresh token was returned or when a stale one was explicitly cleared.
+    if force_client_credentials and refresh is None:
+        refresh_to_store = _encrypt(creds.get("refresh_token"))
+    else:
+        refresh_to_store = _encrypt(refresh)
+
     await m365_repo.update_tokens(
         company_id=company_id,
-        refresh_token=_encrypt(refresh),
+        refresh_token=refresh_to_store,
         access_token=_encrypt(access_token),
         token_expires_at=expires_value,
     )
