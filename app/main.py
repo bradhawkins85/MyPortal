@@ -5429,10 +5429,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # back to the Azure CLI public client, and guide the admin to re-
         # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
-            try:
-                company_id = int(state_data.get("company_id"))
-            except (TypeError, ValueError):
-                company_id = None
+            company_id = None
+            company_id_raw = state_data.get("company_id")
+            if company_id_raw is not None:
+                try:
+                    company_id = int(company_id_raw)
+                except (TypeError, ValueError):
+                    company_id = None
             if company_id is not None:
                 try:
                     await m365_service.clear_company_pkce_client_id(company_id)

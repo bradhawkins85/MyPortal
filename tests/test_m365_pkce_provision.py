@@ -521,6 +521,121 @@ async def test_callback_error_aadsts700016_clears_company_pkce():
     mock_clear_company.assert_awaited_once_with(123)
     mock_clear_global.assert_awaited_once()
 
+
+@pytest.mark.anyio("asyncio")
+async def test_callback_error_aadsts700016_without_company_id_skips_company_clear():
+    """Missing company_id should still clear the global PKCE client."""
+    state = _signed_state({"flow": "discover"})
+    error_param = "invalid_client"
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/m365/callback",
+            "query_string": urlencode(
+                {
+                    "error": error_param,
+                    "error_description": "AADSTS700016: Application not found",
+                    "state": state,
+                }
+            ).encode(),
+            "headers": [],
+        }
+    )
+
+    with (
+        patch.object(
+            m365_service, "clear_company_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_company,
+        patch.object(
+            m365_service, "clear_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_global,
+    ):
+        response = await m365_callback(
+            request, state=state, error=error_param
+        )
+
+    assert response.status_code == 303
+    mock_clear_company.assert_not_awaited()
+    mock_clear_global.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_callback_error_aadsts700016_with_non_int_company_id_skips_company_clear():
+    """Non-integer company_id should not attempt per-company clear."""
+    state = _signed_state({"company_id": "abc", "flow": "discover"})
+    error_param = "invalid_client"
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/m365/callback",
+            "query_string": urlencode(
+                {
+                    "error": error_param,
+                    "error_description": "AADSTS700016: Application not found",
+                    "state": state,
+                }
+            ).encode(),
+            "headers": [],
+        }
+    )
+
+    with (
+        patch.object(
+            m365_service, "clear_company_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_company,
+        patch.object(
+            m365_service, "clear_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_global,
+    ):
+        response = await m365_callback(
+            request, state=state, error=error_param
+        )
+
+    assert response.status_code == 303
+    mock_clear_company.assert_not_awaited()
+    mock_clear_global.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_callback_error_aadsts700016_with_unparseable_state_still_clears_global_pkce():
+    """Unparseable state should still clear the global PKCE client ID."""
+    error_param = "invalid_client"
+    bad_state = "not-a-valid-state"
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/m365/callback",
+            "query_string": urlencode(
+                {
+                    "error": error_param,
+                    "error_description": "AADSTS700016: Application not found",
+                    "state": bad_state,
+                }
+            ).encode(),
+            "headers": [],
+        }
+    )
+
+    with (
+        patch("app.main.oauth_state_serializer.loads", side_effect=Exception("bad state")),
+        patch.object(
+            m365_service, "clear_company_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_company,
+        patch.object(
+            m365_service, "clear_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_global,
+    ):
+        response = await m365_callback(
+            request, state=bad_state, error=error_param
+        )
+
+    assert response.status_code == 303
+    mock_clear_company.assert_not_awaited()
+    mock_clear_global.assert_awaited_once()
+
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
