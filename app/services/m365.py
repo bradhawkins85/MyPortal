@@ -263,7 +263,7 @@ async def _auto_provision_company_pkce_client_id(
     if company_admin_creds is None:
         try:
             company_admin_creds = await get_company_admin_credentials(company_id)
-        except (RuntimeError, M365Error) as exc:  # pragma: no cover - defensive logging
+        except (RuntimeError, M365Error) as exc:  # pragma: no cover - defensive fallback
             log_warning(
                 "Failed to load per-company admin credentials for PKCE auto-provision",
                 company_id=company_id,
@@ -307,7 +307,7 @@ async def _auto_provision_company_pkce_client_id(
         company_name = (company.get("name") or "").strip() if company else ""
         if company_name:
             display_name = f"MyPortal PKCE – {company_name}"
-    except Exception as exc:  # pragma: no cover - best-effort label
+    except Exception as exc:  # pragma: no cover - best-effort company name lookup
         log_warning(
             "Failed to load company name for PKCE display name; using default",
             company_id=company_id,
@@ -353,7 +353,12 @@ async def auto_provision_company_pkce_client_id(
     redirect_uri: str | None = None,
     company_admin_creds: dict[str, Any] | None = None,
 ) -> str | None:
-    """Public wrapper for :func:`_auto_provision_company_pkce_client_id`."""
+    """Provision and persist a per-company PKCE public-client app ID.
+
+    This is the public entry point used by /m365 flows to ensure each customer
+    has their own PKCE registration. Returns the new client ID or ``None`` when
+    auto-provisioning cannot be completed.
+    """
     return await _auto_provision_company_pkce_client_id(
         company_id,
         redirect_uri=redirect_uri,
