@@ -257,7 +257,7 @@ async def _auto_provision_company_pkce_client_id(
     resolution logic.
     """
     # Internal helper so tests can patch the shared implementation while the
-    # public wrapper remains stable for route handlers.
+    # public wrapper remains stable for route handlers and backwards compatibility.
     if not redirect_uri:
         return None
 
@@ -265,7 +265,7 @@ async def _auto_provision_company_pkce_client_id(
     if company_admin_creds is None:
         try:
             company_admin_creds = await get_company_admin_credentials(company_id)
-        except (RuntimeError, M365Error) as exc:  # pragma: no cover - defensive fallback
+        except (RuntimeError, M365Error) as exc:  # pragma: no cover - defensive fallback when DB/module lookups fail
             log_warning(
                 "Failed to load per-company admin credentials for PKCE auto-provision",
                 company_id=company_id,
@@ -308,7 +308,7 @@ async def _auto_provision_company_pkce_client_id(
         company = await companies_repo.get_company_by_id(company_id)
         company_name = (company.get("name") or "").strip() if company else ""
         if company_name:
-            display_name = f"MyPortal PKCE – {company_name}"
+            display_name = f"MyPortal PKCE - {company_name}"
     except Exception as exc:  # pragma: no cover - best-effort company name lookup
         log_warning(
             "Failed to load company name for PKCE display name; using default",
