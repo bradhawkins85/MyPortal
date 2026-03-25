@@ -500,13 +500,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         full_url = messages_url + "?" + "&".join(params)
 
         # Paginate through all messages
-        _remediation_attempted = False
+        remediation_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
-                if exc.http_status == 403 and not _remediation_attempted:
-                    _remediation_attempted = True
+                if exc.http_status == 403 and not remediation_attempted:
+                    remediation_attempted = True
                     # Best-effort: try to auto-grant missing permissions
                     # using the current token and retry once.
                     try:
