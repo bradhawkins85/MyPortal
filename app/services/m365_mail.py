@@ -674,10 +674,48 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
         # Paginate through all messages
         remediation_attempted = False
+        delegated_fallback_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
+                if exc.http_status == 403 and using_delegated and not delegated_fallback_attempted:
+                    # Delegated token lacks access to this mailbox.
+                    # Fall back to client_credentials (app-level permissions)
+                    # which can access any mailbox in the tenant.
+                    delegated_fallback_attempted = True
+                    log_info(
+                        "Delegated token got 403; falling back to client_credentials",
+                        account_id=account_id,
+                        upn=upn,
+                    )
+                    if auth_company_id is None:
+                        provisioned = await m365_repo.list_provisioned_company_ids()
+                        if provisioned:
+                            auth_company_id = min(provisioned)
+                    if auth_company_id is not None:
+                        try:
+                            access_token = await m365_service.acquire_access_token(
+                                int(auth_company_id), force_client_credentials=True
+                            )
+                            using_delegated = False
+                            continue
+                        except Exception as fb_exc:
+                            log_error(
+                                "Failed to acquire client_credentials token for delegated fallback",
+                                account_id=account_id,
+                                error=str(fb_exc),
+                            )
+                    errors.append({
+                        "error": (
+                            "Mail sync failed (403 Forbidden). The signed-in user "
+                            "may not have access to this mailbox and no company "
+                            "credentials are available to fall back to. Please sign "
+                            "in again with a user that has access, or configure "
+                            "Microsoft 365 company credentials."
+                        )
+                    })
+                    break
                 if exc.http_status == 403 and not remediation_attempted and not using_delegated:
                     remediation_attempted = True
                     log_error(
@@ -738,17 +776,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 if exc.http_status == 403:
-                    # Already attempted remediation (or using delegated tokens); fail with actionable message
-                    if using_delegated:
-                        errors.append({
-                            "error": (
-                                "Mail sync failed (403 Forbidden). The signed-in user "
-                                "may not have access to this mailbox. Please sign in "
-                                "again with a user that has access."
-                            )
-                        })
-                    else:
-                        errors.append({"error": _403_ERROR_MESSAGE})
+                    # Already attempted remediation; fail with actionable message
+                    errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 log_error(
                     "Failed to fetch messages from M365 mailbox",
