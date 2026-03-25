@@ -28,7 +28,7 @@
               </tr>
             </thead>
             <tbody>
-              {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
+              {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai', 'm365-admin'] %}
               {% for module in modules %}
                 {% set is_internal = module.slug in internal_slugs %}
                 {% if not is_internal %}
