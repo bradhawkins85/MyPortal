@@ -99,7 +99,7 @@ from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
-from app.core.logging import configure_logging, log_error, log_info
+from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
@@ -5412,28 +5412,49 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     if error:
         message = request.query_params.get("error_description", error)
         # Try to determine the flow from state so we can redirect to the
-        # correct page.  If state is unparseable we fall back to /m365.
+        # correct page and clear any stale PKCE client IDs. If state is
+        # unparseable we fall back to /m365.
         error_redirect = "/m365"
+        state_data: dict[str, Any] = {}
         if state:
             try:
-                parsed_state = oauth_state_serializer.loads(state)
-                if parsed_state.get("flow") == "m365_mail_auth":
+                state_data = oauth_state_serializer.loads(state)
+                if state_data.get("flow") == "m365_mail_auth":
                     error_redirect = "/admin/modules/m365-mail"
             except Exception:
                 pass
         # AADSTS700016 means the PKCE app registration no longer exists in the
-        # tenant (it was deleted).  Clear the stale pkce_client_id so that the
-        # next sign-in attempt falls back to the Azure CLI public client, and
-        # guide the admin to re-provision so a fresh PKCE app is created.
+        # tenant (it was deleted). Clear the stale pkce_client_id (including
+        # any company-specific value) so that the next sign-in attempt falls
+        # back to the Azure CLI public client, and guide the admin to re-
+        # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
+            company_id_raw = state_data.get("company_id")
+            if company_id_raw is not None:
+                try:
+                    await m365_service.clear_company_pkce_client_id(int(company_id_raw))
+                except (TypeError, ValueError):
+                    log_warning(
+                        "Skipping per-company PKCE clear; invalid company_id in state",
+                        company_id_raw=company_id_raw,
+                    )
+                except Exception as exc:
+                    log_warning(
+                        "Failed to clear per-company PKCE client ID after AADSTS700016",
+                        company_id_raw=company_id_raw,
+                        error=str(exc),
+                    )
             try:
                 await m365_service.clear_pkce_client_id()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warning(
+                    "Failed to clear global PKCE client ID after AADSTS700016",
+                    error=str(exc),
+                )
             message = (
                 "The PKCE app registration was not found in Azure AD (AADSTS700016). "
                 "The cached app ID has been cleared. Please sign in again; if the problem "
-                "persists, re-provision the M365 integration via Admin \u2192 M365."
+                "persists, re-provision the M365 integration via Admin → M365."
             )
         encoded = urlencode({"error": message})
         return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
