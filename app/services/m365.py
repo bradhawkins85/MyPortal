@@ -212,11 +212,7 @@ async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> 
     if source == "module":
         try:
             expires_raw = admin_creds.get("client_secret_expires_at")
-            expires_at: datetime | None = None
-            if isinstance(expires_raw, datetime):
-                expires_at = expires_raw
-            elif isinstance(expires_raw, str):
-                expires_at = parse_graph_datetime(expires_raw)
+            expires_at = _parse_client_secret_expires(expires_raw)
 
             await update_admin_m365_credentials(
                 client_id=client_id,
@@ -352,6 +348,15 @@ def parse_graph_datetime(value: str | None) -> datetime | None:
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
     except (ValueError, AttributeError):
         return None
+
+
+def _parse_client_secret_expires(value: Any) -> datetime | None:
+    """Normalise a stored ``client_secret_expires_at`` value."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return parse_graph_datetime(value)
+    return None
 
 
 async def get_credentials(company_id: int) -> dict[str, Any] | None:

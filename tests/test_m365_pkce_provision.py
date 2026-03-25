@@ -8,6 +8,7 @@ CSP/partner admin app to have a service principal in the customer tenant
 from __future__ import annotations
 
 import pytest
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse, urlencode
@@ -43,6 +44,24 @@ def _autoprovision_creds() -> dict:
         "client_secret_key_id": "secret-key",
         "client_secret_expires_at": None,
     }
+
+
+class _MockCursor:
+    async def __aenter__(self):
+        return AsyncMock()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _MockConn:
+    def cursor(self, *args, **kwargs):
+        return _MockCursor()
+
+
+@asynccontextmanager
+async def _mock_db_acquire():
+    yield _MockConn()
 
 
 # ---------------------------------------------------------------------------
@@ -134,22 +153,6 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
 @pytest.mark.anyio("asyncio")
 async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAsyncClient):
     """Provision flow auto-creates a PKCE public client when none is cached."""
-    from contextlib import asynccontextmanager
-    class _MockCursor:
-        async def __aenter__(self):
-            return AsyncMock()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    class _MockConn:
-        def cursor(self, *args, **kwargs):
-            return _MockCursor()
-
-    @asynccontextmanager
-    async def _mock_db_acquire():
-        yield _MockConn()
-
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
         patch("app.main.db.acquire", new=_mock_db_acquire),
