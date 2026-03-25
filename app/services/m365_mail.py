@@ -10,6 +10,7 @@ import httpx
 from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
+from app.repositories import m365 as m365_repo
 from app.repositories import m365_mail_accounts as mail_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import tickets as tickets_repo
@@ -105,12 +106,11 @@ async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any
 async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     name = _normalise_string(payload.get("name"), default="Mailbox")
     company_id = payload.get("company_id")
-    if company_id is None:
-        raise ValueError("Company is required for Office 365 mailboxes")
-    try:
-        company_id = int(company_id)
-    except (TypeError, ValueError):
-        raise ValueError("Company must be numeric")
+    if company_id is not None:
+        try:
+            company_id = int(company_id)
+        except (TypeError, ValueError):
+            raise ValueError("Company must be numeric")
     user_principal_name = _normalise_string(payload.get("user_principal_name"))
     if not user_principal_name:
         raise ValueError("User principal name (email) is required")
@@ -160,11 +160,12 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
     if "company_id" in payload:
         company_value = payload.get("company_id")
         if company_value in ("", None):
-            raise ValueError("Company is required for Office 365 mailboxes")
-        try:
-            updates["company_id"] = int(company_value)
-        except (TypeError, ValueError):
-            raise ValueError("Company must be numeric")
+            updates["company_id"] = None
+        else:
+            try:
+                updates["company_id"] = int(company_value)
+            except (TypeError, ValueError):
+                raise ValueError("Company must be numeric")
     if "user_principal_name" in payload:
         updates["user_principal_name"] = _normalise_string(
             payload.get("user_principal_name"),
@@ -444,8 +445,17 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         return {"status": "skipped", "reason": "Account inactive"}
 
     company_id = account.get("company_id")
-    if not company_id:
-        return {"status": "error", "error": "No company linked to this mailbox"}
+    auth_company_id = _int_or_none(company_id)
+
+    # When no company is linked, try any company with M365 credentials for
+    # authentication only.  Ticket entity resolution will still rely on the
+    # sender's email domain rather than the account's company.
+    if auth_company_id is None:
+        provisioned = await m365_repo.list_provisioned_company_ids()
+        if provisioned:
+            auth_company_id = min(provisioned)
+        else:
+            return {"status": "error", "error": "No Microsoft 365 credentials configured"}
 
     upn = _normalise_string(account.get("user_principal_name"))
     if not upn:
@@ -458,13 +468,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     # Acquire an app-only Graph token for the company's M365 tenant
     try:
         access_token = await m365_service.acquire_access_token(
-            int(company_id), force_client_credentials=True
+            int(auth_company_id), force_client_credentials=True
         )
     except Exception as exc:
         log_error(
             "Unable to acquire M365 access token for mail sync",
             account_id=account_id,
-            company_id=company_id,
+            company_id=auth_company_id,
             error=str(exc),
         )
         return {"status": "error", "error": f"Unable to authenticate with Microsoft 365: {exc}"}
