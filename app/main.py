@@ -108,7 +108,6 @@ from app.repositories import assets as assets_repo
 from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import business_continuity_plans as bc_plans_repo
 from app.repositories import companies as company_repo
-from app.repositories import csp as csp_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import change_log as change_log_repo
@@ -5209,18 +5208,16 @@ async def admin_company_m365_provision(
 
 
 async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
-    """Return (client_id, client_secret) for the M365 admin / CSP / Lighthouse flow.
+    """Return (client_id, client_secret) for the M365 admin app flow.
 
     Reads from the ``m365-admin`` integration module first so that admins can
-    configure the credentials through the UI or via auto-provisioning.  Falls
-    back to the environment variables ``M365_ADMIN_CLIENT_ID`` /
-    ``M365_ADMIN_CLIENT_SECRET`` for backwards-compatibility with existing
-    deployments.
+    configure the credentials through the UI.  Falls back to the environment
+    variables ``M365_ADMIN_CLIENT_ID`` / ``M365_ADMIN_CLIENT_SECRET`` for
+    backwards-compatibility with existing deployments.
 
-    The ``client_secret`` is decrypted if it was stored as ciphertext by the
-    auto-provisioning flow; plaintext values (manually configured) are returned
-    unchanged because :func:`decrypt_secret` is a no-op for non-ciphertext
-    strings.
+    The ``client_secret`` is decrypted if it was stored as ciphertext;
+    plaintext values (manually configured) are returned unchanged because
+    :func:`decrypt_secret` is a no-op for non-ciphertext strings.
     """
     try:
         module = await modules_service.get_module("m365-admin", redact=False)
@@ -5256,7 +5253,7 @@ async def m365_discover(request: Request):
     # capabilities.  Using PKCE avoids AADSTS700025 ("Client is public so
     # neither client_assertion nor client_secret should be presented")
     # which occurs when the configured admin client_id belongs to a public
-    # PKCE app rather than a confidential CSP app.
+    # PKCE app rather than a confidential app.
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
     oauth_client_id = await m365_service.get_effective_pkce_client_id()
 
@@ -5322,166 +5319,6 @@ async def admin_company_m365_discover(company_id: int, request: Request):
         "code_challenge_method": "S256",
     }
 
-    authorize_url = (
-        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
-        f"?{urlencode(params)}"
-    )
-    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/admin/csp/signin")
-async def admin_csp_signin(request: Request):
-    """Sign in as a CSP/Lighthouse account to enumerate managed customer tenants."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
-    if not m365_admin_client_id or not m365_admin_client_secret:
-        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-    redirect_uri = _build_m365_redirect_uri(request)
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": 0,
-            "user_id": current_user.get("id"),
-            "flow": "csp_signin",
-        }
-    )
-    params = {
-        "client_id": m365_admin_client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "response_mode": "query",
-        "scope": m365_service.CSP_SCOPE,
-        "state": state,
-        "prompt": "select_account",
-    }
-    authorize_url = (
-        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
-        f"?{urlencode(params)}"
-    )
-    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/admin/csp/provision")
-async def admin_csp_provision(request: Request):
-    """Provision the CSP/Lighthouse admin app registration automatically.
-
-    Redirects the super-admin to Microsoft's OAuth consent page.  The admin
-    must sign in with an account that has ``Application.ReadWrite.All`` and
-    ``AppRoleAssignment.ReadWrite.All`` permissions in their partner tenant.
-    After consent, the callback creates a dedicated app registration in the
-    partner tenant and stores the resulting credentials in the ``m365-admin``
-    integration module so that subsequent CSP sign-in can use them.
-
-    When no bootstrap credentials are configured the flow uses PKCE with the
-    well-known Azure CLI public client so that the admin can log in without
-    needing to pre-create an Azure app registration.
-    """
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    redirect_uri = _build_m365_redirect_uri(request)
-
-    # Prefer existing admin credentials, then an explicitly configured
-    # bootstrap client, and finally fall back to PKCE with the well-known
-    # Azure CLI public client so no manual credential setup is required.
-    existing_client_id, _ = await _get_m365_admin_credentials()
-    bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
-
-    code_verifier: str | None = None
-    if existing_client_id:
-        oauth_client_id = existing_client_id
-    elif bootstrap_client_id:
-        oauth_client_id = bootstrap_client_id
-    else:
-        # No credentials configured – use PKCE with a public client.  The
-        # code_verifier is stored in the signed state so the callback can
-        # exchange the auth code without a client secret.
-        # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
-        # Azure CLI public client (which may be blocked in some tenants).
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = await m365_service.get_effective_pkce_client_id()
-
-    state_payload: dict = {
-        "company_id": 0,
-        "user_id": current_user.get("id"),
-        "flow": "csp_admin_provision",
-    }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
-
-    state = oauth_state_serializer.dumps(state_payload)
-    params: dict = {
-        "client_id": oauth_client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "response_mode": "query",
-        "scope": m365_service.PROVISION_SCOPE,
-        "state": state,
-        "prompt": "select_account",
-    }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
-
-    authorize_url = (
-        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
-        f"?{urlencode(params)}"
-    )
-    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/admin/csp/graph-bootstrap")
-async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...)):
-    """Start Option 3 Graph bootstrap to create the enterprise app in a tenant."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    clean_tenant_id = tenant_id.strip()
-    if not clean_tenant_id:
-        encoded = urlencode({"error": "Tenant ID is required for Graph bootstrap."})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    admin_client_id, _ = await _get_m365_admin_credentials()
-    if not admin_client_id:
-        encoded = urlencode(
-            {"error": "Admin M365 application ID is not configured for Graph bootstrap."}
-        )
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    redirect_uri = _build_m365_redirect_uri(request)
-    code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": 0,
-            "user_id": current_user.get("id"),
-            "flow": "csp_graph_bootstrap",
-            "tenant_id": clean_tenant_id,
-            "target_app_id": admin_client_id,
-            "code_verifier": code_verifier,
-        }
-    )
-
-    params = {
-        "client_id": await m365_service.get_effective_pkce_client_id(),
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "response_mode": "query",
-        "scope": m365_service.PROVISION_SCOPE,
-        "state": state,
-        "prompt": "consent",
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-        "domain_hint": clean_tenant_id,
-    }
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -5670,7 +5507,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             # AADSTS700025 means the client_id used is a public client but
             # client_secret was presented.  This happens when the configured
             # admin credentials reference a public PKCE app instead of a
-            # confidential CSP app.  Provide an actionable error message.
+            # confidential app.  Provide an actionable error message.
             error_body = token_response.text or ""
             if "AADSTS700025" in error_body:
                 return _discover_error(
@@ -5714,253 +5551,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    if flow == "csp_signin":
-        # ── CSP/Lighthouse sign-in flow ───────────────────────────────────
-        user_id = int(state_data.get("user_id", 0))
-        redirect_uri = _build_m365_redirect_uri(request)
-
-        def _csp_error(msg: str) -> RedirectResponse:
-            encoded = urlencode({"error": msg})
-            return RedirectResponse(
-                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-
-        _csp_cid, _csp_csec = await _get_m365_admin_credentials()
-        if not _csp_cid or not _csp_csec:
-            return _csp_error("Admin M365 credentials are not configured.")
-
-        token_endpoint = (
-            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
-        )
-        token_data = {
-            "client_id": _csp_cid,
-            "client_secret": _csp_csec,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "scope": m365_service.CSP_SCOPE,
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(token_endpoint, data=token_data)
-        if token_response.status_code != 200:
-            log_error(
-                "CSP sign-in token exchange failed",
-                status=token_response.status_code,
-                body=token_response.text,
-            )
-            return _csp_error("Sign-in failed. Please try again.")
-
-        token_payload = token_response.json()
-        access_token = token_payload.get("access_token", "")
-        refresh_token = token_payload.get("refresh_token")
-        expires_in = token_payload.get("expires_in")
-        expires_at = None
-        if isinstance(expires_in, (int, float)):
-            expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=float(expires_in))
-
-        if not access_token:
-            return _csp_error("No access token received during CSP sign-in.")
-
-        await csp_repo.upsert_session(
-            user_id=user_id,
-            access_token=encrypt_secret(access_token),
-            refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
-            expires_at=expires_at,
-        )
-        log_info("CSP session stored for user", user_id=user_id)
-        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
-
-    if flow == "csp_admin_provision":
-        # ── Auto-provision the CSP/Lighthouse admin app registration ──────
-        # The admin signed in with PROVISION_SCOPE targeting /organizations,
-        # so their token has Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
-        # in their own partner tenant.  We use it to create a dedicated app
-        # registration that will serve as the M365 admin OAuth client.
-        redirect_uri = _build_m365_redirect_uri(request)
-
-        def _csp_provision_error(msg: str) -> RedirectResponse:
-            encoded = urlencode({"error": msg})
-            return RedirectResponse(
-                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-
-        # Determine the token exchange method.  When the flow was initiated
-        # using PKCE (state contains a code_verifier), the exchange is done
-        # with the public Azure CLI client – no client secret is required.
-        # Otherwise fall back to the traditional secret-based exchange using
-        # existing admin credentials or the M365_BOOTSTRAP_* env vars.
-        code_verifier: str | None = state_data.get("code_verifier")
-        token_endpoint = (
-            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
-        )
-        if code_verifier:
-            token_data: dict = {
-                "client_id": await m365_service.get_effective_pkce_client_id(),
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier,
-                "scope": m365_service.PROVISION_SCOPE,
-            }
-        else:
-            bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
-            existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
-            oauth_client_id = existing_client_id or bootstrap_client_id
-            bootstrap_client_secret = str(settings.m365_bootstrap_client_secret or "").strip()
-            oauth_client_secret = existing_client_secret or bootstrap_client_secret
-
-            if not oauth_client_id or not oauth_client_secret:
-                return _csp_provision_error(
-                    "No client credentials available to complete provisioning. "
-                    "Configure M365_BOOTSTRAP_CLIENT_ID / M365_BOOTSTRAP_CLIENT_SECRET or "
-                    "enter credentials in the M365 Admin module."
-                )
-
-            token_data = {
-                "client_id": oauth_client_id,
-                "client_secret": oauth_client_secret,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "scope": m365_service.PROVISION_SCOPE,
-            }
-        async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(token_endpoint, data=token_data)
-        if token_response.status_code != 200:
-            log_error(
-                "CSP admin provision token exchange failed",
-                status=token_response.status_code,
-                body=token_response.text,
-            )
-            return _csp_provision_error("Authorization failed during CSP admin provisioning.")
-
-        token_payload = token_response.json()
-        access_token = token_payload.get("access_token", "")
-        if not access_token:
-            return _csp_provision_error("No access token received during CSP admin provisioning.")
-
-        # Extract the partner tenant ID from the token
-        try:
-            partner_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
-        except m365_service.M365Error:
-            try:
-                id_token = token_payload.get("id_token", "")
-                partner_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
-            except m365_service.M365Error:
-                return _csp_provision_error(
-                    "Unable to determine partner tenant ID from token."
-                )
-
-        try:
-            provision_result = await m365_service.provision_csp_admin_app_registration(
-                access_token=access_token,
-                tenant_id=partner_tenant_id,
-                display_name="MyPortal CSP Admin",
-                redirect_uri=redirect_uri,
-            )
-        except m365_service.M365Error as exc:
-            log_error(
-                "CSP admin app provisioning failed",
-                tenant_id=partner_tenant_id,
-                error=str(exc),
-            )
-            return _csp_provision_error(f"Provisioning failed: {exc}")
-
-        await m365_service.update_admin_m365_credentials(
-            client_id=provision_result["client_id"],
-            client_secret=provision_result["client_secret"],
-            tenant_id=provision_result["tenant_id"],
-            app_object_id=provision_result.get("app_object_id"),
-            client_secret_key_id=provision_result.get("client_secret_key_id"),
-            client_secret_expires_at=provision_result.get("client_secret_expires_at"),
-            pkce_client_id=provision_result.get("pkce_client_id"),
-        )
-        # If PKCE app creation failed during provisioning, clear any stale
-        # pkce_client_id that may be left over from a previously deleted app
-        # so that subsequent flows fall back to the Azure CLI public client
-        # rather than failing with AADSTS700016.
-        if not provision_result.get("pkce_client_id"):
-            await m365_service.clear_pkce_client_id()
-        log_info(
-            "M365 CSP admin app provisioned and credentials stored",
-            tenant_id=partner_tenant_id,
-            client_id=provision_result["client_id"],
-        )
-        encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in with your CSP account."})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    if flow == "csp_graph_bootstrap":
-        # ── Option 3 Graph bootstrap for enterprise app creation ─────────
-        redirect_uri = _build_m365_redirect_uri(request)
-        tenant_id = str(state_data.get("tenant_id", "")).strip()
-        target_app_id = str(state_data.get("target_app_id", "")).strip()
-        code_verifier = str(state_data.get("code_verifier", "")).strip()
-
-        def _csp_graph_bootstrap_error(msg: str) -> RedirectResponse:
-            encoded = urlencode({"error": msg})
-            return RedirectResponse(
-                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-
-        if not tenant_id:
-            return _csp_graph_bootstrap_error("Missing tenant ID for Graph bootstrap.")
-        if not target_app_id:
-            return _csp_graph_bootstrap_error("Missing application ID for Graph bootstrap.")
-        if not code_verifier:
-            return _csp_graph_bootstrap_error("Missing PKCE verifier for Graph bootstrap.")
-
-        token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-        token_data = {
-            "client_id": await m365_service.get_effective_pkce_client_id(),
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "code_verifier": code_verifier,
-            "scope": m365_service.PROVISION_SCOPE,
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(token_endpoint, data=token_data)
-        if token_response.status_code != 200:
-            log_error(
-                "CSP Graph bootstrap token exchange failed",
-                status=token_response.status_code,
-                body=token_response.text,
-            )
-            return _csp_graph_bootstrap_error("Authorization failed during Graph bootstrap.")
-
-        token_payload = token_response.json()
-        access_token = str(token_payload.get("access_token") or "")
-        if not access_token:
-            return _csp_graph_bootstrap_error(
-                "No access token received during Graph bootstrap."
-            )
-
-        try:
-            bootstrap_result = await m365_service.ensure_service_principal_for_app(
-                access_token,
-                target_app_id,
-            )
-        except m365_service.M365Error as exc:
-            log_error(
-                "CSP Graph bootstrap failed",
-                tenant_id=tenant_id,
-                app_id=target_app_id,
-                error=str(exc),
-            )
-            return _csp_graph_bootstrap_error(f"Graph bootstrap failed: {exc}")
-
-        if bootstrap_result.get("created"):
-            message = "Graph bootstrap completed. Enterprise app created for this tenant."
-        else:
-            message = "Graph bootstrap completed. Enterprise app already existed in this tenant."
-
-        encoded = urlencode({"success": message})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
     if flow == "provision":
         # ── Auto-provision flow ────────────────────────────────────────────
         tenant_id = str(state_data.get("tenant_id", "")).strip()
@@ -5979,8 +5569,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             return _provision_error("Missing tenant ID in provision state.")
 
         # Always use PKCE for the provision flow so the customer's Global Admin
-        # can grant consent without requiring the CSP admin app to have a service
-        # principal in the customer tenant (avoids AADSTS700016).
+        # can grant consent without requiring the app to have a service
+        # principal in the tenant (avoids AADSTS700016).
         code_verifier = state_data.get("code_verifier")
         token_endpoint = (
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
@@ -17361,7 +16951,7 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
 
     The admin will be redirected to Microsoft to sign in as a user that has
     access to the target shared/user mailbox.  The resulting delegated tokens
-    are stored on the account so that syncs no longer rely on CSP credentials.
+    are stored on the account so that syncs use per-account authentication.
     """
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -17400,7 +16990,7 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
 
 @app.post("/admin/modules/m365-mail/accounts/{account_id}/disconnect", response_class=HTMLResponse)
 async def admin_m365_mail_disconnect(account_id: int, request: Request):
-    """Remove the per-account delegated tokens and revert to CSP credentials."""
+    """Remove the per-account delegated tokens and revert to company credentials."""
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect

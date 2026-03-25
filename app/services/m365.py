@@ -101,24 +101,8 @@ CONNECT_SCOPE = (
 # Minimal scopes used for the tenant-discovery sign-in step
 DISCOVER_SCOPE = "openid profile"
 
-# Scopes for CSP/Lighthouse GDAP sign-in (needs Directory.Read.All for /contracts)
-CSP_SCOPE = (
-    "https://graph.microsoft.com/Directory.Read.All openid profile offline_access"
-)
-
-# Module slug used to store the admin / CSP / Lighthouse partner app credentials
+# Module slug used to store the admin app credentials for PKCE bootstrap flows
 _M365_ADMIN_MODULE_SLUG = "m365-admin"
-
-# Application-permission role IDs for the provisioned CSP/Lighthouse admin app.
-# Directory.Read.All (application) is required to enumerate /contracts via GDAP.
-# Application.ReadWrite.OwnedBy allows the app to renew its own client secret.
-_CSP_ADMIN_APP_ROLES: list[str] = [
-    "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All (application)
-    "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
-]
-
-# Delegated scope ID for Directory.Read.All (for CSP sign-in by partner admins)
-_DIRECTORY_READ_ALL_SCOPE_ID = "06da0dbc-49e2-44d2-8312-53f166ab848a"
 
 # Well-known Microsoft public client used as a fallback for PKCE-based bootstrap
 # provisioning when no custom PKCE client is configured.  This is the Azure CLI
@@ -154,8 +138,7 @@ async def get_effective_pkce_client_id() -> str:
     """Return the best available PKCE public-client app ID.
 
     Resolution order:
-    1. Auto-provisioned PKCE client stored in the ``m365-admin`` module settings
-       (created automatically during :func:`provision_csp_admin_app_registration`).
+    1. Auto-provisioned PKCE client stored in the ``m365-admin`` module settings.
     2. Operator-configured ``M365_PKCE_CLIENT_ID`` environment variable.
     3. Well-known Azure CLI public client (``_AZURE_CLI_CLIENT_ID``).
 
@@ -388,28 +371,18 @@ async def acquire_access_token(
             )
             return stored_token
 
-    # Prefer the company's mapped CSP tenant ID when available.  This ensures
-    # that a shared CSP admin app (registered in the partner/parent tenant) still
-    # acquires a token scoped to the *customer* tenant rather than the parent,
-    # which would otherwise cause /subscribedSkus to return the parent's licenses.
-    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or tenant_id
-    csp_mapping_applied = bool(csp_tenant_id)
-
     log_info(
         "M365 acquiring access token",
         company_id=company_id,
         tenant_id=tenant_id,
         client_id=client_id,
-        effective_tenant_id=effective_tenant_id,
-        csp_mapping_applied=csp_mapping_applied,
     )
 
     stored_refresh = None if force_client_credentials else creds.get("refresh_token")
     grant_type = "refresh_token" if stored_refresh else "client_credentials"
     try:
         access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=effective_tenant_id,
+            tenant_id=tenant_id,
             client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=stored_refresh,
@@ -423,11 +396,11 @@ async def acquire_access_token(
         log_error(
             "M365 refresh token is invalid; falling back to client_credentials grant",
             company_id=company_id,
-            tenant_id=effective_tenant_id,
+            tenant_id=tenant_id,
             client_id=client_id,
         )
         access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=effective_tenant_id,
+            tenant_id=tenant_id,
             client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=None,
@@ -440,7 +413,7 @@ async def acquire_access_token(
     log_info(
         "M365 access token acquired successfully",
         company_id=company_id,
-        effective_tenant_id=effective_tenant_id,
+        tenant_id=tenant_id,
         client_id=client_id,
         grant_type=grant_type,
     )
@@ -489,12 +462,9 @@ async def acquire_delegated_token(company_id: int) -> str | None:
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
 
-    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or tenant_id
-
     try:
         access_token, _, _ = await _exchange_token(
-            tenant_id=effective_tenant_id,
+            tenant_id=tenant_id,
             client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=refresh_token,
@@ -512,7 +482,7 @@ async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     the ``Exchange.ManageAsApp`` application permission and be assigned an
     appropriate Exchange RBAC role (e.g. Exchange Administrator) in the tenant.
 
-    :returns: A tuple of ``(access_token, effective_tenant_id)``.
+    :returns: A tuple of ``(access_token, tenant_id)``.
     """
     creds = await get_credentials(company_id)
     if not creds:
@@ -521,17 +491,14 @@ async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
 
-    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or tenant_id
-
     access_token, _, _ = await _exchange_token(
-        tenant_id=effective_tenant_id,
+        tenant_id=tenant_id,
         client_id=client_id,
         client_secret=creds.get("client_secret") or "",
         refresh_token=None,
         scope=_EXO_SCOPE,
     )
-    return access_token, effective_tenant_id
+    return access_token, tenant_id
 
 
 async def _graph_get(
@@ -1048,227 +1015,12 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
             )
             failed += 1
 
-    # Also check the admin app credential (auto-provisioned only)
-    try:
-        admin_creds = await get_admin_m365_credentials()
-        if admin_creds and admin_creds.get("app_object_id"):
-            raw_expiry = admin_creds.get("client_secret_expires_at")
-            expiry_dt: datetime | None = None
-            if raw_expiry:
-                if isinstance(raw_expiry, datetime):
-                    expiry_dt = raw_expiry
-                else:
-                    try:
-                        expiry_dt = datetime.fromisoformat(str(raw_expiry))
-                    except (ValueError, TypeError):
-                        expiry_dt = None
-            if expiry_dt and expiry_dt <= cutoff:
-                try:
-                    await renew_admin_client_secret()
-                    renewed += 1
-                    log_info("Renewed M365 admin client secret during scheduled check")
-                except M365Error as exc:
-                    log_error(
-                        "Failed to renew M365 admin client secret",
-                        error=str(exc),
-                    )
-                    failed += 1
-    except Exception as exc:
-        log_error("Error checking M365 admin credentials for renewal", error=str(exc))
-
     return {"renewed": renewed, "skipped": skipped, "failed": failed}
 
 
 # ---------------------------------------------------------------------------
-# CSP / Lighthouse admin app provisioning and renewal
+# PKCE public-client app provisioning for tenant bootstrap flows
 # ---------------------------------------------------------------------------
-
-
-async def provision_csp_admin_app_registration(
-    *,
-    access_token: str,
-    tenant_id: str,
-    display_name: str = "MyPortal CSP Admin",
-    redirect_uri: str | None = None,
-) -> dict[str, Any]:
-    """Provision an app registration in the partner tenant for CSP/Lighthouse.
-
-    Uses a delegated *access_token* obtained via the admin-consent OAuth flow to:
-    1. Create an App Registration with delegated ``Directory.Read.All`` and
-       application ``Application.ReadWrite.OwnedBy`` permissions.
-    2. Create the corresponding Service Principal (Enterprise App).
-    3. Grant admin consent for ``Directory.Read.All`` and
-       ``Application.ReadWrite.OwnedBy`` application permissions.
-    4. Add the service principal as an owner of the app registration so it can
-       renew its own client secret later.
-    5. Generate and return a client secret.
-
-    Returns a dict with ``client_id``, ``client_secret``, ``app_object_id``,
-    ``client_secret_key_id``, ``client_secret_expires_at``, and ``tenant_id``.
-    The client secret is returned in plain text exactly once and must be stored
-    immediately.
-
-    :param redirect_uri: The OAuth redirect URI to register on the app
-        registration.  This must match the ``redirect_uri`` used in the
-        CSP sign-in flow so that Microsoft accepts the login request.
-    """
-    settings = get_settings()
-    secret_lifetime_days = settings.m365_client_secret_lifetime_days
-
-    # 0. Remove any existing app registrations with the same display name so
-    #    that re-provisioning always starts from a clean slate.
-    await _delete_existing_apps_by_display_name(access_token, display_name)
-
-    # 1. Create the app registration with required permissions
-    app_payload: dict[str, Any] = {
-        "displayName": display_name,
-        "signInAudience": "AzureADMyOrg",
-        "requiredResourceAccess": [
-            {
-                "resourceAppId": _GRAPH_APP_ID,
-                "resourceAccess": [
-                    # Delegated Directory.Read.All (for CSP sign-in by partner admins)
-                    {"id": _DIRECTORY_READ_ALL_SCOPE_ID, "type": "Scope"},
-                    # Application permissions (granted below)
-                    *[
-                        {"id": role_id, "type": "Role"}
-                        for role_id in _CSP_ADMIN_APP_ROLES
-                    ],
-                ],
-            }
-        ],
-    }
-    if redirect_uri:
-        app_payload["web"] = {"redirectUris": [redirect_uri]}
-    app_data = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/v1.0/applications",
-        app_payload,
-    )
-    app_object_id: str = app_data["id"]
-    client_id: str = app_data["appId"]
-    log_info("Provisioned M365 CSP admin app registration", client_id=client_id)
-
-    # 2. Create a service principal (Enterprise App) for the registration
-    sp_data = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/v1.0/servicePrincipals",
-        {"appId": client_id},
-    )
-    sp_object_id: str = sp_data["id"]
-    log_info("Created M365 CSP admin service principal", sp_object_id=sp_object_id)
-
-    # 3. Locate the Microsoft Graph service principal in this tenant
-    graph_sp_response = await _graph_get(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals"
-        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
-    )
-    graph_sp_list = graph_sp_response.get("value", [])
-    if not graph_sp_list:
-        raise M365Error(
-            "Unable to locate Microsoft Graph service principal in the tenant"
-        )
-    graph_sp_id: str = graph_sp_list[0]["id"]
-
-    # 4. Grant admin consent for application permissions
-    for role_id in _CSP_ADMIN_APP_ROLES:
-        await _graph_post(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-            {
-                "principalId": sp_object_id,
-                "resourceId": graph_sp_id,
-                "appRoleId": role_id,
-            },
-        )
-    log_info(
-        "Granted admin consent for M365 CSP admin app",
-        sp_object_id=sp_object_id,
-    )
-
-    # 5. Add the service principal as an owner so it can renew its own secret
-    try:
-        await _graph_post(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
-            {
-                "@odata.id": (
-                    f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
-                )
-            },
-        )
-        log_info(
-            "Added service principal as owner of M365 CSP admin app registration",
-            app_object_id=app_object_id,
-            sp_object_id=sp_object_id,
-        )
-    except M365Error as exc:
-        log_error(
-            "Failed to add SP as owner of M365 CSP admin app; "
-            "automatic secret renewal will not be available",
-            app_object_id=app_object_id,
-            error=str(exc),
-        )
-
-    # 6. Create a client secret with configurable lifetime (default: 730 days / 2 years)
-    secret_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
-    secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
-    secret_data = await _graph_post(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
-        {
-            "passwordCredential": {
-                "displayName": "MyPortal",
-                "endDateTime": secret_expiry_str,
-            }
-        },
-    )
-    client_secret: str = secret_data["secretText"]
-    client_secret_key_id: str | None = secret_data.get("keyId")
-    client_secret_expires_at = datetime(
-        secret_expiry_date.year,
-        secret_expiry_date.month,
-        secret_expiry_date.day,
-    )
-    log_info(
-        "Created client secret for M365 CSP admin app",
-        client_id=client_id,
-        expires_at=secret_expiry_str,
-    )
-
-    # 7. Create a PKCE public-client app registration for the bootstrap flows.
-    # This multi-tenant public client is used to drive the discover/provision
-    # OAuth flows without needing to pre-configure an app registration in every
-    # customer tenant.  The resulting client_id is stored alongside the CSP admin
-    # credentials so that subsequent bootstrap flows use it automatically instead
-    # of falling back to the shared Azure CLI public client.
-    try:
-        pkce_client_id = await provision_pkce_public_client_app(
-            access_token=access_token,
-            display_name="MyPortal Bootstrap",
-            redirect_uri=redirect_uri,
-        )
-    except M365Error as exc:
-        # PKCE app creation is best-effort: log the error and continue so that
-        # provisioning still succeeds.  The Azure CLI fallback will be used for
-        # PKCE operations until the admin re-provisions.
-        log_error(
-            "Failed to create PKCE public client app during CSP admin provisioning; "
-            "bootstrap flows will fall back to the Azure CLI public client",
-            error=str(exc),
-        )
-        pkce_client_id = None
-
-    return {
-        "tenant_id": tenant_id,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "app_object_id": app_object_id,
-        "client_secret_key_id": client_secret_key_id,
-        "client_secret_expires_at": client_secret_expires_at,
-        "pkce_client_id": pkce_client_id,
-    }
 
 
 async def provision_pkce_public_client_app(
@@ -1284,7 +1036,7 @@ async def provision_pkce_public_client_app(
     needing to be registered in every customer tenant.
 
     :param access_token: A delegated token with ``Application.ReadWrite.All``
-        permission (obtained via the CSP admin provision OAuth flow).
+        permission (obtained via the admin provision OAuth flow).
     :param display_name: Display name for the new app registration.
     :param redirect_uri: The redirect URI to register on the app.  Should match
         the ``redirect_uri`` used in the OAuth flows (i.e. the ``/m365/callback``
@@ -1316,10 +1068,10 @@ async def provision_pkce_public_client_app(
 
 
 async def get_admin_m365_credentials() -> dict[str, Any] | None:
-    """Return the stored CSP/Lighthouse admin app credentials, or ``None``.
+    """Return the stored admin app credentials, or ``None``.
 
     Reads the ``m365-admin`` integration module settings.  The ``client_secret``
-    field is decrypted if it was stored as ciphertext (auto-provisioned) or
+    field is decrypted if it was stored as ciphertext or
     returned as-is if it is already plain text (manually configured).
     """
     module = await modules_repo.get_module(_M365_ADMIN_MODULE_SLUG)
@@ -1355,7 +1107,7 @@ async def update_admin_m365_credentials(
     client_secret_expires_at: datetime | None = None,
     pkce_client_id: str | None = None,
 ) -> None:
-    """Persist CSP/Lighthouse admin app credentials to the ``m365-admin`` module.
+    """Persist admin app credentials to the ``m365-admin`` module.
 
     The ``client_secret`` is encrypted before storage.  Any field that is
     ``None`` is omitted from the update so that existing values are preserved.
@@ -1395,8 +1147,7 @@ async def clear_pkce_client_id() -> None:
     Called when the stored PKCE app registration has been deleted from Azure AD
     (indicated by an ``AADSTS700016`` error) so that subsequent flows fall back
     to the configured ``M365_PKCE_CLIENT_ID`` env var or the well-known Azure
-    CLI public client.  The next successful ``provision_csp_admin_app_registration``
-    run will create a fresh PKCE app and store the new ID automatically.
+    CLI public client.
     """
     module = await modules_repo.get_module(_M365_ADMIN_MODULE_SLUG)
     if not module:
@@ -1410,103 +1161,6 @@ async def clear_pkce_client_id() -> None:
         settings=new_settings,
     )
     log_info("Cleared stale M365 PKCE client ID from admin settings")
-
-
-async def renew_admin_client_secret() -> None:
-    """Renew the Azure AD client secret for the provisioned CSP/Lighthouse admin app.
-
-    Authenticates using the admin app's own credentials via the
-    ``client_credentials`` grant, then calls ``addPassword`` to create a new
-    secret.  The old secret is revoked after the new one is safely persisted.
-
-    Requires the provisioned admin app to have ``Application.ReadWrite.OwnedBy``
-    application permission granted and to be registered as an owner of its own
-    app registration (configured automatically by
-    :func:`provision_csp_admin_app_registration`).
-
-    Raises :class:`M365Error` if the credentials or ``app_object_id`` are missing.
-    """
-    settings_cfg = get_settings()
-    creds = await get_admin_m365_credentials()
-    if not creds:
-        raise M365Error("No M365 admin credentials found")
-
-    tenant_id = creds.get("tenant_id")
-    if not tenant_id:
-        raise M365Error(
-            "Admin tenant ID not stored – re-provisioning is required to enable "
-            "automatic client secret renewal for the admin app"
-        )
-
-    app_object_id = creds.get("app_object_id")
-    if not app_object_id:
-        raise M365Error(
-            "App object ID not stored – re-provisioning is required to enable "
-            "automatic client secret renewal for the admin app"
-        )
-
-    # Acquire an access token via client_credentials using the admin app's own credentials
-    access_token, _, _ = await _exchange_token(
-        tenant_id=tenant_id,
-        client_id=creds["client_id"],
-        client_secret=creds["client_secret"],
-        refresh_token=None,
-    )
-
-    # Calculate new expiry
-    secret_lifetime_days = settings_cfg.m365_client_secret_lifetime_days
-    new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
-    new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
-
-    # Create new client secret via Graph API
-    secret_data = await _graph_post(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
-        {
-            "passwordCredential": {
-                "displayName": "MyPortal",
-                "endDateTime": new_expiry_str,
-            }
-        },
-    )
-    new_secret: str = secret_data["secretText"]
-    new_key_id: str | None = secret_data.get("keyId")
-    new_expires_at = datetime(
-        new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
-    )
-
-    old_key_id: str | None = creds.get("client_secret_key_id")
-
-    # Persist new secret BEFORE revoking old key so we never lose access
-    await update_admin_m365_credentials(
-        client_id=creds["client_id"],
-        client_secret=new_secret,
-        tenant_id=tenant_id,
-        app_object_id=app_object_id,
-        client_secret_key_id=new_key_id,
-        client_secret_expires_at=new_expires_at,
-    )
-    log_info(
-        "Renewed M365 admin client secret",
-        new_key_id=new_key_id,
-        expires_at=new_expiry_str,
-    )
-
-    # Revoke the old secret now that the new one is safely stored
-    if old_key_id:
-        try:
-            await _graph_post(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
-                {"keyId": old_key_id},
-            )
-            log_info("Revoked old M365 admin client secret", old_key_id=old_key_id)
-        except M365Error as exc:
-            log_error(
-                "Failed to revoke old M365 admin client secret",
-                old_key_id=old_key_id,
-                error=str(exc),
-            )
 
 
 async def _sync_staff_assignments(
@@ -1722,79 +1376,21 @@ async def get_all_users(company_id: int) -> list[dict[str, Any]]:
     return users
 
 
-async def _exchange_obo_token(
-    *,
-    customer_tenant_id: str,
-    client_id: str,
-    client_secret: str,
-    user_assertion: str,
-) -> tuple[str, str | None, datetime | None]:
-    """Exchange a partner admin token for a customer-tenant-scoped token via OBO.
-
-    Uses the OAuth2 On-Behalf-Of (OBO) flow to exchange the partner admin's
-    access token for a delegated token scoped to the customer tenant.  This
-    enables GDAP delegated-admin operations (such as granting app permissions)
-    in the customer tenant.
-
-    :param customer_tenant_id: The Azure AD tenant ID of the customer.
-    :param client_id: The CSP admin app's client ID (in the partner tenant).
-    :param client_secret: The CSP admin app's client secret.
-    :param user_assertion: The partner admin's access token to exchange.
-    """
-    token_endpoint = (
-        f"https://login.microsoftonline.com/{customer_tenant_id}/oauth2/v2.0/token"
-    )
-    data = {
-        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "assertion": user_assertion,
-        "scope": _GRAPH_SCOPE,
-        "requested_token_use": "on_behalf_of",
-    }
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(token_endpoint, data=data)
-    if response.status_code != 200:
-        log_error(
-            "OBO token exchange failed",
-            status=response.status_code,
-            body=response.text,
-        )
-        raise M365Error(
-            f"OBO token exchange failed ({response.status_code}): "
-            f"{response.text[:200]}"
-        )
-
-    payload = response.json()
-    access_token = str(payload.get("access_token"))
-    new_refresh = payload.get("refresh_token")
-    expires_in = payload.get("expires_in")
-    expires_at: datetime | None = None
-    if isinstance(expires_in, (int, float)):
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
-    return access_token, str(new_refresh) if new_refresh else None, expires_at
-
-
 async def verify_tenant_permissions(
     company_id: int,
-    csp_access_token: str | None = None,
 ) -> dict[str, Any]:
     """Verify that the provisioned M365 app has all required permissions.
 
     Uses the company's stored credentials (client_credentials grant) to check
-    the current app role assignments on the service principal.  If any required
-    permissions are missing and a CSP *access_token* is provided, attempts to
-    grant them via the GDAP on-behalf-of flow using the stored admin app
-    credentials.
+    the current app role assignments on the service principal.
 
     Returns a dict with:
 
     - ``all_ok`` – ``True`` if all required permissions are present
     - ``missing`` – list of role IDs that are missing
     - ``present`` – list of role IDs that are present
-    - ``updated`` – ``True`` if missing permissions were successfully granted
-    - ``error``   – human-readable error message if the check or update failed
+    - ``updated`` – ``True`` if missing permissions were successfully granted (always False now)
+    - ``error``   – human-readable error message if the check failed
     """
     creds = await get_credentials(company_id)
     if not creds:
@@ -1804,7 +1400,7 @@ async def verify_tenant_permissions(
     client_id = creds["client_id"]
     client_secret = creds.get("client_secret") or ""
 
-    # Acquire a client_credentials access token for the customer tenant
+    # Acquire a client_credentials access token for the tenant
     access_token, _, _ = await _exchange_token(
         tenant_id=tenant_id,
         client_id=client_id,
@@ -1812,7 +1408,7 @@ async def verify_tenant_permissions(
         refresh_token=None,
     )
 
-    # Find the service principal for this app in the customer tenant
+    # Find the service principal for this app in the tenant
     sp_response = await _graph_get(
         access_token,
         f"https://graph.microsoft.com/v1.0/servicePrincipals"
@@ -1839,91 +1435,12 @@ async def verify_tenant_permissions(
     if not missing:
         return {"all_ok": True, "missing": [], "present": present, "updated": False}
 
-    # No CSP session — report what is missing but cannot fix automatically
-    if not csp_access_token:
-        return {
-            "all_ok": False,
-            "missing": missing,
-            "present": present,
-            "updated": False,
-        }
-
-    # Exchange the CSP session token for a customer-tenant-scoped token via OBO
-    admin_creds = await get_admin_m365_credentials()
-    if not admin_creds:
-        return {
-            "all_ok": False,
-            "missing": missing,
-            "present": present,
-            "updated": False,
-            "error": "CSP admin credentials not configured",
-        }
-
-    try:
-        customer_token, _, _ = await _exchange_obo_token(
-            customer_tenant_id=tenant_id,
-            client_id=admin_creds["client_id"],
-            client_secret=admin_creds["client_secret"],
-            user_assertion=csp_access_token,
-        )
-    except M365Error as exc:
-        return {
-            "all_ok": False,
-            "missing": missing,
-            "present": present,
-            "updated": False,
-            "error": f"Unable to obtain admin token for tenant: {exc}",
-        }
-
-    # Locate the Microsoft Graph service principal in the customer tenant
-    graph_sp_response = await _graph_get(
-        customer_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals"
-        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
-    )
-    graph_sp_list = graph_sp_response.get("value", [])
-    if not graph_sp_list:
-        return {
-            "all_ok": False,
-            "missing": missing,
-            "present": present,
-            "updated": False,
-            "error": "Microsoft Graph service principal not found in customer tenant",
-        }
-    graph_sp_id: str = graph_sp_list[0]["id"]
-
-    # Grant missing app role assignments
-    for role_id in missing:
-        try:
-            await _graph_post(
-                customer_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                {
-                    "principalId": sp_object_id,
-                    "resourceId": graph_sp_id,
-                    "appRoleId": role_id,
-                },
-            )
-        except M365Error as exc:
-            return {
-                "all_ok": False,
-                "missing": missing,
-                "present": present,
-                "updated": False,
-                "error": f"Failed to grant permission {role_id}: {exc}",
-            }
-
-    log_info(
-        "Granted missing M365 permissions for tenant",
-        company_id=company_id,
-        tenant_id=tenant_id,
-        granted_roles=missing,
-    )
+    # Missing permissions require manual granting via the Azure Portal
     return {
-        "all_ok": True,
-        "missing": [],
-        "present": sorted(required_roles),
-        "updated": True,
+        "all_ok": False,
+        "missing": missing,
+        "present": present,
+        "updated": False,
     }
 
 
@@ -2138,9 +1655,8 @@ async def ensure_service_principal_for_app(
 ) -> dict[str, Any]:
     """Ensure an enterprise application (service principal) exists for ``app_id``.
 
-    This is used by CSP/Lighthouse onboarding helpers so a Global Admin can
-    bootstrap the enterprise app in a customer tenant without manual portal
-    navigation.
+    This is used by onboarding helpers so a Global Admin can bootstrap the
+    enterprise app in a tenant without manual portal navigation.
     """
     clean_app_id = str(app_id or "").strip()
     if not clean_app_id:
@@ -2167,43 +1683,6 @@ async def ensure_service_principal_for_app(
         "created": True,
         "service_principal": created,
     }
-
-
-async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
-    """Return the list of customer tenants managed by the signed-in CSP/Lighthouse account.
-
-    Calls ``GET /v1.0/contracts`` on Microsoft Graph, which requires the signed-in
-    user to be a member of a CSP partner tenant with GDAP relationships or legacy
-    delegated admin privileges.
-
-    Each returned dict contains:
-    - ``tenant_id``     – the customer's Azure AD tenant ID
-    - ``name``          – the customer's display name
-    - ``default_domain``– the customer's default domain name
-    - ``contract_type`` – the contract type string from Graph (e.g. ``"Contract"``)
-    """
-    url = (
-        "https://graph.microsoft.com/v1.0/contracts"
-        "?$select=customerId,displayName,defaultDomainName,contractType"
-    )
-    customers: list[dict[str, Any]] = []
-    while url:
-        data = await _graph_get(access_token, url)
-        for item in data.get("value", []):
-            tenant_id = str(item.get("customerId") or "").strip()
-            if not tenant_id:
-                continue
-            customers.append(
-                {
-                    "tenant_id": tenant_id,
-                    "name": str(item.get("displayName") or "").strip(),
-                    "default_domain": str(item.get("defaultDomainName") or "").strip(),
-                    "contract_type": str(item.get("contractType") or "").strip(),
-                }
-            )
-        url = data.get("@odata.nextLink")
-    customers.sort(key=lambda c: c["name"].lower())
-    return customers
 
 
 async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
