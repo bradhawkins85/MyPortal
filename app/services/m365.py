@@ -243,6 +243,109 @@ async def _auto_provision_and_get_pkce_client_id(
     return pkce_client_id
 
 
+async def _auto_provision_company_pkce_client_id(
+    company_id: int,
+    *,
+    redirect_uri: str | None = None,
+    company_admin_creds: dict[str, Any] | None = None,
+) -> str | None:
+    """Auto-provision a dedicated PKCE public-client app for a company.
+
+    Uses the company's stored admin app credentials to create a multi-tenant
+    PKCE public client and persists its client ID to ``company_m365_credentials``.
+    Falls back silently on any failure so the caller can continue with existing
+    resolution logic.
+    """
+    if not redirect_uri:
+        return None
+
+    settings = get_settings()
+    if company_admin_creds is None:
+        try:
+            company_admin_creds = await get_company_admin_credentials(company_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_warning(
+                "Failed to load per-company admin credentials for PKCE auto-provision",
+                company_id=company_id,
+                error=str(exc),
+            )
+            company_admin_creds = None
+    if not company_admin_creds:
+        return None
+
+    tenant_id = (
+        str(company_admin_creds.get("tenant_id") or settings.azure_tenant_id or "")
+        .strip()
+    )
+    client_id = str(company_admin_creds.get("client_id") or "").strip()
+    client_secret = str(company_admin_creds.get("client_secret") or "").strip()
+    if not tenant_id or not client_id or not client_secret:
+        return None
+
+    try:
+        access_token, _, _ = await _exchange_token(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            refresh_token=None,
+        )
+    except M365Error as exc:
+        log_warning(
+            "Failed to acquire token for per-company PKCE auto-provision",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return None
+
+    display_name = "MyPortal PKCE"
+    try:
+        company = await companies_repo.get_company_by_id(company_id)
+        company_name = (company.get("name") or "").strip() if company else ""
+        if company_name:
+            display_name = f"MyPortal PKCE – {company_name}"
+    except Exception:
+        pass
+
+    try:
+        pkce_client_id = await provision_pkce_public_client_app(
+            access_token=access_token,
+            display_name=display_name,
+            redirect_uri=redirect_uri,
+        )
+    except Exception as exc:
+        log_warning(
+            "Failed to auto-provision per-company PKCE public client app",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return None
+
+    try:
+        await m365_repo.update_pkce_client_id(company_id, pkce_client_id)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_warning(
+            "Failed to persist per-company PKCE client ID",
+            company_id=company_id,
+            error=str(exc),
+        )
+
+    return pkce_client_id
+
+
+async def auto_provision_company_pkce_client_id(
+    company_id: int,
+    *,
+    redirect_uri: str | None = None,
+    company_admin_creds: dict[str, Any] | None = None,
+) -> str | None:
+    """Public wrapper for :func:`_auto_provision_company_pkce_client_id`."""
+    return await _auto_provision_company_pkce_client_id(
+        company_id,
+        redirect_uri=redirect_uri,
+        company_admin_creds=company_admin_creds,
+    )
+
+
 async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> str:
     """Return the best available PKCE public-client app ID.
 
@@ -1424,6 +1527,16 @@ async def get_effective_pkce_client_id_for_company(
         stored = str(company_creds.get("pkce_client_id") or "").strip()
         if stored:
             return stored
+        # Best-effort auto-provision a dedicated PKCE public client using the
+        # per-company admin credentials so each customer can sign in without
+        # relying on the global PKCE app or Azure CLI fallback.
+        provisioned = await auto_provision_company_pkce_client_id(
+            company_id,
+            redirect_uri=redirect_uri,
+            company_admin_creds=company_creds,
+        )
+        if provisioned:
+            return provisioned
 
     # 2+ falls through to existing function
     return await get_effective_pkce_client_id(redirect_uri=redirect_uri)
