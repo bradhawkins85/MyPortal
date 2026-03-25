@@ -42,6 +42,16 @@ from app.services.imap import (
 
 _MODULE_SLUG = "m365-mail"
 
+_403_ERROR_MESSAGE = (
+    "Mail sync failed (403 Forbidden). The enterprise app "
+    "may be missing the Mail.ReadWrite permission. "
+    "Re-provision or re-authorise the enterprise app in "
+    "Microsoft 365 settings to grant the required "
+    "permissions. If you have just re-provisioned, please "
+    "wait a few minutes for the permissions to take effect, "
+    "then retry the sync."
+)
+
 
 # ---------------------------------------------------------------------------
 # Account management
@@ -501,13 +511,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         full_url = messages_url + "?" + "&".join(params)
 
         # Paginate through all messages
-        _403_remediation_attempted = False
+        remediation_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
-                if exc.http_status == 403 and not _403_remediation_attempted:
-                    _403_remediation_attempted = True
+                if exc.http_status == 403 and not remediation_attempted:
+                    remediation_attempted = True
                     log_error(
                         "Failed to fetch messages from M365 mailbox",
                         account_id=account_id,
@@ -544,31 +554,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         else:
                             # Retry the same request with the new token
                             continue
-                    errors.append({
-                        "error": (
-                            "Mail sync failed (403 Forbidden). The enterprise app "
-                            "may be missing the Mail.ReadWrite permission. "
-                            "Re-provision or re-authorise the enterprise app in "
-                            "Microsoft 365 settings to grant the required "
-                            "permissions. If you have just re-provisioned, please "
-                            "wait a few minutes for the permissions to take effect, "
-                            "then retry the sync."
-                        )
-                    })
+                    errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 if exc.http_status == 403:
                     # Already attempted remediation; fail with actionable message
-                    errors.append({
-                        "error": (
-                            "Mail sync failed (403 Forbidden). The enterprise app "
-                            "may be missing the Mail.ReadWrite permission. "
-                            "Re-provision or re-authorise the enterprise app in "
-                            "Microsoft 365 settings to grant the required "
-                            "permissions. If you have just re-provisioned, please "
-                            "wait a few minutes for the permissions to take effect, "
-                            "then retry the sync."
-                        )
-                    })
+                    errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 log_error(
                     "Failed to fetch messages from M365 mailbox",
