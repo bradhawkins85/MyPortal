@@ -8,6 +8,9 @@ CSP/partner admin app to have a service principal in the customer tenant
 from __future__ import annotations
 
 import pytest
+from datetime import datetime
+from contextlib import asynccontextmanager
+from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse, urlencode
 
@@ -31,6 +34,49 @@ def _signed_state(payload: dict) -> str:
 
 def _pkce_client_id() -> str:
     return m365_service.get_pkce_client_id()
+
+
+def _autoprovision_creds() -> dict:
+    return MappingProxyType(
+        {
+            "client_id": "admin-client",
+            "client_secret": "admin-secret",
+            "tenant_id": "admin-tenant",
+            "app_object_id": "app-obj",
+            "client_secret_key_id": "secret-key",
+            "client_secret_expires_at": None,
+        }
+    )
+
+
+@asynccontextmanager
+async def _mock_cursor():
+    yield AsyncMock()
+
+
+class _MockDatabaseConnection:
+    def cursor(self, *args, **kwargs):
+        return _mock_cursor()
+
+
+@asynccontextmanager
+async def _mock_db_acquire():
+    yield _MockDatabaseConnection()
+
+
+def test_parse_client_secret_expires_with_datetime():
+    dt = datetime(2024, 1, 2, 3, 4, 5)
+    assert m365_service._parse_client_secret_expires(dt) is dt
+
+
+def test_parse_client_secret_expires_with_iso_string():
+    parsed = m365_service._parse_client_secret_expires("2024-01-02T03:04:05Z")
+    assert isinstance(parsed, datetime)
+    assert parsed == datetime(2024, 1, 2, 3, 4, 5)
+
+
+def test_parse_client_secret_expires_with_none():
+    assert m365_service._parse_client_secret_expires(None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +163,70 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
     assert "code_challenge" in qs
     # Must use /organizations endpoint
     assert "organizations" in parsed.path
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAsyncClient):
+    """Provision flow auto-creates a PKCE public client when none is cached."""
+    with (
+        patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
+        patch("app.main.db.acquire", new=_mock_db_acquire),
+        patch("app.core.database.db.fetch_one", new_callable=AsyncMock, return_value=None),
+        patch.object(
+            m365_service,
+            "modules_repo",
+            SimpleNamespace(
+                get_module=AsyncMock(return_value={"settings": _autoprovision_creds()}),
+                update_module=AsyncMock(),
+            ),
+        ),
+        patch.object(
+            m365_service,
+            "get_admin_m365_credentials",
+            new_callable=AsyncMock,
+            return_value=_autoprovision_creds(),
+        ),
+        patch.object(
+            m365_service,
+            "get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(
+            m365_service,
+            "_exchange_token",
+            new_callable=AsyncMock,
+            return_value=("access-token", None, None),
+        ) as mock_exchange,
+        patch.object(
+            m365_service,
+            "provision_pkce_public_client_app",
+            new_callable=AsyncMock,
+            return_value="new-pkce-id",
+        ) as mock_provision_pkce,
+        patch.object(
+            m365_service,
+            "update_admin_m365_credentials",
+            new_callable=AsyncMock,
+        ) as mock_update_admin_creds,
+    ):
+        mock_ctx.return_value = (
+            {"id": 1, "is_super_admin": True},
+            {},
+            None,
+            99,
+            None,
+        )
+
+        response = await async_client.get(
+            "/m365/provision?tenant_id=test-tenant-id",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    mock_exchange.assert_awaited_once()
+    mock_provision_pkce.assert_awaited_once()
+    mock_update_admin_creds.assert_awaited_once()
 
 
 @pytest.mark.anyio("asyncio")
