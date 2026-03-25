@@ -500,31 +500,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         full_url = messages_url + "?" + "&".join(params)
 
         # Paginate through all messages
-        remediation_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
-                if exc.http_status == 403 and not remediation_attempted:
-                    remediation_attempted = True
-                    # Best-effort: try to auto-grant missing permissions
-                    # using the current token and retry once.
-                    try:
-                        granted = await m365_service.try_grant_missing_permissions(
-                            int(auth_company_id), access_token
-                        )
-                        if granted:
-                            access_token = await m365_service.acquire_access_token(
-                                int(auth_company_id), force_client_credentials=True
-                            )
-                            log_info(
-                                "Retrying M365 mail sync after granting missing permissions",
-                                account_id=account_id,
-                            )
-                            continue  # retry the current URL
-                    except Exception:
-                        pass  # auto-remediation failed; fall through
-
+                if exc.http_status == 403:
                     log_error(
                         "Failed to fetch messages from M365 mailbox",
                         account_id=account_id,
