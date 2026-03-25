@@ -25,7 +25,7 @@ def anyio_backend() -> str:
 
 _MAILBOX_REPORTS_ROLE = "230c1aed-a721-4c5d-9cb4-a90514e508ef"  # Reports.Read.All
 _MAILBOX_SETTINGS_ROLE = "40f97065-369a-49f4-947c-6a255697ae91"  # MailboxSettings.Read
-_MAIL_READ_ROLE = "810c84a8-4a9e-49e6-bf7d-12d183f40d01"  # Mail.Read
+_MAIL_READWRITE_ROLE = "e2a3a72e-5f79-4c64-b1b1-878b674786c9"  # Mail.ReadWrite
 
 
 def _fake_creds(client_id: str = "app-client-id") -> dict[str, Any]:
@@ -354,10 +354,10 @@ def test_provision_app_roles_includes_mailbox_settings_read():
     )
 
 
-def test_provision_app_roles_includes_mail_read():
-    """_PROVISION_APP_ROLES must include Mail.Read for Office 365 mailbox import."""
-    assert _MAIL_READ_ROLE in _PROVISION_APP_ROLES, (
-        "Mail.Read (810c84a8-4a9e-49e6-bf7d-12d183f40d01) must be in _PROVISION_APP_ROLES"
+def test_provision_app_roles_includes_mail_readwrite():
+    """_PROVISION_APP_ROLES must include Mail.ReadWrite for Office 365 mailbox import."""
+    assert _MAIL_READWRITE_ROLE in _PROVISION_APP_ROLES, (
+        "Mail.ReadWrite (e2a3a72e-5f79-4c64-b1b1-878b674786c9) must be in _PROVISION_APP_ROLES"
     )
 
 
