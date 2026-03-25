@@ -146,3 +146,19 @@ async def clone_account(
             error_id=error_id,
         ) from exc
     return M365MailAccountResponse.model_validate(account)
+
+
+@router.post("/accounts/{account_id}/disconnect", response_model=M365MailAccountResponse)
+async def disconnect_account(
+    account_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+) -> M365MailAccountResponse:
+    """Remove the per-account delegated OAuth tokens (revert to company credentials)."""
+    account = await m365_mail_service.get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    result = await m365_mail_service.clear_delegated_tokens(account_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    return M365MailAccountResponse.model_validate(m365_mail_service.enrich_account_response(result))
