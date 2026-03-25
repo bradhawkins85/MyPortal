@@ -63,7 +63,7 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
 async def create_account(
     *,
     name: str,
-    company_id: int,
+    company_id: int | None,
     user_principal_name: str,
     mailbox_type: str,
     folder: str,
