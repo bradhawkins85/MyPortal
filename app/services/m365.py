@@ -110,8 +110,7 @@ _M365_ADMIN_MODULE_SLUG = "m365-admin"
 # external applications via Conditional Access or app-approval policies, which
 # can prevent this client from being used.  Set M365_PKCE_CLIENT_ID to a public
 # client app registration in your own tenant to avoid this issue.
-_AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
-AZURE_CLI_CLIENT_ID = _AZURE_CLI_CLIENT_ID
+AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 
 
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
@@ -137,7 +136,7 @@ def get_pkce_client_id() -> str:
     before falling back to this env-var lookup.
     """
     configured = str(get_settings().m365_pkce_client_id or "").strip()
-    return configured if configured else _AZURE_CLI_CLIENT_ID
+    return configured if configured else AZURE_CLI_CLIENT_ID
 
 
 async def _auto_provision_and_get_pkce_client_id(
@@ -375,7 +374,7 @@ async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> st
     Resolution order:
     1. Auto-provisioned PKCE client stored in the ``m365-admin`` module settings.
     2. Operator-configured ``M365_PKCE_CLIENT_ID`` environment variable.
-    3. Well-known Azure CLI public client (``_AZURE_CLI_CLIENT_ID``).
+    3. Well-known Azure CLI public client (``AZURE_CLI_CLIENT_ID``).
 
     Using the auto-provisioned value ensures that the system always uses a
     freshly-created, valid app registration even when the previously configured
@@ -402,7 +401,7 @@ async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> st
         return provisioned
 
     # 3. Azure CLI fallback
-    return _AZURE_CLI_CLIENT_ID
+    return AZURE_CLI_CLIENT_ID
 
 
 class M365Error(RuntimeError):
@@ -1542,7 +1541,7 @@ async def get_effective_pkce_client_id_for_company(
     1. Per-company PKCE client stored in company_m365_credentials.
     2. Auto-provisioned PKCE client from the m365-admin module settings.
     3. Operator-configured M365_PKCE_CLIENT_ID environment variable.
-    4. Well-known Azure CLI public client (_AZURE_CLI_CLIENT_ID).
+    4. Well-known Azure CLI public client (AZURE_CLI_CLIENT_ID).
     """
     # 1. Per-company PKCE client
     company_creds = await get_company_admin_credentials(company_id)
