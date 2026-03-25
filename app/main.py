@@ -5422,17 +5422,22 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 if state_data.get("flow") == "m365_mail_auth":
                     error_redirect = "/admin/modules/m365-mail"
             except Exception:
-                state_data = {}
+                pass
         # AADSTS700016 means the PKCE app registration no longer exists in the
         # tenant (it was deleted). Clear the stale pkce_client_id (including
         # any company-specific value) so that the next sign-in attempt falls
         # back to the Azure CLI public client, and guide the admin to re-
         # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
-            company_id = state_data.get("company_id")
-            if company_id:
+            company_id_raw = state_data.get("company_id")
+            company_id: int | None
+            try:
+                company_id = int(company_id_raw) if company_id_raw is not None else None
+            except (TypeError, ValueError):
+                company_id = None
+            if company_id is not None:
                 try:
-                    await m365_service.clear_company_pkce_client_id(int(company_id))
+                    await m365_service.clear_company_pkce_client_id(company_id)
                 except Exception:
                     pass
             try:
