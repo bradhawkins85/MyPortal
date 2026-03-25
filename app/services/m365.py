@@ -134,7 +134,9 @@ def get_pkce_client_id() -> str:
     return configured if configured else _AZURE_CLI_CLIENT_ID
 
 
-async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> str | None:
+async def _auto_provision_and_get_pkce_client_id(
+    *, redirect_uri: str | None = None
+) -> str | None:
     """Create a PKCE public client app when none is configured.
 
     Uses the stored admin app credentials (``m365-admin`` module) to acquire an
@@ -260,7 +262,7 @@ async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> st
         return configured
 
     # 2. Best-effort auto-provision using admin credentials before falling back
-    provisioned = await _auto_provision_pkce_client_id(redirect_uri=redirect_uri)
+    provisioned = await _auto_provision_and_get_pkce_client_id(redirect_uri=redirect_uri)
     if provisioned:
         return provisioned
 
@@ -340,7 +342,12 @@ def _encrypt(field: str | None) -> str | None:
 
 
 def parse_graph_datetime(value: str | None) -> datetime | None:
-    """Parse an ISO 8601 datetime string from Microsoft Graph into a UTC datetime."""
+    """Parse an ISO 8601 datetime string from Microsoft Graph into a UTC datetime.
+
+    Accepts strings with ``Z`` or explicit UTC offsets (e.g. ``2024-01-02T03:04:05Z``).
+    Returns a naive ``datetime`` normalised to UTC, or ``None`` when the value
+    cannot be parsed.
+    """
     if not value:
         return None
     try:
