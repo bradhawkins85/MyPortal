@@ -536,8 +536,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
                         if delegated:
                             remediation_token = delegated
-                    except Exception:
-                        pass  # fall back to the client_credentials token
+                    except Exception as deleg_exc:
+                        log_error(
+                            "Failed to acquire delegated token for remediation",
+                            account_id=account_id,
+                            error=str(deleg_exc),
+                        )
+                        # fall back to the client_credentials token
 
                     remediated = False
                     try:
