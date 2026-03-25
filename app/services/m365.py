@@ -113,6 +113,11 @@ _M365_ADMIN_MODULE_SLUG = "m365-admin"
 _AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 
 
+def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
+    """Return ``True`` when ``client_id`` matches the Azure CLI fallback app ID."""
+    return str(client_id or "").strip() == _AZURE_CLI_CLIENT_ID
+
+
 def get_pkce_client_id() -> str:
     """Return the PKCE public-client app ID to use for the bootstrap provisioning flow.
 
