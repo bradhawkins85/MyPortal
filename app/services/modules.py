@@ -557,8 +557,8 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     },
     {
         "slug": "m365-admin",
-        "name": "Microsoft 365 CSP / Lighthouse",
-        "description": "Configure Microsoft 365 CSP / Lighthouse partner credentials to enumerate and manage customer tenants.",
+        "name": "Microsoft 365 Admin",
+        "description": "Configure Microsoft 365 admin app credentials for enterprise app management.",
         "icon": "☁️",
         "settings": {
             "client_id": str(os.getenv("M365_ADMIN_CLIENT_ID", "")),
@@ -1096,7 +1096,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "call-recordings", # Call Recordings - configuration only, not an action module
     "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
     "plausible",      # Plausible - email tracking config only
-    "m365-admin",     # M365 CSP/Lighthouse - configuration only, not an action module
+    "m365-admin",     # M365 Admin - configuration only, not an action module
 }
 
 
