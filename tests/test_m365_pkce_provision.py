@@ -351,7 +351,7 @@ async def test_discover_callback_aadsts700025_returns_clear_error(
     assert response.status_code == 303
     location = response.headers.get("location", "")
     assert "error" in location
-    assert "AADSTS700025" in location or "public" in location.lower()
+    assert "AADSTS700025" in location or "public+app+and+cannot" in location.lower()
 
 
 # ---------------------------------------------------------------------------
