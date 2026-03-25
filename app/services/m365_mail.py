@@ -524,11 +524,30 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         upn=upn,
                         error=str(exc),
                     )
-                    # Best-effort: attempt to grant missing permissions and retry
+                    # Best-effort: attempt to grant missing permissions and retry.
+                    # Prefer a delegated token (from the stored refresh token)
+                    # for remediation.  The delegated token obtained during the
+                    # admin connect flow carries AppRoleAssignment.ReadWrite.All
+                    # which is required to create missing appRoleAssignments.
+                    remediation_token = access_token
+                    try:
+                        delegated = await m365_service.acquire_delegated_token(
+                            int(auth_company_id)
+                        )
+                        if delegated:
+                            remediation_token = delegated
+                    except Exception as deleg_exc:
+                        log_error(
+                            "Failed to acquire delegated token for remediation",
+                            account_id=account_id,
+                            error=str(deleg_exc),
+                        )
+                        # fall back to the client_credentials token
+
                     remediated = False
                     try:
                         remediated = await m365_service.try_grant_missing_permissions(
-                            int(auth_company_id), access_token
+                            int(auth_company_id), remediation_token
                         )
                     except Exception as grant_exc:
                         log_error(
