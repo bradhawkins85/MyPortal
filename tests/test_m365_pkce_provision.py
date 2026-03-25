@@ -512,7 +512,9 @@ async def test_callback_error_aadsts700016_clears_company_pkce():
             m365_service, "clear_pkce_client_id", new_callable=AsyncMock
         ) as mock_clear_global,
     ):
-        response = await m365_callback(request, state=state, error="invalid_client")
+        response = await m365_callback(
+            request, state=state, error=request.query_params["error"]
+        )
 
     assert response.status_code == 303
     mock_clear_company.assert_awaited_once_with(123)
