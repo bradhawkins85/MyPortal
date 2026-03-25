@@ -150,7 +150,7 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
         f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     )
     data = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id(),
         "grant_type": "refresh_token",
         "refresh_token": decrypted_refresh,
         "scope": DELEGATED_MAIL_SCOPE,
