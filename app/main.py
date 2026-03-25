@@ -5430,10 +5430,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
             company_id_raw = state_data.get("company_id")
-            try:
-                company_id = int(company_id_raw) if company_id_raw is not None else None
-            except (TypeError, ValueError):
-                company_id = None
+            company_id = None
+            if company_id_raw is not None:
+                try:
+                    company_id = int(company_id_raw)
+                except (TypeError, ValueError):
+                    company_id = None
             if company_id is not None:
                 try:
                     await m365_service.clear_company_pkce_client_id(company_id)
