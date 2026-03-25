@@ -21,6 +21,8 @@ from itsdangerous import BadSignature
 from app.main import app, m365_callback
 from app.services import m365 as m365_service
 
+AZURE_CLI_CLIENT_ID = m365_service._AZURE_CLI_CLIENT_ID  # type: ignore[attr-defined]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -393,14 +395,14 @@ async def test_m365_discover_uses_pkce_even_when_admin_credentials_configured(
 
 
 @pytest.mark.anyio("asyncio")
-async def test_m365_discover_allows_azure_cli_fallback_client(async_client: HttpxAsyncClient):
+async def test_m365_discover_redirects_to_microsoft_with_azure_cli_fallback(async_client: HttpxAsyncClient):
     """GET /m365/discover still proceeds when only Azure CLI fallback is available."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
         patch(
             "app.main.m365_service.get_effective_pkce_client_id_for_company",
             new_callable=AsyncMock,
-            return_value="04b07795-8542-4ab8-9e00-81f6b0a2c83a",
+            return_value=AZURE_CLI_CLIENT_ID,
         ),
     ):
         mock_ctx.return_value = (
@@ -418,18 +420,18 @@ async def test_m365_discover_allows_azure_cli_fallback_client(async_client: Http
 
     assert "login.microsoftonline.com" in parsed.netloc
     assert "organizations" in parsed.path
-    assert qs.get("client_id", [None])[0] == "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+    assert qs.get("client_id", [None])[0] == AZURE_CLI_CLIENT_ID
 
 
 @pytest.mark.anyio("asyncio")
-async def test_m365_provision_allows_azure_cli_fallback_client(async_client: HttpxAsyncClient):
+async def test_m365_provision_redirects_to_microsoft_with_azure_cli_fallback(async_client: HttpxAsyncClient):
     """GET /m365/provision still proceeds when only Azure CLI fallback is available."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
         patch(
             "app.main.m365_service.get_effective_pkce_client_id_for_company",
             new_callable=AsyncMock,
-            return_value="04b07795-8542-4ab8-9e00-81f6b0a2c83a",
+            return_value=AZURE_CLI_CLIENT_ID,
         ),
     ):
         mock_ctx.return_value = (
@@ -450,7 +452,7 @@ async def test_m365_provision_allows_azure_cli_fallback_client(async_client: Htt
 
     assert "login.microsoftonline.com" in parsed.netloc
     assert "organizations" in parsed.path
-    assert qs.get("client_id", [None])[0] == "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+    assert qs.get("client_id", [None])[0] == AZURE_CLI_CLIENT_ID
 
 
 # ---------------------------------------------------------------------------
