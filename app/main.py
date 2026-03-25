@@ -5202,7 +5202,9 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         }
     )
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+            company_id, redirect_uri=redirect_uri
+        ),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5253,7 +5255,9 @@ async def admin_company_m365_provision(
         }
     )
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+            company_id, redirect_uri=redirect_uri
+        ),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5336,7 +5340,9 @@ async def m365_discover(request: Request):
     # which occurs when the configured admin client_id belongs to a public
     # PKCE app rather than a confidential app.
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(company_id)
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
+        company_id, redirect_uri=redirect_uri
+    )
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5377,7 +5383,9 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     # credentials are configured.  See the /m365/discover handler for the
     # full rationale (avoids AADSTS700025 on reprovision with public client).
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(company_id)
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
+        company_id, redirect_uri=redirect_uri
+    )
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5488,7 +5496,11 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
         token_data = {
-            "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id) if company_id else await m365_service.get_effective_pkce_client_id(),
+            "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+                company_id, redirect_uri=redirect_uri
+            )
+            if company_id
+            else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5572,7 +5584,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
+                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+                    company_id, redirect_uri=redirect_uri
+                ),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5679,7 +5693,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data = {
-                "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id),
+                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+                    company_id, redirect_uri=redirect_uri
+                ),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -17075,7 +17091,11 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
         "code_verifier": code_verifier,
     })
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id_for_company(company_id) if company_id else await m365_service.get_effective_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+            company_id, redirect_uri=redirect_uri
+        )
+        if company_id
+        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",

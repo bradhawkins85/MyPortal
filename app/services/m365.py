@@ -134,7 +134,108 @@ def get_pkce_client_id() -> str:
     return configured if configured else _AZURE_CLI_CLIENT_ID
 
 
-async def get_effective_pkce_client_id() -> str:
+async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> str | None:
+    """Create a PKCE public client app when none is configured.
+
+    Uses the stored admin app credentials (``m365-admin`` module) to acquire an
+    app-only token and create a fresh multi-tenant public client.  Falls back to
+    the optional bootstrap credentials from environment variables when the
+    module has not been configured yet.  Returns the new client ID or ``None``
+    if provisioning cannot be performed.
+    """
+    if not redirect_uri:
+        return None
+
+    settings = get_settings()
+
+    try:
+        admin_creds = await get_admin_m365_credentials()
+    except Exception:
+        admin_creds = None
+
+    source: str | None = None
+    if admin_creds:
+        source = "module"
+    elif (
+        settings.m365_bootstrap_client_id
+        and settings.m365_bootstrap_client_secret
+        and settings.azure_tenant_id
+    ):
+        admin_creds = {
+            "client_id": settings.m365_bootstrap_client_id,
+            "client_secret": settings.m365_bootstrap_client_secret,
+            "tenant_id": settings.azure_tenant_id,
+            "app_object_id": None,
+            "client_secret_key_id": None,
+            "client_secret_expires_at": None,
+        }
+        source = "bootstrap"
+    else:
+        return None
+
+    tenant_id = (
+        str(admin_creds.get("tenant_id") or settings.azure_tenant_id or "").strip()
+    )
+    client_id = str(admin_creds.get("client_id") or "").strip()
+    client_secret = str(admin_creds.get("client_secret") or "").strip()
+    if not tenant_id or not client_id or not client_secret:
+        return None
+
+    try:
+        access_token, _, _ = await _exchange_token(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            refresh_token=None,
+        )
+    except M365Error as exc:
+        log_warning(
+            "Failed to acquire token for PKCE auto-provisioning",
+            error=str(exc),
+        )
+        return None
+
+    try:
+        pkce_client_id = await provision_pkce_public_client_app(
+            access_token=access_token,
+            redirect_uri=redirect_uri,
+        )
+    except Exception as exc:
+        log_warning(
+            "Failed to auto-provision PKCE public client app",
+            error=str(exc),
+        )
+        return None
+
+    if source == "module":
+        try:
+            expires_raw = admin_creds.get("client_secret_expires_at")
+            expires_at = expires_raw
+            if isinstance(expires_raw, str):
+                try:
+                    expires_at = datetime.fromisoformat(expires_raw)
+                except ValueError:
+                    expires_at = None
+
+            await update_admin_m365_credentials(
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_id=admin_creds.get("tenant_id"),
+                app_object_id=admin_creds.get("app_object_id"),
+                client_secret_key_id=admin_creds.get("client_secret_key_id"),
+                client_secret_expires_at=expires_at,
+                pkce_client_id=pkce_client_id,
+            )
+        except Exception as exc:  # pragma: no cover - best-effort persistence
+            log_warning(
+                "Failed to persist auto-provisioned PKCE client ID",
+                error=str(exc),
+            )
+
+    return pkce_client_id
+
+
+async def get_effective_pkce_client_id(*, redirect_uri: str | None = None) -> str:
     """Return the best available PKCE public-client app ID.
 
     Resolution order:
@@ -156,8 +257,18 @@ async def get_effective_pkce_client_id() -> str:
         if stored:
             return stored
 
-    # 2. Operator-configured env var / Azure CLI fallback
-    return get_pkce_client_id()
+    settings = get_settings()
+    configured = str(settings.m365_pkce_client_id or "").strip()
+    if configured:
+        return configured
+
+    # 2. Best-effort auto-provision using admin credentials before falling back
+    provisioned = await _auto_provision_pkce_client_id(redirect_uri=redirect_uri)
+    if provisioned:
+        return provisioned
+
+    # 3. Azure CLI fallback
+    return _AZURE_CLI_CLIENT_ID
 
 
 class M365Error(RuntimeError):
@@ -1274,7 +1385,9 @@ async def get_effective_admin_credentials(company_id: int) -> dict[str, Any] | N
     return None
 
 
-async def get_effective_pkce_client_id_for_company(company_id: int) -> str:
+async def get_effective_pkce_client_id_for_company(
+    company_id: int, *, redirect_uri: str | None = None
+) -> str:
     """Return the best available PKCE public-client app ID for a specific company.
 
     Resolution order:
@@ -1291,7 +1404,7 @@ async def get_effective_pkce_client_id_for_company(company_id: int) -> str:
             return stored
 
     # 2+ falls through to existing function
-    return await get_effective_pkce_client_id()
+    return await get_effective_pkce_client_id(redirect_uri=redirect_uri)
 
 
 async def clear_company_pkce_client_id(company_id: int) -> None:
