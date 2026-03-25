@@ -263,3 +263,39 @@ async def test_acquire_access_token_force_client_credentials_bypasses_cache_and_
     mock_exchange.assert_called_once()
     _, call_kwargs = mock_exchange.call_args
     assert call_kwargs.get("refresh_token") is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_force_client_credentials_preserves_stored_refresh_token():
+    """force_client_credentials=True must NOT clear the stored refresh token.
+
+    The client_credentials grant does not consume the refresh token, so the
+    existing value should be preserved for future delegated operations (e.g.
+    auto-granting missing permissions on a 403).
+    """
+    creds = {
+        "company_id": 1,
+        "tenant_id": "tenant-abc",
+        "client_id": "client-abc",
+        "client_secret": "secret-abc",
+        "refresh_token": "delegated-refresh-token",
+        "access_token": "old-token",
+        "token_expires_at": None,
+    }
+
+    mock_update = AsyncMock()
+    mock_exchange = AsyncMock(return_value=("cc-token", None, _utcnow() + timedelta(hours=1)))
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)),
+        patch.object(m365_service.companies_repo, "get_company_csp_tenant_id", AsyncMock(return_value=None)),
+        patch.object(m365_service, "_exchange_token", mock_exchange),
+        patch.object(m365_service.m365_repo, "update_tokens", mock_update),
+        patch.object(m365_service, "_encrypt", lambda x: x),
+    ):
+        result = await m365_service.acquire_access_token(1, force_client_credentials=True)
+
+    assert result == "cc-token"
+    mock_update.assert_called_once()
+    _, update_kwargs = mock_update.call_args
+    # The stored refresh token must be preserved (not set to None)
+    assert update_kwargs.get("refresh_token") == "delegated-refresh-token"

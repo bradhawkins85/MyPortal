@@ -18,6 +18,7 @@ from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import system_state
 from app.services import tickets as tickets_service
+from app.services.m365 import M365Error
 from app.services.sanitization import sanitize_rich_text
 
 # Reuse filter helpers from the IMAP module so we share the same filter DSL.
@@ -313,8 +314,9 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
             status=response.status_code,
             body=response.text[:500] if response.text else "",
         )
-        raise RuntimeError(
-            f"Microsoft Graph request failed ({response.status_code})"
+        raise M365Error(
+            f"Microsoft Graph request failed ({response.status_code})",
+            http_status=response.status_code,
         )
     return response.json()
 
@@ -498,9 +500,57 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         full_url = messages_url + "?" + "&".join(params)
 
         # Paginate through all messages
+        _remediation_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
+            except M365Error as exc:
+                if exc.http_status == 403 and not _remediation_attempted:
+                    _remediation_attempted = True
+                    # Best-effort: try to auto-grant missing permissions
+                    # using the current token and retry once.
+                    try:
+                        granted = await m365_service.try_grant_missing_permissions(
+                            int(auth_company_id), access_token
+                        )
+                        if granted:
+                            access_token = await m365_service.acquire_access_token(
+                                int(auth_company_id), force_client_credentials=True
+                            )
+                            log_info(
+                                "Retrying M365 mail sync after granting missing permissions",
+                                account_id=account_id,
+                            )
+                            continue  # retry the current URL
+                    except Exception:
+                        pass  # auto-remediation failed; fall through
+
+                    log_error(
+                        "Failed to fetch messages from M365 mailbox",
+                        account_id=account_id,
+                        upn=upn,
+                        error=str(exc),
+                    )
+                    errors.append({
+                        "error": (
+                            "Mail sync failed (403 Forbidden). The enterprise app "
+                            "may be missing the Mail.ReadWrite permission. "
+                            "Re-provision or re-authorise the enterprise app in "
+                            "Microsoft 365 settings to grant the required "
+                            "permissions. If you have just re-provisioned, please "
+                            "wait a few minutes for the permissions to take effect, "
+                            "then retry the sync."
+                        )
+                    })
+                    break
+                log_error(
+                    "Failed to fetch messages from M365 mailbox",
+                    account_id=account_id,
+                    upn=upn,
+                    error=str(exc),
+                )
+                errors.append({"error": f"Failed to fetch messages: {exc}"})
+                break
             except Exception as exc:
                 log_error(
                     "Failed to fetch messages from M365 mailbox",
