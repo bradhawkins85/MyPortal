@@ -1191,6 +1191,7 @@ async def trigger_module(
         "update-ticket-description": _invoke_update_ticket_description,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
+        "whisperx": _invoke_whisperx,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -4083,5 +4084,240 @@ async def _invoke_add_ticket_reply(
             "ticket_id": ticket_id_int,
             "reply_id": reply_id,
             "is_internal": is_internal,
+        },
+    )
+
+
+# Audio MIME types accepted for WhisperX transcription
+_WHISPERX_AUDIO_MIME_TYPES = {
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/ogg",
+    "audio/flac",
+    "audio/x-flac",
+    "audio/webm",
+    "audio/mp4",
+    "audio/x-m4a",
+}
+
+# File extensions accepted when MIME type is missing or generic
+_WHISPERX_AUDIO_EXTENSIONS = {
+    ".wav", ".mp3", ".ogg", ".flac", ".webm", ".m4a", ".mp4", ".mpeg",
+}
+
+
+def _is_audio_attachment(attachment: Mapping[str, Any]) -> bool:
+    """Return True if the attachment is an audio file suitable for transcription."""
+    mime = (attachment.get("mime_type") or "").lower().strip()
+    if mime in _WHISPERX_AUDIO_MIME_TYPES:
+        return True
+    original = attachment.get("original_filename") or ""
+    ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
+    return f".{ext}" in _WHISPERX_AUDIO_EXTENSIONS
+
+
+async def _invoke_whisperx(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Transcribe audio attachments on a ticket using WhisperX.
+
+    Accepts a JSON payload with:
+    - ticket_id: Required (can come from context.ticket.id)
+    - add_note: Optional (default: true) – add an internal note with the transcription
+    - language: Optional – override the module-level language setting
+
+    The handler finds all audio attachments on the ticket, sends each to the
+    WhisperX ``/asr`` endpoint, and (when *add_note* is true) posts the
+    resulting transcription as an internal note on the ticket.
+    """
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import ticket_attachments as attachments_repo
+
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+
+    # -- resolve ticket_id ------------------------------------------------
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_ctx = context.get("ticket")
+        if isinstance(ticket_ctx, Mapping):
+            ticket_id = ticket_ctx.get("id")
+
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+
+    add_note = _ensure_bool(payload.get("add_note"), True)
+    language = payload.get("language") or settings.get("language") or ""
+
+    # -- validate WhisperX settings ---------------------------------------
+    base_url = (settings.get("base_url") or "").strip().rstrip("/")
+    api_key = settings.get("api_key") or ""
+    if not base_url:
+        raise ValueError("WhisperX base_url is not configured")
+
+    target_url = f"{base_url}/asr"
+
+    # -- create webhook event for tracking --------------------------------
+    event = await webhook_monitor.create_manual_event(
+        name="module.whisperx.transcribe",
+        target_url=target_url,
+        payload={
+            "ticket_id": ticket_id_int,
+            "add_note": add_note,
+            "language": language,
+        },
+        headers={"X-Module": "whisperx"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for WhisperX transcription")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+
+    attempt_number = 1
+    try:
+        # -- verify ticket exists -----------------------------------------
+        existing = await tickets_repo.get_ticket(ticket_id_int)
+        if not existing:
+            raise ValueError(f"Ticket {ticket_id_int} not found")
+
+        # -- list attachments and filter audio files ----------------------
+        all_attachments = await attachments_repo.list_attachments(ticket_id_int)
+        audio_attachments = [a for a in all_attachments if _is_audio_attachment(a)]
+
+        if not audio_attachments:
+            raise ValueError(f"No audio attachments found on ticket {ticket_id_int}")
+
+        upload_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
+
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        transcriptions: list[dict[str, Any]] = []
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            for attachment in audio_attachments:
+                file_path = upload_dir / attachment["filename"]
+                if not file_path.exists():
+                    logger.warning(
+                        "Audio file missing for attachment %s: %s",
+                        attachment["id"],
+                        file_path,
+                    )
+                    continue
+
+                original_name = attachment.get("original_filename") or attachment["filename"]
+                mime = (attachment.get("mime_type") or "audio/wav").strip()
+
+                with open(file_path, "rb") as audio_file:
+                    files = {"audio_file": (original_name, audio_file, mime)}
+                    data: dict[str, str] = {}
+                    if language:
+                        data["language"] = language
+
+                    response = await client.post(
+                        target_url,
+                        files=files,
+                        data=data if data else None,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+
+                # parse response – JSON with "text" key, or plain text
+                transcription = ""
+                try:
+                    result_json = response.json()
+                    transcription = result_json.get("text", "")
+                except ValueError:
+                    transcription = response.text.strip()
+
+                if transcription:
+                    transcriptions.append({
+                        "attachment_id": attachment["id"],
+                        "filename": original_name,
+                        "transcription": transcription,
+                    })
+
+        if not transcriptions:
+            raise ValueError("WhisperX returned empty transcriptions for all audio attachments")
+
+        # -- optionally post an internal note -----------------------------
+        reply_id = None
+        if add_note:
+            parts: list[str] = []
+            for t in transcriptions:
+                parts.append(
+                    f"**Transcription of {t['filename']}:**\n\n{t['transcription']}"
+                )
+            note_body = "\n\n---\n\n".join(parts)
+            reply = await tickets_repo.create_reply(
+                ticket_id=ticket_id_int,
+                author_id=None,
+                body=note_body,
+                is_internal=True,
+            )
+            reply_id = reply.get("id") if reply else None
+
+            await tickets_service.emit_ticket_updated_event(
+                ticket_id_int,
+                actor_type="automation",
+                trigger_automations=False,
+            )
+
+    except Exception as exc:
+        logger.error(
+            "WhisperX transcription failed",
+            error=str(exc),
+            ticket_id=ticket_id_int,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id_int},
+        )
+
+    response_body = json.dumps({
+        "ticket_id": ticket_id_int,
+        "transcriptions": [
+            {"attachment_id": t["attachment_id"], "filename": t["filename"]}
+            for t in transcriptions
+        ],
+        "reply_id": reply_id,
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "ticket_id": ticket_id_int,
+            "transcription_count": len(transcriptions),
+            "reply_id": reply_id,
         },
     )
