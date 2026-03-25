@@ -393,8 +393,8 @@ async def test_m365_discover_uses_pkce_even_when_admin_credentials_configured(
 
 
 @pytest.mark.anyio("asyncio")
-async def test_m365_discover_rejects_azure_cli_fallback_client(async_client: HttpxAsyncClient):
-    """GET /m365/discover returns an actionable error when only Azure CLI fallback is available."""
+async def test_m365_discover_allows_azure_cli_fallback_client(async_client: HttpxAsyncClient):
+    """GET /m365/discover still proceeds when only Azure CLI fallback is available."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
         patch(
@@ -413,13 +413,17 @@ async def test_m365_discover_rejects_azure_cli_fallback_client(async_client: Htt
         response = await async_client.get("/m365/discover", follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"].startswith("/m365?error=")
-    assert "M365_PKCE_CLIENT_ID" in response.headers["location"]
+    parsed = urlparse(response.headers["location"])
+    qs = parse_qs(parsed.query)
+
+    assert "login.microsoftonline.com" in parsed.netloc
+    assert "organizations" in parsed.path
+    assert qs.get("client_id", [None])[0] == "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 
 
 @pytest.mark.anyio("asyncio")
-async def test_m365_provision_rejects_azure_cli_fallback_client(async_client: HttpxAsyncClient):
-    """GET /m365/provision returns an actionable error when only Azure CLI fallback is available."""
+async def test_m365_provision_allows_azure_cli_fallback_client(async_client: HttpxAsyncClient):
+    """GET /m365/provision still proceeds when only Azure CLI fallback is available."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
         patch(
@@ -441,8 +445,12 @@ async def test_m365_provision_rejects_azure_cli_fallback_client(async_client: Ht
         )
 
     assert response.status_code == 303
-    assert response.headers["location"].startswith("/m365?error=")
-    assert "M365_PKCE_CLIENT_ID" in response.headers["location"]
+    parsed = urlparse(response.headers["location"])
+    qs = parse_qs(parsed.query)
+
+    assert "login.microsoftonline.com" in parsed.netloc
+    assert "organizations" in parsed.path
+    assert qs.get("client_id", [None])[0] == "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 
 
 # ---------------------------------------------------------------------------
