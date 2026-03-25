@@ -4,6 +4,7 @@ import base64
 import json
 from datetime import datetime, timezone
 from typing import Any, Mapping
+from urllib.parse import quote
 
 import httpx
 
@@ -487,7 +488,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     try:
         # Build the messages URL
         # For both user and shared mailboxes the Graph API uses /users/{upn}/...
-        messages_url = f"{_GRAPH_BASE}/users/{upn}/mailFolders/{folder}/messages"
+        messages_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(folder, safe='')}/messages"
         params = [
             "$top=50",
             "$orderby=receivedDateTime asc",
@@ -796,7 +797,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # Mark as read if configured
                 if mark_as_read and is_unread:
                     try:
-                        patch_url = f"{_GRAPH_BASE}/users/{upn}/messages/{msg_id}"
+                        patch_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{msg_id}"
                         await _graph_patch(access_token, patch_url, {"isRead": True})
                     except Exception:  # pragma: no cover - Graph API errors
                         log_error(
@@ -831,7 +832,7 @@ async def _save_graph_attachments(
     ticket_id: int,
 ) -> None:
     """Fetch and save message attachments via the Graph API."""
-    url = f"{_GRAPH_BASE}/users/{upn}/messages/{message_id}/attachments"
+    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id}/attachments"
     try:
         data = await _graph_get(access_token, url)
     except Exception:

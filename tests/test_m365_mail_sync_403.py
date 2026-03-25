@@ -208,3 +208,36 @@ async def test_graph_get_raises_m365error_with_status():
 
     assert exc_info.value.http_status == 403
     assert "403" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# UPN URL-encoding: @ must be percent-encoded in Graph API paths
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_account_encodes_upn_in_graph_url(monkeypatch):
+    """The UPN's '@' must be percent-encoded (%40) in Graph API path segments."""
+    _patch_common(monkeypatch)
+
+    captured_urls: list[str] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        captured_urls.append(url)
+        # Return an empty page so sync completes
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_access_token", fake_acquire_token
+    )
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert len(captured_urls) == 1
+    # The '@' in the UPN must be percent-encoded
+    assert "user%40example.com" in captured_urls[0]
+    assert "user@example.com" not in captured_urls[0]
