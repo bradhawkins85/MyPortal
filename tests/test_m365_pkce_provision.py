@@ -240,7 +240,7 @@ async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAs
 
 
 @pytest.mark.anyio("asyncio")
-async def test_company_pkce_auto_provision_uses_per_company_admin_creds():
+async def test_pkce_auto_provision_uses_company_admin_creds():
     """Per-company PKCE auto-provision uses stored admin credentials when missing."""
     company_creds = {
         "client_id": "company-admin-id",
@@ -669,7 +669,7 @@ async def test_provision_callback_uses_pkce_token_exchange(
 
 
 @pytest.mark.anyio("asyncio")
-async def test_provision_callback_auto_provisions_company_pkce(async_client: HttpxAsyncClient):
+async def test_provision_callback_creates_dedicated_company_pkce_app(async_client: HttpxAsyncClient):
     """Provision callback provisions a dedicated PKCE app for the company."""
     code_verifier, _ = m365_service.generate_pkce_pair()
     state = _signed_state(
