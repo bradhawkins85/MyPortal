@@ -72,6 +72,8 @@ _PROVISION_APP_ROLES: list[str] = [
     # Additional permissions for mailbox reporting:
     "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
     "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
+    # Permission for Office 365 Mailbox Import (m365-mail module):
+    "810c84a8-4a9e-49e6-bf7d-12d183f40d01",  # Mail.Read
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
