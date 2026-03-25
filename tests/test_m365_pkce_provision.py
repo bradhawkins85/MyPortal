@@ -88,6 +88,11 @@ async def test_m365_provision_uses_pkce(async_client: HttpxAsyncClient):
     """GET /m365/provision always uses the PKCE public client."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
     ):
         mock_ctx.return_value = (
             {"id": 1, "is_super_admin": True},  # user
@@ -117,7 +122,7 @@ async def test_m365_provision_uses_pkce(async_client: HttpxAsyncClient):
         "Should include domain_hint with tenant_id to guide admin to correct tenant"
 
     # Must use PKCE client, not admin credentials
-    assert qs.get("client_id", [None])[0] == _pkce_client_id()
+    assert qs.get("client_id", [None])[0] == "custom-pkce-client-id"
 
     # Must include PKCE parameters
     assert "code_challenge" in qs, "Should include code_challenge for PKCE"
@@ -135,6 +140,11 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
             "app.main._get_m365_admin_credentials",
             new_callable=AsyncMock,
             return_value=("admin-client-id", "admin-client-secret"),
+        ),
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
         ),
     ):
         mock_ctx.return_value = (
@@ -158,7 +168,7 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
     # Must NOT use the admin client ID
     assert qs.get("client_id", [None])[0] != "admin-client-id"
     # Must use PKCE client
-    assert qs.get("client_id", [None])[0] == _pkce_client_id()
+    assert qs.get("client_id", [None])[0] == "custom-pkce-client-id"
     # Must include PKCE parameters
     assert "code_challenge" in qs
     # Must use /organizations endpoint
@@ -234,6 +244,11 @@ async def test_admin_company_m365_provision_uses_pkce(async_client: HttpxAsyncCl
     """GET /admin/companies/{id}/m365-provision always uses the PKCE public client."""
     with (
         patch("app.main._require_super_admin_page", new_callable=AsyncMock) as mock_auth,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
     ):
         mock_auth.return_value = ({"id": 1, "is_super_admin": True}, None)
 
@@ -254,7 +269,7 @@ async def test_admin_company_m365_provision_uses_pkce(async_client: HttpxAsyncCl
     # Must pass domain_hint for the correct tenant
     assert qs.get("domain_hint", [None])[0] == "customer-tenant-id"
 
-    assert qs.get("client_id", [None])[0] == _pkce_client_id()
+    assert qs.get("client_id", [None])[0] == "custom-pkce-client-id"
     assert "code_challenge" in qs
     assert qs.get("code_challenge_method", [None])[0] == "S256"
 
@@ -270,6 +285,11 @@ async def test_m365_discover_always_uses_pkce(
     """GET /m365/discover always uses PKCE regardless of admin credential config."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
     ):
         mock_ctx.return_value = (
             {"id": 1, "is_super_admin": True},
@@ -286,7 +306,7 @@ async def test_m365_discover_always_uses_pkce(
     parsed = urlparse(location)
     qs = parse_qs(parsed.query)
 
-    assert qs.get("client_id", [None])[0] == _pkce_client_id()
+    assert qs.get("client_id", [None])[0] == "custom-pkce-client-id"
     assert "code_challenge" in qs
     assert qs.get("code_challenge_method", [None])[0] == "S256"
 
@@ -307,6 +327,11 @@ async def test_m365_discover_uses_pkce_even_when_admin_credentials_configured(
             new_callable=AsyncMock,
             return_value=("configured-admin-client", "configured-admin-secret"),
         ),
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
     ):
         mock_ctx.return_value = (
             {"id": 1, "is_super_admin": True},
@@ -325,9 +350,62 @@ async def test_m365_discover_uses_pkce_even_when_admin_credentials_configured(
 
     # Must NOT use the admin client ID - always use the PKCE public client
     assert qs.get("client_id", [None])[0] != "configured-admin-client"
-    assert qs.get("client_id", [None])[0] == _pkce_client_id()
+    assert qs.get("client_id", [None])[0] == "custom-pkce-client-id"
     assert "code_challenge" in qs
     assert qs.get("code_challenge_method", [None])[0] == "S256"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_m365_discover_rejects_azure_cli_fallback_client(async_client: HttpxAsyncClient):
+    """GET /m365/discover returns an actionable error when only Azure CLI fallback is available."""
+    with (
+        patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="04b07795-8542-4ab8-9e00-81f6b0a2c83a",
+        ),
+    ):
+        mock_ctx.return_value = (
+            {"id": 1, "is_super_admin": True},
+            {},
+            None,
+            42,
+            None,
+        )
+        response = await async_client.get("/m365/discover", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/m365?error=")
+    assert "M365_PKCE_CLIENT_ID" in response.headers["location"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_m365_provision_rejects_azure_cli_fallback_client(async_client: HttpxAsyncClient):
+    """GET /m365/provision returns an actionable error when only Azure CLI fallback is available."""
+    with (
+        patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="04b07795-8542-4ab8-9e00-81f6b0a2c83a",
+        ),
+    ):
+        mock_ctx.return_value = (
+            {"id": 1, "is_super_admin": True},
+            {},
+            None,
+            42,
+            None,
+        )
+        response = await async_client.get(
+            "/m365/provision?tenant_id=test-tenant-id",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/m365?error=")
+    assert "M365_PKCE_CLIENT_ID" in response.headers["location"]
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +444,16 @@ async def test_discover_callback_uses_pkce_token_exchange(
 
     with (
         patch("app.main.httpx.AsyncClient") as mock_http,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
+        patch(
+            "app.main._get_m365_admin_credentials",
+            new_callable=AsyncMock,
+            return_value=(None, None),
+        ),
     ):
         mock_http.return_value.__aenter__ = AsyncMock(
             return_value=MagicMock(post=AsyncMock(side_effect=fake_post))
@@ -382,7 +470,7 @@ async def test_discover_callback_uses_pkce_token_exchange(
     assert "discovered-tenant-id" in response.headers.get("location", "")
     assert len(token_calls) == 1
     token_req = token_calls[0]["data"]
-    assert token_req.get("client_id") == _pkce_client_id()
+    assert token_req.get("client_id") == "custom-pkce-client-id"
     assert token_req.get("code_verifier") == code_verifier
     assert "client_secret" not in token_req
 
@@ -505,6 +593,11 @@ async def test_provision_callback_uses_pkce_token_exchange(
 
     with (
         patch("app.main.httpx.AsyncClient") as mock_http,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
         patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
         patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock),
         patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
@@ -527,7 +620,7 @@ async def test_provision_callback_uses_pkce_token_exchange(
     # Token exchange must use PKCE (code_verifier, no client_secret)
     assert len(token_calls) == 1
     token_req = token_calls[0]["data"]
-    assert token_req.get("client_id") == _pkce_client_id()
+    assert token_req.get("client_id") == "custom-pkce-client-id"
     assert "code_verifier" in token_req
     assert token_req["code_verifier"] == code_verifier
     assert "client_secret" not in token_req
@@ -575,6 +668,11 @@ async def test_provision_callback_persists_token_tenant_when_it_differs_from_sta
 
     with (
         patch("app.main.httpx.AsyncClient") as mock_http,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
         patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
         patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock) as mock_upsert,
         patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
