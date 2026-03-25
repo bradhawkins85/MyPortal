@@ -45,12 +45,11 @@ _MODULE_SLUG = "m365-mail"
 
 _403_ERROR_MESSAGE = (
     "Mail sync failed (403 Forbidden). The enterprise app "
-    "may be missing the Mail.ReadWrite permission. "
-    "Re-provision or re-authorise the enterprise app in "
-    "Microsoft 365 settings to grant the required "
-    "permissions. If you have just re-provisioned, please "
-    "wait a few minutes for the permissions to take effect, "
-    "then retry the sync."
+    "may be missing required Microsoft Graph application "
+    "permissions (including Mail.ReadWrite), or mailbox access "
+    "to this user is restricted by policy. Re-authorise from "
+    "Microsoft 365 settings as a Global Administrator and "
+    "grant admin consent, then retry the sync."
 )
 
 # Delegated OAuth scope for the per-account sign-in flow.  Mail.ReadWrite
@@ -675,7 +674,6 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         full_url = messages_url + "?" + urlencode(query_params, quote_via=quote, safe="$,")
 
         # Paginate through all messages
-        remediation_attempted = False
         delegated_fallback_attempted = False
         while full_url:
             try:
@@ -718,67 +716,16 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
                     })
                     break
-                if exc.http_status == 403 and not remediation_attempted and not using_delegated:
-                    remediation_attempted = True
+                if exc.http_status == 403 and not using_delegated:
                     log_error(
                         "Failed to fetch messages from M365 mailbox",
                         account_id=account_id,
                         upn=upn,
                         error=str(exc),
                     )
-                    # Best-effort: attempt to grant missing permissions and retry.
-                    # Prefer a delegated token (from the stored refresh token)
-                    # for remediation.  The delegated token obtained during the
-                    # admin connect flow carries AppRoleAssignment.ReadWrite.All
-                    # which is required to create missing appRoleAssignments.
-                    remediation_token = access_token
-                    try:
-                        delegated = await m365_service.acquire_delegated_token(
-                            int(auth_company_id)
-                        )
-                        if delegated:
-                            remediation_token = delegated
-                    except Exception as deleg_exc:
-                        log_error(
-                            "Failed to acquire delegated token for remediation",
-                            account_id=account_id,
-                            error=str(deleg_exc),
-                        )
-                        # fall back to the client_credentials token
-
-                    remediated = False
-                    try:
-                        remediated = await m365_service.try_grant_missing_permissions(
-                            int(auth_company_id), remediation_token
-                        )
-                    except Exception as grant_exc:
-                        log_error(
-                            "Auto-grant of missing M365 permissions failed",
-                            account_id=account_id,
-                            error=str(grant_exc),
-                        )
-                    if remediated:
-                        log_info(
-                            "Granted missing M365 permissions; re-acquiring token and retrying",
-                            account_id=account_id,
-                        )
-                        try:
-                            access_token = await m365_service.acquire_access_token(
-                                int(auth_company_id), force_client_credentials=True
-                            )
-                        except Exception as token_exc:
-                            log_error(
-                                "Failed to re-acquire M365 token after permission grant",
-                                account_id=account_id,
-                                error=str(token_exc),
-                            )
-                        else:
-                            # Retry the same request with the new token
-                            continue
                     errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 if exc.http_status == 403:
-                    # Already attempted remediation; fail with actionable message
                     errors.append({"error": _403_ERROR_MESSAGE})
                     break
                 log_error(
