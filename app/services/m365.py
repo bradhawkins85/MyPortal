@@ -210,8 +210,10 @@ async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> 
     if source == "module":
         try:
             expires_raw = admin_creds.get("client_secret_expires_at")
-            expires_at = expires_raw
-            if isinstance(expires_raw, str):
+            expires_at: datetime | None = None
+            if isinstance(expires_raw, datetime):
+                expires_at = expires_raw
+            elif isinstance(expires_raw, str):
                 try:
                     expires_at = datetime.fromisoformat(expires_raw)
                 except ValueError:

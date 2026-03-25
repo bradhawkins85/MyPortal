@@ -135,9 +135,6 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
 async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAsyncClient):
     """Provision flow auto-creates a PKCE public client when none is cached."""
     from contextlib import asynccontextmanager
-    from dataclasses import dataclass
-
-    @dataclass
     class _DummyCursor:
         async def __aenter__(self):
             return AsyncMock()
@@ -145,7 +142,6 @@ async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAs
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-    @dataclass
     class _DummyConn:
         def cursor(self, *args, **kwargs):
             return _DummyCursor()
