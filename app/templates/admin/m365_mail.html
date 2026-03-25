@@ -12,7 +12,7 @@
       <h2 class="management__heading">{{ 'Update mailbox' if is_editing else 'Create mailbox' }}</h2>
       <p class="management__intro">
         Import emails from an Office 365 mailbox into the ticketing workspace using Microsoft Graph API.
-        Requires an active Microsoft 365 connection for the selected company.
+        Use the <strong>Sign in</strong> button to authenticate as a user with access to each mailbox.
       </p>
       <form action="{{ form_action }}" method="post" class="form management__form">
         {% if csrf_token %}
@@ -125,6 +125,7 @@
                 <th scope="col" data-sort="string">Folder</th>
                 <th scope="col" data-sort="string">Schedule</th>
                 <th scope="col" data-sort="string">Company</th>
+                <th scope="col" data-sort="string">Auth</th>
                 <th scope="col" data-sort="string">Last synced</th>
                 <th scope="col" data-sort="string">Status</th>
                 <th scope="col" class="table__actions">Actions</th>
@@ -154,6 +155,15 @@
                       {{ company.name if company else '—' }}
                     </td>
                     <td>
+                      {% if account.auth_status == 'signed_in' %}
+                        <span class="badge badge--success">Signed in</span>
+                      {% elif account.auth_status == 'company_credentials' %}
+                        <span class="badge badge--secondary">Company</span>
+                      {% else %}
+                        <span class="badge badge--warning">Not configured</span>
+                      {% endif %}
+                    </td>
+                    <td>
                       {% if account.last_synced_at %}
                         {{ account.last_synced_at.isoformat() }}
                       {% else %}
@@ -167,6 +177,16 @@
                     </td>
                     <td class="table__actions">
                       <div class="button-group">
+                        {% if account.auth_status == 'signed_in' %}
+                          <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/disconnect" method="post" class="inline-form" onsubmit="return confirm('Disconnect user sign-in for {{ account.name }}? The mailbox will fall back to company credentials.');">
+                            {% if csrf_token %}
+                              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                            {% endif %}
+                            <button type="submit" class="button button--small button--ghost">Disconnect</button>
+                          </form>
+                        {% else %}
+                          <a class="button button--small" href="/admin/modules/m365-mail/accounts/{{ account.id }}/authorize">Sign in</a>
+                        {% endif %}
                         <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/clone" method="post" class="inline-form">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -192,7 +212,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="9" class="table__empty">No Office 365 mailboxes configured yet.</td>
+                  <td colspan="10" class="table__empty">No Office 365 mailboxes configured yet.</td>
                 </tr>
               {% endif %}
             </tbody>

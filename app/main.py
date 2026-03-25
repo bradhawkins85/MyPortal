@@ -5497,8 +5497,18 @@ async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         message = request.query_params.get("error_description", error)
+        # Try to determine the flow from state so we can redirect to the
+        # correct page.  If state is unparseable we fall back to /m365.
+        error_redirect = "/m365"
+        if state:
+            try:
+                _err_state = oauth_state_serializer.loads(state)
+                if _err_state.get("flow") == "m365_mail_auth":
+                    error_redirect = "/admin/modules/m365-mail"
+            except Exception:
+                pass
         encoded = urlencode({"error": message})
-        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     if not code or not state:
         return RedirectResponse(url="/m365?error=invalid+response", status_code=status.HTTP_303_SEE_OTHER)
     try:
@@ -5507,6 +5517,90 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
     company_id = int(state_data.get("company_id", 0))
     flow = state_data.get("flow", "connect")
+
+    if flow == "m365_mail_auth":
+        # ── Per-account delegated sign-in for M365 mail import ────────────
+        account_id = int(state_data.get("account_id", 0))
+        code_verifier: str | None = state_data.get("code_verifier")
+        redirect_uri = _build_m365_redirect_uri(request)
+
+        def _mail_auth_error(msg: str) -> RedirectResponse:
+            return RedirectResponse(
+                url=f"/admin/modules/m365-mail?error={quote(msg)}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        if not account_id:
+            return _mail_auth_error("Invalid account in OAuth state.")
+        if not code_verifier:
+            return _mail_auth_error("Missing PKCE code verifier.")
+
+        token_endpoint = (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": m365_service.get_pkce_client_id(),
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+            "scope": m365_mail_service.DELEGATED_MAIL_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "M365 mail account OAuth token exchange failed",
+                account_id=account_id,
+                status=token_response.status_code,
+                body=token_response.text[:500] if token_response.text else "",
+            )
+            return _mail_auth_error("Sign-in failed. Please try again.")
+
+        token_payload = token_response.json()
+        access_token = token_payload.get("access_token", "")
+        refresh_token = token_payload.get("refresh_token")
+        expires_in = token_payload.get("expires_in")
+        expires_at: datetime | None = None
+        if isinstance(expires_in, (int, float)):
+            from datetime import timedelta as _td
+            expires_at = datetime.now(timezone.utc) + _td(seconds=float(expires_in))
+
+        if not access_token or not refresh_token:
+            return _mail_auth_error(
+                "Sign-in did not return the required tokens. "
+                "Ensure offline_access permission is granted."
+            )
+
+        # Extract tenant ID from the token so we know which tenant to
+        # send refresh requests to later.
+        try:
+            tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+        except Exception:
+            # Try id_token as fallback
+            id_token = token_payload.get("id_token", "")
+            try:
+                tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+            except Exception:
+                return _mail_auth_error(
+                    "Unable to determine tenant ID from the sign-in response."
+                )
+
+        await m365_mail_service.store_delegated_tokens(
+            account_id,
+            tenant_id=tenant_id,
+            refresh_token=refresh_token,
+            access_token=access_token,
+            expires_at=expires_at,
+        )
+
+        account = await m365_mail_service.get_account(account_id)
+        label = account.get("name") if account else f"#{account_id}"
+        message = quote(f"Successfully signed in for mailbox {label}.")
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?success={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     if flow == "discover":
         # ── Tenant-discovery flow ──────────────────────────────────────────
@@ -17220,6 +17314,70 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_303_SEE_OTHER,
         )
     message = quote(f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/admin/modules/m365-mail/accounts/{account_id}/authorize")
+async def admin_m365_mail_authorize(account_id: int, request: Request):
+    """Start an OAuth2 PKCE sign-in for a specific mail account.
+
+    The admin will be redirected to Microsoft to sign in as a user that has
+    access to the target shared/user mailbox.  The resulting delegated tokens
+    are stored on the account so that syncs no longer rely on CSP credentials.
+    """
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await m365_mail_service.get_account(account_id)
+    if not account:
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    redirect_uri = _build_m365_redirect_uri(request)
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    state = oauth_state_serializer.dumps({
+        "user_id": current_user.get("id"),
+        "flow": "m365_mail_auth",
+        "account_id": account_id,
+        "code_verifier": code_verifier,
+    })
+    params = {
+        "client_id": m365_service.get_pkce_client_id(),
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_mail_service.DELEGATED_MAIL_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/disconnect", response_class=HTMLResponse)
+async def admin_m365_mail_disconnect(account_id: int, request: Request):
+    """Remove the per-account delegated tokens and revert to CSP credentials."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await m365_mail_service.get_account(account_id)
+    if not account:
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    await m365_mail_service.clear_delegated_tokens(account_id)
+    label = account.get("name") or f"#{account_id}"
+    message = quote(f"Disconnected user sign-in for {label}.")
     return RedirectResponse(
         url=f"/admin/modules/m365-mail?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
