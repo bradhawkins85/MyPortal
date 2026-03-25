@@ -111,11 +111,12 @@ _M365_ADMIN_MODULE_SLUG = "m365-admin"
 # can prevent this client from being used.  Set M365_PKCE_CLIENT_ID to a public
 # client app registration in your own tenant to avoid this issue.
 _AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
+AZURE_CLI_CLIENT_ID = _AZURE_CLI_CLIENT_ID
 
 
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
     """Return ``True`` when ``client_id`` matches the Azure CLI fallback app ID."""
-    return str(client_id or "").strip() == _AZURE_CLI_CLIENT_ID
+    return str(client_id or "").strip() == AZURE_CLI_CLIENT_ID
 
 
 def get_pkce_client_id() -> str:
