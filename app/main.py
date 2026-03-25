@@ -5133,7 +5133,7 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         }
     )
     params = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id(),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5184,7 +5184,7 @@ async def admin_company_m365_provision(
         }
     )
     params = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id(),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5256,7 +5256,7 @@ async def m365_discover(request: Request):
         oauth_client_id = m365_admin_client_id
     else:
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
+        oauth_client_id = await m365_service.get_effective_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5301,7 +5301,7 @@ async def admin_company_m365_discover(company_id: int, request: Request):
         oauth_client_id = m365_admin_client_id
     else:
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
+        oauth_client_id = await m365_service.get_effective_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5407,7 +5407,7 @@ async def admin_csp_provision(request: Request):
         # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
         # Azure CLI public client (which may be blocked in some tenants).
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
+        oauth_client_id = await m365_service.get_effective_pkce_client_id()
 
     state_payload: dict = {
         "company_id": 0,
@@ -5475,7 +5475,7 @@ async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...
     )
 
     params = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id(),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -5539,7 +5539,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
         token_data = {
-            "client_id": m365_service.get_pkce_client_id(),
+            "client_id": await m365_service.get_effective_pkce_client_id(),
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5623,7 +5623,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id(),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5766,7 +5766,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id(),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5844,6 +5844,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             app_object_id=provision_result.get("app_object_id"),
             client_secret_key_id=provision_result.get("client_secret_key_id"),
             client_secret_expires_at=provision_result.get("client_secret_expires_at"),
+            pkce_client_id=provision_result.get("pkce_client_id"),
         )
         log_info(
             "M365 CSP admin app provisioned and credentials stored",
@@ -5877,7 +5878,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         token_data = {
-            "client_id": m365_service.get_pkce_client_id(),
+            "client_id": await m365_service.get_effective_pkce_client_id(),
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
@@ -5951,7 +5952,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id(),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -17345,7 +17346,7 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
         "code_verifier": code_verifier,
     })
     params = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": await m365_service.get_effective_pkce_client_id(),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
