@@ -418,7 +418,7 @@ async def test_m365_discover_redirects_to_microsoft_with_azure_cli_fallback(asyn
     parsed = urlparse(response.headers["location"])
     qs = parse_qs(parsed.query)
 
-    assert "login.microsoftonline.com" in parsed.netloc
+    assert parsed.netloc == "login.microsoftonline.com"
     assert "organizations" in parsed.path
     assert qs.get("client_id", [None])[0] == AZURE_CLI_CLIENT_ID
 
@@ -450,7 +450,7 @@ async def test_m365_provision_redirects_to_microsoft_with_azure_cli_fallback(asy
     parsed = urlparse(response.headers["location"])
     qs = parse_qs(parsed.query)
 
-    assert "login.microsoftonline.com" in parsed.netloc
+    assert parsed.netloc == "login.microsoftonline.com"
     assert "organizations" in parsed.path
     assert qs.get("client_id", [None])[0] == AZURE_CLI_CLIENT_ID
 
