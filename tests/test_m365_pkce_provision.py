@@ -8,6 +8,7 @@ CSP/partner admin app to have a service principal in the customer tenant
 from __future__ import annotations
 
 import pytest
+from datetime import datetime
 from contextlib import asynccontextmanager
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -61,6 +62,21 @@ class _MockDatabaseConnection:
 @asynccontextmanager
 async def _mock_db_acquire():
     yield _MockDatabaseConnection()
+
+
+def test_parse_client_secret_expires_with_datetime():
+    dt = datetime(2024, 1, 2, 3, 4, 5)
+    assert m365_service._parse_client_secret_expires(dt) is dt
+
+
+def test_parse_client_secret_expires_with_iso_string():
+    parsed = m365_service._parse_client_secret_expires("2024-01-02T03:04:05Z")
+    assert isinstance(parsed, datetime)
+    assert parsed == datetime(2024, 1, 2, 3, 4, 5)
+
+
+def test_parse_client_secret_expires_with_none():
+    assert m365_service._parse_client_secret_expires(None) is None
 
 
 # ---------------------------------------------------------------------------
