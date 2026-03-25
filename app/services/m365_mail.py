@@ -180,11 +180,13 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
     if isinstance(expires_in, (int, float)):
         new_expires = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
 
-    # Persist the refreshed tokens
+    # Persist the refreshed tokens.  When the token endpoint returns a new
+    # refresh_token, encrypt and store it.  Otherwise keep the original.
+    stored_refresh = encrypt_secret(str(new_refresh)) if new_refresh else refresh_token
     await mail_repo.update_account_tokens(
         account_id,
         tenant_id=tenant_id,
-        refresh_token=encrypt_secret(str(new_refresh)) if new_refresh else encrypt_secret(decrypted_refresh),
+        refresh_token=stored_refresh,
         access_token=encrypt_secret(new_access),
         token_expires_at=new_expires,
     )
@@ -637,7 +639,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             if provisioned:
                 auth_company_id = min(provisioned)
             else:
-                return {"status": "error", "error": "No Microsoft 365 credentials configured. Please sign in to authorise access to the mailbox."}
+                return {"status": "error", "error": "No Microsoft 365 credentials configured. Please sign in to authorize access to the mailbox."}
 
         try:
             access_token = await m365_service.acquire_access_token(

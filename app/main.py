@@ -5502,8 +5502,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         error_redirect = "/m365"
         if state:
             try:
-                _err_state = oauth_state_serializer.loads(state)
-                if _err_state.get("flow") == "m365_mail_auth":
+                parsed_state = oauth_state_serializer.loads(state)
+                if parsed_state.get("flow") == "m365_mail_auth":
                     error_redirect = "/admin/modules/m365-mail"
             except Exception:
                 pass
@@ -5563,8 +5563,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         expires_in = token_payload.get("expires_in")
         expires_at: datetime | None = None
         if isinstance(expires_in, (int, float)):
-            from datetime import timedelta as _td
-            expires_at = datetime.now(timezone.utc) + _td(seconds=float(expires_in))
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
 
         if not access_token or not refresh_token:
             return _mail_auth_error(
