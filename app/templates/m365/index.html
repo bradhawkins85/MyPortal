@@ -101,6 +101,75 @@
   <details class="card card--panel card-collapsible">
     <summary class="card__header card__header--collapsible">
       <div>
+        <h3 class="card__title">Admin enterprise app</h3>
+      </div>
+      <div class="card__collapsible-meta" aria-hidden="true">
+        <span class="card__toggle-icon"></span>
+      </div>
+    </summary>
+    <div class="card-collapsible__content">
+      <p class="text-muted" style="margin-bottom: 1rem;">
+        Configure per-company admin credentials for the enterprise app used to auto-provision customer app registrations. These settings override the global module configuration.
+      </p>
+      {% if admin_credential %}
+      <dl class="definition-list" style="margin-bottom: 1rem;">
+        <div class="definition-list__item">
+          <dt>Admin Client ID</dt>
+          <dd>{{ admin_credential.client_id }}</dd>
+        </div>
+        {% if admin_credential.tenant_id %}
+        <div class="definition-list__item">
+          <dt>Admin Tenant ID</dt>
+          <dd>{{ admin_credential.tenant_id }}</dd>
+        </div>
+        {% endif %}
+        {% if admin_credential.client_secret_expires_at %}
+        <div class="definition-list__item">
+          <dt>Secret expires</dt>
+          <dd>{{ admin_credential.client_secret_expires_at }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+      {% endif %}
+      <form method="post" action="/m365/admin-credentials" class="form-grid">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <label class="form-field">
+          <span class="form-label">Admin Client ID</span>
+          <input type="text" name="adminClientId" class="input" value="{{ admin_credential.client_id if admin_credential else '' }}" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <span class="form-help">The Azure AD application ID for the admin enterprise app registration.</span>
+        </label>
+        <label class="form-field">
+          <span class="form-label">Admin Client Secret</span>
+          <input type="password" name="adminClientSecret" class="input" placeholder="Enter a new client secret" {% if not admin_credential %}required{% endif %} />
+          <span class="form-help">Leave blank to keep existing secret. Secrets are encrypted at rest.</span>
+        </label>
+        <label class="form-field">
+          <span class="form-label">Admin Tenant ID (optional)</span>
+          <input type="text" name="adminTenantId" class="input" value="{{ admin_credential.tenant_id if admin_credential else '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <span class="form-help">The tenant ID for the admin app (usually the partner/MSP tenant).</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="button">Save admin credentials</button>
+        </div>
+      </form>
+      {% if admin_credential %}
+      <form method="post" action="/m365/admin-credentials/delete" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--secondary" onclick="return confirm('Delete admin enterprise app credentials? This company will fall back to global module settings.');">Delete admin credentials</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if is_super_admin %}
+  <details class="card card--panel card-collapsible">
+    <summary class="card__header card__header--collapsible">
+      <div>
         <h3 class="card__title">Manage credentials</h3>
       </div>
       <div class="card__collapsible-meta" aria-hidden="true">
