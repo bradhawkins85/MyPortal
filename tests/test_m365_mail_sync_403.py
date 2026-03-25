@@ -53,12 +53,12 @@ def _patch_common(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 403 error produces actionable message
+# 403 error produces actionable message when remediation fails
 # ---------------------------------------------------------------------------
 
 
 async def test_sync_account_403_returns_actionable_error(monkeypatch):
-    """A 403 from Graph should surface a clear re-provision message."""
+    """A 403 from Graph should attempt remediation, then surface a clear re-provision message."""
     _patch_common(monkeypatch)
 
     async def fake_acquire_token(company_id, **kwargs):
@@ -69,10 +69,16 @@ async def test_sync_account_403_returns_actionable_error(monkeypatch):
             "Microsoft Graph request failed (403)", http_status=403
         )
 
+    async def fake_try_grant(company_id, token):
+        return False
+
     monkeypatch.setattr(
         m365_mail.m365_service, "acquire_access_token", fake_acquire_token
     )
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant
+    )
 
     result = await m365_mail.sync_account(1)
 
@@ -112,12 +118,88 @@ async def test_sync_account_403_non_403_error_not_intercepted(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 403 handling should not attempt app-role remediation during sync
+# 403 auto-remediation: attempt try_grant_missing_permissions then retry
 # ---------------------------------------------------------------------------
 
 
-async def test_sync_account_403_does_not_retry_or_reacquire_token(monkeypatch):
-    """Mailbox sync should fail fast on 403 without trying to self-grant roles."""
+async def test_sync_account_403_attempts_remediation_and_retries(monkeypatch):
+    """On 403, sync should call try_grant_missing_permissions, re-acquire token, and retry."""
+    _patch_common(monkeypatch)
+
+    call_count = {"graph_get": 0, "acquire": 0, "try_grant": 0}
+
+    async def fake_acquire_token(company_id, **kwargs):
+        call_count["acquire"] += 1
+        return f"token-{call_count['acquire']}"
+
+    async def fake_graph_get(access_token: str, url: str):
+        call_count["graph_get"] += 1
+        if call_count["graph_get"] == 1:
+            raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+        # Second call succeeds after remediation
+        return {"value": [], "@odata.nextLink": None}
+
+    async def fake_try_grant(company_id, token):
+        call_count["try_grant"] += 1
+        return True
+
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_access_token", fake_acquire_token
+    )
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant
+    )
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    # Should have tried graph_get twice (first 403, then success)
+    assert call_count["graph_get"] == 2
+    # Should have acquired token twice (initial + re-acquire after grant)
+    assert call_count["acquire"] == 2
+    # Should have called try_grant once
+    assert call_count["try_grant"] == 1
+
+
+async def test_sync_account_403_remediation_fails_returns_error(monkeypatch):
+    """When try_grant returns False, sync should surface the actionable error."""
+    _patch_common(monkeypatch)
+
+    call_count = {"graph_get": 0, "acquire": 0, "try_grant": 0}
+
+    async def fake_acquire_token(company_id, **kwargs):
+        call_count["acquire"] += 1
+        return f"token-{call_count['acquire']}"
+
+    async def fake_graph_get(access_token: str, url: str):
+        call_count["graph_get"] += 1
+        raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    async def fake_try_grant(company_id, token):
+        call_count["try_grant"] += 1
+        return False
+
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_access_token", fake_acquire_token
+    )
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant
+    )
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "completed_with_errors"
+    assert "403 Forbidden" in result["errors"][0]["error"]
+    # Remediation attempted but failed; no retry
+    assert call_count["graph_get"] == 1
+    assert call_count["acquire"] == 1
+    assert call_count["try_grant"] == 1
+
+
+async def test_sync_account_403_retry_still_403_gives_error(monkeypatch):
+    """When retry after successful grant still returns 403, surface the error."""
     _patch_common(monkeypatch)
 
     call_count = {"graph_get": 0, "acquire": 0, "try_grant": 0}
@@ -146,14 +228,14 @@ async def test_sync_account_403_does_not_retry_or_reacquire_token(monkeypatch):
 
     assert result["status"] == "completed_with_errors"
     assert "403 Forbidden" in result["errors"][0]["error"]
-    # No retry/re-acquire and no remediation call expected.
-    assert call_count["graph_get"] == 1
-    assert call_count["acquire"] == 1
-    assert call_count["try_grant"] == 0
+    # Should have tried graph_get twice, acquired twice, and granted once
+    assert call_count["graph_get"] == 2
+    assert call_count["acquire"] == 2
+    assert call_count["try_grant"] == 1
 
 
 async def test_sync_account_403_grant_exception_falls_through(monkeypatch):
-    """A 403 should still surface an actionable message (no auto-grant call)."""
+    """If try_grant raises an exception, sync still surfaces the actionable error."""
     _patch_common(monkeypatch)
 
     async def fake_acquire_token(company_id, **kwargs):
@@ -164,10 +246,16 @@ async def test_sync_account_403_grant_exception_falls_through(monkeypatch):
             "Microsoft Graph request failed (403)", http_status=403
         )
 
+    async def fake_try_grant(company_id, token):
+        raise RuntimeError("Grant exploded")
+
     monkeypatch.setattr(
         m365_mail.m365_service, "acquire_access_token", fake_acquire_token
     )
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant
+    )
 
     result = await m365_mail.sync_account(1)
 
