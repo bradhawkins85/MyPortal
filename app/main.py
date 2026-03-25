@@ -5412,20 +5412,29 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     if error:
         message = request.query_params.get("error_description", error)
         # Try to determine the flow from state so we can redirect to the
-        # correct page.  If state is unparseable we fall back to /m365.
+        # correct page and clear any stale PKCE client IDs. If state is
+        # unparseable we fall back to /m365.
         error_redirect = "/m365"
+        state_data: dict[str, Any] = {}
         if state:
             try:
-                parsed_state = oauth_state_serializer.loads(state)
-                if parsed_state.get("flow") == "m365_mail_auth":
+                state_data = oauth_state_serializer.loads(state)
+                if state_data.get("flow") == "m365_mail_auth":
                     error_redirect = "/admin/modules/m365-mail"
             except Exception:
-                pass
+                state_data = {}
         # AADSTS700016 means the PKCE app registration no longer exists in the
-        # tenant (it was deleted).  Clear the stale pkce_client_id so that the
-        # next sign-in attempt falls back to the Azure CLI public client, and
-        # guide the admin to re-provision so a fresh PKCE app is created.
+        # tenant (it was deleted). Clear the stale pkce_client_id (including
+        # any company-specific value) so that the next sign-in attempt falls
+        # back to the Azure CLI public client, and guide the admin to re-
+        # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
+            company_id = state_data.get("company_id")
+            if company_id:
+                try:
+                    await m365_service.clear_company_pkce_client_id(int(company_id))
+                except Exception:
+                    pass
             try:
                 await m365_service.clear_pkce_client_id()
             except Exception:
@@ -5433,7 +5442,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             message = (
                 "The PKCE app registration was not found in Azure AD (AADSTS700016). "
                 "The cached app ID has been cleared. Please sign in again; if the problem "
-                "persists, re-provision the M365 integration via Admin \u2192 M365."
+                "persists, re-provision the M365 integration via Admin → M365."
             )
         encoded = urlencode({"error": message})
         return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)

@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlencode
 
 from httpx import AsyncClient as HttpxAsyncClient
-from starlette.testclient import TestClient
+from starlette.requests import Request
 
-from app.main import app
+from app.main import app, m365_callback
 from app.services import m365 as m365_service
 
 
@@ -482,6 +482,41 @@ async def test_provision_callback_persists_token_tenant_when_it_differs_from_sta
     assert response.status_code == 303
     assert mock_upsert.await_count == 1
     assert mock_upsert.await_args.kwargs["tenant_id"] == "token-tenant-id"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_callback_error_aadsts700016_clears_company_pkce():
+    """AADSTS700016 errors should clear per-company and global PKCE IDs."""
+    state = _signed_state({"company_id": 123, "flow": "discover"})
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/m365/callback",
+            "query_string": urlencode(
+                {
+                    "error": "invalid_client",
+                    "error_description": "AADSTS700016: Application not found",
+                    "state": state,
+                }
+            ).encode(),
+            "headers": [],
+        }
+    )
+
+    with (
+        patch.object(
+            m365_service, "clear_company_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_company,
+        patch.object(
+            m365_service, "clear_pkce_client_id", new_callable=AsyncMock
+        ) as mock_clear_global,
+    ):
+        response = await m365_callback(request, state=state, error="invalid_client")
+
+    assert response.status_code == 303
+    mock_clear_company.assert_awaited_once_with(123)
+    mock_clear_global.assert_awaited_once()
 
 # ---------------------------------------------------------------------------
 # Fixture
