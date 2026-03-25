@@ -149,21 +149,16 @@ async def test_admin_company_m365_provision_uses_pkce(async_client: HttpxAsyncCl
 
 
 # ---------------------------------------------------------------------------
-# Tests for m365_discover route (PKCE fallback)
+# Tests for m365_discover route (always uses PKCE)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio("asyncio")
-async def test_m365_discover_falls_back_to_pkce_without_admin_credentials(
+async def test_m365_discover_always_uses_pkce(
     async_client: HttpxAsyncClient,
 ):
-    """GET /m365/discover falls back to PKCE when no admin credentials configured."""
+    """GET /m365/discover always uses PKCE regardless of admin credential config."""
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
-        patch(
-            "app.main._get_m365_admin_credentials",
-            new_callable=AsyncMock,
-            return_value=(None, None),
-        ),
     ):
         mock_ctx.return_value = (
             {"id": 1, "is_super_admin": True},
@@ -180,17 +175,20 @@ async def test_m365_discover_falls_back_to_pkce_without_admin_credentials(
     parsed = urlparse(location)
     qs = parse_qs(parsed.query)
 
-    # Must use PKCE public client
     assert qs.get("client_id", [None])[0] == _pkce_client_id()
     assert "code_challenge" in qs
     assert qs.get("code_challenge_method", [None])[0] == "S256"
 
 
 @pytest.mark.anyio("asyncio")
-async def test_m365_discover_uses_admin_credentials_when_configured(
+async def test_m365_discover_uses_pkce_even_when_admin_credentials_configured(
     async_client: HttpxAsyncClient,
 ):
-    """GET /m365/discover uses admin credentials when they are configured."""
+    """GET /m365/discover uses PKCE even when admin credentials are configured.
+
+    This prevents AADSTS700025 which occurs when the configured admin client_id
+    belongs to a public PKCE app rather than a confidential CSP app.
+    """
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
         patch(
@@ -214,9 +212,146 @@ async def test_m365_discover_uses_admin_credentials_when_configured(
     parsed = urlparse(location)
     qs = parse_qs(parsed.query)
 
-    assert qs.get("client_id", [None])[0] == "configured-admin-client"
-    # Should NOT include PKCE params when using admin credentials
-    assert "code_challenge" not in qs
+    # Must NOT use the admin client ID - always use the PKCE public client
+    assert qs.get("client_id", [None])[0] != "configured-admin-client"
+    assert qs.get("client_id", [None])[0] == _pkce_client_id()
+    assert "code_challenge" in qs
+    assert qs.get("code_challenge_method", [None])[0] == "S256"
+
+
+# ---------------------------------------------------------------------------
+# Tests for discover callback (flow=="discover")
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_callback_uses_pkce_token_exchange(
+    async_client: HttpxAsyncClient,
+):
+    """Discover callback uses PKCE (no client_secret) when code_verifier is in state."""
+    code_verifier, _ = m365_service.generate_pkce_pair()
+    state = _signed_state(
+        {
+            "company_id": 42,
+            "user_id": 1,
+            "flow": "discover",
+            "code_verifier": code_verifier,
+        }
+    )
+
+    token_calls: list[dict] = []
+
+    async def fake_post(url, *, data=None, **kwargs):
+        token_calls.append({"url": url, "data": data or {}})
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "id_token": (
+                "eyJhbGciOiJub25lIn0."
+                "eyJ0aWQiOiJkaXNjb3ZlcmVkLXRlbmFudC1pZCJ9."
+                "sig"
+            )
+        }
+        return mock_resp
+
+    with (
+        patch("app.main.httpx.AsyncClient") as mock_http,
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(
+            return_value=MagicMock(post=AsyncMock(side_effect=fake_post))
+        )
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        response = await async_client.get(
+            f"/m365/callback?code=auth-code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "provision" in response.headers.get("location", "")
+    assert "discovered-tenant-id" in response.headers.get("location", "")
+    assert len(token_calls) == 1
+    token_req = token_calls[0]["data"]
+    assert token_req.get("client_id") == _pkce_client_id()
+    assert token_req.get("code_verifier") == code_verifier
+    assert "client_secret" not in token_req
+
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_callback_missing_code_verifier_returns_error(
+    async_client: HttpxAsyncClient,
+):
+    """Discover callback returns an error when code_verifier is absent and no admin creds."""
+    state = _signed_state(
+        {
+            "company_id": 42,
+            "user_id": 1,
+            "flow": "discover",
+        }
+    )
+
+    with (
+        patch(
+            "app.main._get_m365_admin_credentials",
+            new_callable=AsyncMock,
+            return_value=(None, None),
+        ),
+    ):
+        response = await async_client.get(
+            f"/m365/callback?code=auth-code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert "error" in response.headers.get("location", "")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_discover_callback_aadsts700025_returns_clear_error(
+    async_client: HttpxAsyncClient,
+):
+    """Discover callback surfaces a clear error when AADSTS700025 is returned.
+
+    Guards the legacy admin-creds fallback: if the configured admin client is a
+    public PKCE app, the token exchange fails with AADSTS700025 and the callback
+    must return an actionable message.
+    """
+    state = _signed_state(
+        {
+            "company_id": 42,
+            "user_id": 1,
+            "flow": "discover",
+            # No code_verifier - triggers the legacy admin-creds path
+        }
+    )
+
+    async def fake_post(url, *, data=None, **kwargs):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = "AADSTS700025: Client is public so client_secret not allowed"
+        return mock_resp
+
+    with (
+        patch("app.main.httpx.AsyncClient") as mock_http,
+        patch(
+            "app.main._get_m365_admin_credentials",
+            new_callable=AsyncMock,
+            return_value=("some-public-client-id", "some-secret"),
+        ),
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(
+            return_value=MagicMock(post=AsyncMock(side_effect=fake_post))
+        )
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        response = await async_client.get(
+            f"/m365/callback?code=auth-code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location", "")
+    assert "error" in location
+    assert "AADSTS700025" in location or "public+app+and+cannot" in location.lower()
 
 
 # ---------------------------------------------------------------------------
