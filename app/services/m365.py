@@ -437,6 +437,42 @@ async def acquire_access_token(
     return access_token
 
 
+async def acquire_delegated_token(company_id: int) -> str | None:
+    """Acquire a delegated token via the stored refresh token.
+
+    Returns the access-token string when a valid refresh token is available,
+    or ``None`` when no refresh token is stored or the exchange fails.  The
+    resulting token is **not** cached – it is intended for one-shot operations
+    such as auto-granting missing application permissions after a 403 error.
+    The delegated token carries the scopes that were consented during the
+    admin connect flow (including ``AppRoleAssignment.ReadWrite.All``).
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        return None
+
+    refresh_token = creds.get("refresh_token")
+    if not refresh_token:
+        return None
+
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = csp_tenant_id or tenant_id
+
+    try:
+        access_token, _, _ = await _exchange_token(
+            tenant_id=effective_tenant_id,
+            client_id=client_id,
+            client_secret=creds.get("client_secret") or "",
+            refresh_token=refresh_token,
+        )
+        return access_token
+    except M365Error:
+        return None
+
+
 async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     """Acquire an app-only access token for the Exchange Online PowerShell REST API.
 

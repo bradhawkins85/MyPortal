@@ -47,9 +47,15 @@ def _patch_common(monkeypatch):
     async def fake_update_account(account_id, **fields):
         return None
 
+    async def fake_acquire_delegated_token(company_id):
+        return None
+
     monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_delegated_token", fake_acquire_delegated_token
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +269,85 @@ async def test_sync_account_403_grant_exception_falls_through(monkeypatch):
     error_msg = result["errors"][0]["error"]
     assert "403 Forbidden" in error_msg
     assert "Mail.ReadWrite" in error_msg
+
+
+# ---------------------------------------------------------------------------
+# 403 auto-remediation: prefer delegated token from stored refresh token
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_account_403_prefers_delegated_token_for_remediation(monkeypatch):
+    """On 403, remediation should use the delegated token (from the stored
+    refresh token) rather than the client_credentials token, because the
+    delegated token carries AppRoleAssignment.ReadWrite.All."""
+    _patch_common(monkeypatch)
+
+    grant_tokens: list[str] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "client-creds-token"
+
+    async def fake_acquire_delegated(company_id):
+        return "delegated-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    async def fake_try_grant(company_id, token):
+        grant_tokens.append(token)
+        return False
+
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_access_token", fake_acquire_token
+    )
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_delegated_token", fake_acquire_delegated
+    )
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant
+    )
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "completed_with_errors"
+    # The delegated token must have been passed to try_grant_missing_permissions
+    assert grant_tokens == ["delegated-token"]
+
+
+async def test_sync_account_403_falls_back_to_client_creds_when_no_delegated(
+    monkeypatch,
+):
+    """When no delegated token is available, remediation falls back to the
+    client_credentials token."""
+    _patch_common(monkeypatch)
+
+    grant_tokens: list[str] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "client-creds-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+
+    async def fake_try_grant(company_id, token):
+        grant_tokens.append(token)
+        return False
+
+    monkeypatch.setattr(
+        m365_mail.m365_service, "acquire_access_token", fake_acquire_token
+    )
+    # acquire_delegated_token returns None (from _patch_common)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(
+        m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant
+    )
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "completed_with_errors"
+    # Falls back to the client_credentials token when no delegated token
+    assert grant_tokens == ["client-creds-token"]
 
 
 # ---------------------------------------------------------------------------
