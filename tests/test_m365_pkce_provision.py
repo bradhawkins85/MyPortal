@@ -621,7 +621,10 @@ async def test_callback_error_aadsts700016_with_unparseable_state_still_clears_g
     )
 
     with (
-        patch("app.main.oauth_state_serializer.loads", side_effect=BadSignature("bad state")),
+        patch(
+            "app.main.oauth_state_serializer.loads",
+            side_effect=BadSignature("bad state"),
+        ) as mock_state_loads,
         patch.object(
             m365_service, "clear_company_pkce_client_id", new_callable=AsyncMock
         ) as mock_clear_company,
@@ -634,6 +637,7 @@ async def test_callback_error_aadsts700016_with_unparseable_state_still_clears_g
         )
 
     assert response.status_code == 303
+    mock_state_loads.assert_called_once()
     mock_clear_company.assert_not_awaited()
     mock_clear_global.assert_awaited_once()
 
