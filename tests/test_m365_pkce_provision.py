@@ -46,17 +46,14 @@ def _autoprovision_creds() -> dict:
     }
 
 
-class _MockCursor:
-    async def __aenter__(self):
-        return AsyncMock()
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
+@asynccontextmanager
+async def _mock_cursor():
+    yield AsyncMock()
 
 
 class _MockConn:
     def cursor(self, *args, **kwargs):
-        return _MockCursor()
+        return _mock_cursor()
 
 
 @asynccontextmanager
