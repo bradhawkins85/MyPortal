@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import parse_qs, urlparse, urlencode
 
@@ -36,14 +36,16 @@ def _pkce_client_id() -> str:
 
 
 def _autoprovision_creds() -> dict:
-    return {
-        "client_id": "admin-client",
-        "client_secret": "admin-secret",
-        "tenant_id": "admin-tenant",
-        "app_object_id": "app-obj",
-        "client_secret_key_id": "secret-key",
-        "client_secret_expires_at": None,
-    }
+    return MappingProxyType(
+        {
+            "client_id": "admin-client",
+            "client_secret": "admin-secret",
+            "tenant_id": "admin-tenant",
+            "app_object_id": "app-obj",
+            "client_secret_key_id": "secret-key",
+            "client_secret_expires_at": None,
+        }
+    )
 
 
 @asynccontextmanager
@@ -51,14 +53,14 @@ async def _mock_cursor():
     yield AsyncMock()
 
 
-class _MockConn:
+class _MockDatabaseConnection:
     def cursor(self, *args, **kwargs):
         return _mock_cursor()
 
 
 @asynccontextmanager
 async def _mock_db_acquire():
-    yield _MockConn()
+    yield _MockDatabaseConnection()
 
 
 # ---------------------------------------------------------------------------

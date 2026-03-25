@@ -225,7 +225,7 @@ async def _auto_provision_and_get_pkce_client_id(
                 client_secret_expires_at=expires_at,
                 pkce_client_id=pkce_client_id,
             )
-        except Exception as exc:  # pragma: no cover - best-effort persistence
+        except (RuntimeError, M365Error, ValueError) as exc:  # pragma: no cover - best-effort persistence
             log_warning(
                 "Failed to persist auto-provisioned PKCE client ID",
                 error=str(exc),
