@@ -141,7 +141,8 @@ async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> 
     app-only token and create a fresh multi-tenant public client.  Falls back to
     the optional bootstrap credentials from environment variables when the
     module has not been configured yet.  Returns the new client ID or ``None``
-    if provisioning cannot be performed.
+    if provisioning cannot be performed.  A ``redirect_uri`` is required so the
+    newly-created app has the correct OAuth redirect configured.
     """
     if not redirect_uri:
         return None
@@ -150,7 +151,8 @@ async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> 
 
     try:
         admin_creds = await get_admin_m365_credentials()
-    except Exception:
+    except Exception as exc:
+        log_warning("Failed to load stored admin credentials for PKCE auto-provision", error=str(exc))
         admin_creds = None
 
     source: str | None = None
@@ -214,10 +216,7 @@ async def _auto_provision_pkce_client_id(*, redirect_uri: str | None = None) -> 
             if isinstance(expires_raw, datetime):
                 expires_at = expires_raw
             elif isinstance(expires_raw, str):
-                try:
-                    expires_at = datetime.fromisoformat(expires_raw)
-                except ValueError:
-                    expires_at = None
+                expires_at = parse_graph_datetime(expires_raw)
 
             await update_admin_m365_credentials(
                 client_id=client_id,

@@ -135,24 +135,24 @@ async def test_m365_provision_uses_pkce_even_when_admin_credentials_present(
 async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAsyncClient):
     """Provision flow auto-creates a PKCE public client when none is cached."""
     from contextlib import asynccontextmanager
-    class _DummyCursor:
+    class _MockCursor:
         async def __aenter__(self):
             return AsyncMock()
 
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-    class _DummyConn:
+    class _MockConn:
         def cursor(self, *args, **kwargs):
-            return _DummyCursor()
+            return _MockCursor()
 
     @asynccontextmanager
-    async def _fake_acquire():
-        yield _DummyConn()
+    async def _mock_db_acquire():
+        yield _MockConn()
 
     with (
         patch("app.main._load_license_context", new_callable=AsyncMock) as mock_ctx,
-        patch("app.main.db.acquire", new=_fake_acquire),
+        patch("app.main.db.acquire", new=_mock_db_acquire),
         patch("app.core.database.db.fetch_one", new_callable=AsyncMock, return_value=None),
         patch.object(
             m365_service,
