@@ -1389,6 +1389,29 @@ async def update_admin_m365_credentials(
     )
 
 
+async def clear_pkce_client_id() -> None:
+    """Remove the stored PKCE public-client app ID from the m365-admin module settings.
+
+    Called when the stored PKCE app registration has been deleted from Azure AD
+    (indicated by an ``AADSTS700016`` error) so that subsequent flows fall back
+    to the configured ``M365_PKCE_CLIENT_ID`` env var or the well-known Azure
+    CLI public client.  The next successful ``provision_csp_admin_app_registration``
+    run will create a fresh PKCE app and store the new ID automatically.
+    """
+    module = await modules_repo.get_module(_M365_ADMIN_MODULE_SLUG)
+    if not module:
+        return
+    existing_settings: dict[str, Any] = dict((module or {}).get("settings") or {})
+    if "pkce_client_id" not in existing_settings:
+        return
+    new_settings = {k: v for k, v in existing_settings.items() if k != "pkce_client_id"}
+    await modules_repo.update_module(
+        _M365_ADMIN_MODULE_SLUG,
+        settings=new_settings,
+    )
+    log_info("Cleared stale M365 PKCE client ID from admin settings")
+
+
 async def renew_admin_client_secret() -> None:
     """Renew the Azure AD client secret for the provisioned CSP/Lighthouse admin app.
 

@@ -5507,6 +5507,20 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                     error_redirect = "/admin/modules/m365-mail"
             except Exception:
                 pass
+        # AADSTS700016 means the PKCE app registration no longer exists in the
+        # tenant (it was deleted).  Clear the stale pkce_client_id so that the
+        # next sign-in attempt falls back to the Azure CLI public client, and
+        # guide the admin to re-provision so a fresh PKCE app is created.
+        if "AADSTS700016" in message:
+            try:
+                await m365_service.clear_pkce_client_id()
+            except Exception:
+                pass
+            message = (
+                "The PKCE app registration was not found in Azure AD (AADSTS700016). "
+                "The cached app ID has been cleared. Please sign in again; if the problem "
+                "persists, re-provision the M365 integration via Admin \u2192 M365."
+            )
         encoded = urlencode({"error": message})
         return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     if not code or not state:
@@ -5846,6 +5860,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             client_secret_expires_at=provision_result.get("client_secret_expires_at"),
             pkce_client_id=provision_result.get("pkce_client_id"),
         )
+        # If PKCE app creation failed during provisioning, clear any stale
+        # pkce_client_id that may be left over from a previously deleted app
+        # so that subsequent flows fall back to the Azure CLI public client
+        # rather than failing with AADSTS700016.
+        if not provision_result.get("pkce_client_id"):
+            await m365_service.clear_pkce_client_id()
         log_info(
             "M365 CSP admin app provisioned and credentials stored",
             tenant_id=partner_tenant_id,
