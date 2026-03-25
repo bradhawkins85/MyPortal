@@ -280,10 +280,7 @@ async def _auto_provision_company_pkce_client_id(
     if not company_admin_creds:
         return None
 
-    tenant_id = (
-        str(company_admin_creds.get("tenant_id") or settings.azure_tenant_id or "")
-        .strip()
-    )
+    tenant_id = str(company_admin_creds.get("tenant_id") or settings.azure_tenant_id or "").strip()
     client_id = str(company_admin_creds.get("client_id") or "").strip()
     client_secret = str(company_admin_creds.get("client_secret") or "").strip()
     if not tenant_id or not client_id or not client_secret:
