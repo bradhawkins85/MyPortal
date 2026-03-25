@@ -313,64 +313,28 @@ async def test_sync_delegated_403_falls_back_via_provisioned_company(monkeypatch
     assert call_count["graph_get"] == 2
 
 
-async def test_sync_delegated_403_fallback_then_remediation(monkeypatch):
-    """When delegated 403 falls back to client_credentials which also gets 403,
-    the auto-remediation logic should kick in."""
+async def test_sync_delegated_403_fallback_then_client_creds_also_403(monkeypatch):
+    """When both delegated and client_credentials get 403, surface actionable error."""
     from app.services.m365 import M365Error
-
-    account = _fake_account(
-        company_id=5,
-        refresh_token="enc:refresh",
-        tenant_id="tenant-123",
-    )
+    account = _fake_account(company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123")
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
-
     async def fake_acquire_delegated(acct):
         return "delegated-token"
-
     monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
-
-    call_count = {"graph_get": 0, "acquire": 0, "try_grant": 0}
-
+    call_count = {"graph_get": 0, "acquire": 0}
     async def fake_graph_get(token, url):
         call_count["graph_get"] += 1
-        if call_count["graph_get"] <= 2:
-            # First two calls fail (delegated, then client_credentials)
-            raise M365Error("Forbidden", http_status=403)
-        # Third call succeeds after remediation
-        return {"value": [], "@odata.nextLink": None}
-
+        raise M365Error("Forbidden", http_status=403)
     async def fake_acquire_token(company_id, **kwargs):
         call_count["acquire"] += 1
         return f"client-creds-token-{call_count['acquire']}"
-
-    async def fake_try_grant(company_id, token):
-        call_count["try_grant"] += 1
-        return True
-
-    async def fake_acquire_delegated_for_remediation(company_id):
-        return None
-
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
-    monkeypatch.setattr(m365_mail.m365_service, "try_grant_missing_permissions", fake_try_grant)
-    monkeypatch.setattr(m365_mail.m365_service, "acquire_delegated_token", fake_acquire_delegated_for_remediation)
-
     result = await m365_mail.sync_account(1)
-    assert result["status"] == "succeeded"
-    # 3 graph_get calls: delegated 403, client_creds 403, remediated success
-    assert call_count["graph_get"] == 3
-    # 2 acquire calls: delegated fallback + re-acquire after remediation
-    assert call_count["acquire"] == 2
-    # 1 try_grant call during client_credentials remediation
-    assert call_count["try_grant"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-
+    assert result["status"] == "completed_with_errors"
+    assert "403 Forbidden" in result["errors"][0]["error"]
+    assert call_count["graph_get"] == 2
+    assert call_count["acquire"] == 1
 async def _coro(val):
     return val
