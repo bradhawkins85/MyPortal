@@ -5248,23 +5248,24 @@ async def m365_discover(request: Request):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required",
         )
-    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
     redirect_uri = _build_m365_redirect_uri(request)
 
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = await m365_service.get_effective_pkce_client_id()
+    # Always use PKCE for the discover flow regardless of whether admin
+    # credentials are configured.  The discover step only needs to extract
+    # a tenant ID from the id_token - it requires no confidential-client
+    # capabilities.  Using PKCE avoids AADSTS700025 ("Client is public so
+    # neither client_assertion nor client_secret should be presented")
+    # which occurs when the configured admin client_id belongs to a public
+    # PKCE app rather than a confidential CSP app.
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    oauth_client_id = await m365_service.get_effective_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
         "user_id": user.get("id"),
         "flow": "discover",
+        "code_verifier": code_verifier,
     }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
 
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
@@ -5275,10 +5276,9 @@ async def m365_discover(request: Request):
         "scope": m365_service.DISCOVER_SCOPE,
         "state": state,
         "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
 
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
@@ -5293,24 +5293,21 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
     redirect_uri = _build_m365_redirect_uri(request)
 
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = await m365_service.get_effective_pkce_client_id()
+    # Always use PKCE for the discover flow regardless of whether admin
+    # credentials are configured.  See the /m365/discover handler for the
+    # full rationale (avoids AADSTS700025 on reprovision with public client).
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    oauth_client_id = await m365_service.get_effective_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
         "user_id": current_user.get("id"),
         "flow": "discover",
         "return_to": "company_edit",
+        "code_verifier": code_verifier,
     }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
 
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
@@ -5321,10 +5318,9 @@ async def admin_company_m365_discover(company_id: int, request: Request):
         "scope": m365_service.DISCOVER_SCOPE,
         "state": state,
         "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
 
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
@@ -5644,7 +5640,17 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "code_verifier": code_verifier,
                 "scope": m365_service.DISCOVER_SCOPE,
             }
-        elif _discover_cid and _discover_csec:
+        else:
+            # code_verifier is always included by the discover endpoints now.
+            # This branch handles legacy state tokens that pre-date the PKCE-
+            # always change.  Using admin credentials here risks AADSTS700025
+            # if the configured client_id belongs to a public PKCE app, so we
+            # only fall back when the credentials are actually present and
+            # surface a clear error on failure.
+            if not _discover_cid or not _discover_csec:
+                return _discover_error(
+                    "Sign-in session is incomplete. Please click 'Sign in as Global Admin' again."
+                )
             token_data = {
                 "client_id": _discover_cid,
                 "client_secret": _discover_csec,
@@ -5653,8 +5659,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "redirect_uri": redirect_uri,
                 "scope": m365_service.DISCOVER_SCOPE,
             }
-        else:
-            return _discover_error("Admin M365 credentials are not configured.")
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
@@ -5663,6 +5667,17 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 status=token_response.status_code,
                 body=token_response.text,
             )
+            # AADSTS700025 means the client_id used is a public client but
+            # client_secret was presented.  This happens when the configured
+            # admin credentials reference a public PKCE app instead of a
+            # confidential CSP app.  Provide an actionable error message.
+            error_body = token_response.text or ""
+            if "AADSTS700025" in error_body:
+                return _discover_error(
+                    "Tenant discovery failed: the configured admin client is a "
+                    "public app and cannot use a client secret (AADSTS700025). "
+                    "Please click 'Sign in as Global Admin' to retry using PKCE."
+                )
             return _discover_error("Sign-in failed during tenant discovery.")
 
         token_payload = token_response.json()
