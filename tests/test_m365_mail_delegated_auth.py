@@ -361,8 +361,9 @@ async def test_sync_delegated_403_fallback_then_remediation(monkeypatch):
     assert result["status"] == "succeeded"
     # 3 graph_get calls: delegated 403, client_creds 403, remediated success
     assert call_count["graph_get"] == 3
-    # 2 acquire calls: fallback + re-acquire after remediation
+    # 2 acquire calls: delegated fallback + re-acquire after remediation
     assert call_count["acquire"] == 2
+    # 1 try_grant call during client_credentials remediation
     assert call_count["try_grant"] == 1
 
 
