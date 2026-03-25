@@ -240,6 +240,43 @@ async def test_provision_auto_provisions_pkce_when_missing(async_client: HttpxAs
 
 
 @pytest.mark.anyio("asyncio")
+async def test_pkce_auto_provision_uses_company_admin_creds():
+    """Per-company PKCE auto-provision uses stored admin credentials when missing."""
+    company_creds = {
+        "client_id": "company-admin-id",
+        "client_secret": "company-admin-secret",
+        "tenant_id": "partner-tenant-id",
+    }
+    with (
+        patch.object(
+            m365_service,
+            "get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value=company_creds,
+        ),
+        patch.object(
+            m365_service,
+            "auto_provision_company_pkce_client_id",
+            new_callable=AsyncMock,
+            return_value="company-pkce-id",
+        ) as mock_auto_pkce,
+        patch.object(
+            m365_service,
+            "get_effective_pkce_client_id",
+            new_callable=AsyncMock,
+            return_value="fallback",
+        ) as mock_fallback,
+    ):
+        pkce_id = await m365_service.get_effective_pkce_client_id_for_company(
+            99, redirect_uri="https://example.com/m365/callback"
+        )
+
+    assert pkce_id == "company-pkce-id"
+    mock_auto_pkce.assert_awaited_once()
+    mock_fallback.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_company_m365_provision_uses_pkce(async_client: HttpxAsyncClient):
     """GET /admin/companies/{id}/m365-provision always uses the PKCE public client."""
     with (
@@ -600,6 +637,11 @@ async def test_provision_callback_uses_pkce_token_exchange(
         ),
         patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
         patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock),
+        patch(
+            "app.main.m365_service.auto_provision_company_pkce_client_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
         patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=set()),
         patch("app.main.scheduled_tasks_repo.create_task", new_callable=AsyncMock),
@@ -624,6 +666,68 @@ async def test_provision_callback_uses_pkce_token_exchange(
     assert "code_verifier" in token_req
     assert token_req["code_verifier"] == code_verifier
     assert "client_secret" not in token_req
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_callback_creates_dedicated_company_pkce_app(async_client: HttpxAsyncClient):
+    """Provision callback provisions a dedicated PKCE app for the company."""
+    code_verifier, _ = m365_service.generate_pkce_pair()
+    state = _signed_state(
+        {
+            "company_id": 42,
+            "user_id": 1,
+            "tenant_id": "customer-tenant-id",
+            "flow": "provision",
+            "code_verifier": code_verifier,
+        }
+    )
+
+    async def fake_post(url, *, data=None, **kwargs):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"access_token": "test-access-token"}
+        return mock_resp
+
+    async def fake_provision(**kwargs):
+        return {
+            "client_id": "new-client-id",
+            "client_secret": "new-secret",
+            "app_object_id": "obj-id",
+            "client_secret_key_id": "key-id",
+            "client_secret_expires_at": None,
+        }
+
+    with (
+        patch("app.main.httpx.AsyncClient") as mock_http,
+        patch(
+            "app.main.m365_service.get_effective_pkce_client_id_for_company",
+            new_callable=AsyncMock,
+            return_value="custom-pkce-client-id",
+        ),
+        patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
+        patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock),
+        patch(
+            "app.main.m365_service.auto_provision_company_pkce_client_id",
+            new_callable=AsyncMock,
+        ) as mock_auto_pkce,
+        patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
+        patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=set()),
+        patch("app.main.scheduled_tasks_repo.create_task", new_callable=AsyncMock),
+        patch("app.main.scheduler_service.refresh", new_callable=AsyncMock),
+    ):
+        mock_http.return_value.__aenter__ = AsyncMock(return_value=MagicMock(post=AsyncMock(side_effect=fake_post)))
+        mock_http.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        response = await async_client.get(
+            f"/m365/callback?code=auth-code&state={state}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    mock_auto_pkce.assert_awaited_once()
+    args, kwargs = mock_auto_pkce.call_args
+    assert args and args[0] == 42
+    assert kwargs.get("redirect_uri")
 
 
 
@@ -675,6 +779,11 @@ async def test_provision_callback_persists_token_tenant_when_it_differs_from_sta
         ),
         patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
         patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock) as mock_upsert,
+        patch(
+            "app.main.m365_service.auto_provision_company_pkce_client_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
         patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=set()),
         patch("app.main.scheduled_tasks_repo.create_task", new_callable=AsyncMock),
