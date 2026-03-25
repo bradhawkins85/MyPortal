@@ -44,12 +44,12 @@ from app.services.imap import (
 _MODULE_SLUG = "m365-mail"
 
 _403_ERROR_MESSAGE = (
-    "Mail sync failed (403 Forbidden). The enterprise app "
-    "may be missing required Microsoft Graph application "
-    "permissions (including Mail.ReadWrite), or mailbox access "
-    "to this user is restricted by policy. Re-authorise from "
-    "Microsoft 365 settings as a Global Administrator and "
-    "grant admin consent, then retry the sync."
+    "Mail sync failed (403 Forbidden). Access to the mailbox was denied. "
+    "This may be because mailbox access is restricted by an Exchange Online "
+    "policy, the mailbox does not exist, or the enterprise app has not been "
+    "granted access. Verify that the enterprise app has Mail.ReadWrite "
+    "application permission and that no Exchange Online access policies "
+    "are blocking access, then retry the sync."
 )
 
 # Delegated OAuth scope for the per-account sign-in flow.  Mail.ReadWrite
@@ -669,8 +669,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 "hasAttachments,conversationId"
             ),
         }
-        if process_unread_only:
-            query_params["$filter"] = "isRead eq false"
+        # Note: $filter is intentionally omitted. Combining $filter=isRead eq false
+        # with $orderby on the messages endpoint returns ErrorAccessDenied (403) for
+        # shared mailboxes and service accounts in certain Exchange Online configurations.
+        # Unread filtering is applied client-side using the isRead field from $select.
         full_url = messages_url + "?" + urlencode(query_params, quote_via=quote, safe="$,")
 
         # Paginate through all messages
@@ -754,6 +756,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 internet_msg_id = msg.get("internetMessageId") or msg_id
 
                 if not msg_id:
+                    continue
+
+                # Skip already-read messages when only processing unread
+                if process_unread_only and msg.get("isRead", False):
                     continue
 
                 # Check if already processed

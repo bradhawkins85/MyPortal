@@ -17306,11 +17306,11 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_303_SEE_OTHER,
         )
     if status_value == "completed_with_errors" and error_count:
-        message = quote(
-            f"Office 365 mail sync completed with {error_count} issue{'s' if error_count != 1 else ''}. Imported {processed} messages."
-        )
+        first_error = (result.get("errors") or [{}])[0].get("error") or "Office 365 mail sync completed with errors."
+        if processed:
+            first_error = f"{first_error} ({processed} message{'s' if processed != 1 else ''} imported.)"
         return RedirectResponse(
-            url=f"/admin/modules/m365-mail?success={message}",
+            url=f"/admin/modules/m365-mail?error={quote(first_error)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     message = quote(f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.")
