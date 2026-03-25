@@ -99,7 +99,7 @@ from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
-from app.core.logging import configure_logging, log_error, log_info
+from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
@@ -5430,21 +5430,27 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
             company_id_raw = state_data.get("company_id")
-            company_id = None
             if company_id_raw is not None:
                 try:
-                    company_id = int(company_id_raw)
+                    await m365_service.clear_company_pkce_client_id(int(company_id_raw))
                 except (TypeError, ValueError):
-                    company_id = None
-            if company_id is not None:
-                try:
-                    await m365_service.clear_company_pkce_client_id(company_id)
-                except Exception:
-                    pass
+                    log_warning(
+                        "Skipping per-company PKCE clear; invalid company_id in state",
+                        company_id_raw=company_id_raw,
+                    )
+                except Exception as exc:
+                    log_warning(
+                        "Failed to clear per-company PKCE client ID after AADSTS700016",
+                        company_id_raw=company_id_raw,
+                        error=str(exc),
+                    )
             try:
                 await m365_service.clear_pkce_client_id()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warning(
+                    "Failed to clear global PKCE client ID after AADSTS700016",
+                    error=str(exc),
+                )
             message = (
                 "The PKCE app registration was not found in Azure AD (AADSTS700016). "
                 "The cached app ID has been cleared. Please sign in again; if the problem "
