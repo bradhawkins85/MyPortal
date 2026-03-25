@@ -262,7 +262,7 @@ async def test_provision_callback_uses_pkce_token_exchange(
         patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
         patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock),
         patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
-        patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=[]),
+        patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=set()),
         patch("app.main.scheduled_tasks_repo.create_task", new_callable=AsyncMock),
         patch("app.main.scheduler_service.refresh", new_callable=AsyncMock),
     ):
@@ -332,7 +332,7 @@ async def test_provision_callback_persists_token_tenant_when_it_differs_from_sta
         patch.object(m365_service, "provision_app_registration", side_effect=fake_provision),
         patch("app.main.m365_service.upsert_credentials", new_callable=AsyncMock) as mock_upsert,
         patch("app.main.company_repo.get_company_by_id", new_callable=AsyncMock, return_value={"name": "Acme"}),
-        patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=[]),
+        patch("app.main.scheduled_tasks_repo.get_commands_for_company", new_callable=AsyncMock, return_value=set()),
         patch("app.main.scheduled_tasks_repo.create_task", new_callable=AsyncMock),
         patch("app.main.scheduler_service.refresh", new_callable=AsyncMock),
     ):
