@@ -660,7 +660,7 @@ async def test_provision_callback_uses_pkce_token_exchange(
     assert "/m365" in response.headers.get("location", "")
 
     # Token exchange must use PKCE (code_verifier, no client_secret)
-    assert token_calls, "Expected at least one token exchange"
+    assert len(token_calls) == 1
     token_req = token_calls[0]["data"]
     assert token_req.get("client_id") == "custom-pkce-client-id"
     assert "code_verifier" in token_req

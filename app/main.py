@@ -5841,8 +5841,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                     ),
                 },
             )
-        except Exception:  # pragma: no cover - best-effort helper
-            pass
+        except Exception as exc:  # pragma: no cover - best-effort helper
+            log_warning(
+                "Per-company PKCE auto-provision failed after M365 app provisioning",
+                company_id=company_id,
+                error=str(exc),
+            )
 
         # Auto-create default sync tasks for the company if not already present.
         existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
