@@ -263,9 +263,16 @@ async def _auto_provision_company_pkce_client_id(
     if company_admin_creds is None:
         try:
             company_admin_creds = await get_company_admin_credentials(company_id)
-        except Exception as exc:  # pragma: no cover - defensive logging
+        except (RuntimeError, M365Error) as exc:  # pragma: no cover - defensive logging
             log_warning(
                 "Failed to load per-company admin credentials for PKCE auto-provision",
+                company_id=company_id,
+                error=str(exc),
+            )
+            company_admin_creds = None
+        except Exception as exc:  # pragma: no cover - unexpected
+            log_warning(
+                "Unexpected error loading per-company admin credentials for PKCE auto-provision",
                 company_id=company_id,
                 error=str(exc),
             )
@@ -303,8 +310,12 @@ async def _auto_provision_company_pkce_client_id(
         company_name = (company.get("name") or "").strip() if company else ""
         if company_name:
             display_name = f"MyPortal PKCE – {company_name}"
-    except Exception:
-        pass
+    except Exception as exc:  # pragma: no cover - best-effort label
+        log_warning(
+            "Failed to load company name for PKCE display name; using default",
+            company_id=company_id,
+            error=str(exc),
+        )
 
     try:
         pkce_client_id = await provision_pkce_public_client_app(
@@ -312,9 +323,16 @@ async def _auto_provision_company_pkce_client_id(
             display_name=display_name,
             redirect_uri=redirect_uri,
         )
-    except Exception as exc:
+    except M365Error as exc:
         log_warning(
             "Failed to auto-provision per-company PKCE public client app",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return None
+    except Exception as exc:  # pragma: no cover - unexpected provisioning failure
+        log_warning(
+            "Unexpected error during per-company PKCE auto-provision",
             company_id=company_id,
             error=str(exc),
         )
