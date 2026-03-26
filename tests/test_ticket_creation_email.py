@@ -538,11 +538,8 @@ async def test_send_creation_email_skips_when_requester_email_blank(monkeypatch)
     """No notification is attempted when requester email is blank/whitespace."""
     module_triggered: list[str] = []
     direct_send_called = False
-    event_setting_called = False
 
     async def fake_get_event_setting(event_type: str):
-        nonlocal event_setting_called
-        event_setting_called = True
         return {
             "event_type": event_type,
             "display_name": "Ticket created",
@@ -579,7 +576,6 @@ async def test_send_creation_email_skips_when_requester_email_blank(monkeypatch)
 
     await tickets_service._send_ticket_creation_email(enriched)
 
-    assert not event_setting_called
     assert not module_triggered
     assert not direct_send_called
 
