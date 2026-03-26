@@ -62,7 +62,7 @@ async def list_attachments(
     When `access_levels` is provided, results are filtered to the allowed values.
     """
     # When empty, no filtering is applied; when populated, restrict to these levels.
-    access_level_filter = tuple(access_levels) if access_levels else ()
+    allowed_access_levels = tuple(access_levels) if access_levels else ()
     query = """
         SELECT id, ticket_id, filename, original_filename, file_size, 
                mime_type, access_level, uploaded_by_user_id, uploaded_at
@@ -70,10 +70,10 @@ async def list_attachments(
         WHERE ticket_id = ?
     """
     params: list[Any] = [ticket_id]
-    if access_level_filter:
-        placeholders = ",".join("?" for _ in access_level_filter)
+    if allowed_access_levels:
+        placeholders = ",".join("?" for _ in allowed_access_levels)
         query += f" AND access_level IN ({placeholders})"
-        params.extend(access_level_filter)
+        params.extend(allowed_access_levels)
 
     query += " ORDER BY uploaded_at ASC"
 

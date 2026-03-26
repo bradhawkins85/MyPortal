@@ -13763,13 +13763,9 @@ async def _render_portal_ticket_detail(
         if isinstance(uploaded_at, datetime):
             uploaded_iso = uploaded_at.astimezone(timezone.utc).isoformat()
         else:
-            uploaded_iso = ""
+            uploaded_iso = None
         try:
-            raw_file_size = attachment.get("file_size")
-            if raw_file_size is None:
-                file_size = 0
-            else:
-                file_size = int(raw_file_size)
+            file_size = int(attachment.get("file_size", 0) or 0)
         except (TypeError, ValueError):
             file_size = 0
 
