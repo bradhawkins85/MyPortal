@@ -13769,7 +13769,13 @@ async def _render_portal_ticket_detail(
     for attachment in attachment_records:
         uploaded_at = attachment.get("uploaded_at")
         if isinstance(uploaded_at, datetime):
-            uploaded_iso = uploaded_at.astimezone(timezone.utc).isoformat()
+            # Treat naive database timestamps as UTC to avoid localtime shifts
+            uploaded_dt = (
+                uploaded_at.replace(tzinfo=timezone.utc)
+                if uploaded_at.tzinfo is None
+                else uploaded_at.astimezone(timezone.utc)
+            )
+            uploaded_iso = uploaded_dt.isoformat()
         else:
             uploaded_iso = None
         try:
@@ -14156,7 +14162,12 @@ async def _render_ticket_detail(
     for attachment in attachment_records:
         uploaded_at = attachment.get("uploaded_at")
         if isinstance(uploaded_at, datetime):
-            uploaded_iso = uploaded_at.astimezone(timezone.utc).isoformat()
+            uploaded_dt = (
+                uploaded_at.replace(tzinfo=timezone.utc)
+                if uploaded_at.tzinfo is None
+                else uploaded_at.astimezone(timezone.utc)
+            )
+            uploaded_iso = uploaded_dt.isoformat()
         else:
             uploaded_iso = None
         try:
