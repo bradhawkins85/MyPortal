@@ -1943,8 +1943,6 @@
       return;
     }
 
-    convertUtcElements(container);
-
     const ticketId = container.getAttribute('data-ticket-id');
     const emptyMessage = document.querySelector('[data-attachments-empty]');
 
