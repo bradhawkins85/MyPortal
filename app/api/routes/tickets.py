@@ -170,11 +170,9 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
         attachment_records = await attachments_repo.list_attachments(ticket_id)
     else:
         # Non-technicians can only see open and closed attachments (not restricted)
-        all_attachments = await attachments_repo.list_attachments(ticket_id)
-        attachment_records = [
-            att for att in all_attachments
-            if att.get("access_level") in ("open", "closed")
-        ]
+        attachment_records = await attachments_repo.list_attachments(
+            ticket_id, access_levels=("open", "closed")
+        )
 
     return TicketDetail(
         **ticket,
@@ -1136,17 +1134,13 @@ async def list_ticket_attachments(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     
     # Get attachments
-    all_attachments = await attachments_repo.list_attachments(ticket_id)
-    
-    # Filter based on access level
     if has_helpdesk_access:
-        attachments = all_attachments
+        attachments = await attachments_repo.list_attachments(ticket_id)
     else:
         # Non-technicians cannot see restricted attachments
-        attachments = [
-            att for att in all_attachments
-            if att.get("access_level") in ("open", "closed")
-        ]
+        attachments = await attachments_repo.list_attachments(
+            ticket_id, access_levels=("open", "closed")
+        )
     
     return TicketAttachmentListResponse(
         items=[TicketAttachment(**attachment) for attachment in attachments]
@@ -1451,4 +1445,3 @@ async def merge_tickets(
         moved_reply_count=moved_count,
         moved_time_entry_count=time_entry_count,
     )
-

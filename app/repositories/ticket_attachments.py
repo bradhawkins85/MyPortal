@@ -1,7 +1,7 @@
 """Repository for ticket attachments data access."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
 from app.core.database import db
 from app.core.logging import log_debug, log_error
@@ -54,16 +54,29 @@ async def get_attachment_by_filename(ticket_id: int, filename: str) -> dict[str,
     return dict(row) if row else None
 
 
-async def list_attachments(ticket_id: int) -> list[dict[str, Any]]:
-    """List all attachments for a ticket."""
+async def list_attachments(
+    ticket_id: int, *, access_levels: Iterable[str] | None = None
+) -> list[dict[str, Any]]:
+    """List all attachments for a ticket.
+
+    When `access_levels` is provided, results are filtered to the allowed values.
+    """
+    allowed_levels = tuple(access_levels) if access_levels else ()
     query = """
         SELECT id, ticket_id, filename, original_filename, file_size, 
                mime_type, access_level, uploaded_by_user_id, uploaded_at
         FROM ticket_attachments
         WHERE ticket_id = ?
-        ORDER BY uploaded_at ASC
     """
-    rows = await db.fetch_all(query, (ticket_id,))
+    params: list[Any] = [ticket_id]
+    if allowed_levels:
+        placeholders = ",".join("?" for _ in allowed_levels)
+        query += f" AND access_level IN ({placeholders})"
+        params.extend(allowed_levels)
+
+    query += " ORDER BY uploaded_at ASC"
+
+    rows = await db.fetch_all(query, tuple(params))
     return [dict(row) for row in rows]
 
 
