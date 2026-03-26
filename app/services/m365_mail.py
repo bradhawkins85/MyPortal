@@ -569,49 +569,51 @@ async def _resolve_mail_folder_identifier(
 
         raise M365Error(f"Mail folder '{trimmed}' not found or inaccessible", http_status=404)
 
+    async def _resolve_child_folder(parent_identifier: str, child_name: str) -> str:
+        if _looks_like_graph_folder_id(child_name):
+            return child_name
+
+        filter_value = _escape_odata_string(child_name)
+        params = {
+            "$filter": f"displayName eq '{filter_value}'",
+            "$select": "id,displayName",
+            "$top": "1",
+        }
+        url = (
+            f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(parent_identifier, safe='')}/childFolders?"
+            + urlencode(
+                params,
+                quote_via=quote,
+                safe="$,",
+            )
+        )
+        data = await _graph_get(access_token, url)
+        child_folders = data.get("value") or []
+        if not child_folders:
+            raise M365Error(
+                f"Mail folder '{trimmed_folder}' not found or inaccessible",
+                http_status=404,
+            )
+        folder_id = child_folders[0].get("id")
+        if not folder_id:
+            raise M365Error(
+                f"Mail folder '{trimmed_folder}' found but missing folder ID",
+                http_status=404,
+            )
+        return folder_id
+
     raw_segments = trimmed_folder.split("/")
     segments = [seg for seg in raw_segments if seg]
     if len(segments) != len(raw_segments):
         raise M365Error(
-            "Mail folder path contains empty segments; use 'Parent/Subfolder' format",
+            f"Mail folder path '{trimmed_folder}' contains empty segments; use 'Parent/Subfolder' format",
             http_status=400,
         )
     if len(segments) > 1:
         # Resolve the first segment against the root, then walk child folders for the rest
         parent_identifier = await _resolve_top_level(segments[0])
         for child_name in segments[1:]:
-            if _looks_like_graph_folder_id(child_name):
-                parent_identifier = child_name
-                continue
-
-            filter_value = _escape_odata_string(child_name)
-            params = {
-                "$filter": f"displayName eq '{filter_value}'",
-                "$select": "id,displayName",
-                "$top": "1",
-            }
-            url = (
-                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(parent_identifier, safe='')}/childFolders?"
-                + urlencode(
-                    params,
-                    quote_via=quote,
-                    safe="$,",
-                )
-            )
-            data = await _graph_get(access_token, url)
-            child_folders = data.get("value") or []
-            if not child_folders:
-                raise M365Error(
-                    f"Mail folder '{trimmed_folder}' not found or inaccessible",
-                    http_status=404,
-                )
-            folder_id = child_folders[0].get("id")
-            if not folder_id:
-                raise M365Error(
-                    f"Mail folder '{trimmed_folder}' found but missing folder ID",
-                    http_status=404,
-                )
-            parent_identifier = folder_id
+            parent_identifier = await _resolve_child_folder(parent_identifier, child_name)
 
         return parent_identifier
 
