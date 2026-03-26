@@ -13768,8 +13768,6 @@ async def _render_portal_ticket_detail(
             raw_file_size = attachment.get("file_size")
             if raw_file_size is None:
                 file_size = 0
-            elif isinstance(raw_file_size, (int, float)):
-                file_size = int(raw_file_size)
             else:
                 file_size = int(raw_file_size)
         except (TypeError, ValueError):
