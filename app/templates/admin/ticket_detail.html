@@ -857,7 +857,15 @@
                     aria-multiline="true"
                     data-placeholder="Write your reply..."
                   ></div>
-                  <input type="hidden" name="body" data-rich-text-value required />
+                  <textarea
+                    name="body"
+                    class="rich-text-editor__fallback"
+                    data-rich-text-value
+                    data-rich-text-fallback
+                    aria-labelledby="ticket-reply-label"
+                    placeholder="Write your reply..."
+                    required
+                  ></textarea>
                 </div>
               </div>
               <div class="form-field">
