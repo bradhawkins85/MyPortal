@@ -543,7 +543,7 @@ async def test_sync_account_errors_on_empty_folder_segment(monkeypatch):
     assert any("empty segments" in err for err in errors)
 
 
-async def test_sync_account_resolves_deep_subfolder(monkeypatch):
+async def test_sync_account_resolves_multi_level_nested_folders(monkeypatch):
     """sync_account resolves multi-level nested folders."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
