@@ -602,9 +602,8 @@ async def _resolve_mail_folder_identifier(
             )
         return folder_id
 
-    raw_segments = trimmed_folder.split("/")
-    segments = [seg for seg in raw_segments if seg]
-    if len(segments) != len(raw_segments):
+    segments = trimmed_folder.split("/")
+    if any(not seg for seg in segments):
         raise M365Error(
             f"Mail folder path '{trimmed_folder}' contains empty segments; use 'Parent/Subfolder' format",
             http_status=400,
