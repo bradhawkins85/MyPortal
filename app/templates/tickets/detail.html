@@ -103,6 +103,41 @@
             </div>
           </article>
 
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Attachments</h2>
+            </header>
+            <div class="card__body">
+              {% if ticket_attachments %}
+                <div class="attachments-grid">
+                  {% for attachment in ticket_attachments %}
+                    <article class="attachment-card">
+                      <div class="attachment-card__icon" aria-hidden="true">📎</div>
+                      <div>
+                        <p class="attachment-card__name">
+                          <a href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download">
+                            {{ attachment.original_filename or attachment.filename }}
+                          </a>
+                        </p>
+                        <p class="attachment-card__meta">
+                          {{ attachment.file_size | filesizeformat }}
+                          {% if attachment.uploaded_iso %}
+                            · <span data-utc="{{ attachment.uploaded_iso }}"></span>
+                          {% endif %}
+                          {% if attachment.access_level %}
+                            · {{ attachment.access_level | replace('_', ' ') | title }}
+                          {% endif %}
+                        </p>
+                      </div>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="card__empty">No attachments have been added yet.</p>
+              {% endif %}
+            </div>
+          </article>
+
           {% if assigned_user and assigned_user.booking_link_url %}
             <article class="card card--panel">
               <header class="card__header">

@@ -139,7 +139,7 @@ def test_create_ticket_with_api_key_authentication(monkeypatch):
     monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
     
     from app.repositories import ticket_attachments as attachments_repo
-    async def mock_list_attachments(ticket_id):
+    async def mock_list_attachments(ticket_id, *, access_levels=None):
         return []
     monkeypatch.setattr(attachments_repo, "list_attachments", mock_list_attachments)
     
@@ -326,7 +326,7 @@ def test_create_ticket_with_session_still_works(monkeypatch):
     monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
     
     from app.repositories import ticket_attachments as attachments_repo
-    async def mock_list_attachments(ticket_id):
+    async def mock_list_attachments(ticket_id, *, access_levels=None):
         return []
     monkeypatch.setattr(attachments_repo, "list_attachments", mock_list_attachments)
     
