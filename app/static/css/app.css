@@ -7033,6 +7033,11 @@ dialog.dialog::backdrop {
   height: 100%;
 }
 
+.attachment-card__content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .attachment-card__header {
   display: flex;
   align-items: center;
