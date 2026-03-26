@@ -494,6 +494,25 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
     return response.json()
 
 
+async def _graph_get_bytes(access_token: str, url: str) -> bytes:
+    """Perform a GET request to Microsoft Graph and return raw bytes."""
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(url, headers=headers)
+    if response.status_code != 200:
+        log_error(
+            "Microsoft Graph mail binary request failed",
+            url=url,
+            status=response.status_code,
+            body=response.text[:500] if response.text else "",
+        )
+        raise M365Error(
+            f"Microsoft Graph binary request failed ({response.status_code})",
+            http_status=response.status_code,
+        )
+    return response.content
+
+
 async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> None:
     """Perform a PATCH request to Microsoft Graph."""
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -1196,15 +1215,32 @@ async def _save_graph_attachments(
         if odata_type != "#microsoft.graph.fileAttachment":
             continue
 
+        attachment_id = str(attachment.get("id") or "").strip()
         filename = attachment.get("name") or "attachment"
         content_type = attachment.get("contentType") or "application/octet-stream"
         content_bytes_b64 = attachment.get("contentBytes") or ""
-        if not content_bytes_b64:
-            continue
+        payload: bytes | None = None
 
-        try:
-            payload = base64.b64decode(content_bytes_b64)
-        except Exception:
+        if content_bytes_b64:
+            try:
+                payload = base64.b64decode(content_bytes_b64)
+            except Exception:
+                payload = None
+
+        if payload is None and attachment_id:
+            # Graph list-attachments responses may omit contentBytes depending on
+            # tenant settings, API behavior, or attachment size. Fetch the raw
+            # attachment stream to ensure file attachments are persisted.
+            value_url = (
+                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id}"
+                f"/attachments/{quote(attachment_id, safe='')}/$value"
+            )
+            try:
+                payload = await _graph_get_bytes(access_token, value_url)
+            except Exception:
+                payload = None
+
+        if not payload:
             continue
 
         # Skip inline images (same as IMAP)
