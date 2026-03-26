@@ -541,30 +541,88 @@ async def _resolve_mail_folder_identifier(
     folder: str,
 ) -> str:
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
-    if folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder):
-        return folder
+    folder_path = (folder or "").strip()
 
-    # OData string literal escaping (single-quote doubling); urlencode then handles
-    # URL encoding of the full filter expression.
-    filter_value = _escape_odata_string(folder)
-    params = {
-        "$filter": f"displayName eq '{filter_value}'",
-        "$select": "id,displayName",
-        "$top": "1",
-    }
-    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders?" + urlencode(
-        params,
-        quote_via=quote,  # Match path encoding (spaces as %20) for consistent OData queries
-        safe="$,",  # Keep $ for OData operators and commas for $select field lists; encode all other characters
-    )
-    data = await _graph_get(access_token, url)
-    folders = data.get("value") or []
-    if folders:
-        folder_id = folders[0].get("id")
-        if folder_id:
-            return folder_id
+    async def _resolve_top_level(folder_name: str) -> str:
+        if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder_name):
+            return folder_name
 
-    raise M365Error(f"Mail folder '{folder}' not found or inaccessible", http_status=404)
+        # OData string literal escaping (single-quote doubling); urlencode then handles
+        # URL encoding of the full filter expression.
+        filter_value = _escape_odata_string(folder_name)
+        params = {
+            "$filter": f"displayName eq '{filter_value}'",
+            "$select": "id,displayName",
+            "$top": "1",
+        }
+        url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders?" + urlencode(
+            params,
+            quote_via=quote,  # Match path encoding (spaces as %20) for consistent OData queries
+            safe="$,",  # Keep $ for OData operators and commas for $select field lists; encode all other characters
+        )
+        data = await _graph_get(access_token, url)
+        folders = data.get("value") or []
+        if folders:
+            folder_id = folders[0].get("id")
+            if folder_id:
+                return folder_id
+
+        raise M365Error(f"Mail folder '{folder_name}' not found or inaccessible", http_status=404)
+
+    async def _resolve_child_folder(parent_identifier: str, child_name: str) -> str:
+        if _looks_like_graph_folder_id(child_name):
+            return child_name
+
+        filter_value = _escape_odata_string(child_name)
+        params = {
+            "$filter": f"displayName eq '{filter_value}'",
+            "$select": "id,displayName",
+            "$top": "1",
+        }
+        url = (
+            f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(parent_identifier, safe='')}/childFolders?"
+            + urlencode(
+                params,
+                quote_via=quote,
+                safe="$,",
+            )
+        )
+        data = await _graph_get(access_token, url)
+        child_folders = data.get("value") or []
+        if not child_folders:
+            raise M365Error(
+                f"Mail folder '{folder_path}' not found or inaccessible",
+                http_status=404,
+            )
+        folder_id = child_folders[0].get("id")
+        if not folder_id:
+            raise M365Error(
+                f"Mail folder '{folder_path}' found but missing folder ID",
+                http_status=404,
+            )
+        return folder_id
+
+    if folder_path.startswith("/") or folder_path.endswith("/"):
+        raise M365Error(
+            f"Mail folder path '{folder_path}' cannot start or end with '/'",
+            http_status=400,
+        )
+
+    segments = folder_path.split("/")
+    if any(not seg for seg in segments):
+        raise M365Error(
+            f"Mail folder path '{folder_path}' contains empty segments; use 'Parent/Subfolder' format",
+            http_status=400,
+        )
+    if len(segments) > 1:
+        # Resolve the first segment against the root, then walk child folders for the rest
+        parent_identifier = await _resolve_top_level(segments[0])
+        for child_name in segments[1:]:
+            parent_identifier = await _resolve_child_folder(parent_identifier, child_name)
+
+        return parent_identifier
+
+    return await _resolve_top_level(folder_path)
 
 
 def _build_filter_context(
