@@ -166,7 +166,7 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
         result = asyncio.run(modules._invoke_whisperx(settings, payload))
 
         # Verify result
-        assert result["status"] == "succeeded"
+        assert result["status"] == "succeeded", f"result={result}"
         assert result["ticket_id"] == 10
         assert result["transcription_count"] == 1
         assert result["reply_id"] == 42
@@ -190,7 +190,7 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
 
 def test_invoke_whisperx_no_audio_attachments(monkeypatch):
     """Error when ticket has no audio attachments."""
-    _webhook_helpers(monkeypatch)
+    fake_event_state = _webhook_helpers(monkeypatch)
 
     async def fake_get_ticket(tid):
         return {"id": tid, "subject": "No audio"}
@@ -233,7 +233,7 @@ def test_invoke_whisperx_missing_ticket_id():
 
 def test_invoke_whisperx_missing_base_url(monkeypatch):
     """Error when base_url is not configured."""
-    _webhook_helpers(monkeypatch)
+    fake_event_state = _webhook_helpers(monkeypatch)
 
     settings = {"base_url": "", "api_key": ""}
     payload = {"ticket_id": 1}
@@ -299,7 +299,7 @@ def test_invoke_whisperx_add_note_false(monkeypatch, tmp_path):
 
         result = asyncio.run(modules._invoke_whisperx(settings, payload))
 
-        assert result["status"] == "succeeded"
+        assert result["status"] == "succeeded", f"result={result}, last_error={fake_event_state.get('last_error')}"
         assert result["transcription_count"] == 1
         assert result["reply_id"] is None
         assert reply_created["called"] is False
@@ -348,3 +348,68 @@ def test_is_audio_attachment_by_extension():
     assert modules._is_audio_attachment({"mime_type": None, "original_filename": "recording.mp3"})
     assert modules._is_audio_attachment({"mime_type": "application/octet-stream", "original_filename": "call.flac"})
     assert not modules._is_audio_attachment({"mime_type": "", "original_filename": "document.txt"})
+
+
+def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
+    """Handler should wait briefly for attachment file to appear before failing."""
+    fake_event_state = _webhook_helpers(monkeypatch)
+
+    async def fake_get_ticket(tid):
+        return {"id": tid}
+
+    attachment = {
+        "id": 11,
+        "ticket_id": 55,
+        "filename": "delayed.wav",
+        "original_filename": "delayed.wav",
+        "mime_type": "audio/wav",
+        "file_size": 1024,
+    }
+
+    call_count = {"calls": 0}
+
+    async def fake_list_attachments(tid, *, access_levels=None):
+        call_count["calls"] += 1
+        # First poll: no attachments yet, second poll: attachment appears
+        return [] if call_count["calls"] == 1 else [attachment]
+
+    # Prepare upload directory but do not create the file yet
+    upload_dir = Path(modules.__file__).parent.parent / "static" / "uploads" / "tickets"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    delayed_file = upload_dir / attachment["filename"]
+    if delayed_file.exists():
+        delayed_file.unlink()
+
+    async def fake_sleep(seconds):
+        # Simulate importer finishing and writing the file
+        delayed_file.write_bytes(b"RIFF delayed")
+        return None
+
+    # Fake HTTP client
+    whisperx_response = _FakeResponse({"text": "ready now"})
+    client_factory = _AsyncClientFactory(whisperx_response)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    import app.repositories.tickets as tickets_repo_mod
+    import app.repositories.ticket_attachments as attach_repo_mod
+
+    monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    async def fake_create_reply(**kw):
+        return {"id": 123}
+    monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
+    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", _noop)
+
+    settings = {"base_url": "http://whisperx.local"}
+    payload = {"ticket_id": 55}
+
+    try:
+        result = asyncio.run(modules._invoke_whisperx(settings, payload))
+
+        assert result["status"] == "succeeded", f"result={result}, last_error={fake_event_state.get('last_error')}"
+        assert result["transcription_count"] == 1
+        assert call_count["calls"] >= 2  # ensured we polled at least twice
+    finally:
+        if delayed_file.exists():
+            delayed_file.unlink()
