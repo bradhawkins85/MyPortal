@@ -14127,7 +14127,11 @@ async def _render_ticket_detail(
     if tactical_module:
         tactical_settings = tactical_module.get("settings") or {}
         if isinstance(tactical_settings, Mapping):
-            base_rmm_url = str(tactical_settings.get("base_rmm_url") or "").strip()
+            base_rmm_url = str(
+                tactical_settings.get("base_rmm_url")
+                or tactical_settings.get("base_url")
+                or ""
+            ).strip()
             if base_rmm_url:
                 tactical_base_url = base_rmm_url.rstrip("/")
 
@@ -14136,6 +14140,37 @@ async def _render_ticket_detail(
     # Fetch call recordings linked to this ticket
     from app.repositories import call_recordings as call_recordings_repo
     call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
+
+    attachment_records: list[Mapping[str, Any]] = []
+    try:
+        attachment_records = await attachments_repo.list_attachments(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to load ticket attachments",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        attachment_records = []
+
+    formatted_attachments: list[dict[str, Any]] = []
+    for attachment in attachment_records:
+        uploaded_at = attachment.get("uploaded_at")
+        if isinstance(uploaded_at, datetime):
+            uploaded_iso = uploaded_at.astimezone(timezone.utc).isoformat()
+        else:
+            uploaded_iso = None
+        try:
+            file_size = int(attachment.get("file_size", 0) or 0)
+        except (TypeError, ValueError):
+            file_size = 0
+
+        formatted_attachments.append(
+            {
+                **attachment,
+                "uploaded_iso": uploaded_iso,
+                "file_size": file_size,
+            }
+        )
 
     total_billable_minutes = 0
     total_non_billable_minutes = 0
@@ -14394,6 +14429,7 @@ async def _render_ticket_detail(
         "ticket_replies": enriched_replies,
         "ticket_call_recordings": enriched_recordings,
         "ticket_watchers": enriched_watchers,
+        "ticket_attachments": formatted_attachments,
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
@@ -15732,17 +15768,49 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     
+    has_failed_attachments = False
     try:
         author_id = current_user.get("id")
+        if not isinstance(author_id, int):
+            try:
+                author_id = int(author_id)
+            except (TypeError, ValueError, AttributeError):
+                author_id = None
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
-            author_id=author_id if isinstance(author_id, int) else None,
+            author_id=author_id,
             body=sanitized_body.html,
             is_internal=is_internal,
             minutes_spent=minutes_spent,
             is_billable=is_billable,
             labour_type_id=labour_type_id,
         )
+        attachments = form.getlist("attachments")
+        if attachments:
+            for attachment in attachments:
+                filename = (attachment.filename or "") if attachment else ""
+                if filename:
+                    try:
+                        await attachments_service.save_uploaded_file(
+                            ticket_id=ticket_id,
+                            file=attachment,
+                            access_level="closed",
+                            uploaded_by_user_id=author_id,
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        log_error(
+                            "Failed to save attachment",
+                            ticket_id=ticket_id,
+                            filename=filename,
+                            error=str(exc),
+                        )
+                        has_failed_attachments = True
+                else:
+                    log_error(
+                        "Skipped attachment without filename; treating as failed upload",
+                        ticket_id=ticket_id,
+                    )
+                    has_failed_attachments = True
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
@@ -15762,8 +15830,11 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             error_message="Unable to save the reply. Please try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+    message_text = "Reply posted."
+    if has_failed_attachments:
+        message_text = "Reply posted, but some attachments failed to upload."
     return RedirectResponse(
-        url=f"/admin/tickets/{ticket_id}?success=" + quote("Reply posted."),
+        url=f"/admin/tickets/{ticket_id}?success=" + quote(message_text),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
