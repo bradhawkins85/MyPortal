@@ -13490,6 +13490,18 @@ async def _render_portal_tickets_page(
     return response
 
 
+def _format_attachment_uploaded_iso(uploaded_at: datetime | None) -> str | None:
+    """Normalize attachment timestamps to UTC ISO strings."""
+    if not isinstance(uploaded_at, datetime):
+        return None
+    uploaded_dt = (
+        uploaded_at.replace(tzinfo=timezone.utc)
+        if uploaded_at.tzinfo is None
+        else uploaded_at.astimezone(timezone.utc)
+    )
+    return uploaded_dt.isoformat()
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -13768,10 +13780,7 @@ async def _render_portal_ticket_detail(
     formatted_attachments: list[dict[str, Any]] = []
     for attachment in attachment_records:
         uploaded_at = attachment.get("uploaded_at")
-        if isinstance(uploaded_at, datetime):
-            uploaded_iso = uploaded_at.astimezone(timezone.utc).isoformat()
-        else:
-            uploaded_iso = None
+        uploaded_iso = _format_attachment_uploaded_iso(uploaded_at)
         try:
             file_size = int(attachment.get("file_size", 0) or 0)
         except (TypeError, ValueError):
@@ -14155,10 +14164,7 @@ async def _render_ticket_detail(
     formatted_attachments: list[dict[str, Any]] = []
     for attachment in attachment_records:
         uploaded_at = attachment.get("uploaded_at")
-        if isinstance(uploaded_at, datetime):
-            uploaded_iso = uploaded_at.astimezone(timezone.utc).isoformat()
-        else:
-            uploaded_iso = None
+        uploaded_iso = _format_attachment_uploaded_iso(uploaded_at)
         try:
             file_size = int(attachment.get("file_size", 0) or 0)
         except (TypeError, ValueError):
