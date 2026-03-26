@@ -542,17 +542,41 @@ async def _resolve_mail_folder_identifier(
 ) -> str:
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
     normalized = (folder or "").strip()
+
+    async def _resolve_top_level(name: str) -> str:
+        trimmed = (name or "").strip()
+        if trimmed.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed):
+            return trimmed
+
+        # OData string literal escaping (single-quote doubling); urlencode then handles
+        # URL encoding of the full filter expression.
+        filter_value = _escape_odata_string(trimmed)
+        params = {
+            "$filter": f"displayName eq '{filter_value}'",
+            "$select": "id,displayName",
+            "$top": "1",
+        }
+        url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders?" + urlencode(
+            params,
+            quote_via=quote,  # Match path encoding (spaces as %20) for consistent OData queries
+            safe="$,",  # Keep $ for OData operators and commas for $select field lists; encode all other characters
+        )
+        data = await _graph_get(access_token, url)
+        folders = data.get("value") or []
+        if folders:
+            folder_id = folders[0].get("id")
+            if folder_id:
+                return folder_id
+
+        raise M365Error(f"Mail folder '{trimmed}' not found or inaccessible", http_status=404)
+
     if normalized.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(normalized):
         return normalized
 
     segments = [seg for seg in normalized.split("/") if seg]
     if len(segments) > 1:
         # Resolve the first segment against the root, then walk child folders for the rest
-        parent_identifier = await _resolve_mail_folder_identifier(
-            access_token=access_token,
-            upn=upn,
-            folder=segments[0],
-        )
+        parent_identifier = await _resolve_top_level(segments[0])
         for child_name in segments[1:]:
             if _looks_like_graph_folder_id(child_name):
                 parent_identifier = child_name
@@ -589,27 +613,7 @@ async def _resolve_mail_folder_identifier(
 
         return parent_identifier
 
-    # OData string literal escaping (single-quote doubling); urlencode then handles
-    # URL encoding of the full filter expression.
-    filter_value = _escape_odata_string(normalized)
-    params = {
-        "$filter": f"displayName eq '{filter_value}'",
-        "$select": "id,displayName",
-        "$top": "1",
-    }
-    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders?" + urlencode(
-        params,
-        quote_via=quote,  # Match path encoding (spaces as %20) for consistent OData queries
-        safe="$,",  # Keep $ for OData operators and commas for $select field lists; encode all other characters
-    )
-    data = await _graph_get(access_token, url)
-    folders = data.get("value") or []
-    if folders:
-        folder_id = folders[0].get("id")
-        if folder_id:
-            return folder_id
-
-    raise M365Error(f"Mail folder '{folder}' not found or inaccessible", http_status=404)
+    return await _resolve_top_level(normalized)
 
 
 def _build_filter_context(

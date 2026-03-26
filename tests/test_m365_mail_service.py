@@ -470,8 +470,9 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
         if "childFolders?" in decoded:
             child_folder_requests.append(decoded)
             return {"value": [{"id": "child-folder-id"}]}
-        assert "/mailFolders/child-folder-id/messages?" in decoded
-        return {"value": []}
+        if "/mailFolders/child-folder-id/messages?" in decoded:
+            return {"value": []}
+        pytest.fail(f"Unexpected Graph call: {decoded}")
 
     async def fake_update_account(account_id: int, **fields):
         return None
