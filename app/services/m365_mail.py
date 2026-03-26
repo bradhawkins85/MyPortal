@@ -453,6 +453,7 @@ async def _record_message(
 # ---------------------------------------------------------------------------
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+_MIN_FOLDER_ID_LENGTH = 20
 _WELL_KNOWN_MAIL_FOLDERS = {
     "archive",
     "clutter",
@@ -507,13 +508,30 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
 
 
 def _looks_like_graph_folder_id(folder: str) -> bool:
-    """Heuristic check for Graph folder IDs (typically AAMk/AQMk...)."""
-    if not folder:
+    """Heuristic check for Graph folder IDs.
+
+    Graph uses opaque, base64-like IDs (often starting with AAMk/AQMk). Treat
+    any long, space-free token as an ID to avoid unnecessary display-name
+    lookups and to keep working if Microsoft introduces new prefixes.
+    """
+    normalized = (folder or "").strip()
+    if not normalized:
+        return False  # Whitespace-only input is not a valid folder ID
+    # Spaces imply user-facing names (not opaque IDs).
+    if " " in normalized:
         return False
-    normalized = folder.strip()
-    if not normalized or " " in normalized:
-        return False
-    return normalized.startswith(("AAMk", "AQMk"))
+    if normalized.startswith(("AAMk", "AQMk")):
+        return True  # Current Graph folder ID prefixes
+    return len(normalized) >= _MIN_FOLDER_ID_LENGTH  # Fallback for future prefixes
+
+
+def _escape_odata_string(value: str) -> str:
+    """Escape a string literal for use in an OData filter expression.
+
+    Currently handles the required single-quote doubling for string literals.
+    Extend this if additional OData escaping is needed in the future.
+    """
+    return value.replace("'", "''")
 
 
 async def _resolve_mail_folder_identifier(
@@ -526,14 +544,18 @@ async def _resolve_mail_folder_identifier(
     if folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder):
         return folder
 
-    filter_value = folder.replace("'", "''")
+    # OData string literal escaping (single-quote doubling); urlencode then handles
+    # URL encoding of the full filter expression.
+    filter_value = _escape_odata_string(folder)
     params = {
         "$filter": f"displayName eq '{filter_value}'",
         "$select": "id,displayName",
         "$top": "1",
     }
     url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders?" + urlencode(
-        params, quote_via=quote, safe="$,"
+        params,
+        quote_via=quote,  # Match path encoding (spaces as %20) for consistent OData queries
+        safe="$,",  # Keep $ for OData operators and commas for $select field lists; encode all other characters
     )
     data = await _graph_get(access_token, url)
     folders = data.get("value") or []
