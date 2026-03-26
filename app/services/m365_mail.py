@@ -541,7 +541,7 @@ async def _resolve_mail_folder_identifier(
     folder: str,
 ) -> str:
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
-    trimmed_folder = (folder or "").strip()
+    folder_path = (folder or "").strip()
 
     async def _resolve_top_level(trimmed: str) -> str:
         if trimmed.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed):
@@ -591,21 +591,27 @@ async def _resolve_mail_folder_identifier(
         child_folders = data.get("value") or []
         if not child_folders:
             raise M365Error(
-                f"Mail folder '{trimmed_folder}' not found or inaccessible",
+                f"Mail folder '{folder_path}' not found or inaccessible",
                 http_status=404,
             )
         folder_id = child_folders[0].get("id")
         if not folder_id:
             raise M365Error(
-                f"Mail folder '{trimmed_folder}' found but missing folder ID",
+                f"Mail folder '{folder_path}' found but missing folder ID",
                 http_status=404,
             )
         return folder_id
 
-    segments = trimmed_folder.split("/")
+    if folder_path.startswith("/") or folder_path.endswith("/"):
+        raise M365Error(
+            f"Mail folder path '{folder_path}' cannot start or end with '/'",
+            http_status=400,
+        )
+
+    segments = folder_path.split("/")
     if any(not seg for seg in segments):
         raise M365Error(
-            f"Mail folder path '{trimmed_folder}' contains empty segments; use 'Parent/Subfolder' format",
+            f"Mail folder path '{folder_path}' contains empty segments; use 'Parent/Subfolder' format",
             http_status=400,
         )
     if len(segments) > 1:
@@ -616,7 +622,7 @@ async def _resolve_mail_folder_identifier(
 
         return parent_identifier
 
-    return await _resolve_top_level(trimmed_folder)
+    return await _resolve_top_level(folder_path)
 
 
 def _build_filter_context(
