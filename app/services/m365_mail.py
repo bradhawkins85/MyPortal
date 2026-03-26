@@ -543,13 +543,13 @@ async def _resolve_mail_folder_identifier(
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
     folder_path = (folder or "").strip()
 
-    async def _resolve_top_level(trimmed: str) -> str:
-        if trimmed.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed):
-            return trimmed
+    async def _resolve_top_level(folder_name: str) -> str:
+        if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder_name):
+            return folder_name
 
         # OData string literal escaping (single-quote doubling); urlencode then handles
         # URL encoding of the full filter expression.
-        filter_value = _escape_odata_string(trimmed)
+        filter_value = _escape_odata_string(folder_name)
         params = {
             "$filter": f"displayName eq '{filter_value}'",
             "$select": "id,displayName",
@@ -567,7 +567,7 @@ async def _resolve_mail_folder_identifier(
             if folder_id:
                 return folder_id
 
-        raise M365Error(f"Mail folder '{trimmed}' not found or inaccessible", http_status=404)
+        raise M365Error(f"Mail folder '{folder_name}' not found or inaccessible", http_status=404)
 
     async def _resolve_child_folder(parent_identifier: str, child_name: str) -> str:
         if _looks_like_graph_folder_id(child_name):
