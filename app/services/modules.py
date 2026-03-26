@@ -4113,6 +4113,10 @@ _WHISPERX_AUDIO_EXTENSIONS = {
 }
 
 
+_WHISPERX_ATTACHMENT_POLL_ATTEMPTS = 3
+_WHISPERX_ATTACHMENT_POLL_DELAY_SECONDS = 1.5
+
+
 def _is_audio_attachment(attachment: Mapping[str, Any]) -> bool:
     """Return True if the attachment is an audio file suitable for transcription."""
     mime = (attachment.get("mime_type") or "").lower().strip()
@@ -4200,14 +4204,37 @@ async def _invoke_whisperx(
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
 
-        # -- list attachments and filter audio files ----------------------
-        all_attachments = await attachments_repo.list_attachments(ticket_id_int)
-        audio_attachments = [a for a in all_attachments if _is_audio_attachment(a)]
+        upload_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
+
+        # -- list attachments and filter audio files (with short polling) --
+        audio_attachments: list[Mapping[str, Any]] = []
+        ready_attachments: list[Mapping[str, Any]] = []
+        for poll_attempt in range(_WHISPERX_ATTACHMENT_POLL_ATTEMPTS):
+            all_attachments = await attachments_repo.list_attachments(ticket_id_int)
+            audio_attachments = [a for a in all_attachments if _is_audio_attachment(a)]
+
+            ready_attachments = [
+                a for a in audio_attachments if (upload_dir / a["filename"]).exists()
+            ]
+
+            if ready_attachments:
+                break
+
+            if poll_attempt < _WHISPERX_ATTACHMENT_POLL_ATTEMPTS - 1:
+                # Give the ticket importer a moment to finish writing attachments
+                if audio_attachments:
+                    logger.info(
+                        "Audio attachments found but files not yet present; retrying",
+                        ticket_id=ticket_id_int,
+                        poll_attempt=poll_attempt + 1,
+                    )
+                await asyncio.sleep(_WHISPERX_ATTACHMENT_POLL_DELAY_SECONDS)
 
         if not audio_attachments:
             raise ValueError(f"No audio attachments found on ticket {ticket_id_int}")
 
-        upload_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
+        if not ready_attachments:
+            raise ValueError(f"Audio attachments not yet available on disk for ticket {ticket_id_int}")
 
         headers: dict[str, str] = {}
         if api_key:
@@ -4216,16 +4243,8 @@ async def _invoke_whisperx(
         transcriptions: list[dict[str, Any]] = []
 
         async with httpx.AsyncClient(timeout=300.0) as client:
-            for attachment in audio_attachments:
+            for attachment in ready_attachments:
                 file_path = upload_dir / attachment["filename"]
-                if not file_path.exists():
-                    logger.warning(
-                        "Audio file missing for attachment %s: %s",
-                        attachment["id"],
-                        file_path,
-                    )
-                    continue
-
                 original_name = attachment.get("original_filename") or attachment["filename"]
                 mime = (attachment.get("mime_type") or "audio/wav").strip()
 
