@@ -1191,6 +1191,93 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
     assert replies_added[0]["ticket_id"] == 50
 
 
+async def test_save_graph_attachments_fetches_value_when_content_bytes_missing(monkeypatch):
+    """Attachments are saved even when Graph list response omits contentBytes."""
+    captured: list[dict[str, Any]] = []
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "id": "att-123",
+                    "name": "report.pdf",
+                    "contentType": "application/pdf",
+                    "isInline": False,
+                }
+            ]
+        }
+
+    async def fake_graph_get_bytes(access_token: str, url: str):
+        assert url.endswith("/attachments/att-123/$value")
+        return b"pdf-bytes"
+
+    async def fake_save_email_attachment(**kwargs):
+        captured.append(kwargs)
+        return {"id": 1}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_graph_get_bytes", fake_graph_get_bytes)
+    monkeypatch.setattr(m365_mail, "_save_email_attachment", fake_save_email_attachment)
+
+    await m365_mail._save_graph_attachments(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-1",
+        ticket_id=123,
+    )
+
+    assert len(captured) == 1
+    assert captured[0]["ticket_id"] == 123
+    assert captured[0]["filename"] == "report.pdf"
+    assert captured[0]["content_type"] == "application/pdf"
+    assert captured[0]["payload"] == b"pdf-bytes"
+
+
+async def test_save_graph_attachments_still_uses_content_bytes_when_present(monkeypatch):
+    """contentBytes attachments continue to be decoded and saved directly."""
+    captured: list[dict[str, Any]] = []
+    value_fetches = 0
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "id": "att-456",
+                    "name": "notes.txt",
+                    "contentType": "text/plain",
+                    "contentBytes": "aGVsbG8=",
+                    "isInline": False,
+                }
+            ]
+        }
+
+    async def fake_graph_get_bytes(access_token: str, url: str):
+        nonlocal value_fetches
+        value_fetches += 1
+        return b"unused"
+
+    async def fake_save_email_attachment(**kwargs):
+        captured.append(kwargs)
+        return {"id": 2}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_graph_get_bytes", fake_graph_get_bytes)
+    monkeypatch.setattr(m365_mail, "_save_email_attachment", fake_save_email_attachment)
+
+    await m365_mail._save_graph_attachments(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-2",
+        ticket_id=321,
+    )
+
+    assert len(captured) == 1
+    assert captured[0]["payload"] == b"hello"
+    assert value_fetches == 0
+
+
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------
