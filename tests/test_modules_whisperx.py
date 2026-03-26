@@ -114,7 +114,7 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
     audio_file = tmp_path / "abc123.wav"
     audio_file.write_bytes(b"RIFF fake wav content")
 
-    async def fake_list_attachments(tid):
+    async def fake_list_attachments(tid, *, access_levels=None):
         return [
             {
                 "id": 1,
@@ -195,7 +195,7 @@ def test_invoke_whisperx_no_audio_attachments(monkeypatch):
     async def fake_get_ticket(tid):
         return {"id": tid, "subject": "No audio"}
 
-    async def fake_list_attachments(tid):
+    async def fake_list_attachments(tid, *, access_levels=None):
         return [
             {
                 "id": 2,
@@ -252,7 +252,7 @@ def test_invoke_whisperx_add_note_false(monkeypatch, tmp_path):
     audio_file = tmp_path / "xyz.wav"
     audio_file.write_bytes(b"RIFF fake")
 
-    async def fake_list_attachments(tid):
+    async def fake_list_attachments(tid, *, access_levels=None):
         return [
             {
                 "id": 3,
@@ -315,7 +315,7 @@ def test_invoke_whisperx_ticket_id_from_context(monkeypatch):
     async def fake_get_ticket(tid):
         return {"id": tid}
 
-    async def fake_list_attachments(tid):
+    async def fake_list_attachments(tid, *, access_levels=None):
         return []  # no attachments → will error
 
     import app.repositories.tickets as tickets_repo_mod
