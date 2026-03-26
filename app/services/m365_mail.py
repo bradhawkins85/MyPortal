@@ -1204,7 +1204,8 @@ async def _save_graph_attachments(
     ticket_id: int,
 ) -> None:
     """Fetch and save message attachments via the Graph API."""
-    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id}/attachments"
+    message_id_encoded = quote(message_id, safe="")
+    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}/attachments"
     try:
         data = await _graph_get(access_token, url)
     except Exception:
@@ -1232,7 +1233,7 @@ async def _save_graph_attachments(
             # tenant settings, API behavior, or attachment size. Fetch the raw
             # attachment stream to ensure file attachments are persisted.
             value_url = (
-                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id}"
+                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}"
                 f"/attachments/{quote(attachment_id, safe='')}/$value"
             )
             try:
