@@ -462,13 +462,11 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
         return "fake-access-token"
 
     graph_calls: list[str] = []
-    child_folder_requests: list[str] = []
 
     async def fake_graph_get(access_token: str, url: str):
         decoded = unquote(url)
         graph_calls.append(decoded)
         if "childFolders?" in decoded:
-            child_folder_requests.append(decoded)
             return {"value": [{"id": "child-folder-id"}]}
         if "/mailFolders/child-folder-id/messages?" in decoded:
             return {"value": []}
@@ -491,14 +489,12 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
 
     assert result["status"] == "succeeded"
     assert graph_calls, "Expected at least one Graph request"
-    assert child_folder_requests and child_folder_requests[0] == graph_calls[0]
     assert len(graph_calls) == 2, "Expected child folder lookup then messages fetch"
-    assert "childFolders?" in graph_calls[0]
-    assert "/mailFolders/child-folder-id/messages?" in graph_calls[1]
-    assert any("/mailFolders/Inbox/childFolders?" in call for call in child_folder_requests)
-    assert any("displayName eq 'Support'" in call for call in child_folder_requests)
-    assert any("childFolders?" in call for call in graph_calls)
-    assert any("/mailFolders/child-folder-id/messages?" in call for call in graph_calls)
+    first_call, second_call = graph_calls
+    assert "childFolders?" in first_call
+    assert "/mailFolders/Inbox/childFolders?" in first_call
+    assert "displayName eq 'Support'" in first_call
+    assert "/mailFolders/child-folder-id/messages?" in second_call
 
 
 async def test_sync_account_escapes_folder_name(monkeypatch):
