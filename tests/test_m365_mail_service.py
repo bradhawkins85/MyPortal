@@ -462,13 +462,13 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
         return "fake-access-token"
 
     graph_calls: list[str] = []
+    child_folder_requests: list[str] = []
 
     async def fake_graph_get(access_token: str, url: str):
         decoded = unquote(url)
         graph_calls.append(decoded)
         if "childFolders?" in decoded:
-            assert "/mailFolders/Inbox/childFolders?" in decoded
-            assert "displayName eq 'Support'" in decoded
+            child_folder_requests.append(decoded)
             return {"value": [{"id": "child-folder-id"}]}
         assert "/mailFolders/child-folder-id/messages?" in decoded
         return {"value": []}
@@ -489,6 +489,9 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "succeeded"
+    assert child_folder_requests, "Expected child folder lookup request"
+    assert any("/mailFolders/Inbox/childFolders?" in call for call in child_folder_requests)
+    assert any("displayName eq 'Support'" in call for call in child_folder_requests)
     assert any("childFolders?" in call for call in graph_calls)
     assert any("/mailFolders/child-folder-id/messages?" in call for call in graph_calls)
 

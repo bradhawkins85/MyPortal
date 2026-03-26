@@ -582,7 +582,7 @@ async def _resolve_mail_folder_identifier(
             folder_id = child_folders[0].get("id")
             if not folder_id:
                 raise M365Error(
-                    f"Mail folder '{normalized}' not found or inaccessible",
+                    f"Mail folder '{normalized}' found but missing folder ID",
                     http_status=404,
                 )
             parent_identifier = folder_id
