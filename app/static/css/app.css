@@ -7011,7 +7011,7 @@ dialog.dialog::backdrop {
 
 .attachment-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-gap-base);
   padding: 0.9rem 1.1rem;
   border-radius: 0.85rem;
@@ -7033,16 +7033,43 @@ dialog.dialog::backdrop {
   height: 100%;
 }
 
+.attachment-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+}
+
 .attachment-card__name {
   margin: 0 0 0.25rem;
   font-weight: 600;
   color: #f8fafc;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.attachment-card__name a {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
 }
 
 .attachment-card__meta {
   margin: 0;
   font-size: 0.75rem;
   color: rgba(148, 163, 184, 0.78);
+}
+
+.attachment-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+}
+
+.attachment-card__action {
+  flex-shrink: 0;
 }
 
 .dropdown {
