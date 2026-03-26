@@ -541,10 +541,9 @@ async def _resolve_mail_folder_identifier(
     folder: str,
 ) -> str:
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
-    normalized = (folder or "").strip()
+    trimmed_folder = (folder or "").strip()
 
-    async def _resolve_top_level(name: str) -> str:
-        trimmed = (name or "").strip()
+    async def _resolve_top_level(trimmed: str) -> str:
         if trimmed.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed):
             return trimmed
 
@@ -570,10 +569,10 @@ async def _resolve_mail_folder_identifier(
 
         raise M365Error(f"Mail folder '{trimmed}' not found or inaccessible", http_status=404)
 
-    if normalized.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(normalized):
-        return normalized
+    if trimmed_folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed_folder):
+        return trimmed_folder
 
-    segments = [seg for seg in normalized.split("/") if seg]
+    segments = [seg for seg in trimmed_folder.split("/") if seg]
     if len(segments) > 1:
         # Resolve the first segment against the root, then walk child folders for the rest
         parent_identifier = await _resolve_top_level(segments[0])
@@ -600,20 +599,20 @@ async def _resolve_mail_folder_identifier(
             child_folders = data.get("value") or []
             if not child_folders:
                 raise M365Error(
-                    f"Mail folder '{normalized}' not found or inaccessible",
+                    f"Mail folder '{trimmed_folder}' not found or inaccessible",
                     http_status=404,
                 )
             folder_id = child_folders[0].get("id")
             if not folder_id:
                 raise M365Error(
-                    f"Mail folder '{normalized}' found but missing folder ID",
+                    f"Mail folder '{trimmed_folder}' found but missing folder ID",
                     http_status=404,
                 )
             parent_identifier = folder_id
 
         return parent_identifier
 
-    return await _resolve_top_level(normalized)
+    return await _resolve_top_level(trimmed_folder)
 
 
 def _build_filter_context(
