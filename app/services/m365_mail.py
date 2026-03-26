@@ -453,6 +453,25 @@ async def _record_message(
 # ---------------------------------------------------------------------------
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+_WELL_KNOWN_MAIL_FOLDERS = {
+    "archive",
+    "clutter",
+    "conflicts",
+    "conversationhistory",
+    "deleteditems",
+    "drafts",
+    "inbox",
+    "junkemail",
+    "localfailures",
+    "outbox",
+    "recoverableitemsdeletions",
+    "recoverableitemsversions",
+    "scheduled",
+    "searchfolders",
+    "sentitems",
+    "serverfailures",
+    "syncissues",
+}
 
 
 async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
@@ -485,6 +504,45 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
             url=url,
             status=response.status_code,
         )
+
+
+def _looks_like_graph_folder_id(folder: str) -> bool:
+    """Heuristic check for Graph folder IDs (typically AAMk/AQMk...)."""
+    if not folder:
+        return False
+    normalized = folder.strip()
+    if not normalized or " " in normalized:
+        return False
+    return normalized.startswith(("AAMk", "AQMk"))
+
+
+async def _resolve_mail_folder_identifier(
+    *,
+    access_token: str,
+    upn: str,
+    folder: str,
+) -> str:
+    """Resolve a mailbox folder display name to a Graph folder ID when needed."""
+    if folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder):
+        return folder
+
+    filter_value = folder.replace("'", "''")
+    params = {
+        "$filter": f"displayName eq '{filter_value}'",
+        "$select": "id,displayName",
+        "$top": "1",
+    }
+    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders?" + urlencode(
+        params, quote_via=quote, safe="$,"
+    )
+    data = await _graph_get(access_token, url)
+    folders = data.get("value") or []
+    if folders:
+        folder_id = folders[0].get("id")
+        if folder_id:
+            return folder_id
+
+    raise M365Error(f"Mail folder '{folder}' not found or inaccessible", http_status=404)
 
 
 def _build_filter_context(
@@ -659,7 +717,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     try:
         # Build the messages URL
         # For both user and shared mailboxes the Graph API uses /users/{upn}/...
-        messages_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(folder, safe='')}/messages"
+        folder_identifier = await _resolve_mail_folder_identifier(
+            access_token=access_token,
+            upn=upn,
+            folder=folder,
+        )
+        messages_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(folder_identifier, safe='')}/messages"
         query_params = {
             "$top": "50",
             "$orderby": "receivedDateTime asc",
