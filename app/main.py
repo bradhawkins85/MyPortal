@@ -13491,7 +13491,7 @@ async def _render_portal_tickets_page(
 
 
 def _format_attachment_uploaded_iso(uploaded_at: Any) -> str | None:
-    """Normalise attachment timestamps to UTC ISO strings."""
+    """Normalize attachment timestamps to UTC ISO strings."""
     if not isinstance(uploaded_at, datetime):
         return None
     uploaded_dt = (
