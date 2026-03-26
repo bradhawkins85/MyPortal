@@ -1278,6 +1278,42 @@ async def test_save_graph_attachments_still_uses_content_bytes_when_present(monk
     assert value_fetches == 0
 
 
+async def test_save_graph_attachments_encodes_message_id(monkeypatch):
+    """Attachment fetches URL-encode message IDs so Graph paths are valid."""
+    requested_urls: list[str] = []
+
+    async def fake_graph_get(access_token: str, url: str):
+        requested_urls.append(url)
+        return {
+            "value": [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "id": "att-789",
+                    "name": "image.png",
+                    "contentType": "image/png",
+                    "contentBytes": "cGljZWw=",
+                    "isInline": False,
+                }
+            ]
+        }
+
+    async def fake_save_email_attachment(**kwargs):
+        return {"id": 3}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_graph_get_bytes", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_save_email_attachment", fake_save_email_attachment)
+
+    await m365_mail._save_graph_attachments(
+        access_token="token",
+        upn="user@example.com",
+        message_id="AAMkAGI2/ABC==",
+        ticket_id=999,
+    )
+
+    assert any("%2F" in url and "AAMkAGI2%2FABC%3D%3D" in url for url in requested_urls)
+
+
 # ---------------------------------------------------------------------------
 # Schema validation
 # ---------------------------------------------------------------------------
