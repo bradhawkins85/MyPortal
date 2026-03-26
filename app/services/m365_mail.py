@@ -541,12 +541,57 @@ async def _resolve_mail_folder_identifier(
     folder: str,
 ) -> str:
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
-    if folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder):
-        return folder
+    normalized = (folder or "").strip()
+    if normalized.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(normalized):
+        return normalized
+
+    segments = [seg for seg in normalized.split("/") if seg]
+    if len(segments) > 1:
+        # Resolve the first segment against the root, then walk child folders for the rest
+        parent_identifier = await _resolve_mail_folder_identifier(
+            access_token=access_token,
+            upn=upn,
+            folder=segments[0],
+        )
+        for child_name in segments[1:]:
+            if _looks_like_graph_folder_id(child_name):
+                parent_identifier = child_name
+                continue
+
+            filter_value = _escape_odata_string(child_name)
+            params = {
+                "$filter": f"displayName eq '{filter_value}'",
+                "$select": "id,displayName",
+                "$top": "1",
+            }
+            url = (
+                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(parent_identifier, safe='')}/childFolders?"
+                + urlencode(
+                    params,
+                    quote_via=quote,
+                    safe="$,",
+                )
+            )
+            data = await _graph_get(access_token, url)
+            child_folders = data.get("value") or []
+            if not child_folders:
+                raise M365Error(
+                    f"Mail folder '{normalized}' not found or inaccessible",
+                    http_status=404,
+                )
+            folder_id = child_folders[0].get("id")
+            if not folder_id:
+                raise M365Error(
+                    f"Mail folder '{normalized}' not found or inaccessible",
+                    http_status=404,
+                )
+            parent_identifier = folder_id
+
+        return parent_identifier
 
     # OData string literal escaping (single-quote doubling); urlencode then handles
     # URL encoding of the full filter expression.
-    filter_value = _escape_odata_string(folder)
+    filter_value = _escape_odata_string(normalized)
     params = {
         "$filter": f"displayName eq '{filter_value}'",
         "$select": "id,displayName",

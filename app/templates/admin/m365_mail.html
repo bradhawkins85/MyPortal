@@ -55,6 +55,7 @@
           <label class="form-field">
             <span class="form-label">Folder</span>
             <input type="text" name="folder" class="form-input" value="{{ editing_account.folder if is_editing else 'Inbox' }}" maxlength="255" required />
+            <span class="form-help">Use <code>Inbox/Subfolder</code> syntax for nested folders.</span>
           </label>
         </div>
         <label class="form-field">
