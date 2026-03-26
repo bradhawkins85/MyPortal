@@ -132,6 +132,21 @@
     return meta ? meta.getAttribute('content') || '' : '';
   }
 
+  function convertUtcElements(root) {
+    const context = root && typeof root.querySelectorAll === 'function' ? root : document;
+    context.querySelectorAll('[data-utc]').forEach((element) => {
+      const iso = element.getAttribute('data-utc');
+      if (!iso) {
+        return;
+      }
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) {
+        return;
+      }
+      element.textContent = date.toLocaleString();
+    });
+  }
+
   function getCsrfToken() {
     const metaToken = getMetaContent('csrf-token');
     if (metaToken) {
@@ -1922,6 +1937,80 @@
     removeButtons.forEach(button => attachRemoveHandler(button));
   }
 
+  function initialiseAttachmentActions() {
+    const container = document.querySelector('[data-attachments-grid]');
+    if (!container) {
+      return;
+    }
+
+    convertUtcElements(container);
+
+    const ticketId = container.getAttribute('data-ticket-id');
+    const emptyMessage = document.querySelector('[data-attachments-empty]');
+
+    function updateEmptyState() {
+      const remaining = container.querySelector('[data-attachment-id]');
+      if (emptyMessage) {
+        emptyMessage.hidden = Boolean(remaining);
+      }
+    }
+
+    async function handleRemove(button) {
+      const attachmentId = button.getAttribute('data-attachment-id');
+      if (!attachmentId || !ticketId) {
+        return;
+      }
+
+      if (!window.confirm('Remove this attachment?')) {
+        return;
+      }
+
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+
+      try {
+        const response = await fetch(`/api/tickets/${ticketId}/attachments/${attachmentId}`, {
+          method: 'DELETE',
+          headers: {
+            'X-CSRF-Token': getCsrfToken(),
+          },
+        });
+
+        if (!response.ok) {
+          let detail = 'Failed to remove attachment';
+          try {
+            const payload = await response.json();
+            if (payload && payload.detail) {
+              detail = payload.detail;
+            }
+          } catch (error) {
+            /* ignore parse errors */
+          }
+          throw new Error(detail);
+        }
+
+        const card = button.closest('[data-attachment-id]');
+        if (card) {
+          card.remove();
+        }
+        updateEmptyState();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to remove attachment';
+        alert(message);
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+      }
+    }
+
+    const removeButtons = container.querySelectorAll('[data-remove-attachment]');
+    removeButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        handleRemove(button);
+      });
+    });
+  }
+
   function getTicketIdFromPath() {
     const match = window.location.pathname.match(/\/admin\/tickets\/(\d+)/);
     return match ? match[1] : null;
@@ -1945,6 +2034,8 @@
     initialiseRequesterSelector();
     initialiseTaskManagement();
     initialiseWatcherManagement();
+    initialiseAttachmentActions();
+    convertUtcElements();
     initialiseBookingModal();
   }
 
