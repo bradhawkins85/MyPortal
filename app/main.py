@@ -13490,7 +13490,7 @@ async def _render_portal_tickets_page(
     return response
 
 
-def _format_attachment_uploaded_iso(uploaded_at: Any) -> str | None:
+def _format_attachment_uploaded_iso(uploaded_at: datetime | None) -> str | None:
     """Normalize attachment timestamps to UTC ISO strings."""
     if not isinstance(uploaded_at, datetime):
         return None
