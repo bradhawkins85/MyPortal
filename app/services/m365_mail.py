@@ -572,7 +572,13 @@ async def _resolve_mail_folder_identifier(
     if trimmed_folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed_folder):
         return trimmed_folder
 
-    segments = [seg for seg in trimmed_folder.split("/") if seg]
+    raw_segments = trimmed_folder.split("/")
+    segments = [seg for seg in raw_segments if seg]
+    if "/" in trimmed_folder and len(segments) != len(raw_segments):
+        raise M365Error(
+            "Mail folder path contains empty segments; use 'Parent/Subfolder' format",
+            http_status=400,
+        )
     if len(segments) > 1:
         # Resolve the first segment against the root, then walk child folders for the rest
         parent_identifier = await _resolve_top_level(segments[0])
