@@ -497,6 +497,112 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
     assert "/mailFolders/child-folder-id/messages?" in second_call
 
 
+async def test_sync_account_errors_on_empty_folder_segment(monkeypatch):
+    """sync_account rejects folder paths with empty segments."""
+    monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": 1,
+            "active": True,
+            "company_id": 5,
+            "user_principal_name": "user@example.com",
+            "folder": "Inbox//Support",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-access-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        pytest.fail("Graph should not be called when folder path is invalid")
+
+    async def fake_update_account(account_id: int, **fields):
+        return None
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return None
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] in {"error", "completed_with_errors"}
+    errors = [result.get("error", "")] + [e.get("error", "") for e in result.get("errors", [])]
+    assert any("empty segments" in err for err in errors)
+
+
+async def test_sync_account_resolves_deep_subfolder(monkeypatch):
+    """sync_account resolves multi-level nested folders."""
+    monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": 1,
+            "active": True,
+            "company_id": 5,
+            "user_principal_name": "user@example.com",
+            "folder": "Inbox/Team/Support",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-access-token"
+
+    graph_calls: list[str] = []
+
+    async def fake_graph_get(access_token: str, url: str):
+        decoded = unquote(url)
+        graph_calls.append(decoded)
+        if "/mailFolders/Inbox/childFolders?" in decoded:
+            assert "displayName eq 'Team'" in decoded
+            return {"value": [{"id": "team-folder-id"}]}
+        if "/mailFolders/team-folder-id/childFolders?" in decoded:
+            assert "displayName eq 'Support'" in decoded
+            return {"value": [{"id": "support-folder-id"}]}
+        if "/mailFolders/support-folder-id/messages?" in decoded:
+            return {"value": []}
+        pytest.fail(f"Unexpected Graph call: {decoded}")
+
+    async def fake_update_account(account_id: int, **fields):
+        return None
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return None
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert len(graph_calls) == 3
+    assert "childFolders?" in graph_calls[0]
+    assert "childFolders?" in graph_calls[1]
+    assert "/mailFolders/support-folder-id/messages?" in graph_calls[2]
+
+
 async def test_sync_account_escapes_folder_name(monkeypatch):
     """sync_account escapes single quotes in folder display names."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
