@@ -534,7 +534,7 @@
               <p
                 class="card__empty"
                 data-attachments-empty
-                {{ 'hidden' if ticket_attachments else '' }}
+                {% if ticket_attachments %}hidden{% endif %}
               >
                 No attachments have been added yet.
               </p>
