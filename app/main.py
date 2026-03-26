@@ -131,6 +131,7 @@ from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import automations as automation_repo
@@ -13743,6 +13744,42 @@ async def _render_portal_ticket_detail(
                 "email": watcher.get("email"),
             })
 
+    # Get ticket attachments
+    attachment_records: list[Mapping[str, Any]] = []
+    try:
+        if has_helpdesk_access or is_super_admin:
+            attachment_records = await attachments_repo.list_attachments(ticket_id)
+        else:
+            all_attachments = await attachments_repo.list_attachments(ticket_id)
+            attachment_records = [
+                att for att in all_attachments
+                if str(att.get("access_level") or "").lower() in ("open", "closed")
+            ]
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load ticket attachments", ticket_id=ticket_id, error=str(exc))
+        attachment_records = []
+
+    formatted_attachments: list[dict[str, Any]] = []
+    for attachment in attachment_records:
+        uploaded_at = attachment.get("uploaded_at")
+        uploaded_iso = (
+            uploaded_at.astimezone(timezone.utc).isoformat()
+            if hasattr(uploaded_at, "astimezone")
+            else ""
+        )
+        try:
+            file_size = int(attachment.get("file_size")) if attachment.get("file_size") is not None else 0
+        except (TypeError, ValueError):
+            file_size = 0
+
+        formatted_attachments.append(
+            {
+                **attachment,
+                "uploaded_iso": uploaded_iso,
+                "file_size": file_size,
+            }
+        )
+
     # Get linked assets
     ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
     
@@ -13780,6 +13817,7 @@ async def _render_portal_ticket_detail(
         "assigned_user": assigned_record,
         "ticket_replies": timeline_entries,
         "ticket_watchers": watchers,
+        "ticket_attachments": formatted_attachments,
         "ticket_assets": ticket_assets,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
