@@ -398,6 +398,54 @@ async def test_send_creation_email_uses_event_template_for_external_requester(mo
 
 
 @pytest.mark.anyio
+async def test_send_creation_email_uses_requester_fallback_in_template(monkeypatch):
+    """Fallback email address is available to templates when requester is unknown."""
+    captured: dict[str, object] = {}
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "{{ ticket.requester_email }}",
+            "module_actions": [],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_send_email(*, subject, recipients, html_body, text_body=None, **kwargs):
+        captured["subject"] = subject
+        captured["recipients"] = recipients
+        captured["html_body"] = html_body
+        captured["text_body"] = text_body
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 401,
+        "ticket_number": "401",
+        "subject": "Fallback template test",
+        "requester_id": None,
+        "requester_email": None,
+    }
+
+    await tickets_service._send_ticket_creation_email(
+        enriched,
+        requester_email_fallback="unknown@example.com",
+    )
+
+    assert captured["recipients"] == ["unknown@example.com"]
+    assert captured["text_body"] == "unknown@example.com"
+    assert captured["html_body"] == "<p>unknown@example.com</p>"
+    assert "unknown@example.com" in captured["subject"]
+
+
+@pytest.mark.anyio
 async def test_send_creation_email_falls_back_when_template_unavailable(monkeypatch):
     """When event setting lookup fails, a sensible fallback message is used."""
     captured: dict[str, object] = {}
