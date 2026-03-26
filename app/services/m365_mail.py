@@ -569,12 +569,9 @@ async def _resolve_mail_folder_identifier(
 
         raise M365Error(f"Mail folder '{trimmed}' not found or inaccessible", http_status=404)
 
-    if trimmed_folder.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(trimmed_folder):
-        return trimmed_folder
-
     raw_segments = trimmed_folder.split("/")
     segments = [seg for seg in raw_segments if seg]
-    if "/" in trimmed_folder and len(segments) != len(raw_segments):
+    if len(segments) != len(raw_segments):
         raise M365Error(
             "Mail folder path contains empty segments; use 'Parent/Subfolder' format",
             http_status=400,

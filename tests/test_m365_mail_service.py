@@ -492,7 +492,6 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
     assert result["status"] == "succeeded"
     assert graph_calls, "Expected at least one Graph request"
     assert child_folder_requests and child_folder_requests[0] == graph_calls[0]
-    assert child_folder_requests, "Expected child folder lookup request"
     assert any("/mailFolders/Inbox/childFolders?" in call for call in child_folder_requests)
     assert any("displayName eq 'Support'" in call for call in child_folder_requests)
     assert any("childFolders?" in call for call in graph_calls)
