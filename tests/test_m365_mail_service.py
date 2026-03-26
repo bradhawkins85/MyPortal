@@ -489,7 +489,8 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
 
     assert result["status"] == "succeeded"
     assert graph_calls, "Expected at least one Graph request"
-    assert len(graph_calls) == 2, "Expected child folder lookup, then messages fetch"
+    expected_call_count = 2  # child folder lookup + messages fetch
+    assert len(graph_calls) == expected_call_count, "Expected child folder lookup, then messages fetch"
     first_call, second_call = graph_calls
     assert "childFolders?" in first_call
     assert "/mailFolders/Inbox/childFolders?" in first_call
@@ -597,7 +598,8 @@ async def test_sync_account_resolves_multi_level_nested_folders(monkeypatch):
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "succeeded"
-    assert len(graph_calls) == 3
+    expected_call_count = 3  # two child lookups + messages fetch
+    assert len(graph_calls) == expected_call_count
     assert "childFolders?" in graph_calls[0]
     assert "childFolders?" in graph_calls[1]
     assert "/mailFolders/support-folder-id/messages?" in graph_calls[2]

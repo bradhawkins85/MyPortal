@@ -54,8 +54,8 @@
           </label>
           <label class="form-field">
             <span class="form-label">Folder</span>
-            <input type="text" name="folder" class="form-input" value="{{ editing_account.folder if is_editing else 'Inbox' }}" maxlength="255" required />
-            <span class="form-help">Use slash notation (e.g., <code>Inbox/Subfolder</code>) for nested folders. Folder names are case-sensitive.</span>
+            <input type="text" name="folder" class="form-input" value="{{ editing_account.folder if is_editing else 'Inbox' }}" maxlength="255" required aria-describedby="folder-help" />
+            <span class="form-help" id="folder-help">Use slash notation (e.g., <code>Inbox/Subfolder</code>) for nested folders. Folder names are case-sensitive.</span>
           </label>
         </div>
         <label class="form-field">
