@@ -5474,12 +5474,20 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         state_data = oauth_state_serializer.loads(state)
     except BadSignature:
         return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
-    company_id = int(state_data.get("company_id", 0))
+    company_id_raw = state_data.get("company_id")
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        company_id = 0
     flow = state_data.get("flow", "connect")
 
     if flow == "m365_mail_auth":
         # ── Per-account delegated sign-in for M365 mail import ────────────
-        account_id = int(state_data.get("account_id", 0))
+        account_id_raw = state_data.get("account_id")
+        try:
+            account_id = int(account_id_raw)
+        except (TypeError, ValueError):
+            account_id = 0
         code_verifier: str | None = state_data.get("code_verifier")
         redirect_uri = _build_m365_redirect_uri(request)
 
