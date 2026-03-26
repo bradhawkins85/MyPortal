@@ -534,6 +534,53 @@ async def test_send_creation_email_skips_direct_send_when_email_module_action_su
 
 
 @pytest.mark.anyio
+async def test_send_creation_email_skips_when_requester_email_blank(monkeypatch):
+    """No notification is attempted when requester email is blank/whitespace."""
+    module_triggered: list[str] = []
+    direct_send_called = False
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "Ticket created",
+            "module_actions": [{"module": "smtp2go", "payload": {"to": ["{{ ticket.requester_email }}"]}}],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_trigger_module(slug, payload, *, background=True, **kwargs):
+        module_triggered.append(slug)
+        return {"status": "success"}
+
+    async def fake_send_email(**kwargs):
+        nonlocal direct_send_called
+        direct_send_called = True
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 51,
+        "ticket_number": "501",
+        "subject": "Blank requester test",
+        "requester_id": None,
+        "requester_email": "   ",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    assert not module_triggered
+    assert not direct_send_called
+
+
+@pytest.mark.anyio
 async def test_send_creation_email_uses_fallback_when_email_module_action_fails(monkeypatch):
     """When the email-delivery module action fails, the fallback direct email is sent."""
     captured: dict[str, object] = {}
