@@ -23,7 +23,7 @@ async def create_attachment(
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """
     params = (ticket_id, filename, original_filename, file_size, mime_type, access_level, uploaded_by_user_id)
-    attachment_id = await db.execute(query, params)
+    attachment_id = await db.execute_returning_lastrowid(query, params)
     
     log_debug(f"Created attachment {attachment_id} for ticket {ticket_id}")
     
