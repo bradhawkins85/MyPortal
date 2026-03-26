@@ -995,6 +995,8 @@ async def _send_ticket_creation_email(
     """
     requester_id: int | None = enriched_ticket.get("requester_id")  # type: ignore[assignment]
     requester_email: str | None = enriched_ticket.get("requester_email") or requester_email_fallback  # type: ignore[assignment]
+    if requester_email is not None:
+        requester_email = requester_email.strip() or None
 
     if not requester_email and not requester_id:
         return

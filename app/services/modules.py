@@ -1610,15 +1610,13 @@ async def _invoke_smtp2go(
     
     # Check if using template
     template_type = payload.get("template")
+    recipients: list[str] = []
     if template_type:
         # Template-based email
         try:
             variables = payload.get("variables", {})
             recipients = _ensure_list(payload.get("recipients"))
             sender = str(payload.get("sender") or "").strip() or None
-            
-            if not recipients:
-                raise ValueError("At least one recipient is required")
             
             # Format payload using template
             formatted_payload = smtp2go.format_template_payload(
@@ -1639,13 +1637,19 @@ async def _invoke_smtp2go(
         # Direct payload format
         # Support both 'to' (SMTP2Go API format) and 'recipients' (legacy format)
         recipients = _ensure_list(payload.get("to") or payload.get("recipients"))
-        if not recipients:
-            raise ValueError("At least one recipient is required")
 
         subject = str(payload.get("subject") or "Automation notification")
         html_body = str(payload.get("html") or payload.get("html_body") or payload.get("body") or "<p>Automation triggered.</p>")
         text_body = payload.get("text") or payload.get("text_body")
         sender = str(payload.get("sender") or "").strip() or None
+
+    if not recipients:
+        logger.warning(
+            "SMTP2Go module skipped because no recipients were provided after rendering",
+            module="smtp2go",
+            context_keys=list(payload.get("context", {}).keys()) if isinstance(payload.get("context"), Mapping) else None,
+        )
+        return {"status": "skipped", "reason": "no_recipients", "module": "smtp2go"}
     
     reply_to = str(payload.get("reply_to") or "").strip() or None
     
