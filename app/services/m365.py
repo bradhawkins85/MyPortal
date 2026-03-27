@@ -22,6 +22,7 @@ from app.core.logging import log_error, log_info, log_warning
 from app.repositories import apps as apps_repo
 from app.repositories import companies as companies_repo
 from app.repositories import licenses as license_repo
+from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import staff as staff_repo
@@ -1678,7 +1679,12 @@ async def sync_company_licenses(company_id: int) -> None:
         app = None
         if part_number:
             app = await apps_repo.get_app_by_vendor_sku(part_number)
-        name = app.get("name") if app else part_number or "Unknown SKU"
+        friendly_name = (
+            await sku_friendly_repo.get_friendly_name(part_number)
+            if part_number
+            else None
+        )
+        name = friendly_name or (app.get("name") if app else None) or part_number or "Unknown SKU"
         existing = await license_repo.get_license_by_company_and_sku(
             company_id, part_number
         )

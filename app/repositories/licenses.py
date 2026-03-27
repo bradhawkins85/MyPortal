@@ -39,10 +39,11 @@ _ALLOCATED_SUBQUERY = """
 async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         f"""
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+        SELECT l.*, COALESCE(lsn.friendly_name, a.name, l.name) AS display_name,
                {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
+        LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
         WHERE l.company_id = %s
         GROUP BY l.id
         ORDER BY display_name, l.name
@@ -55,10 +56,11 @@ async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
 async def list_all_licenses() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         f"""
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+        SELECT l.*, COALESCE(lsn.friendly_name, a.name, l.name) AS display_name,
                {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
+        LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
         GROUP BY l.id
         ORDER BY l.company_id, display_name
         """,
@@ -69,10 +71,11 @@ async def list_all_licenses() -> list[dict[str, Any]]:
 async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         f"""
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+        SELECT l.*, COALESCE(lsn.friendly_name, a.name, l.name) AS display_name,
                {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
+        LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
         WHERE l.id = %s
         GROUP BY l.id
         """,
@@ -84,10 +87,11 @@ async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
 async def get_license_by_company_and_sku(company_id: int, sku: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
         f"""
-        SELECT l.*, COALESCE(a.name, l.name) AS display_name,
+        SELECT l.*, COALESCE(lsn.friendly_name, a.name, l.name) AS display_name,
                {_ALLOCATED_SUBQUERY} AS allocated
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
+        LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
         WHERE l.company_id = %s AND l.platform = %s
         GROUP BY l.id
         """,
@@ -242,4 +246,3 @@ async def bulk_unlink_staff(license_id: int, staff_ids: Iterable[int]) -> None:
         f"DELETE FROM staff_licenses WHERE license_id = %s AND staff_id IN ({placeholders})",
         tuple([license_id, *ids]),
     )
-
