@@ -27,6 +27,10 @@ def _normalise(value: str | None) -> str:
     return value.strip() if value else ""
 
 
+def _default_account_action(*, account_enabled: bool) -> str:
+    return "Onboarded" if account_enabled else "Offboarded"
+
+
 def _find_existing_staff(
     existing_staff: list[dict[str, Any]],
     *,
@@ -256,7 +260,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 job_title=job_title or existing.get("job_title"),
                 org_company=existing.get("org_company"),
                 manager_name=existing.get("manager_name"),
-                account_action=existing.get("account_action"),
+                account_action=existing.get("account_action")
+                or _default_account_action(account_enabled=account_enabled),
                 syncro_contact_id=existing.get("syncro_contact_id"),
                 m365_last_sign_in=m365_last_sign_in,
             )
@@ -281,7 +286,7 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 job_title=job_title,
                 org_company=None,
                 manager_name=None,
-                account_action=None,
+                account_action=_default_account_action(account_enabled=account_enabled),
                 syncro_contact_id=None,
                 source="m365",
                 m365_last_sign_in=m365_last_sign_in,
