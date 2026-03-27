@@ -201,16 +201,29 @@
                   {% for field in staff_field_config %}
                     <tr>
                       <td>{{ field.label }}</td>
-                      <td><code>{{ field.type }}</code></td>
+                      <td>
+                        <select
+                          class="form-input"
+                          name="field_{{ field.key }}_type"
+                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
+                        >
+                          {% for value in ['text', 'select', 'checkbox', 'date'] %}
+                            <option value="{{ value }}" {% if field.type == value %}selected{% endif %}>{{ value }}</option>
+                          {% endfor %}
+                        </select>
+                        {% if field.key in ['first_name', 'last_name', 'email'] %}
+                          <input type="hidden" name="field_{{ field.key }}_type" value="{{ field.type }}" />
+                        {% endif %}
+                      </td>
                       <td>
                         <input
                           type="checkbox"
                           name="field_{{ field.key }}_visible"
                           value="1"
                           {% if field.visible %}checked{% endif %}
-                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
+                          {% if field.key in ['first_name', 'last_name'] %}disabled{% endif %}
                         />
-                        {% if field.key in ['first_name', 'last_name', 'email'] %}
+                        {% if field.key in ['first_name', 'last_name'] %}
                           <input type="hidden" name="field_{{ field.key }}_visible" value="1" />
                         {% endif %}
                       </td>
@@ -220,9 +233,9 @@
                           name="field_{{ field.key }}_required"
                           value="1"
                           {% if field.required %}checked{% endif %}
-                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
+                          {% if field.key in ['first_name', 'last_name'] %}disabled{% endif %}
                         />
-                        {% if field.key in ['first_name', 'last_name', 'email'] %}
+                        {% if field.key in ['first_name', 'last_name'] %}
                           <input type="hidden" name="field_{{ field.key }}_required" value="1" />
                         {% endif %}
                       </td>
