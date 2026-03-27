@@ -263,6 +263,97 @@
         </div>
       </details>
 
+      <details class="card card--panel card-collapsible admin-grid__full">
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Staff custom fields</h2>
+            <p class="card__subtitle">Manage company-specific custom fields captured on staff records.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <form action="/admin/companies/{{ company.id }}/staff-custom-fields" method="post" class="form-grid">
+            {% include "partials/csrf.html" %}
+            <div class="form-field">
+              <label class="form-label" for="new-custom-name">Key</label>
+              <input class="form-input" id="new-custom-name" name="name" placeholder="e.g. shirt_size" required />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-display-name">Label</label>
+              <input class="form-input" id="new-custom-display-name" name="display_name" placeholder="Shirt size" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-field-type">Type</label>
+              <select class="form-input" id="new-custom-field-type" name="field_type">
+                <option value="text">text</option>
+                <option value="select">select</option>
+                <option value="checkbox">checkbox</option>
+                <option value="date">date</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-display-order">Sort</label>
+              <input class="form-input" id="new-custom-display-order" name="display_order" type="number" value="0" />
+            </div>
+            <div class="form-field admin-grid__full">
+              <label class="form-label" for="new-custom-options">Options (select only)</label>
+              <input class="form-input" id="new-custom-options" name="options" placeholder="small:Small, medium:Medium" />
+            </div>
+            <div class="form-actions admin-grid__full">
+              <button type="submit" class="button">Add custom field</button>
+            </div>
+          </form>
+
+          <div class="table-wrapper">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Label</th>
+                  <th>Type</th>
+                  <th>Sort</th>
+                  <th>Active</th>
+                  <th>Options</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for field in staff_custom_field_definitions %}
+                  <tr>
+                    <form action="/admin/companies/{{ company.id }}/staff-custom-fields/{{ field.id }}" method="post">
+                      {% include "partials/csrf.html" %}
+                      <td><code>{{ field.name }}</code></td>
+                      <td><input class="form-input" name="display_name" value="{{ field.display_name or '' }}" /></td>
+                      <td>
+                        <select class="form-input" name="field_type">
+                          {% for value in ['text', 'select', 'checkbox', 'date'] %}
+                            <option value="{{ value }}" {% if field.field_type == value %}selected{% endif %}>{{ value }}</option>
+                          {% endfor %}
+                        </select>
+                      </td>
+                      <td><input class="form-input" type="number" name="display_order" value="{{ field.display_order }}" /></td>
+                      <td><input type="checkbox" name="is_active" value="1" {% if field.is_active %}checked{% endif %} /></td>
+                      <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
+                      <td class="table__actions">
+                        <button type="submit" class="button button--ghost">Save</button>
+                    </form>
+                    <form action="/admin/companies/{{ company.id }}/staff-custom-fields/{{ field.id }}/delete" method="post" class="inline-form">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--danger">Delete</button>
+                    </form>
+                      </td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="7" class="table__empty">No custom fields defined.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+
       <details class="card card--panel card-collapsible admin-grid__full" data-billing-contacts-panel open>
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
