@@ -1931,15 +1931,8 @@ async def _build_consolidated_overview(
             except (TypeError, ValueError):
                 return 0
 
-        def _is_countable(license_record: Mapping[str, Any]) -> bool:
-            return _safe_int(license_record.get("count")) < 10000
-
-        counted_licenses = [lic for lic in licenses if _is_countable(lic)]
-        excluded_licenses = [lic for lic in licenses if not _is_countable(lic)]
-
-        license_capacity = sum(_safe_int(lic.get("count")) for lic in counted_licenses)
-        license_allocated = sum(_safe_int(lic.get("allocated")) for lic in counted_licenses)
-        excluded_allocated = sum(_safe_int(lic.get("allocated")) for lic in excluded_licenses)
+        license_capacity = sum(_safe_int(lic.get("count")) for lic in licenses)
+        license_allocated = sum(_safe_int(lic.get("allocated")) for lic in licenses)
         license_available = max(license_capacity - license_allocated, 0)
         license_utilisation = (
             round((license_allocated / license_capacity) * 100)
@@ -1947,15 +1940,7 @@ async def _build_consolidated_overview(
             else 0
         )
 
-        license_meta_parts = [f"{_format_int(license_allocated)} allocated"]
-        if excluded_licenses:
-            excluded_count = len(excluded_licenses)
-            excluded_label = "license" if excluded_count == 1 else "licenses"
-            note = f"Excludes {excluded_count} high-capacity {excluded_label}"
-            if excluded_allocated:
-                note += f" ({_format_int(excluded_allocated)} assigned)"
-            license_meta_parts.append(note)
-        license_meta = "; ".join(license_meta_parts)
+        license_meta = f"{_format_int(license_allocated)} allocated"
 
         invoice_status_counts = Counter(
             (str(invoice.get("status") or "Unspecified").strip() or "Unspecified")
