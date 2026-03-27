@@ -43,7 +43,8 @@ async def list_effective_staff_fields(company_id: int) -> list[dict[str, Any]]:
             c.visible AS override_visible,
             c.required AS override_required,
             c.sort_order AS override_sort_order,
-            c.validation_metadata AS override_validation_metadata
+            c.validation_metadata AS override_validation_metadata,
+            c.field_type AS override_field_type
         FROM staff_field_definitions AS d
         LEFT JOIN company_staff_field_configs AS c
             ON c.field_definition_id = d.id
@@ -81,9 +82,9 @@ async def list_effective_staff_fields(company_id: int) -> list[dict[str, Any]]:
 
     fields: list[dict[str, Any]] = []
     for row in rows:
-        field_type = str(row.get("field_type") or "text").strip().lower()
-        if field_type not in _ALLOWED_FIELD_TYPES:
-            field_type = "text"
+        base_field_type = str(row.get("field_type") or "text").strip().lower()
+        if base_field_type not in _ALLOWED_FIELD_TYPES:
+            base_field_type = "text"
         definition_id = int(row.get("definition_id"))
         override_visible = row.get("override_visible")
         override_required = row.get("override_required")
@@ -93,12 +94,19 @@ async def list_effective_staff_fields(company_id: int) -> list[dict[str, Any]]:
         override_validation = _decode_json(row.get("override_validation_metadata")) or {}
         validation_metadata.update(override_validation)
 
+        override_field_type_raw = row.get("override_field_type")
+        if override_field_type_raw and str(override_field_type_raw).strip().lower() in _ALLOWED_FIELD_TYPES:
+            field_type = str(override_field_type_raw).strip().lower()
+        else:
+            field_type = base_field_type
+
         fields.append(
             {
                 "definition_id": definition_id,
                 "key": str(row.get("field_key") or "").strip(),
                 "label": str(row.get("label") or "").strip(),
                 "type": field_type,
+                "base_type": base_field_type,
                 "visible": _as_bool(override_visible)
                 if override_visible is not None
                 else _as_bool(row.get("default_visible")),
@@ -123,6 +131,9 @@ async def upsert_company_staff_field_configs(
         definition_id = config.get("definition_id")
         if definition_id is None:
             continue
+        field_type_override = config.get("field_type") or None
+        if field_type_override and str(field_type_override).strip().lower() not in _ALLOWED_FIELD_TYPES:
+            field_type_override = None
         await db.execute(
             """
             INSERT INTO company_staff_field_configs (
@@ -131,13 +142,15 @@ async def upsert_company_staff_field_configs(
                 visible,
                 required,
                 sort_order,
-                validation_metadata
-            ) VALUES (%s, %s, %s, %s, %s, %s)
+                validation_metadata,
+                field_type
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 visible = VALUES(visible),
                 required = VALUES(required),
                 sort_order = VALUES(sort_order),
-                validation_metadata = VALUES(validation_metadata)
+                validation_metadata = VALUES(validation_metadata),
+                field_type = VALUES(field_type)
             """,
             (
                 company_id,
@@ -146,6 +159,7 @@ async def upsert_company_staff_field_configs(
                 1 if config.get("required") else 0,
                 int(config.get("sort_order") or 0),
                 json.dumps(config.get("validation_metadata") or {}),
+                field_type_override,
             ),
         )
 
