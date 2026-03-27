@@ -9,13 +9,14 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "sku": str(row.get("sku") or "").strip(),
         "friendly_name": str(row.get("friendly_name") or "").strip(),
+        "hidden": bool(row.get("hidden")),
     }
 
 
 async def list_mappings() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT sku, friendly_name
+        SELECT sku, friendly_name, hidden
         FROM license_sku_friendly_names
         ORDER BY sku
         """
@@ -38,20 +39,21 @@ async def get_friendly_name(sku: str) -> str | None:
     return friendly_name or None
 
 
-async def upsert_mapping(sku: str, friendly_name: str) -> dict[str, Any]:
+async def upsert_mapping(sku: str, friendly_name: str, *, hidden: bool = False) -> dict[str, Any]:
     cleaned_sku = sku.strip().upper()
     cleaned_name = friendly_name.strip()
+    hidden_value = 1 if hidden else 0
     await db.execute(
         """
-        INSERT INTO license_sku_friendly_names (sku, friendly_name)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE friendly_name = VALUES(friendly_name)
+        INSERT INTO license_sku_friendly_names (sku, friendly_name, hidden)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE friendly_name = VALUES(friendly_name), hidden = VALUES(hidden)
         """,
-        (cleaned_sku, cleaned_name),
+        (cleaned_sku, cleaned_name, hidden_value),
     )
     row = await db.fetch_one(
         """
-        SELECT sku, friendly_name
+        SELECT sku, friendly_name, hidden
         FROM license_sku_friendly_names
         WHERE sku = %s
         """,

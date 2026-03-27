@@ -45,6 +45,7 @@ async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
         LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
         WHERE l.company_id = %s
+          AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         ORDER BY display_name, l.name
         """,
@@ -61,6 +62,7 @@ async def list_all_licenses() -> list[dict[str, Any]]:
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
         LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
+        WHERE COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         ORDER BY l.company_id, display_name
         """,
@@ -77,6 +79,7 @@ async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
         LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
         WHERE l.id = %s
+          AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         """,
         (license_id,),
@@ -92,7 +95,9 @@ async def get_license_by_company_and_sku(company_id: int, sku: str) -> dict[str,
         FROM licenses AS l
         LEFT JOIN apps AS a ON a.vendor_sku = l.platform
         LEFT JOIN license_sku_friendly_names AS lsn ON lsn.sku = l.platform
-        WHERE l.company_id = %s AND l.platform = %s
+        WHERE l.company_id = %s
+          AND l.platform = %s
+          AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         """,
         (company_id, sku),
