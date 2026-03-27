@@ -172,6 +172,97 @@
       </div>
     </section>
     {% if is_super_admin %}
+      <details class="card card--panel card-collapsible admin-grid__full" data-staff-field-config-panel>
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Staff intake fields</h2>
+            <p class="card__subtitle">Control which staff onboarding fields are visible, required, and their display order.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <form action="/admin/companies/{{ company.id }}/staff-fields" method="post" class="form">
+            {% include "partials/csrf.html" %}
+            <div class="table-wrapper">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Field</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Visible</th>
+                    <th scope="col">Required</th>
+                    <th scope="col">Sort</th>
+                    <th scope="col">Options (select only)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for field in staff_field_config %}
+                    <tr>
+                      <td>{{ field.label }}</td>
+                      <td><code>{{ field.type }}</code></td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          name="field_{{ field.key }}_visible"
+                          value="1"
+                          {% if field.visible %}checked{% endif %}
+                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
+                        />
+                        {% if field.key in ['first_name', 'last_name', 'email'] %}
+                          <input type="hidden" name="field_{{ field.key }}_visible" value="1" />
+                        {% endif %}
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          name="field_{{ field.key }}_required"
+                          value="1"
+                          {% if field.required %}checked{% endif %}
+                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
+                        />
+                        {% if field.key in ['first_name', 'last_name', 'email'] %}
+                          <input type="hidden" name="field_{{ field.key }}_required" value="1" />
+                        {% endif %}
+                      </td>
+                      <td>
+                        <input
+                          class="form-input"
+                          type="number"
+                          name="field_{{ field.key }}_sort_order"
+                          value="{{ field.sort_order }}"
+                        />
+                      </td>
+                      <td>
+                        {% if field.type == 'select' %}
+                          <input
+                            class="form-input"
+                            type="text"
+                            name="field_{{ field.key }}_options"
+                            value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}"
+                            placeholder="value:Label, value2:Label 2"
+                          />
+                        {% else %}
+                          <span class="text-muted">—</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% else %}
+                    <tr>
+                      <td colspan="6" class="table__empty">No staff field configuration found.</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Save staff field settings</button>
+            </div>
+          </form>
+        </div>
+      </details>
+
       <details class="card card--panel card-collapsible admin-grid__full" data-billing-contacts-panel open>
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
