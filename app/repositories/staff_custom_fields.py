@@ -6,6 +6,11 @@ from typing import Any
 from app.core.database import db
 
 
+def _int_csv(values: list[int]) -> str:
+    """Return a comma-separated list of integers for FIND_IN_SET filters."""
+    return ",".join(str(int(value)) for value in values)
+
+
 async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
     """List effective field definitions for a company (global with company overrides)."""
     rows = await db.fetch_all(
@@ -35,15 +40,15 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
         return []
 
     ids = [int(item["id"]) for item in definitions]
-    placeholders = ", ".join(["%s"] * len(ids))
+    id_csv = _int_csv(ids)
     option_rows = await db.fetch_all(
-        f"""
+        """
         SELECT field_definition_id, option_value, option_label, sort_order
         FROM staff_custom_field_options
-        WHERE field_definition_id IN ({placeholders})
+        WHERE FIND_IN_SET(field_definition_id, %s) > 0
         ORDER BY field_definition_id, sort_order, id
         """,
-        tuple(ids),
+        (id_csv,),
     )
     options_map: dict[int, list[dict[str, Any]]] = {}
     for row in option_rows or []:
@@ -74,15 +79,15 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
     if not definitions:
         return []
     ids = [int(item["id"]) for item in definitions]
-    placeholders = ", ".join(["%s"] * len(ids))
+    id_csv = _int_csv(ids)
     option_rows = await db.fetch_all(
-        f"""
+        """
         SELECT field_definition_id, option_value, option_label, sort_order
         FROM staff_custom_field_options
-        WHERE field_definition_id IN ({placeholders})
+        WHERE FIND_IN_SET(field_definition_id, %s) > 0
         ORDER BY field_definition_id, sort_order, id
         """,
-        tuple(ids),
+        (id_csv,),
     )
     options_map: dict[int, list[dict[str, Any]]] = {}
     for row in option_rows or []:
@@ -183,14 +188,14 @@ async def get_all_staff_field_values(
         return {}
 
     definition_map = {int(item["id"]): item for item in definitions}
-    placeholders = ", ".join(["%s"] * len(staff_ids))
+    staff_ids_csv = _int_csv(staff_ids)
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT staff_id, field_definition_id, value_text, value_date, value_boolean
         FROM staff_custom_field_values
-        WHERE staff_id IN ({placeholders})
+        WHERE FIND_IN_SET(staff_id, %s) > 0
         """,
-        tuple(staff_ids),
+        (staff_ids_csv,),
     )
     values: dict[int, dict[str, Any]] = {int(staff_id): {} for staff_id in staff_ids}
     for row in rows or []:
