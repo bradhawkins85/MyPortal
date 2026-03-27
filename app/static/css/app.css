@@ -6043,6 +6043,11 @@ dialog.dialog {
   width: 90vw;
 }
 
+dialog.dialog--wide {
+  max-width: 64rem;
+  width: min(95vw, 64rem);
+}
+
 dialog.dialog::backdrop {
   background: rgba(15, 23, 42, 0.75);
   backdrop-filter: blur(6px);
