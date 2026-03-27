@@ -142,6 +142,7 @@ from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
@@ -3687,9 +3688,13 @@ async def _render_company_edit_page(
                 raise
 
     staff_field_config: list[dict[str, Any]] = []
+    staff_custom_field_definitions: list[dict[str, Any]] = []
     if is_super_admin:
         staff_field_config = (
             await staff_field_config_service.load_effective_company_staff_fields(company_id)
+        )
+        staff_custom_field_definitions = (
+            await staff_custom_fields_repo.list_company_owned_definitions(company_id)
         )
 
     assign_form = {
@@ -3729,6 +3734,7 @@ async def _render_company_edit_page(
         "m365_has_credentials": m365_credential_view is not None,
         "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
         "staff_field_config": staff_field_config,
+        "staff_custom_field_definitions": staff_custom_field_definitions,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -8619,10 +8625,12 @@ async def staff_page(
     staff_members: list[dict[str, Any]] = []
     departments: list[str] = []
     field_config: list[dict[str, Any]] = []
+    custom_field_definitions: list[dict[str, Any]] = []
     if company_id is not None:
         field_config = await staff_field_config_service.load_effective_company_staff_fields(
             company_id
         )
+        custom_field_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
         staff_members = await staff_repo.list_staff(
             company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
         )
@@ -8694,6 +8702,7 @@ async def staff_page(
         "department_filter": department_filter,
         "show_ex_staff": show_ex_staff_flag,
         "staff_field_config": field_config,
+        "staff_custom_field_definitions": custom_field_definitions,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -8739,7 +8748,7 @@ async def create_staff_member(request: Request):
     enabled = bool(values.get("enabled", True))
     department = str(values.get("department") or "").strip() or None
 
-    await staff_repo.create_staff(
+    created = await staff_repo.create_staff(
         company_id=company_id,
         first_name=first_name,
         last_name=last_name,
@@ -8759,6 +8768,23 @@ async def create_staff_member(request: Request):
         manager_name=None,
         account_action=None,
         syncro_contact_id=None,
+    )
+    custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+    custom_values: dict[str, Any] = {}
+    for definition in custom_definitions:
+        key = str(definition.get("name") or "").strip()
+        if not key:
+            continue
+        field_type = str(definition.get("field_type") or "text")
+        raw_value = form.get(key)
+        if field_type == "checkbox":
+            custom_values[key] = str(raw_value or "").lower() in {"1", "true", "on", "yes"}
+        else:
+            custom_values[key] = str(raw_value or "").strip() or None
+    await staff_custom_fields_repo.set_staff_field_values_by_name(
+        company_id=company_id,
+        staff_id=int(created["id"]),
+        values=custom_values,
     )
 
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
@@ -8857,6 +8883,16 @@ async def update_staff_member(staff_id: int, request: Request):
         account_action=account_action,
         syncro_contact_id=existing.get("syncro_contact_id"),
     )
+    raw_custom_fields = get_value("customFields", "custom_fields")
+    if isinstance(raw_custom_fields, dict):
+        await staff_custom_fields_repo.set_staff_field_values_by_name(
+            company_id=int(existing.get("company_id") or company_id or 0),
+            staff_id=staff_id,
+            values=raw_custom_fields,
+        )
+        refreshed = await staff_repo.get_staff_by_id(staff_id)
+        if refreshed:
+            updated = refreshed
     return JSONResponse({"success": True, "staff": updated})
 
 
@@ -9821,6 +9857,102 @@ async def admin_update_company_staff_fields(company_id: int, request: Request):
         company_id=company_id,
         success="Staff intake field configuration updated.",
     )
+
+
+def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for part in (options_text or "").split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if ":" in item:
+            value_part, label_part = item.split(":", 1)
+            value = value_part.strip()
+            label = label_part.strip() or value
+        else:
+            value = item
+            label = item
+        if not value:
+            continue
+        options.append({"value": value, "label": label})
+    return options
+
+
+@app.post("/admin/companies/{company_id}/staff-custom-fields", response_class=HTMLResponse)
+async def admin_create_company_staff_custom_field(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    name = str(form.get("name") or "").strip().lower().replace(" ", "_")
+    display_name = str(form.get("display_name") or "").strip() or None
+    field_type = str(form.get("field_type") or "text").strip().lower()
+    try:
+        display_order = int(str(form.get("display_order") or "0").strip())
+    except ValueError:
+        display_order = 0
+    options = _parse_custom_field_options(str(form.get("options") or ""))
+    if not name:
+        return _company_edit_redirect(company_id=company_id, error="Custom field name is required.")
+    if field_type not in {"text", "checkbox", "date", "select"}:
+        return _company_edit_redirect(company_id=company_id, error="Invalid custom field type.")
+    await staff_custom_fields_repo.create_company_definition(
+        company_id=company_id,
+        name=name,
+        display_name=display_name,
+        field_type=field_type,
+        display_order=display_order,
+        options=options,
+    )
+    return _company_edit_redirect(company_id=company_id, success="Staff custom field created.")
+
+
+@app.post("/admin/companies/{company_id}/staff-custom-fields/{definition_id}", response_class=HTMLResponse)
+async def admin_update_company_staff_custom_field(
+    company_id: int, definition_id: int, request: Request
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    display_name = str(form.get("display_name") or "").strip() or None
+    field_type = str(form.get("field_type") or "text").strip().lower()
+    try:
+        display_order = int(str(form.get("display_order") or "0").strip())
+    except ValueError:
+        display_order = 0
+    is_active = str(form.get("is_active") or "").lower() in {"1", "true", "on", "yes"}
+    options = _parse_custom_field_options(str(form.get("options") or ""))
+    await staff_custom_fields_repo.update_company_definition(
+        definition_id,
+        company_id=company_id,
+        display_name=display_name,
+        field_type=field_type,
+        display_order=display_order,
+        is_active=is_active,
+        options=options,
+    )
+    return _company_edit_redirect(company_id=company_id, success="Staff custom field updated.")
+
+
+@app.post(
+    "/admin/companies/{company_id}/staff-custom-fields/{definition_id}/delete",
+    response_class=HTMLResponse,
+)
+async def admin_delete_company_staff_custom_field(
+    company_id: int, definition_id: int, request: Request
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    await staff_custom_fields_repo.delete_company_definition(definition_id, company_id)
+    return _company_edit_redirect(company_id=company_id, success="Staff custom field deleted.")
 
 
 @app.post("/admin/companies/{company_id}/m365-credentials", response_class=HTMLResponse)

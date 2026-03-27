@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import staff as staff_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.schemas.staff import StaffCreate, StaffResponse, StaffUpdate
 
 
@@ -62,7 +63,15 @@ async def create_staff(
     _: None = Depends(require_database),
     __: dict = Depends(require_super_admin),
 ):
-    created = await staff_repo.create_staff(**payload.model_dump(by_alias=False))
+    payload_data = payload.model_dump(by_alias=False)
+    custom_fields = payload_data.pop("custom_fields", None) or {}
+    created = await staff_repo.create_staff(**payload_data)
+    await staff_custom_fields_repo.set_staff_field_values_by_name(
+        company_id=created["company_id"],
+        staff_id=created["id"],
+        values=custom_fields,
+    )
+    created = await staff_repo.get_staff_by_id(created["id"]) or created
     return StaffResponse.model_validate(created)
 
 
@@ -112,6 +121,14 @@ async def update_staff(
         account_action=data.get("account_action"),
         syncro_contact_id=data.get("syncro_contact_id"),
     )
+    custom_fields = data.get("custom_fields")
+    if isinstance(custom_fields, dict):
+        await staff_custom_fields_repo.set_staff_field_values_by_name(
+            company_id=updated["company_id"],
+            staff_id=staff_id,
+            values=custom_fields,
+        )
+        updated = await staff_repo.get_staff_by_id(staff_id) or updated
     return StaffResponse.model_validate(updated)
 
 

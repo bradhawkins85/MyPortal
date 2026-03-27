@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -31,6 +31,7 @@ class StaffBase(BaseModel):
 
 class StaffCreate(StaffBase):
     company_id: int = Field(validation_alias="companyId")
+    custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
 class StaffUpdate(BaseModel):
@@ -54,6 +55,7 @@ class StaffUpdate(BaseModel):
     syncro_contact_id: Optional[str] = Field(
         default=None, validation_alias="syncroContactId"
     )
+    custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
 class StaffResponse(BaseModel):
@@ -80,6 +82,7 @@ class StaffResponse(BaseModel):
     verification_code: Optional[str] = None
     verification_admin_name: Optional[str] = None
     syncro_contact_id: Optional[str] = None
+    custom_fields: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {
         "from_attributes": True,
