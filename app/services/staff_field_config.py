@@ -7,7 +7,7 @@ from typing import Any
 from app.repositories import staff_field_configs as staff_field_config_repo
 
 
-_CORE_REQUIRED_KEYS = {"first_name", "last_name", "email"}
+_CORE_REQUIRED_KEYS = {"first_name", "last_name"}
 _FIELD_TYPE_MAP = {
     "text": "text",
     "date": "date",
@@ -81,6 +81,7 @@ async def load_effective_company_staff_fields(company_id: int) -> list[dict[str,
             "key": key,
             "label": str(row.get("label") or key.replace("_", " ").title()),
             "type": field_type,
+            "base_type": str(row.get("base_type") or field_type),
             "visible": visible,
             "required": required,
             "sort_order": int(row.get("sort_order") or 0),
@@ -170,6 +171,12 @@ async def save_company_staff_field_admin_config(
         except ValueError:
             sort_order = int(field.get("sort_order") or 0)
 
+        field_type_raw = str(form_data.get(f"field_{key}_type") or "").strip().lower()
+        base_type = field.get("base_type") or field.get("type") or "text"
+        field_type_override = field_type_raw if field_type_raw and field_type_raw in _FIELD_TYPE_MAP else None
+        if field_type_override == base_type:
+            field_type_override = None
+
         configs.append(
             {
                 "definition_id": definition_id,
@@ -177,10 +184,12 @@ async def save_company_staff_field_admin_config(
                 "required": required,
                 "sort_order": sort_order,
                 "validation_metadata": field.get("validation_metadata") or {},
+                "field_type": field_type_override,
             }
         )
 
-        if field.get("type") == "select":
+        effective_type = field_type_override or base_type
+        if effective_type == "select":
             options_text = str(form_data.get(f"field_{key}_options") or "")
             options_by_definition[definition_id] = _parse_options_text(options_text)
 
