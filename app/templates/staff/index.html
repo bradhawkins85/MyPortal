@@ -16,36 +16,46 @@
       <div class="card-collapsible__content">
         <form action="/staff" method="post" class="staff-form">
           {% include "partials/csrf.html" %}
-          <div class="form-field">
-            <label class="form-label" for="staff-first-name">First name</label>
-            <input class="form-input" id="staff-first-name" name="firstName" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-last-name">Last name</label>
-            <input class="form-input" id="staff-last-name" name="lastName" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-email">Email</label>
-            <input class="form-input" id="staff-email" name="email" type="email" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-mobile">Mobile phone</label>
-            <input class="form-input" id="staff-mobile" name="mobilePhone" type="tel" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-department">Department</label>
-            <input class="form-input" id="staff-department" name="department" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-date-onboarded">Onboard date</label>
-            <input class="form-input" id="staff-date-onboarded" name="dateOnboarded" type="date" />
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox">
-              <input type="checkbox" name="enabled" value="1" checked />
-              <span>Enabled</span>
-            </label>
-          </div>
+          {% for field in staff_field_config %}
+            {% if field.visible %}
+              {% if field.type == 'checkbox' %}
+                <div class="form-field form-field--checkbox">
+                  <label class="checkbox" for="{{ field.input_id }}">
+                    <input
+                      id="{{ field.input_id }}"
+                      type="checkbox"
+                      name="{{ field.input_name }}"
+                      value="1"
+                      {% if field.key == 'enabled' %}checked{% endif %}
+                      {% if field.required %}required{% endif %}
+                    />
+                    <span>{{ field.label }}</span>
+                  </label>
+                </div>
+              {% elif field.type == 'select' %}
+                <div class="form-field">
+                  <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
+                  <select class="form-input" id="{{ field.input_id }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
+                    <option value="">Select {{ field.label|lower }}</option>
+                    {% for option in field.options %}
+                      <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              {% else %}
+                <div class="form-field">
+                  <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
+                  <input
+                    class="form-input"
+                    id="{{ field.input_id }}"
+                    name="{{ field.input_name }}"
+                    type="{% if field.type == 'date' %}date{% else %}{% if field.validation_metadata.format == 'email' %}email{% else %}text{% endif %}{% endif %}"
+                    {% if field.required %}required{% endif %}
+                  />
+                </div>
+              {% endif %}
+            {% endif %}
+          {% endfor %}
           <div class="form-actions staff-form__actions">
             <button type="submit" class="button">Add staff</button>
           </div>

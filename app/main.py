@@ -180,6 +180,7 @@ from app.services import shop as shop_service
 from app.services import shop_packages as shop_packages_service
 from app.services import staff_importer
 from app.services import staff_access as staff_access_service
+from app.services import staff_field_config as staff_field_config_service
 from app.services import company_importer
 from app.services import labour_types as labour_types_service
 from app.services import subscription_shop_integration
@@ -3685,6 +3686,12 @@ async def _render_company_edit_page(
             else:
                 raise
 
+    staff_field_config: list[dict[str, Any]] = []
+    if is_super_admin:
+        staff_field_config = (
+            await staff_field_config_service.load_effective_company_staff_fields(company_id)
+        )
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -3721,6 +3728,7 @@ async def _render_company_edit_page(
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
         "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
+        "staff_field_config": staff_field_config,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -8610,7 +8618,11 @@ async def staff_page(
 
     staff_members: list[dict[str, Any]] = []
     departments: list[str] = []
+    field_config: list[dict[str, Any]] = []
     if company_id is not None:
+        field_config = await staff_field_config_service.load_effective_company_staff_fields(
+            company_id
+        )
         staff_members = await staff_repo.list_staff(
             company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
         )
@@ -8681,6 +8693,7 @@ async def staff_page(
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
         "show_ex_staff": show_ex_staff_flag,
+        "staff_field_config": field_config,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -8701,25 +8714,30 @@ async def create_staff_member(request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
 
     form = await request.form()
-    first_name = (form.get("firstName") or form.get("first_name") or "").strip()
-    last_name = (form.get("lastName") or form.get("last_name") or "").strip()
-    email = (form.get("email") or "").strip()
-    if not first_name or not last_name or not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name, last name, and email are required")
+    field_config = await staff_field_config_service.load_effective_company_staff_fields(company_id)
+    submitted = {str(key): form.get(key) for key in form.keys()}
+    values, validation_errors = staff_field_config_service.validate_staff_form_values(
+        submitted, field_config
+    )
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation_errors),
+        )
 
-    mobile_phone = (form.get("mobilePhone") or form.get("mobile_phone") or "").strip() or None
-    date_onboarded = _parse_input_datetime(form.get("dateOnboarded"), assume_midnight=True)
-    date_offboarded = _parse_input_datetime(form.get("dateOffboarded"))
-    enabled = str(form.get("enabled", "1")).lower() in {"1", "true", "on"}
-    street = (form.get("street") or "").strip() or None
-    city = (form.get("city") or "").strip() or None
-    state_val = (form.get("state") or "").strip() or None
-    postcode = (form.get("postcode") or "").strip() or None
-    country = (form.get("country") or "").strip() or None
-    department = (form.get("department") or "").strip() or None
-    job_title = (form.get("jobTitle") or form.get("job_title") or "").strip() or None
-    org_company = (form.get("company") or "").strip() or None
-    manager_name = (form.get("managerName") or form.get("manager_name") or "").strip() or None
+    first_name = str(values.get("first_name") or "").strip()
+    last_name = str(values.get("last_name") or "").strip()
+    email = str(values.get("email") or "").strip()
+    if not first_name or not last_name or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="First name, last name, and email are required",
+        )
+
+    mobile_phone = str(values.get("mobile_phone") or "").strip() or None
+    date_onboarded = values.get("date_onboarded")
+    enabled = bool(values.get("enabled", True))
+    department = str(values.get("department") or "").strip() or None
 
     await staff_repo.create_staff(
         company_id=company_id,
@@ -8728,17 +8746,17 @@ async def create_staff_member(request: Request):
         email=email,
         mobile_phone=mobile_phone,
         date_onboarded=date_onboarded,
-        date_offboarded=date_offboarded,
+        date_offboarded=None,
         enabled=enabled,
-        street=street,
-        city=city,
-        state=state_val,
-        postcode=postcode,
-        country=country,
+        street=None,
+        city=None,
+        state=None,
+        postcode=None,
+        country=None,
         department=department,
-        job_title=job_title,
-        org_company=org_company,
-        manager_name=manager_name,
+        job_title=None,
+        org_company=None,
+        manager_name=None,
         account_action=None,
         syncro_contact_id=None,
     )
@@ -9783,6 +9801,25 @@ async def admin_update_company(company_id: int, request: Request):
     return _company_edit_redirect(
         company_id=company_id,
         success=f"Company {name} updated.",
+    )
+
+
+@app.post("/admin/companies/{company_id}/staff-fields", response_class=HTMLResponse)
+async def admin_update_company_staff_fields(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    form_data = {str(key): form.get(key) for key in form.keys()}
+    await staff_field_config_service.save_company_staff_field_admin_config(
+        company_id, form_data
+    )
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Staff intake field configuration updated.",
     )
 
 
