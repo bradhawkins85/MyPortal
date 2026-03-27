@@ -4260,11 +4260,12 @@ async def upsert_license_sku_mapping(request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
     sku = str(payload.get("sku") or "").strip().upper()
     friendly_name = str(payload.get("friendly_name") or "").strip()
+    hidden = bool(payload.get("hidden"))
     if not sku:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU is required")
     if not friendly_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Friendly name is required")
-    mapping = await sku_friendly_repo.upsert_mapping(sku, friendly_name)
+    mapping = await sku_friendly_repo.upsert_mapping(sku, friendly_name, hidden=hidden)
     return JSONResponse({"item": mapping, "success": True})
 
 
