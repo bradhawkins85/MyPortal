@@ -115,6 +115,7 @@ from app.repositories import assets as asset_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import licenses as license_repo
+from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import forms as forms_repo
 from app.repositories import knowledge_base as knowledge_base_repo
 from app.repositories import m365 as m365_repo
@@ -4228,10 +4229,57 @@ async def licenses_page(request: Request):
         "company": company,
         "can_order_licenses": can_order,
         "can_manage_licenses": can_manage,
+        "can_manage_sku_mappings": is_super_admin,
         "webhook_enabled": bool(settings.licenses_webhook_url and settings.licenses_webhook_api_key),
         "has_m365_credentials": bool(credentials),
     }
     return await _render_template("licenses/index.html", request, user, extra=extra)
+
+
+@app.get("/licenses/sku-mappings", response_class=JSONResponse)
+async def list_license_sku_mappings(request: Request):
+    user, _membership, _company, _company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    mappings = await sku_friendly_repo.list_mappings()
+    return JSONResponse({"items": mappings})
+
+
+@app.post("/licenses/sku-mappings", response_class=JSONResponse)
+async def upsert_license_sku_mapping(request: Request):
+    user, _membership, _company, _company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - defensive parsing
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
+    sku = str(payload.get("sku") or "").strip().upper()
+    friendly_name = str(payload.get("friendly_name") or "").strip()
+    if not sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU is required")
+    if not friendly_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Friendly name is required")
+    mapping = await sku_friendly_repo.upsert_mapping(sku, friendly_name)
+    return JSONResponse({"item": mapping, "success": True})
+
+
+@app.delete("/licenses/sku-mappings/{sku}", response_class=JSONResponse)
+async def delete_license_sku_mapping(request: Request, sku: str):
+    user, _membership, _company, _company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    cleaned_sku = sku.strip().upper()
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU is required")
+    await sku_friendly_repo.delete_mapping(cleaned_sku)
+    return JSONResponse({"success": True})
 
 
 @app.get("/compliance", response_class=HTMLResponse)
