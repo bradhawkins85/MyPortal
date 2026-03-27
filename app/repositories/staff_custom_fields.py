@@ -23,6 +23,9 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
             COALESCE(ovr.field_type, base.field_type) AS field_type,
             COALESCE(ovr.display_order, base.display_order) AS display_order,
             COALESCE(ovr.is_active, base.is_active) AS is_active,
+            COALESCE(ovr.condition_parent_name, base.condition_parent_name) AS condition_parent_name,
+            COALESCE(ovr.condition_operator, base.condition_operator) AS condition_operator,
+            COALESCE(ovr.condition_value, base.condition_value) AS condition_value,
             COALESCE(ovr.company_id, base.company_id) AS company_id
         FROM staff_custom_field_definitions AS base
         LEFT JOIN staff_custom_field_definitions AS ovr
@@ -68,7 +71,20 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
 async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT id, base_definition_id, company_id, name, display_name, field_type, display_order, is_active, created_at, updated_at
+        SELECT
+            id,
+            base_definition_id,
+            company_id,
+            name,
+            display_name,
+            field_type,
+            display_order,
+            is_active,
+            condition_parent_name,
+            condition_operator,
+            condition_value,
+            created_at,
+            updated_at
         FROM staff_custom_field_definitions
         WHERE company_id = %s
         ORDER BY display_order, id
@@ -110,15 +126,36 @@ async def create_company_definition(
     display_name: str | None,
     field_type: str,
     display_order: int = 0,
+    condition_parent_name: str | None = None,
+    condition_operator: str | None = None,
+    condition_value: str | None = None,
     options: list[dict[str, str]] | None = None,
 ) -> int:
     definition_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO staff_custom_field_definitions (
-            company_id, base_definition_id, name, display_name, field_type, display_order, is_active
-        ) VALUES (%s, NULL, %s, %s, %s, %s, 1)
+            company_id,
+            base_definition_id,
+            name,
+            display_name,
+            field_type,
+            display_order,
+            is_active,
+            condition_parent_name,
+            condition_operator,
+            condition_value
+        ) VALUES (%s, NULL, %s, %s, %s, %s, 1, %s, %s, %s)
         """,
-        (company_id, name, display_name or None, field_type, display_order),
+        (
+            company_id,
+            name,
+            display_name or None,
+            field_type,
+            display_order,
+            condition_parent_name or None,
+            condition_operator or None,
+            condition_value or None,
+        ),
     )
     if not definition_id:
         raise RuntimeError("Failed to create staff custom field definition")
@@ -134,6 +171,9 @@ async def update_company_definition(
     field_type: str,
     display_order: int,
     is_active: bool,
+    condition_parent_name: str | None,
+    condition_operator: str | None,
+    condition_value: str | None,
     options: list[dict[str, str]] | None = None,
 ) -> None:
     await db.execute(
@@ -142,10 +182,23 @@ async def update_company_definition(
         SET display_name = %s,
             field_type = %s,
             display_order = %s,
-            is_active = %s
+            is_active = %s,
+            condition_parent_name = %s,
+            condition_operator = %s,
+            condition_value = %s
         WHERE id = %s AND company_id = %s
         """,
-        (display_name or None, field_type, display_order, 1 if is_active else 0, definition_id, company_id),
+        (
+            display_name or None,
+            field_type,
+            display_order,
+            1 if is_active else 0,
+            condition_parent_name or None,
+            condition_operator or None,
+            condition_value or None,
+            definition_id,
+            company_id,
+        ),
     )
     await replace_field_options(definition_id, options or [])
 

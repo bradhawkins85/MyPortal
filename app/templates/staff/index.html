@@ -58,14 +58,28 @@
           {% endfor %}
           {% for field in staff_custom_field_definitions %}
             {% if field.field_type == 'checkbox' %}
-              <div class="form-field form-field--checkbox">
+              <div
+                class="form-field form-field--checkbox"
+                data-custom-field-wrapper
+                data-custom-field-name="{{ field.name }}"
+                data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+                data-condition-operator="{{ field.condition_operator or '' }}"
+                data-condition-value="{{ field.condition_value or '' }}"
+              >
                 <label class="checkbox" for="staff-custom-{{ field.name }}">
                   <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
                   <span>{{ field.display_name or field.name }}</span>
                 </label>
               </div>
             {% elif field.field_type == 'select' %}
-              <div class="form-field">
+              <div
+                class="form-field"
+                data-custom-field-wrapper
+                data-custom-field-name="{{ field.name }}"
+                data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+                data-condition-operator="{{ field.condition_operator or '' }}"
+                data-condition-value="{{ field.condition_value or '' }}"
+              >
                 <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
                 <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
                   <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
@@ -75,7 +89,14 @@
                 </select>
               </div>
             {% else %}
-              <div class="form-field">
+              <div
+                class="form-field"
+                data-custom-field-wrapper
+                data-custom-field-name="{{ field.name }}"
+                data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+                data-condition-operator="{{ field.condition_operator or '' }}"
+                data-condition-value="{{ field.condition_value or '' }}"
+              >
                 <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
                 <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
               </div>
