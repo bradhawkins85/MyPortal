@@ -1595,7 +1595,7 @@ async def _sync_staff_assignments(
     url: str | None = (
         "https://graph.microsoft.com/v1.0/users?"
         f"$filter=assignedLicenses/any(x:x/skuId eq {sku_id})&"
-        "$select=id,displayName,mail,userPrincipalName,givenName,surname,signInActivity&"
+        "$select=id,displayName,mail,userPrincipalName,givenName,surname,signInActivity,accountEnabled&"
         "$count=true"
     )
     consistency_headers = {"ConsistencyLevel": "eventual"}
@@ -1617,6 +1617,7 @@ async def _sync_staff_assignments(
             sign_in_activity = user.get("signInActivity") or {}
             last_sign_in_str = sign_in_activity.get("lastSignInDateTime")
             last_sign_in = parse_graph_datetime(last_sign_in_str)
+            account_enabled = bool(user.get("accountEnabled", True))
             staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
             if not staff:
                 first = (user.get("givenName") or "").strip() or "Unknown"
@@ -1631,7 +1632,8 @@ async def _sync_staff_assignments(
                     mobile_phone=None,
                     date_onboarded=None,
                     date_offboarded=None,
-                    enabled=True,
+                    enabled=account_enabled,
+                    is_ex_staff=not account_enabled,
                     street=None,
                     city=None,
                     state=None,
@@ -1641,7 +1643,7 @@ async def _sync_staff_assignments(
                     job_title=None,
                     org_company=None,
                     manager_name=None,
-                    account_action=None,
+                    account_action="Onboarded" if account_enabled else "Offboarded",
                     syncro_contact_id=None,
                     source="m365",
                     m365_last_sign_in=last_sign_in,
