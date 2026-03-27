@@ -30,6 +30,26 @@ mark_restart_required() {
   fi
 }
 
+apply_update_immediately() {
+  echo "Running as root; applying update immediately instead of creating restart flag."
+  local status=0
+  "${SCRIPT_DIR}/restart.sh" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    echo "Update applied successfully."
+  else
+    echo "Error: restart helper exited with status ${status}." >&2
+    exit "$status"
+  fi
+}
+
+handle_restart() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    apply_update_immediately
+  else
+    mark_restart_required
+  fi
+}
+
 purge_spurious_dist_info() {
   if [[ ! -d "$VENV_DIR" ]]; then
     return
@@ -405,7 +425,7 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   update_version_file
   install_dependencies
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-    mark_restart_required
+    handle_restart
   else
     echo "Auto-fallback mode detected; skipping restart flag because caller will relaunch the service." >&2
   fi
@@ -414,7 +434,7 @@ elif [[ "$FORCE_RESTART" == "1" ]]; then
   update_version_file
   install_dependencies
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-    mark_restart_required
+    handle_restart
   else
     echo "Auto-fallback mode detected; caller responsible for restart handling." >&2
   fi
