@@ -524,6 +524,7 @@ async def test_import_m365_disabled_account_marks_ex_staff(monkeypatch):
     assert len(created_calls) == 1
     assert created_calls[0]["enabled"] is False
     assert created_calls[0]["is_ex_staff"] is True
+    assert created_calls[0]["account_action"] == "Offboarded"
 
 
 @pytest.mark.anyio
@@ -572,6 +573,52 @@ async def test_import_m365_enabled_account_not_ex_staff(monkeypatch):
     assert len(created_calls) == 1
     assert created_calls[0]["enabled"] is True
     assert created_calls[0]["is_ex_staff"] is False
+    assert created_calls[0]["account_action"] == "Onboarded"
+
+
+@pytest.mark.anyio
+async def test_import_m365_defaults_missing_account_action_for_existing_staff(monkeypatch):
+    """Existing M365 staff with no account_action default based on account status."""
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id",
+        lambda *_, **__: _async_return({"id": 24, "syncro_company_id": None}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(
+            [{"givenName": "Jane", "surname": "Disabled", "mail": "jane@example.com", "accountEnabled": False}]
+        ),
+    )
+    existing = [
+        {
+            "id": 77,
+            "first_name": "Jane",
+            "last_name": "Disabled",
+            "email": "jane@example.com",
+            "account_action": None,
+        }
+    ]
+    monkeypatch.setattr("app.repositories.staff.list_staff", lambda *_, **__: _async_return(existing))
+    updated_calls: list[dict] = []
+
+    async def fake_update_staff(staff_id, **kwargs):
+        updated_calls.append({"id": staff_id, **kwargs})
+        return {"id": staff_id, **kwargs}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(24)
+
+    assert summary.updated == 1
+    assert updated_calls[0]["account_action"] == "Offboarded"
 
 
 @pytest.mark.anyio
@@ -758,4 +805,3 @@ async def test_import_m365_disabled_account_kept_in_seen_emails(monkeypatch):
 
 async def _async_return(value):
     return value
-

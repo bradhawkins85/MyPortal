@@ -93,6 +93,7 @@ async def test_sync_staff_assignments_select_includes_sign_in_activity():
 
     assert len(captured_urls) == 1
     assert "signInActivity" in captured_urls[0]
+    assert "accountEnabled" in captured_urls[0]
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ async def test_sync_staff_assignments_stores_last_sign_in_on_create():
                     "givenName": "Alice",
                     "surname": "Smith",
                     "signInActivity": {"lastSignInDateTime": "2024-06-01T08:00:00Z"},
+                    "accountEnabled": False,
                 },
             ]
         }
@@ -144,6 +146,9 @@ async def test_sync_staff_assignments_stores_last_sign_in_on_create():
 
     assert len(create_calls) == 1
     assert create_calls[0]["m365_last_sign_in"] == datetime(2024, 6, 1, 8, 0, 0)
+    assert create_calls[0]["enabled"] is False
+    assert create_calls[0]["is_ex_staff"] is True
+    assert create_calls[0]["account_action"] == "Offboarded"
 
 
 # ---------------------------------------------------------------------------
