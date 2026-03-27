@@ -124,6 +124,10 @@
           <span class="form-field__label">Friendly name</span>
           <input type="text" class="input" id="new-sku-friendly-name" placeholder="e.g. Office 365 Business Essentials" />
         </label>
+        <label class="form-field">
+          <span class="form-field__label">Hide from licenses table</span>
+          <input type="checkbox" id="new-sku-hidden" />
+        </label>
       </div>
       <div class="button-group" style="margin-top: 0.75rem;">
         <button type="button" class="button button--small" data-sku-add>Save entry</button>
@@ -135,12 +139,13 @@
             <tr>
               <th scope="col">SKU</th>
               <th scope="col">Friendly name</th>
+              <th scope="col">Hide</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody data-sku-mapping-table-body>
             <tr>
-              <td colspan="3" class="text-center">Loading mappings…</td>
+              <td colspan="4" class="text-center">Loading mappings…</td>
             </tr>
           </tbody>
         </table>
@@ -329,12 +334,13 @@
     const addSkuButton = document.querySelector('[data-sku-add]');
     const newSkuInput = document.getElementById('new-sku-key');
     const newFriendlyNameInput = document.getElementById('new-sku-friendly-name');
+    const newSkuHiddenInput = document.getElementById('new-sku-hidden');
 
     function renderSkuRows(items) {
       if (!skuTableBody) return;
       skuTableBody.innerHTML = '';
       if (!items || items.length === 0) {
-        skuTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No mappings configured.</td></tr>';
+        skuTableBody.innerHTML = '<tr><td colspan="4" class="text-center">No mappings configured.</td></tr>';
         return;
       }
       for (const item of items) {
@@ -342,6 +348,7 @@
         row.innerHTML = `
           <td><code>${item.sku || ''}</code></td>
           <td><input type="text" class="input" data-sku-row-name="${item.sku || ''}" value="${(item.friendly_name || '').replace(/"/g, '&quot;')}" /></td>
+          <td><input type="checkbox" data-sku-row-hidden="${item.sku || ''}" ${item.hidden ? 'checked' : ''} /></td>
           <td>
             <div class="button-group">
               <button type="button" class="button button--small" data-sku-row-save="${item.sku || ''}">Save</button>
@@ -355,7 +362,7 @@
 
     async function loadSkuMappings() {
       if (!skuTableBody) return;
-      skuTableBody.innerHTML = '<tr><td colspan="3" class="text-center">Loading mappings…</td></tr>';
+      skuTableBody.innerHTML = '<tr><td colspan="4" class="text-center">Loading mappings…</td></tr>';
       const response = await fetch('/licenses/sku-mappings');
       if (!response.ok) {
         throw new Error('Unable to load mappings');
@@ -364,14 +371,14 @@
       renderSkuRows(payload.items || []);
     }
 
-    async function saveSkuMapping(sku, friendlyName) {
+    async function saveSkuMapping(sku, friendlyName, hidden) {
       const response = await fetch('/licenses/sku-mappings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken || '',
         },
-        body: JSON.stringify({ sku, friendly_name: friendlyName }),
+        body: JSON.stringify({ sku, friendly_name: friendlyName, hidden }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -410,14 +417,16 @@
       addSkuButton.addEventListener('click', async () => {
         const sku = (newSkuInput?.value || '').trim().toUpperCase();
         const friendlyName = (newFriendlyNameInput?.value || '').trim();
+        const hidden = Boolean(newSkuHiddenInput?.checked);
         if (!sku || !friendlyName) {
           showToast('SKU and friendly name are required.', 'error');
           return;
         }
         try {
-          await saveSkuMapping(sku, friendlyName);
+          await saveSkuMapping(sku, friendlyName, hidden);
           if (newSkuInput) newSkuInput.value = '';
           if (newFriendlyNameInput) newFriendlyNameInput.value = '';
+          if (newSkuHiddenInput) newSkuHiddenInput.checked = false;
           await loadSkuMappings();
           showToast('SKU mapping saved.', 'success');
         } catch (err) {
@@ -435,13 +444,15 @@
         const saveSku = target.getAttribute('data-sku-row-save');
         if (saveSku) {
           const input = skuTableBody.querySelector(`[data-sku-row-name="${saveSku}"]`);
+          const hiddenInput = skuTableBody.querySelector(`[data-sku-row-hidden="${saveSku}"]`);
           const friendlyName = input instanceof HTMLInputElement ? input.value.trim() : '';
+          const hidden = hiddenInput instanceof HTMLInputElement ? hiddenInput.checked : false;
           if (!friendlyName) {
             showToast('Friendly name cannot be empty.', 'error');
             return;
           }
           try {
-            await saveSkuMapping(saveSku, friendlyName);
+            await saveSkuMapping(saveSku, friendlyName, hidden);
             showToast('SKU mapping updated.', 'success');
           } catch (err) {
             console.error(err);
