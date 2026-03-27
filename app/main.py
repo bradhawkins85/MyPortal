@@ -2820,6 +2820,26 @@ async def _load_staff_context(
     return user, membership, company, staff_permission, company_id, None
 
 
+def _staff_member_matches_company_email_domains(
+    staff_member: dict[str, Any], company_email_domains: list[str]
+) -> bool:
+    """Return whether a staff member should be visible for company domain filtering.
+
+    Staff without an email address are always visible. Staff with email addresses
+    are only visible when the email domain is present in the company's configured
+    email domain list.
+    """
+
+    email = str(staff_member.get("email") or "").strip().lower()
+    if not email:
+        return True
+    if "@" not in email:
+        return False
+    _, domain = email.rsplit("@", 1)
+    allowed_domains = {str(domain).strip().lower() for domain in company_email_domains if str(domain).strip()}
+    return domain in allowed_domains
+
+
 async def _load_company_section_context(
     request: Request,
     *,
@@ -8594,6 +8614,12 @@ async def staff_page(
         staff_members = await staff_repo.list_staff(
             company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
         )
+        company_email_domains = list((company or {}).get("email_domains") or [])
+        staff_members = [
+            member
+            for member in staff_members
+            if _staff_member_matches_company_email_domains(member, company_email_domains)
+        ]
         if not is_super_admin and staff_permission in (1, 2):
             user_email = (user.get("email") or "").lower()
             current_staff = next(
