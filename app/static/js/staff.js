@@ -113,6 +113,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     const staffList = parseJson('staff-data', []);
+    const customFieldDefinitions = parseJson('staff-custom-field-definitions', []);
     const flags = parseJson('staff-flags', {});
     const staffById = new Map(staffList.map((member) => [member.id, member]));
 
@@ -121,6 +122,7 @@
     const editModal = document.getElementById('staff-edit-modal');
     const editForm = document.getElementById('staff-edit-form');
     const editIdField = getField('edit-staff-id');
+    const editCustomFieldsGrid = getField('edit-custom-fields-grid');
 
     const editFields = {
       first_name: getField('edit-first-name'),
@@ -144,6 +146,47 @@
     };
 
     bindModalDismissal(editModal);
+
+    const editCustomFieldInputs = new Map();
+    if (editCustomFieldsGrid && Array.isArray(customFieldDefinitions)) {
+      customFieldDefinitions.forEach((field) => {
+        if (!field || !field.name) {
+          return;
+        }
+        const wrapper = document.createElement('div');
+        wrapper.className = field.field_type === 'checkbox' ? 'form-field form-field--checkbox' : 'form-field';
+        const inputId = `edit-custom-${field.name}`;
+        if (field.field_type === 'checkbox') {
+          wrapper.innerHTML = `
+            <label class="checkbox" for="${inputId}">
+              <input type="checkbox" id="${inputId}" />
+              <span>${field.display_name || field.name}</span>
+            </label>
+          `;
+        } else if (field.field_type === 'select') {
+          const options = (field.options || [])
+            .map((option) => `<option value="${option.value}">${option.label || option.value}</option>`)
+            .join('');
+          wrapper.innerHTML = `
+            <label class="form-label" for="${inputId}">${field.display_name || field.name}</label>
+            <select class="form-input" id="${inputId}">
+              <option value="">Select ${(field.display_name || field.name).toLowerCase()}</option>
+              ${options}
+            </select>
+          `;
+        } else {
+          wrapper.innerHTML = `
+            <label class="form-label" for="${inputId}">${field.display_name || field.name}</label>
+            <input class="form-input" id="${inputId}" type="${field.field_type === 'date' ? 'date' : 'text'}" />
+          `;
+        }
+        editCustomFieldsGrid.appendChild(wrapper);
+        editCustomFieldInputs.set(field.name, {
+          field,
+          input: wrapper.querySelector(`#${inputId}`),
+        });
+      });
+    }
 
     if (flags && flags.isAdmin && !flags.isSuperAdmin) {
       const offboardField = editFields.date_offboarded;
@@ -188,6 +231,18 @@
           editFields.account_action.value = member.account_action || 'Onboard Requested';
         }
         setValue(editFields.m365_last_sign_in, member.m365_last_sign_in ? member.m365_last_sign_in.replace('T', ' ').slice(0, 16) : '');
+        const existingCustom = member.custom_fields || {};
+        editCustomFieldInputs.forEach((entry, name) => {
+          if (!entry || !entry.input) {
+            return;
+          }
+          const value = existingCustom[name];
+          if (entry.field.field_type === 'checkbox') {
+            entry.input.checked = Boolean(value);
+          } else {
+            entry.input.value = value ?? '';
+          }
+        });
         openModal(editModal);
       });
     });
@@ -217,7 +272,18 @@
           company: editFields.org_company ? editFields.org_company.value : '',
           managerName: editFields.manager_name ? editFields.manager_name.value : '',
           accountAction: editFields.account_action ? editFields.account_action.value : '',
+          customFields: {},
         };
+        editCustomFieldInputs.forEach((entry, name) => {
+          if (!entry || !entry.input) {
+            return;
+          }
+          if (entry.field.field_type === 'checkbox') {
+            payload.customFields[name] = Boolean(entry.input.checked);
+          } else {
+            payload.customFields[name] = entry.input.value || null;
+          }
+        });
         try {
           await requestJson(`/staff/${staffId}`, {
             method: 'PUT',

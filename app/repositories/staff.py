@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timezone
 from typing import Any, Iterable, List, Sequence
 
 from app.core.database import db
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
@@ -101,7 +102,16 @@ async def list_staff(
         """.format(where=where_clause),
         tuple(params),
     )
-    return [_map_staff_row(row) for row in rows]
+    mapped_rows = [_map_staff_row(row) for row in rows]
+    if not mapped_rows:
+        return mapped_rows
+    values_by_staff = await staff_custom_fields_repo.get_all_staff_field_values(
+        company_id,
+        [int(row["id"]) for row in mapped_rows if row.get("id") is not None],
+    )
+    for row in mapped_rows:
+        row["custom_fields"] = values_by_staff.get(int(row["id"]), {})
+    return mapped_rows
 
 
 async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
@@ -186,7 +196,26 @@ async def list_all_staff(
         sql += f" WHERE {where_clause}"
     sql += " ORDER BY s.company_id, s.last_name, s.first_name"
     rows = await db.fetch_all(sql, tuple(params))
-    return [_map_staff_row(row) for row in rows]
+    mapped_rows = [_map_staff_row(row) for row in rows]
+    if not mapped_rows:
+        return mapped_rows
+    grouped_by_company: dict[int, list[int]] = {}
+    for row in mapped_rows:
+        company_id = row.get("company_id")
+        staff_id = row.get("id")
+        if company_id is None or staff_id is None:
+            continue
+        grouped_by_company.setdefault(int(company_id), []).append(int(staff_id))
+    values_by_staff: dict[int, dict[str, Any]] = {}
+    for company_id, staff_ids in grouped_by_company.items():
+        company_values = await staff_custom_fields_repo.get_all_staff_field_values(
+            company_id,
+            staff_ids,
+        )
+        values_by_staff.update(company_values)
+    for row in mapped_rows:
+        row["custom_fields"] = values_by_staff.get(int(row["id"]), {})
+    return mapped_rows
 
 
 async def list_staff_by_email(email: str) -> list[dict[str, Any]]:
@@ -225,7 +254,18 @@ async def get_staff_by_id(staff_id: int) -> dict[str, Any] | None:
         """,
         (staff_id,),
     )
-    return _map_staff_row(row) if row else None
+    if not row:
+        return None
+    mapped = _map_staff_row(row)
+    company_id = mapped.get("company_id")
+    if company_id is not None:
+        values_by_staff = await staff_custom_fields_repo.get_all_staff_field_values(
+            int(company_id), [staff_id]
+        )
+        mapped["custom_fields"] = values_by_staff.get(staff_id, {})
+    else:
+        mapped["custom_fields"] = {}
+    return mapped
 
 
 async def get_staff_by_company_and_email(

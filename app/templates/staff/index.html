@@ -56,6 +56,31 @@
               {% endif %}
             {% endif %}
           {% endfor %}
+          {% for field in staff_custom_field_definitions %}
+            {% if field.field_type == 'checkbox' %}
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox" for="staff-custom-{{ field.name }}">
+                  <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
+                  <span>{{ field.display_name or field.name }}</span>
+                </label>
+              </div>
+            {% elif field.field_type == 'select' %}
+              <div class="form-field">
+                <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+                <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
+                  <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
+                  {% for option in field.options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% else %}
+              <div class="form-field">
+                <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+                <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
+              </div>
+            {% endif %}
+          {% endfor %}
           <div class="form-actions staff-form__actions">
             <button type="submit" class="button">Add staff</button>
           </div>
@@ -158,6 +183,9 @@
             <th scope="col" data-sort="string" data-column="code">Code</th>
             <th scope="col" data-sort="date" data-column="onboarded" data-mobile-priority="supporting">Onboarded</th>
             <th scope="col" data-sort="date" data-column="m365-sign-in">O365 Last Sign In</th>
+            {% for field in staff_custom_field_definitions %}
+              <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
+            {% endfor %}
             <th scope="col" data-sort="string" data-column="enabled" data-mobile-priority="supporting">Enabled</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
@@ -184,6 +212,16 @@
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
+              {% for field in staff_custom_field_definitions %}
+                {% set custom_value = member.custom_fields.get(field.name) if member.custom_fields else None %}
+                <td data-label="{{ field.display_name or field.name }}" data-column="custom-{{ field.name }}">
+                  {% if field.field_type == 'checkbox' %}
+                    {{ 'Yes' if custom_value else 'No' }}
+                  {% else %}
+                    {{ custom_value or '—' }}
+                  {% endif %}
+                </td>
+              {% endfor %}
               <td data-label="Enabled" data-column="enabled">
                 <form action="/staff/enabled" method="post" class="inline-form">
                   {% include "partials/csrf.html" %}
@@ -216,7 +254,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="9" class="table__empty">No staff records found.</td>
+              <td colspan="{{ 9 + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -347,6 +385,10 @@
         <label class="form-label" for="edit-m365-last-sign-in">O365 Last Sign In</label>
         <input class="form-input" id="edit-m365-last-sign-in" readonly />
       </div>
+      <fieldset class="fieldset" id="edit-custom-fields-section">
+        <legend>Custom fields</legend>
+        <div class="form-grid" id="edit-custom-fields-grid"></div>
+      </fieldset>
       <div class="form-actions">
         <button type="submit" class="button">Save changes</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
@@ -356,6 +398,7 @@
 </div>
 
 <script type="application/json" id="staff-data">{{ staff_members | tojson }}</script>
+<script type="application/json" id="staff-custom-field-definitions">{{ staff_custom_field_definitions | tojson }}</script>
 <script type="application/json" id="staff-flags">{{ {
   'isSuperAdmin': is_super_admin,
   'isAdmin': is_admin
