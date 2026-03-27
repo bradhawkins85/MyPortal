@@ -110,6 +110,78 @@
     element.value = value ?? '';
   }
 
+  function normalizeValue(value) {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  function getInputCurrentValue(input) {
+    if (!input) {
+      return '';
+    }
+    if (input.type === 'checkbox') {
+      return input.checked ? '1' : '0';
+    }
+    return input.value ?? '';
+  }
+
+  function evaluateCondition(input, operator, expectedValue) {
+    const normalizedOperator = normalizeValue(operator);
+    if (!input || !normalizedOperator) {
+      return true;
+    }
+    if (normalizedOperator === 'is_checked') {
+      return Boolean(input.checked);
+    }
+    if (normalizedOperator === 'is_not_checked') {
+      return !input.checked;
+    }
+    const actual = normalizeValue(getInputCurrentValue(input));
+    const expected = normalizeValue(expectedValue);
+    if (normalizedOperator === 'not_equals') {
+      return actual !== expected;
+    }
+    return actual === expected;
+  }
+
+  function initCustomFieldConditionals({
+    wrappers,
+    getInputByName,
+  }) {
+    if (!Array.isArray(wrappers) || wrappers.length === 0) {
+      return;
+    }
+
+    const applyVisibility = () => {
+      wrappers.forEach((wrapper) => {
+        const parentName = wrapper.dataset.conditionParentName || '';
+        const operator = wrapper.dataset.conditionOperator || '';
+        const expected = wrapper.dataset.conditionValue || '';
+        const shouldShow = !parentName || evaluateCondition(getInputByName(parentName), operator, expected);
+        wrapper.hidden = !shouldShow;
+        wrapper.querySelectorAll('input, select, textarea').forEach((input) => {
+          input.disabled = !shouldShow;
+        });
+      });
+    };
+
+    const parents = new Map();
+    wrappers.forEach((wrapper) => {
+      const parentName = wrapper.dataset.conditionParentName || '';
+      if (!parentName || parents.has(parentName)) {
+        return;
+      }
+      const parentInput = getInputByName(parentName);
+      if (!parentInput) {
+        return;
+      }
+      parents.set(parentName, parentInput);
+      parentInput.addEventListener('change', applyVisibility);
+      parentInput.addEventListener('input', applyVisibility);
+    });
+
+    applyVisibility();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     const staffList = parseJson('staff-data', []);
@@ -123,6 +195,7 @@
     const editForm = document.getElementById('staff-edit-form');
     const editIdField = getField('edit-staff-id');
     const editCustomFieldsGrid = getField('edit-custom-fields-grid');
+    const addForm = container.querySelector('form.staff-form');
 
     const editFields = {
       first_name: getField('edit-first-name'),
@@ -155,6 +228,11 @@
         }
         const wrapper = document.createElement('div');
         wrapper.className = field.field_type === 'checkbox' ? 'form-field form-field--checkbox' : 'form-field';
+        wrapper.dataset.customFieldWrapper = '1';
+        wrapper.dataset.customFieldName = field.name;
+        wrapper.dataset.conditionParentName = field.condition_parent_name || '';
+        wrapper.dataset.conditionOperator = field.condition_operator || '';
+        wrapper.dataset.conditionValue = field.condition_value || '';
         const inputId = `edit-custom-${field.name}`;
         if (field.field_type === 'checkbox') {
           wrapper.innerHTML = `
@@ -183,8 +261,28 @@
         editCustomFieldsGrid.appendChild(wrapper);
         editCustomFieldInputs.set(field.name, {
           field,
+          wrapper,
           input: wrapper.querySelector(`#${inputId}`),
         });
+      });
+    }
+
+    if (addForm) {
+      const addWrappers = Array.from(addForm.querySelectorAll('[data-custom-field-wrapper]'));
+      initCustomFieldConditionals({
+        wrappers: addWrappers,
+        getInputByName: (name) => addForm.querySelector(`[name="${name}"]`),
+      });
+    }
+
+    if (editCustomFieldsGrid) {
+      const editWrappers = Array.from(editCustomFieldsGrid.querySelectorAll('[data-custom-field-wrapper]'));
+      initCustomFieldConditionals({
+        wrappers: editWrappers,
+        getInputByName: (name) => {
+          const entry = editCustomFieldInputs.get(name);
+          return entry && entry.input ? entry.input : null;
+        },
       });
     }
 
@@ -276,6 +374,9 @@
         };
         editCustomFieldInputs.forEach((entry, name) => {
           if (!entry || !entry.input) {
+            return;
+          }
+          if (entry.input.disabled) {
             return;
           }
           if (entry.field.field_type === 'checkbox') {

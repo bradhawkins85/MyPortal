@@ -9878,6 +9878,26 @@ def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
     return options
 
 
+def _parse_staff_custom_field_condition(
+    *,
+    parent_name_value: str,
+    operator_value: str,
+    condition_value: str,
+) -> tuple[str | None, str | None, str | None]:
+    parent_name = str(parent_name_value or "").strip().lower().replace(" ", "_")
+    operator = str(operator_value or "").strip().lower()
+    normalized_condition_value = str(condition_value or "").strip()
+    if not parent_name:
+        return None, None, None
+    if operator not in {"equals", "not_equals", "is_checked", "is_not_checked"}:
+        operator = "equals"
+    if operator in {"is_checked", "is_not_checked"}:
+        normalized_condition_value = None
+    if operator in {"equals", "not_equals"} and not normalized_condition_value:
+        return None, None, None
+    return parent_name, operator, normalized_condition_value or None
+
+
 @app.post("/admin/companies/{company_id}/staff-custom-fields", response_class=HTMLResponse)
 async def admin_create_company_staff_custom_field(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -9894,6 +9914,11 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
         display_order = int(str(form.get("display_order") or "0").strip())
     except ValueError:
         display_order = 0
+    condition_parent_name, condition_operator, condition_value = _parse_staff_custom_field_condition(
+        parent_name_value=str(form.get("condition_parent_name") or ""),
+        operator_value=str(form.get("condition_operator") or ""),
+        condition_value=str(form.get("condition_value") or ""),
+    )
     options = _parse_custom_field_options(str(form.get("options") or ""))
     if not name:
         return _company_edit_redirect(company_id=company_id, error="Custom field name is required.")
@@ -9905,6 +9930,9 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
         display_name=display_name,
         field_type=field_type,
         display_order=display_order,
+        condition_parent_name=condition_parent_name,
+        condition_operator=condition_operator,
+        condition_value=condition_value,
         options=options,
     )
     return _company_edit_redirect(company_id=company_id, success="Staff custom field created.")
@@ -9928,6 +9956,11 @@ async def admin_update_company_staff_custom_field(
     except ValueError:
         display_order = 0
     is_active = str(form.get("is_active") or "").lower() in {"1", "true", "on", "yes"}
+    condition_parent_name, condition_operator, condition_value = _parse_staff_custom_field_condition(
+        parent_name_value=str(form.get("condition_parent_name") or ""),
+        operator_value=str(form.get("condition_operator") or ""),
+        condition_value=str(form.get("condition_value") or ""),
+    )
     options = _parse_custom_field_options(str(form.get("options") or ""))
     await staff_custom_fields_repo.update_company_definition(
         definition_id,
@@ -9936,6 +9969,9 @@ async def admin_update_company_staff_custom_field(
         field_type=field_type,
         display_order=display_order,
         is_active=is_active,
+        condition_parent_name=condition_parent_name,
+        condition_operator=condition_operator,
+        condition_value=condition_value,
         options=options,
     )
     return _company_edit_redirect(company_id=company_id, success="Staff custom field updated.")
