@@ -5,9 +5,28 @@
 {% block header_actions %}
   <div class="header-actions">
     <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
-    {% if has_m365_credentials %}
-    <button type="button" class="button" data-sync-licenses>Sync from Microsoft 365</button>
-    {% endif %}
+    <div class="header-title-menu">
+      <details class="header-title-menu__dropdown" data-header-menu>
+        <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+            <path d="M12 5.5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Zm0 8.25a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Zm0 8.25a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z"></path>
+          </svg>
+          <span class="visually-hidden">Toggle license tools menu</span>
+        </summary>
+        <ul class="header-title-menu__list" role="menu">
+          {% if has_m365_credentials %}
+          <li class="header-title-menu__item" role="none">
+            <button type="button" class="header-title-menu__link" role="menuitem" data-sync-licenses>Sync from Microsoft 365</button>
+          </li>
+          {% endif %}
+          {% if can_manage_sku_mappings %}
+          <li class="header-title-menu__item" role="none">
+            <button type="button" class="header-title-menu__link" role="menuitem" data-manage-sku-mappings>Manage SKU display names</button>
+          </li>
+          {% endif %}
+        </ul>
+      </details>
+    </div>
   </div>
 {% endblock %}
 
@@ -85,6 +104,54 @@
     </footer>
   </form>
 </dialog>
+
+{% if can_manage_sku_mappings %}
+<dialog id="sku-mappings-dialog" class="dialog">
+  <form method="dialog" class="dialog__container">
+    <header class="dialog__header">
+      <h3 class="dialog__title">SKU display name mappings</h3>
+      <button type="submit" class="dialog__close" aria-label="Close">
+        <span aria-hidden="true">&times;</span>
+      </button>
+    </header>
+    <div class="dialog__body">
+      <div class="form-grid">
+        <label class="form-field">
+          <span class="form-field__label">SKU</span>
+          <input type="text" class="input" id="new-sku-key" placeholder="e.g. O365_BUSINESS_ESSENTIALS" />
+        </label>
+        <label class="form-field">
+          <span class="form-field__label">Friendly name</span>
+          <input type="text" class="input" id="new-sku-friendly-name" placeholder="e.g. Office 365 Business Essentials" />
+        </label>
+      </div>
+      <div class="button-group" style="margin-top: 0.75rem;">
+        <button type="button" class="button button--small" data-sku-add>Save entry</button>
+      </div>
+      <hr />
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">SKU</th>
+              <th scope="col">Friendly name</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody data-sku-mapping-table-body>
+            <tr>
+              <td colspan="3" class="text-center">Loading mappings…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <footer class="dialog__footer">
+      <button type="submit" class="button">Close</button>
+    </footer>
+  </form>
+</dialog>
+{% endif %}
 
 <div id="license-toast" class="toast" role="status" aria-live="polite"></div>
 {% endblock %}
@@ -255,7 +322,148 @@
         }
       });
     }
+
+    const skuDialog = document.getElementById('sku-mappings-dialog');
+    const skuTableBody = document.querySelector('[data-sku-mapping-table-body]');
+    const manageSkuButton = document.querySelector('[data-manage-sku-mappings]');
+    const addSkuButton = document.querySelector('[data-sku-add]');
+    const newSkuInput = document.getElementById('new-sku-key');
+    const newFriendlyNameInput = document.getElementById('new-sku-friendly-name');
+
+    function renderSkuRows(items) {
+      if (!skuTableBody) return;
+      skuTableBody.innerHTML = '';
+      if (!items || items.length === 0) {
+        skuTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No mappings configured.</td></tr>';
+        return;
+      }
+      for (const item of items) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td><code>${item.sku || ''}</code></td>
+          <td><input type="text" class="input" data-sku-row-name="${item.sku || ''}" value="${(item.friendly_name || '').replace(/"/g, '&quot;')}" /></td>
+          <td>
+            <div class="button-group">
+              <button type="button" class="button button--small" data-sku-row-save="${item.sku || ''}">Save</button>
+              <button type="button" class="button button--secondary button--small" data-sku-row-delete="${item.sku || ''}">Delete</button>
+            </div>
+          </td>
+        `;
+        skuTableBody.appendChild(row);
+      }
+    }
+
+    async function loadSkuMappings() {
+      if (!skuTableBody) return;
+      skuTableBody.innerHTML = '<tr><td colspan="3" class="text-center">Loading mappings…</td></tr>';
+      const response = await fetch('/licenses/sku-mappings');
+      if (!response.ok) {
+        throw new Error('Unable to load mappings');
+      }
+      const payload = await response.json();
+      renderSkuRows(payload.items || []);
+    }
+
+    async function saveSkuMapping(sku, friendlyName) {
+      const response = await fetch('/licenses/sku-mappings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || '',
+        },
+        body: JSON.stringify({ sku, friendly_name: friendlyName }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || 'Unable to save mapping');
+      }
+    }
+
+    async function deleteSkuMapping(sku) {
+      const response = await fetch(`/licenses/sku-mappings/${encodeURIComponent(sku)}`, {
+        method: 'DELETE',
+        headers: {
+          'X-CSRF-Token': csrfToken || '',
+        },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || 'Unable to delete mapping');
+      }
+    }
+
+    if (manageSkuButton && skuDialog) {
+      manageSkuButton.addEventListener('click', async () => {
+        try {
+          await loadSkuMappings();
+          if (typeof skuDialog.showModal === 'function') {
+            skuDialog.showModal();
+          }
+        } catch (err) {
+          console.error(err);
+          showToast('Unable to load SKU mappings.', 'error');
+        }
+      });
+    }
+
+    if (addSkuButton) {
+      addSkuButton.addEventListener('click', async () => {
+        const sku = (newSkuInput?.value || '').trim().toUpperCase();
+        const friendlyName = (newFriendlyNameInput?.value || '').trim();
+        if (!sku || !friendlyName) {
+          showToast('SKU and friendly name are required.', 'error');
+          return;
+        }
+        try {
+          await saveSkuMapping(sku, friendlyName);
+          if (newSkuInput) newSkuInput.value = '';
+          if (newFriendlyNameInput) newFriendlyNameInput.value = '';
+          await loadSkuMappings();
+          showToast('SKU mapping saved.', 'success');
+        } catch (err) {
+          console.error(err);
+          showToast('Unable to save SKU mapping.', 'error');
+        }
+      });
+    }
+
+    if (skuTableBody) {
+      skuTableBody.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+
+        const saveSku = target.getAttribute('data-sku-row-save');
+        if (saveSku) {
+          const input = skuTableBody.querySelector(`[data-sku-row-name="${saveSku}"]`);
+          const friendlyName = input instanceof HTMLInputElement ? input.value.trim() : '';
+          if (!friendlyName) {
+            showToast('Friendly name cannot be empty.', 'error');
+            return;
+          }
+          try {
+            await saveSkuMapping(saveSku, friendlyName);
+            showToast('SKU mapping updated.', 'success');
+          } catch (err) {
+            console.error(err);
+            showToast('Unable to update SKU mapping.', 'error');
+          }
+          return;
+        }
+
+        const deleteSku = target.getAttribute('data-sku-row-delete');
+        if (deleteSku) {
+          if (!window.confirm(`Delete mapping for ${deleteSku}?`)) return;
+          try {
+            await deleteSkuMapping(deleteSku);
+            await loadSkuMappings();
+            showToast('SKU mapping removed.', 'success');
+          } catch (err) {
+            console.error(err);
+            showToast('Unable to delete SKU mapping.', 'error');
+          }
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}
-
