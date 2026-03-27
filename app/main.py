@@ -8736,11 +8736,11 @@ async def create_staff_member(request: Request):
 
     first_name = str(values.get("first_name") or "").strip()
     last_name = str(values.get("last_name") or "").strip()
-    email = str(values.get("email") or "").strip()
-    if not first_name or not last_name or not email:
+    email = str(values.get("email") or "").strip() or None
+    if not first_name or not last_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="First name, last name, and email are required",
+            detail="First name and last name are required",
         )
 
     mobile_phone = str(values.get("mobile_phone") or "").strip() or None
