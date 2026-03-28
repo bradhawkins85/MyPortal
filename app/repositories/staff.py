@@ -53,6 +53,25 @@ def _serialize_datetime(value: Any) -> str | None:
     return dt.isoformat()
 
 
+def _decode_staff_cursor(cursor: str | None) -> tuple[datetime, int] | None:
+    if not cursor:
+        return None
+    raw_cursor = str(cursor).strip()
+    if not raw_cursor:
+        return None
+    updated_part, separator, id_part = raw_cursor.rpartition("|")
+    if separator != "|" or not updated_part:
+        return None
+    updated_at = _coerce_datetime(updated_part)
+    if updated_at is None:
+        return None
+    try:
+        staff_id = int(id_part)
+    except (TypeError, ValueError):
+        return None
+    return (updated_at, staff_id)
+
+
 def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     mapped = dict(row)
     mapped["enabled"] = bool(int(mapped.get("enabled", 0)))
@@ -63,7 +82,11 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
         mapped["verification_code"] = None
     mapped["date_onboarded"] = _serialize_datetime(mapped.get("date_onboarded"))
     mapped["date_offboarded"] = _serialize_datetime(mapped.get("date_offboarded"))
+    mapped["onboarding_completed_at"] = _serialize_datetime(mapped.get("onboarding_completed_at"))
     mapped["m365_last_sign_in"] = _serialize_datetime(mapped.get("m365_last_sign_in"))
+    mapped["created_at"] = _serialize_datetime(mapped.get("created_at"))
+    mapped["updated_at"] = _serialize_datetime(mapped.get("updated_at"))
+    mapped["onboarding_complete"] = bool(int(mapped.get("onboarding_complete", 0)))
     return mapped
 
 
@@ -82,7 +105,16 @@ async def count_staff(company_id: int, *, enabled: bool | None = None) -> int:
 
 
 async def list_staff(
-    company_id: int, *, enabled: bool | None = None, exclude_ex_staff: bool = False
+    company_id: int,
+    *,
+    enabled: bool | None = None,
+    exclude_ex_staff: bool = False,
+    onboarding_complete: bool | None = None,
+    onboarding_status: str | None = None,
+    created_after: datetime | None = None,
+    updated_after: datetime | None = None,
+    cursor: str | None = None,
+    page_size: int | None = None,
 ) -> list[dict[str, Any]]:
     conditions = ["s.company_id = %s"]
     params: list[Any] = [company_id]
@@ -91,16 +123,39 @@ async def list_staff(
         params.append(1 if enabled else 0)
     if exclude_ex_staff:
         conditions.append("s.is_ex_staff = 0")
+    if onboarding_complete is not None:
+        conditions.append("s.onboarding_complete = %s")
+        params.append(1 if onboarding_complete else 0)
+    if onboarding_status:
+        conditions.append("LOWER(s.onboarding_status) = LOWER(%s)")
+        params.append(str(onboarding_status).strip())
+    if created_after is not None:
+        conditions.append("s.created_at > %s")
+        params.append(_coerce_datetime(created_after))
+    if updated_after is not None:
+        conditions.append("s.updated_at > %s")
+        params.append(_coerce_datetime(updated_after))
+    decoded_cursor = _decode_staff_cursor(cursor)
+    if decoded_cursor is not None:
+        cursor_updated_at, cursor_staff_id = decoded_cursor
+        conditions.append(
+            "(s.updated_at > %s OR (s.updated_at = %s AND s.id > %s))"
+        )
+        params.extend([cursor_updated_at, cursor_updated_at, cursor_staff_id])
     where_clause = " AND ".join(conditions)
+    if page_size is None:
+        page_size = 200
+    safe_page_size = max(1, min(int(page_size), 500))
     rows = await db.fetch_all(
         """
         SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
         WHERE {where}
-        ORDER BY s.last_name, s.first_name
+        ORDER BY s.updated_at ASC, s.id ASC
+        LIMIT %s
         """.format(where=where_clause),
-        tuple(params),
+        tuple([*params, safe_page_size]),
     )
     mapped_rows = [_map_staff_row(row) for row in rows]
     if not mapped_rows:
@@ -307,6 +362,9 @@ async def create_staff(
     syncro_contact_id: str | None = None,
     source: str = "manual",
     m365_last_sign_in: datetime | None = None,
+    onboarding_status: str = "requested",
+    onboarding_complete: bool = False,
+    onboarding_completed_at: datetime | None = None,
 ) -> dict[str, Any]:
     staff_id = await db.execute_returning_lastrowid(
         """
@@ -332,8 +390,11 @@ async def create_staff(
             account_action,
             syncro_contact_id,
             source,
-            m365_last_sign_in
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            m365_last_sign_in,
+            onboarding_status,
+            onboarding_complete,
+            onboarding_completed_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -358,6 +419,9 @@ async def create_staff(
             syncro_contact_id,
             source,
             _coerce_datetime(m365_last_sign_in),
+            onboarding_status,
+            1 if onboarding_complete else 0,
+            _coerce_datetime(onboarding_completed_at),
         ),
     )
     if not staff_id:
@@ -391,6 +455,9 @@ async def update_staff(
     manager_name: str | None,
     account_action: str | None,
     syncro_contact_id: str | None,
+    onboarding_status: str | None = None,
+    onboarding_complete: bool | None = None,
+    onboarding_completed_at: datetime | None = None,
     m365_last_sign_in: datetime | None = None,
 ) -> dict[str, Any]:
     await db.execute(
@@ -417,6 +484,9 @@ async def update_staff(
             manager_name = %s,
             account_action = %s,
             syncro_contact_id = %s,
+            onboarding_status = COALESCE(%s, onboarding_status),
+            onboarding_complete = COALESCE(%s, onboarding_complete),
+            onboarding_completed_at = COALESCE(%s, onboarding_completed_at),
             m365_last_sign_in = COALESCE(%s, m365_last_sign_in)
         WHERE id = %s
         """,
@@ -441,6 +511,9 @@ async def update_staff(
             manager_name,
             account_action,
             syncro_contact_id,
+            onboarding_status,
+            (1 if onboarding_complete else 0) if onboarding_complete is not None else None,
+            _coerce_datetime(onboarding_completed_at),
             _coerce_datetime(m365_last_sign_in),
             staff_id,
         ),
