@@ -68,6 +68,17 @@ class StaffUpdate(BaseModel):
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
+class StaffWorkflowStatus(BaseModel):
+    state: Optional[str] = None
+    current_step: Optional[str] = None
+    retries_used: Optional[int] = None
+    last_error: Optional[str] = None
+    helpdesk_ticket_id: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    requested_at: Optional[datetime] = None
+
+
 class StaffResponse(BaseModel):
     id: int
     company_id: int
@@ -98,6 +109,7 @@ class StaffResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     custom_fields: dict[str, Any] = Field(default_factory=dict)
+    workflow_status: Optional[StaffWorkflowStatus] = None
 
     model_config = {
         "from_attributes": True,
