@@ -163,3 +163,4 @@ When working with external APIs, use the documentation for these systems:
 - Use regression tests where possible
 - Ensure tests cover edge cases and error conditions
 - Run full test suite before submitting changes
+- Fix Possible SQL injection vectors before completing the assigned task
