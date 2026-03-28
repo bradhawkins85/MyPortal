@@ -27,6 +27,11 @@ class StaffBase(BaseModel):
     syncro_contact_id: Optional[str] = Field(
         default=None, validation_alias="syncroContactId"
     )
+    onboarding_status: Optional[str] = Field(default=None, validation_alias="onboardingStatus")
+    onboarding_complete: Optional[bool] = Field(default=None, validation_alias="onboardingComplete")
+    onboarding_completed_at: Optional[datetime] = Field(
+        default=None, validation_alias="onboardingCompletedAt"
+    )
 
 
 class StaffCreate(StaffBase):
@@ -55,6 +60,11 @@ class StaffUpdate(BaseModel):
     syncro_contact_id: Optional[str] = Field(
         default=None, validation_alias="syncroContactId"
     )
+    onboarding_status: Optional[str] = Field(default=None, validation_alias="onboardingStatus")
+    onboarding_complete: Optional[bool] = Field(default=None, validation_alias="onboardingComplete")
+    onboarding_completed_at: Optional[datetime] = Field(
+        default=None, validation_alias="onboardingCompletedAt"
+    )
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
@@ -82,6 +92,11 @@ class StaffResponse(BaseModel):
     verification_code: Optional[str] = None
     verification_admin_name: Optional[str] = None
     syncro_contact_id: Optional[str] = None
+    onboarding_status: Optional[str] = None
+    onboarding_complete: bool = False
+    onboarding_completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     custom_fields: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {
