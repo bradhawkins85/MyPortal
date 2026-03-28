@@ -8768,6 +8768,9 @@ async def create_staff_member(request: Request):
         manager_name=None,
         account_action=None,
         syncro_contact_id=None,
+        onboarding_status="requested",
+        onboarding_complete=False,
+        onboarding_completed_at=None,
     )
     custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
     custom_values: dict[str, Any] = {}

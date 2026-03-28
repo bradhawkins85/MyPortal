@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
@@ -17,6 +19,12 @@ async def list_staff(
     company_id: int | None = Query(default=None, alias="companyId"),
     account_action: str | None = Query(default=None, alias="accountAction"),
     email: str | None = None,
+    onboarding_complete: bool | None = Query(default=None, alias="onboardingComplete"),
+    onboarding_status: str | None = Query(default=None, alias="onboardingStatus"),
+    created_after: datetime | None = Query(default=None, alias="createdAfter"),
+    updated_after: datetime | None = Query(default=None, alias="updatedAfter"),
+    cursor: str | None = Query(default=None, alias="cursor"),
+    page_size: int | None = Query(default=200, alias="pageSize", ge=1, le=500),
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
 ):
@@ -42,7 +50,16 @@ async def list_staff(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient permissions to list staff"
                 )
-        records = await staff_repo.list_staff(company_id, enabled=True)
+        records = await staff_repo.list_staff(
+            company_id,
+            enabled=True,
+            onboarding_complete=onboarding_complete,
+            onboarding_status=onboarding_status,
+            created_after=created_after,
+            updated_after=updated_after,
+            cursor=cursor,
+            page_size=page_size,
+        )
     else:
         # Listing all staff requires super admin
         if not current_user.get("is_super_admin", False):
@@ -65,6 +82,9 @@ async def create_staff(
 ):
     payload_data = payload.model_dump(by_alias=False)
     custom_fields = payload_data.pop("custom_fields", None) or {}
+    payload_data.setdefault("onboarding_status", "requested")
+    payload_data.setdefault("onboarding_complete", False)
+    payload_data.setdefault("onboarding_completed_at", None)
     created = await staff_repo.create_staff(**payload_data)
     await staff_custom_fields_repo.set_staff_field_values_by_name(
         company_id=created["company_id"],
@@ -120,6 +140,9 @@ async def update_staff(
         manager_name=data.get("manager_name"),
         account_action=data.get("account_action"),
         syncro_contact_id=data.get("syncro_contact_id"),
+        onboarding_status=data.get("onboarding_status"),
+        onboarding_complete=data.get("onboarding_complete"),
+        onboarding_completed_at=data.get("onboarding_completed_at"),
     )
     custom_fields = data.get("custom_fields")
     if isinstance(custom_fields, dict):
