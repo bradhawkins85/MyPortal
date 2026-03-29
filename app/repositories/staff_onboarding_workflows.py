@@ -154,14 +154,14 @@ async def list_executions_for_staff_ids(staff_ids: Iterable[int]) -> dict[int, d
     ids = [int(item) for item in staff_ids]
     if not ids:
         return {}
-    placeholders = ", ".join(["%s"] * len(ids))
+    ids_csv = ",".join(str(item) for item in ids)
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT *
         FROM staff_onboarding_workflow_executions
-        WHERE staff_id IN ({placeholders})
+        WHERE FIND_IN_SET(staff_id, %s) > 0
         """,
-        tuple(ids),
+        (ids_csv,),
     )
     mapped: dict[int, dict[str, Any]] = {}
     for row in rows:
