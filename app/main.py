@@ -130,6 +130,7 @@ from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import subscription_categories as subscription_categories_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
+from app.repositories import staff_onboarding_workflows as staff_workflow_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_attachments as attachments_repo
@@ -182,6 +183,7 @@ from app.services import shop_packages as shop_packages_service
 from app.services import staff_importer
 from app.services import staff_access as staff_access_service
 from app.services import staff_field_config as staff_field_config_service
+from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 from app.services import company_importer
 from app.services import labour_types as labour_types_service
 from app.services import subscription_shop_integration
@@ -8634,6 +8636,12 @@ async def staff_page(
         staff_members = await staff_repo.list_staff(
             company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
         )
+        workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
+            [int(member["id"]) for member in staff_members if member.get("id") is not None]
+        )
+        for member in staff_members:
+            execution = workflow_map.get(int(member["id"])) if member.get("id") is not None else None
+            member["workflow_status"] = execution
         company_email_domains = list((company or {}).get("email_domains") or [])
         staff_members = [
             member
@@ -8790,6 +8798,12 @@ async def create_staff_member(request: Request):
         values=custom_values,
     )
 
+    await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+        company_id=company_id,
+        staff_id=int(created["id"]),
+        initiated_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+    )
+
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -8885,6 +8899,9 @@ async def update_staff_member(staff_id: int, request: Request):
         manager_name=manager_name,
         account_action=account_action,
         syncro_contact_id=existing.get("syncro_contact_id"),
+        onboarding_status=existing.get("onboarding_status"),
+        onboarding_complete=bool(existing.get("onboarding_complete", False)),
+        onboarding_completed_at=existing.get("onboarding_completed_at"),
     )
     raw_custom_fields = get_value("customFields", "custom_fields")
     if isinstance(raw_custom_fields, dict):
@@ -8896,6 +8913,16 @@ async def update_staff_member(staff_id: int, request: Request):
         refreshed = await staff_repo.get_staff_by_id(staff_id)
         if refreshed:
             updated = refreshed
+
+    requested_status = str(get_value("onboardingStatus", "onboarding_status") or "").strip().lower()
+    if requested_status in {"requested", "provisioning"}:
+        await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+            company_id=int(updated.get("company_id") or company_id or 0),
+            staff_id=staff_id,
+            initiated_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        )
+
+    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
     return JSONResponse({"success": True, "staff": updated})
 
 

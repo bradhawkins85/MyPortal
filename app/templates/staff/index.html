@@ -185,6 +185,10 @@
                 O365 Last Sign In
               </label>
               <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
+                Onboarding Workflow
+              </label>
+              <label class="ticket-columns__option">
                 <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
                 Enabled
               </label>
@@ -204,6 +208,7 @@
             <th scope="col" data-sort="string" data-column="code">Code</th>
             <th scope="col" data-sort="date" data-column="onboarded" data-mobile-priority="supporting">Onboarded</th>
             <th scope="col" data-sort="date" data-column="m365-sign-in">O365 Last Sign In</th>
+            <th scope="col" data-sort="string" data-column="onboarding-workflow">Onboarding Workflow</th>
             {% for field in staff_custom_field_definitions %}
               <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
             {% endfor %}
@@ -231,6 +236,20 @@
                   {{ member.m365_last_sign_in }}
                 {% else %}
                   <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Onboarding Workflow" data-column="onboarding-workflow">
+                {% set workflow = member.workflow_status or {} %}
+                {% set workflow_state = workflow.get('state') or member.onboarding_status or 'requested' %}
+                <span class="status-pill status-pill--{{ workflow_state|replace('_', '-') }}">{{ workflow_state|replace('_', ' ')|title }}</span>
+                {% if workflow.get('current_step') %}
+                  <div class="text-muted text-small">Step: {{ workflow.get('current_step')|replace('_', ' ')|title }}</div>
+                {% endif %}
+                {% if workflow.get('helpdesk_ticket_id') %}
+                  <div class="text-small">Ticket #{{ workflow.get('helpdesk_ticket_id') }}</div>
+                {% endif %}
+                {% if workflow.get('last_error') %}
+                  <div class="text-danger text-small">{{ workflow.get('last_error') }}</div>
                 {% endif %}
               </td>
               {% for field in staff_custom_field_definitions %}
@@ -275,7 +294,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="{{ 9 + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
+              <td colspan="{{ 10 + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
