@@ -8,7 +8,9 @@ from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
+from app.repositories import staff_onboarding_workflows as staff_workflow_repo
 from app.schemas.staff import StaffCreate, StaffResponse, StaffUpdate
+from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 
 
 router = APIRouter(prefix="/api/staff", tags=["Staff"])
@@ -71,6 +73,12 @@ async def list_staff(
             account_action=account_action,
             email=email,
         )
+    workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
+        [int(record["id"]) for record in records if record.get("id") is not None]
+    )
+    for record in records:
+        execution = workflow_map.get(int(record["id"])) if record.get("id") is not None else None
+        record["workflow_status"] = execution
     return [StaffResponse.model_validate(record) for record in records]
 
 
@@ -92,6 +100,12 @@ async def create_staff(
         values=custom_fields,
     )
     created = await staff_repo.get_staff_by_id(created["id"]) or created
+    await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+        company_id=int(created["company_id"]),
+        staff_id=int(created["id"]),
+        initiated_by_user_id=int(__.get("id")) if __.get("id") is not None else None,
+    )
+    created["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(int(created["id"]))
     return StaffResponse.model_validate(created)
 
 
@@ -104,6 +118,7 @@ async def get_staff(
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    staff["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
     return StaffResponse.model_validate(staff)
 
 
@@ -152,6 +167,16 @@ async def update_staff(
             values=custom_fields,
         )
         updated = await staff_repo.get_staff_by_id(staff_id) or updated
+
+    status_value = str((data.get("onboarding_status") or "")).strip().lower()
+    if status_value in {"requested", "provisioning"}:
+        await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+            company_id=int(updated["company_id"]),
+            staff_id=staff_id,
+            initiated_by_user_id=int(__.get("id")) if __.get("id") is not None else None,
+        )
+
+    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
     return StaffResponse.model_validate(updated)
 
 
