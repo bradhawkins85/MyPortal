@@ -11,12 +11,20 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as staff_workflow_repo
-from app.schemas.staff import StaffCreate, StaffRequestCreate, StaffResponse, StaffUpdate
+from app.schemas.staff import (
+    StaffApprovalDecision,
+    StaffCreate,
+    StaffRequestCreate,
+    StaffResponse,
+    StaffUpdate,
+)
+from app.services import audit as audit_service
 from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 
 
 router = APIRouter(prefix="/api/staff", tags=["Staff"])
 STAFF_REQUEST_PERMISSION = "staff.request"
+STAFF_APPROVE_PERMISSION = "staff.approve"
 
 
 async def _ensure_company_exists(company_id: int) -> None:
@@ -44,6 +52,28 @@ async def _require_staff_request_access(current_user: dict, company_id: int) -> 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions to request staff onboarding",
+        )
+
+
+async def _require_staff_approval_access(current_user: dict, company_id: int) -> None:
+    if current_user.get("is_super_admin"):
+        return
+    user_id = current_user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to approve staff onboarding requests",
+        ) from exc
+    membership = await membership_repo.get_membership_by_company_user(company_id, user_id_int)
+    if not membership or str(membership.get("status", "")).lower() != "active":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company membership required")
+    permissions = set(membership.get("combined_permissions") or membership.get("permissions") or [])
+    if "company.admin" not in permissions and STAFF_APPROVE_PERMISSION not in permissions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions to approve staff onboarding requests",
         )
 
 
@@ -119,7 +149,7 @@ async def create_staff(
 ):
     payload_data = payload.model_dump(by_alias=False)
     custom_fields = payload_data.pop("custom_fields", None) or {}
-    payload_data.setdefault("onboarding_status", "requested")
+    payload_data.setdefault("onboarding_status", "approved")
     payload_data.setdefault("onboarding_complete", False)
     payload_data.setdefault("onboarding_completed_at", None)
     payload_data.setdefault("approval_status", "approved")
@@ -154,7 +184,7 @@ async def create_staff_request(
     payload_data.pop("company_id", None)
     custom_fields = payload_data.pop("custom_fields", None) or {}
     payload_data["company_id"] = company_id
-    payload_data.setdefault("onboarding_status", "requested")
+    payload_data["onboarding_status"] = "awaiting_approval"
     payload_data.setdefault("onboarding_complete", False)
     payload_data.setdefault("onboarding_completed_at", None)
     payload_data.setdefault("approval_status", "pending")
@@ -170,6 +200,23 @@ async def create_staff_request(
         values=custom_fields,
     )
     created = await staff_repo.get_staff_by_id(created["id"]) or created
+    approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
+        company_id=int(created["company_id"]),
+        staff=created,
+        requester_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.onboarding.requested",
+        entity_type="staff",
+        entity_id=int(created["id"]),
+        metadata={
+            "company_id": int(created["company_id"]),
+            "onboarding_status": created.get("onboarding_status"),
+            "approval_status": created.get("approval_status"),
+            "approver_user_ids": approver_user_ids,
+        },
+    )
     created["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(int(created["id"]))
     return StaffResponse.model_validate(created)
 
@@ -177,12 +224,15 @@ async def create_staff_request(
 @router.post("/{staff_id}/approve", response_model=StaffResponse)
 async def approve_staff_request(
     staff_id: int,
+    payload: StaffApprovalDecision,
     _: None = Depends(require_database),
-    current_user: dict = Depends(require_super_admin),
+    current_user: dict = Depends(get_current_user),
 ):
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    await _require_staff_approval_access(current_user, int(staff["company_id"]))
+    comment_text = str(payload.comment or payload.reason or "").strip() or None
     updated = await staff_repo.update_staff(
         staff_id,
         company_id=staff["company_id"],
@@ -205,17 +255,95 @@ async def approve_staff_request(
         manager_name=staff.get("manager_name"),
         account_action=staff.get("account_action"),
         syncro_contact_id=staff.get("syncro_contact_id"),
-        onboarding_status=staff.get("onboarding_status") or "requested",
+        onboarding_status="approved",
         onboarding_complete=bool(staff.get("onboarding_complete", False)),
         onboarding_completed_at=staff.get("onboarding_completed_at"),
         approval_status="approved",
         approved_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
         approved_at=datetime.now(tz=timezone.utc),
+        approval_notes=comment_text,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.onboarding.approved",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(updated["company_id"]),
+            "comment": comment_text,
+        },
     )
     await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
         company_id=int(updated["company_id"]),
         staff_id=staff_id,
         initiated_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+    )
+    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    return StaffResponse.model_validate(updated)
+
+
+@router.post("/{staff_id}/deny", response_model=StaffResponse)
+async def deny_staff_request(
+    staff_id: int,
+    payload: StaffApprovalDecision,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    await _require_staff_approval_access(current_user, int(staff["company_id"]))
+    reason_text = str(payload.reason or payload.comment or "").strip()
+    if not reason_text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deny reason is required")
+    updated = await staff_repo.update_staff(
+        staff_id,
+        company_id=staff["company_id"],
+        first_name=staff["first_name"],
+        last_name=staff["last_name"],
+        email=staff["email"],
+        mobile_phone=staff.get("mobile_phone"),
+        date_onboarded=staff.get("date_onboarded"),
+        date_offboarded=staff.get("date_offboarded"),
+        enabled=bool(staff.get("enabled", True)),
+        is_ex_staff=bool(staff.get("is_ex_staff", False)),
+        street=staff.get("street"),
+        city=staff.get("city"),
+        state=staff.get("state"),
+        postcode=staff.get("postcode"),
+        country=staff.get("country"),
+        department=staff.get("department"),
+        job_title=staff.get("job_title"),
+        org_company=staff.get("org_company"),
+        manager_name=staff.get("manager_name"),
+        account_action=staff.get("account_action"),
+        syncro_contact_id=staff.get("syncro_contact_id"),
+        onboarding_status="denied",
+        onboarding_complete=False,
+        onboarding_completed_at=None,
+        approval_status="denied",
+        approved_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        approved_at=datetime.now(tz=timezone.utc),
+        approval_notes=reason_text,
+    )
+    execution = await staff_workflow_repo.get_execution_by_staff_id(staff_id)
+    if execution:
+        await staff_workflow_repo.update_execution_state(
+            int(execution["id"]),
+            state="denied",
+            current_step="denied",
+            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            last_error=reason_text,
+        )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.onboarding.denied",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(updated["company_id"]),
+            "reason": reason_text,
+        },
     )
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
     return StaffResponse.model_validate(updated)
@@ -288,7 +416,7 @@ async def update_staff(
         updated = await staff_repo.get_staff_by_id(staff_id) or updated
 
     status_value = str((data.get("onboarding_status") or "")).strip().lower()
-    if status_value in {"requested", "provisioning"}:
+    if status_value == "approved":
         await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
             company_id=int(updated["company_id"]),
             staff_id=staff_id,
