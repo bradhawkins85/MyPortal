@@ -78,6 +78,11 @@ class StaffUpdate(BaseModel):
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
+class StaffApprovalDecision(BaseModel):
+    comment: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class StaffWorkflowStatus(BaseModel):
     state: Optional[str] = None
     current_step: Optional[str] = None
