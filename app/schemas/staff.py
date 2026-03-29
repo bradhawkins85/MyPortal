@@ -32,10 +32,17 @@ class StaffBase(BaseModel):
     onboarding_completed_at: Optional[datetime] = Field(
         default=None, validation_alias="onboardingCompletedAt"
     )
+    approval_status: Optional[str] = Field(default=None, validation_alias="approvalStatus")
+    request_notes: Optional[str] = Field(default=None, validation_alias="requestNotes")
+    approval_notes: Optional[str] = Field(default=None, validation_alias="approvalNotes")
 
 
 class StaffCreate(StaffBase):
     company_id: int = Field(validation_alias="companyId")
+    custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
+
+
+class StaffRequestCreate(StaffBase):
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
@@ -65,6 +72,9 @@ class StaffUpdate(BaseModel):
     onboarding_completed_at: Optional[datetime] = Field(
         default=None, validation_alias="onboardingCompletedAt"
     )
+    approval_status: Optional[str] = Field(default=None, validation_alias="approvalStatus")
+    request_notes: Optional[str] = Field(default=None, validation_alias="requestNotes")
+    approval_notes: Optional[str] = Field(default=None, validation_alias="approvalNotes")
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
@@ -106,6 +116,13 @@ class StaffResponse(BaseModel):
     onboarding_status: Optional[str] = None
     onboarding_complete: bool = False
     onboarding_completed_at: Optional[datetime] = None
+    approval_status: str = "pending"
+    requested_by_user_id: Optional[int] = None
+    requested_at: Optional[datetime] = None
+    approved_by_user_id: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    request_notes: Optional[str] = None
+    approval_notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     custom_fields: dict[str, Any] = Field(default_factory=dict)
