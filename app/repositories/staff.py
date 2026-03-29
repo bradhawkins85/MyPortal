@@ -83,10 +83,13 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     mapped["date_onboarded"] = _serialize_datetime(mapped.get("date_onboarded"))
     mapped["date_offboarded"] = _serialize_datetime(mapped.get("date_offboarded"))
     mapped["onboarding_completed_at"] = _serialize_datetime(mapped.get("onboarding_completed_at"))
+    mapped["requested_at"] = _serialize_datetime(mapped.get("requested_at"))
+    mapped["approved_at"] = _serialize_datetime(mapped.get("approved_at"))
     mapped["m365_last_sign_in"] = _serialize_datetime(mapped.get("m365_last_sign_in"))
     mapped["created_at"] = _serialize_datetime(mapped.get("created_at"))
     mapped["updated_at"] = _serialize_datetime(mapped.get("updated_at"))
     mapped["onboarding_complete"] = bool(int(mapped.get("onboarding_complete", 0)))
+    mapped["approval_status"] = str(mapped.get("approval_status") or "pending")
     return mapped
 
 
@@ -365,6 +368,13 @@ async def create_staff(
     onboarding_status: str = "requested",
     onboarding_complete: bool = False,
     onboarding_completed_at: datetime | None = None,
+    approval_status: str = "pending",
+    requested_by_user_id: int | None = None,
+    requested_at: datetime | None = None,
+    approved_by_user_id: int | None = None,
+    approved_at: datetime | None = None,
+    request_notes: str | None = None,
+    approval_notes: str | None = None,
 ) -> dict[str, Any]:
     staff_id = await db.execute_returning_lastrowid(
         """
@@ -393,8 +403,15 @@ async def create_staff(
             m365_last_sign_in,
             onboarding_status,
             onboarding_complete,
-            onboarding_completed_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            onboarding_completed_at,
+            approval_status,
+            requested_by_user_id,
+            requested_at,
+            approved_by_user_id,
+            approved_at,
+            request_notes,
+            approval_notes
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -422,6 +439,13 @@ async def create_staff(
             onboarding_status,
             1 if onboarding_complete else 0,
             _coerce_datetime(onboarding_completed_at),
+            approval_status,
+            requested_by_user_id,
+            _coerce_datetime(requested_at),
+            approved_by_user_id,
+            _coerce_datetime(approved_at),
+            request_notes,
+            approval_notes,
         ),
     )
     if not staff_id:
@@ -458,6 +482,13 @@ async def update_staff(
     onboarding_status: str | None = None,
     onboarding_complete: bool | None = None,
     onboarding_completed_at: datetime | None = None,
+    approval_status: str | None = None,
+    requested_by_user_id: int | None = None,
+    requested_at: datetime | None = None,
+    approved_by_user_id: int | None = None,
+    approved_at: datetime | None = None,
+    request_notes: str | None = None,
+    approval_notes: str | None = None,
     m365_last_sign_in: datetime | None = None,
 ) -> dict[str, Any]:
     await db.execute(
@@ -487,6 +518,13 @@ async def update_staff(
             onboarding_status = COALESCE(%s, onboarding_status),
             onboarding_complete = COALESCE(%s, onboarding_complete),
             onboarding_completed_at = COALESCE(%s, onboarding_completed_at),
+            approval_status = COALESCE(%s, approval_status),
+            requested_by_user_id = COALESCE(%s, requested_by_user_id),
+            requested_at = COALESCE(%s, requested_at),
+            approved_by_user_id = COALESCE(%s, approved_by_user_id),
+            approved_at = COALESCE(%s, approved_at),
+            request_notes = COALESCE(%s, request_notes),
+            approval_notes = COALESCE(%s, approval_notes),
             m365_last_sign_in = COALESCE(%s, m365_last_sign_in)
         WHERE id = %s
         """,
@@ -514,6 +552,13 @@ async def update_staff(
             onboarding_status,
             (1 if onboarding_complete else 0) if onboarding_complete is not None else None,
             _coerce_datetime(onboarding_completed_at),
+            approval_status,
+            requested_by_user_id,
+            _coerce_datetime(requested_at),
+            approved_by_user_id,
+            _coerce_datetime(approved_at),
+            request_notes,
+            approval_notes,
             _coerce_datetime(m365_last_sign_in),
             staff_id,
         ),
