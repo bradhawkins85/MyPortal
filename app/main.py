@@ -8776,9 +8776,12 @@ async def create_staff_member(request: Request):
         manager_name=None,
         account_action=None,
         syncro_contact_id=None,
-        onboarding_status="requested",
+        onboarding_status="awaiting_approval",
         onboarding_complete=False,
         onboarding_completed_at=None,
+        approval_status="pending",
+        requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_at=datetime.now(tz=timezone.utc),
     )
     custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
     custom_values: dict[str, Any] = {}
@@ -8798,10 +8801,22 @@ async def create_staff_member(request: Request):
         values=custom_values,
     )
 
-    await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+    approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
         company_id=company_id,
-        staff_id=int(created["id"]),
-        initiated_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        staff=created,
+        requester_user_id=int(user["id"]) if user.get("id") is not None else None,
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.onboarding.requested",
+        entity_type="staff",
+        entity_id=int(created["id"]),
+        metadata={
+            "company_id": company_id,
+            "onboarding_status": created.get("onboarding_status"),
+            "approval_status": created.get("approval_status"),
+            "approver_user_ids": approver_user_ids,
+        },
     )
 
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
@@ -8915,7 +8930,7 @@ async def update_staff_member(staff_id: int, request: Request):
             updated = refreshed
 
     requested_status = str(get_value("onboardingStatus", "onboarding_status") or "").strip().lower()
-    if requested_status in {"requested", "provisioning"}:
+    if requested_status == "approved":
         await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
             company_id=int(updated.get("company_id") or company_id or 0),
             staff_id=staff_id,

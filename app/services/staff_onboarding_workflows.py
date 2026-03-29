@@ -6,15 +6,21 @@ from typing import Any
 
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
+from app.repositories import company_memberships as membership_repo
 from app.repositories import licenses as license_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_onboarding_workflows as workflow_repo
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
+from app.services import notifications as notifications_service
 from app.services import tickets as tickets_service
 
 
 STATE_REQUESTED = "requested"
+STATE_AWAITING_APPROVAL = "awaiting_approval"
+STATE_APPROVED = "approved"
+STATE_DENIED = "denied"
+STATE_WAITING_EXTERNAL = "waiting_external"
 STATE_PROVISIONING = "provisioning"
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
@@ -30,6 +36,80 @@ class LicenseExhaustionError(WorkflowStepError):
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def resolve_approver_user_ids(
+    *,
+    company_id: int,
+    policy: dict[str, Any] | None = None,
+) -> list[int]:
+    policy_config = (policy or {}).get("config") if isinstance((policy or {}).get("config"), dict) else {}
+    approver_user_ids_raw = policy_config.get("approver_user_ids")
+    designated_ids: set[int] = set()
+    if isinstance(approver_user_ids_raw, list):
+        for raw_id in approver_user_ids_raw:
+            try:
+                designated_ids.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+
+    memberships = await membership_repo.list_company_memberships(company_id)
+    company_admin_ids: set[int] = set()
+    permission_based_ids: set[int] = set()
+    approver_permission = str(policy_config.get("approver_permission") or "staff.approve").strip()
+    for membership in memberships:
+        if str(membership.get("status") or "").lower() != "active":
+            continue
+        try:
+            member_user_id = int(membership.get("user_id"))
+        except (TypeError, ValueError):
+            continue
+        permissions = set(membership.get("combined_permissions") or membership.get("permissions") or [])
+        if bool(membership.get("is_admin")) or "company.admin" in permissions:
+            company_admin_ids.add(member_user_id)
+        if approver_permission and approver_permission in permissions:
+            permission_based_ids.add(member_user_id)
+
+    return sorted(designated_ids | permission_based_ids | company_admin_ids)
+
+
+async def notify_staff_approval_requested(
+    *,
+    company_id: int,
+    staff: dict[str, Any],
+    requester_user_id: int | None,
+) -> list[int]:
+    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    approver_ids = await resolve_approver_user_ids(company_id=company_id, policy=policy)
+    if not approver_ids:
+        return []
+    staff_name = " ".join(
+        part for part in [staff.get("first_name"), staff.get("last_name")] if part
+    ).strip() or (staff.get("email") or f"staff #{staff.get('id')}")
+    message = f"Approval requested for staff onboarding: {staff_name}."
+    metadata = {
+        "company_id": company_id,
+        "staff_id": staff.get("id"),
+        "staff_email": staff.get("email"),
+        "requested_by_user_id": requester_user_id,
+    }
+    for approver_id in approver_ids:
+        try:
+            await notifications_service.emit_notification(
+                event_type="staff.onboarding.approval_requested",
+                message=message,
+                user_id=approver_id,
+                metadata=metadata,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_warning(
+                "Failed to send staff approval request notification",
+                company_id=company_id,
+                staff_id=staff.get("id"),
+                approver_id=approver_id,
+                error=str(exc),
+            )
+    return approver_ids
 
 
 async def _create_failure_ticket(
@@ -169,6 +249,14 @@ async def run_staff_onboarding_workflow(
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise ValueError("Staff not found")
+    onboarding_status = str(staff.get("onboarding_status") or "").strip().lower()
+    if onboarding_status != STATE_APPROVED:
+        return {
+            "state": "ignored",
+            "reason": "not_approved",
+            "required_state": STATE_APPROVED,
+            "current_state": onboarding_status or None,
+        }
 
     policy = await workflow_repo.get_company_workflow_policy(company_id)
     if not policy.get("is_enabled", True):
