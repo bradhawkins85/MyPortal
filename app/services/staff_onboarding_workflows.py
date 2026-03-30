@@ -622,6 +622,8 @@ def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
     if direction == DIRECTION_OFFBOARDING:
         return [
             {"name": "disable_and_cleanup_account", "type": "offboard_account"},
+            {"name": "remove_from_teams_groups", "type": "m365_remove_teams_group_member"},
+            {"name": "remove_from_sharepoint_sites", "type": "m365_remove_sharepoint_site_member"},
             {"name": "rename_identity", "type": "m365_rename_upn_display_name"},
             {"name": "update_org_fields", "type": "m365_update_org_fields"},
             {"name": "hide_from_gal", "type": "m365_hide_from_gal"},
@@ -630,6 +632,8 @@ def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
     return [
         {"name": "provision_account", "type": "provision_account"},
         {"name": "assign_license", "type": "m365_assign_license"},
+        {"name": "add_to_teams_groups", "type": "m365_add_teams_group_member"},
+        {"name": "add_to_sharepoint_sites", "type": "m365_add_sharepoint_site_member"},
     ]
 
 
@@ -843,6 +847,15 @@ async def _execute_policy_step(
     policy_config: dict[str, Any],
     vars_map: dict[str, Any],
 ) -> dict[str, Any]:
+    async def _resolve_step_user_id() -> str:
+        configured_user_id = str(
+            _resolve_template_value(step.get("user_id"), vars_map=vars_map) or vars_map.get("m365_user_id") or ""
+        ).strip()
+        if configured_user_id:
+            return configured_user_id
+        user = await _resolve_staff_m365_user(company_id, staff)
+        return str(user["id"])
+
     step_type = str(step.get("type") or "").strip().lower()
     if step_type == "provision_account":
         return await _run_provisioning_step(company_id=company_id, staff=staff)
@@ -931,7 +944,7 @@ async def _execute_policy_step(
 
     if step_type == "m365_add_group":
         group_id = str(_resolve_template_value(step.get("group_id"), vars_map=vars_map) or "").strip()
-        m365_user_id = str(_resolve_template_value(step.get("user_id"), vars_map=vars_map) or vars_map.get("m365_user_id") or "").strip()
+        m365_user_id = await _resolve_step_user_id()
         if not group_id or not m365_user_id:
             raise WorkflowStepError("m365_add_group requires group_id and user_id")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
@@ -941,6 +954,90 @@ async def _execute_policy_step(
             {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
         )
         return {"group_id": group_id, "m365_user_id": m365_user_id, "added": True}
+
+    if step_type in {"m365_add_teams_group_member", "m365_remove_teams_group_member"}:
+        group_ids = _normalize_group_ids(
+            _resolve_template_value(step.get("group_ids"), vars_map=vars_map)
+            or _resolve_template_value(step.get("group_ids_csv"), vars_map=vars_map)
+            or _resolve_template_value(step.get("group_id"), vars_map=vars_map)
+        )
+        if not group_ids:
+            raise WorkflowStepError(f"{step_type} requires one or more group IDs")
+        m365_user_id = await _resolve_step_user_id()
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        changed_group_ids: list[str] = []
+        for group_id in group_ids:
+            if step_type == "m365_add_teams_group_member":
+                await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
+                    {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
+                )
+            else:
+                await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{m365_user_id}/$ref",
+                )
+            changed_group_ids.append(group_id)
+        return {
+            "m365_user_id": m365_user_id,
+            "group_ids": changed_group_ids,
+            "operation": "add" if step_type == "m365_add_teams_group_member" else "remove",
+        }
+
+    if step_type in {"m365_add_sharepoint_site_member", "m365_remove_sharepoint_site_member"}:
+        site_ids = _normalize_group_ids(
+            _resolve_template_value(step.get("site_ids"), vars_map=vars_map)
+            or _resolve_template_value(step.get("site_ids_csv"), vars_map=vars_map)
+            or _resolve_template_value(step.get("site_id"), vars_map=vars_map)
+        )
+        if not site_ids:
+            raise WorkflowStepError(f"{step_type} requires one or more site IDs")
+        m365_user_id = await _resolve_step_user_id()
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        site_role = str(_resolve_template_value(step.get("site_role"), vars_map=vars_map) or "write").strip().lower()
+        if site_role not in {"read", "write"}:
+            raise WorkflowStepError("site_role must be either 'read' or 'write'")
+        changed_site_ids: list[str] = []
+        for site_id in site_ids:
+            if step_type == "m365_add_sharepoint_site_member":
+                await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions",
+                    {
+                        "roles": [site_role],
+                        "grantedToIdentitiesV2": [
+                            {"user": {"id": m365_user_id}},
+                        ],
+                    },
+                )
+            else:
+                permissions = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions",
+                )
+                for permission in permissions.get("value") or []:
+                    permission_id = str(permission.get("id") or "").strip()
+                    if not permission_id:
+                        continue
+                    granted_entries = permission.get("grantedToIdentitiesV2") or []
+                    user_ids = {
+                        str((entry.get("user") or {}).get("id") or "").strip()
+                        for entry in granted_entries
+                        if isinstance(entry, dict)
+                    }
+                    if m365_user_id in user_ids:
+                        await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                            access_token,
+                            f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions/{permission_id}",
+                        )
+            changed_site_ids.append(site_id)
+        return {
+            "m365_user_id": m365_user_id,
+            "site_ids": changed_site_ids,
+            "operation": "add" if step_type == "m365_add_sharepoint_site_member" else "remove",
+            "site_role": site_role,
+        }
 
     if step_type == "m365_rename_upn_display_name":
         user = await _resolve_staff_m365_user(company_id, staff)
