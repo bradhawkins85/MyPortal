@@ -76,6 +76,12 @@ async def test_create_staff_request_forces_company_scope(monkeypatch):
         "get_staff_workflow_status",
         AsyncMock(return_value=None),
     )
+    monkeypatch.setattr(
+        staff.staff_onboarding_workflow_service,
+        "notify_staff_approval_requested",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(staff.audit_service, "log_action", AsyncMock())
 
     create_mock = AsyncMock(
         return_value={
