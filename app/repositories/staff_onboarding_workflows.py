@@ -259,6 +259,31 @@ async def append_step_log(
     )
 
 
+async def list_step_logs_for_execution_ids(
+    execution_ids: Iterable[int],
+) -> dict[int, list[dict[str, Any]]]:
+    ids = [int(item) for item in execution_ids]
+    if not ids:
+        return {}
+    ids_csv = ",".join(str(item) for item in ids)
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM staff_onboarding_workflow_step_logs
+        WHERE FIND_IN_SET(execution_id, %s) > 0
+        ORDER BY started_at ASC, id ASC
+        """,
+        (ids_csv,),
+    )
+    mapped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        execution_id = int(row.get("execution_id") or 0)
+        if execution_id <= 0:
+            continue
+        mapped.setdefault(execution_id, []).append(dict(row))
+    return mapped
+
+
 async def create_external_checkpoint(
     *,
     execution_id: int,
@@ -316,6 +341,31 @@ async def get_pending_external_checkpoint(
         (execution_id, company_id, staff_id, confirmation_token_hash),
     )
     return dict(row) if row else None
+
+
+async def list_external_checkpoints_for_execution_ids(
+    execution_ids: Iterable[int],
+) -> dict[int, list[dict[str, Any]]]:
+    ids = [int(item) for item in execution_ids]
+    if not ids:
+        return {}
+    ids_csv = ",".join(str(item) for item in ids)
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM staff_onboarding_external_checkpoints
+        WHERE FIND_IN_SET(execution_id, %s) > 0
+        ORDER BY created_at ASC, id ASC
+        """,
+        (ids_csv,),
+    )
+    mapped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        execution_id = int(row.get("execution_id") or 0)
+        if execution_id <= 0:
+            continue
+        mapped.setdefault(execution_id, []).append(dict(row))
+    return mapped
 
 
 async def confirm_external_checkpoint(

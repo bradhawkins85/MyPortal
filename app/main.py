@@ -8611,6 +8611,13 @@ async def staff_page(
 
     is_super_admin = bool(user.get("is_super_admin"))
     is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
+    membership_permissions = set((membership or {}).get("combined_permissions") or (membership or {}).get("permissions") or [])
+    can_approve_onboarding = bool(
+        is_super_admin
+        or is_admin
+        or "company.admin" in membership_permissions
+        or "staff.approve" in membership_permissions
+    )
 
     enabled_value = enabled.strip()
     enabled_filter: bool | None
@@ -8639,9 +8646,100 @@ async def staff_page(
         workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
             [int(member["id"]) for member in staff_members if member.get("id") is not None]
         )
+        execution_ids = [
+            int(execution["id"])
+            for execution in workflow_map.values()
+            if execution and execution.get("id") is not None
+        ]
+        workflow_step_logs = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
+        external_checkpoint_logs = await staff_workflow_repo.list_external_checkpoints_for_execution_ids(execution_ids)
         for member in staff_members:
             execution = workflow_map.get(int(member["id"])) if member.get("id") is not None else None
             member["workflow_status"] = execution
+            staff_id = member.get("id")
+            audit_logs: list[dict[str, Any]] = []
+            if staff_id is not None:
+                audit_logs = await audit_repo.list_audit_logs(
+                    entity_type="staff",
+                    entity_id=int(staff_id),
+                    limit=50,
+                )
+            audit_logs = sorted(audit_logs, key=lambda entry: entry.get("created_at") or datetime.min)
+            timeline: list[dict[str, Any]] = []
+            approver_user_ids: list[int] = []
+            for entry in audit_logs:
+                action = str(entry.get("action") or "").strip()
+                metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+                if action == "staff.onboarding.requested":
+                    raw_ids = metadata.get("approver_user_ids")
+                    if isinstance(raw_ids, list):
+                        approver_user_ids = [
+                            int(raw_id)
+                            for raw_id in raw_ids
+                            if isinstance(raw_id, int) or (isinstance(raw_id, str) and raw_id.isdigit())
+                        ]
+                timeline.append(
+                    {
+                        "timestamp": entry.get("created_at"),
+                        "event_type": "audit",
+                        "event": action,
+                        "actor": entry.get("user_email") or "System",
+                        "details": metadata,
+                    }
+                )
+
+            approver_emails: list[str] = []
+            for approver_id in approver_user_ids:
+                approver_user = await user_repo.get_user_by_id(int(approver_id))
+                if approver_user and approver_user.get("email"):
+                    approver_emails.append(str(approver_user["email"]))
+            if execution and execution.get("id") is not None:
+                execution_id = int(execution["id"])
+                for step in workflow_step_logs.get(execution_id, []):
+                    timeline.append(
+                        {
+                            "timestamp": step.get("started_at") or step.get("completed_at"),
+                            "event_type": "workflow_step",
+                            "event": f"{step.get('step_name')} ({step.get('status')})",
+                            "actor": "Workflow engine",
+                            "details": {
+                                "attempt": step.get("attempt"),
+                                "error_message": step.get("error_message"),
+                            },
+                        }
+                    )
+                for checkpoint in external_checkpoint_logs.get(execution_id, []):
+                    timeline.append(
+                        {
+                            "timestamp": checkpoint.get("updated_at") or checkpoint.get("created_at"),
+                            "event_type": "external_callback",
+                            "event": f"external checkpoint {checkpoint.get('status')}",
+                            "actor": f"API key #{checkpoint.get('confirmed_by_api_key_id')}" if checkpoint.get("confirmed_by_api_key_id") else "External system",
+                            "details": {
+                                "source": checkpoint.get("source"),
+                                "proof_reference_id": checkpoint.get("proof_reference_id"),
+                                "payload_hash": checkpoint.get("payload_hash"),
+                            },
+                        }
+                    )
+            timeline = sorted(timeline, key=lambda entry: entry.get("timestamp") or datetime.min)
+            member["onboarding_timeline"] = timeline
+            workflow_state = str((execution or {}).get("state") or member.get("onboarding_status") or "requested").strip().lower()
+            if workflow_state == "waiting_external":
+                current_step = str((execution or {}).get("current_step") or "await_external_confirmation")
+                member["onboarding_pending_details"] = (
+                    f"Waiting for external completion: callback pending for step "
+                    f"{current_step.replace('_', ' ')}."
+                )
+            elif workflow_state == "awaiting_approval":
+                if approver_emails:
+                    member["onboarding_pending_details"] = (
+                        "Waiting for approval from: " + ", ".join(approver_emails)
+                    )
+                else:
+                    member["onboarding_pending_details"] = "Waiting for approval from authorized approvers."
+            else:
+                member["onboarding_pending_details"] = None
         company_email_domains = list((company or {}).get("email_domains") or [])
         staff_members = [
             member
@@ -8704,6 +8802,7 @@ async def staff_page(
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
         "staff_permission": staff_permission,
+        "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
         "staff_members": staff_members,
         "enabled_filter": enabled_value,

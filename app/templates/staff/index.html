@@ -242,14 +242,37 @@
                 {% set workflow = member.workflow_status or {} %}
                 {% set workflow_state = workflow.get('state') or member.onboarding_status or 'requested' %}
                 <span class="status-pill status-pill--{{ workflow_state|replace('_', '-') }}">{{ workflow_state|replace('_', ' ')|title }}</span>
+                {% if member.approval_status %}
+                  <span class="status-pill status-pill--{{ member.approval_status|replace('_', '-') }}">{{ member.approval_status|replace('_', ' ')|title }}</span>
+                {% endif %}
                 {% if workflow.get('current_step') %}
                   <div class="text-muted text-small">Step: {{ workflow.get('current_step')|replace('_', ' ')|title }}</div>
+                {% endif %}
+                {% if member.onboarding_pending_details %}
+                  <div class="text-small">{{ member.onboarding_pending_details }}</div>
                 {% endif %}
                 {% if workflow.get('helpdesk_ticket_id') %}
                   <div class="text-small">Ticket #{{ workflow.get('helpdesk_ticket_id') }}</div>
                 {% endif %}
                 {% if workflow.get('last_error') %}
                   <div class="text-danger text-small">{{ workflow.get('last_error') }}</div>
+                {% endif %}
+                {% if member.onboarding_timeline %}
+                  <details class="text-small">
+                    <summary>Timeline ({{ member.onboarding_timeline|length }})</summary>
+                    <ol class="list-unstyled">
+                      {% for event in member.onboarding_timeline %}
+                        <li>
+                          <strong>{{ event.event|replace('_', ' ')|title }}</strong>
+                          {% if event.actor %}<span class="text-muted"> · {{ event.actor }}</span>{% endif %}
+                          {% if event.timestamp %}<span class="text-muted"> · {{ event.timestamp }}</span>{% endif %}
+                          {% if event.details %}
+                            <div class="text-muted">{{ event.details }}</div>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </details>
                 {% endif %}
               </td>
               {% for field in staff_custom_field_definitions %}
@@ -284,6 +307,10 @@
                   {% endif %}
                   {% if is_admin or is_super_admin %}
                     <button type="button" class="button button--ghost" data-staff-invite="{{ member.id }}">Invite</button>
+                  {% endif %}
+                  {% if can_approve_onboarding and (member.approval_status == 'pending' or member.onboarding_status == 'awaiting_approval') %}
+                    <button type="button" class="button button--ghost" data-staff-approve="{{ member.id }}">Approve</button>
+                    <button type="button" class="button button--danger" data-staff-deny="{{ member.id }}">Deny</button>
                   {% endif %}
                   <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
                   {% if is_super_admin %}
@@ -441,7 +468,8 @@
 <script type="application/json" id="staff-custom-field-definitions">{{ staff_custom_field_definitions | tojson }}</script>
 <script type="application/json" id="staff-flags">{{ {
   'isSuperAdmin': is_super_admin,
-  'isAdmin': is_admin
+  'isAdmin': is_admin,
+  'canApproveOnboarding': can_approve_onboarding
 } | tojson }}</script>
 {% endblock %}
 
