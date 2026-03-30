@@ -123,8 +123,8 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
         ]
 
         mock_invoice_repo.patch_invoice.assert_awaited_once()
-        mock_billed_repo.rename_invoice_number.assert_awaited_once_with("INV-202603-0001", "XERO-2001")
-        mock_tickets_repo.rename_xero_invoice_number.assert_awaited_once_with("INV-202603-0001", "XERO-2001")
+        mock_billed_repo.rename_invoice_number.assert_awaited_once_with(1, "INV-202603-0001", "XERO-2001")
+        mock_tickets_repo.rename_xero_invoice_number.assert_awaited_once_with(1, "INV-202603-0001", "XERO-2001")
 
 
 @pytest.mark.anyio("asyncio")

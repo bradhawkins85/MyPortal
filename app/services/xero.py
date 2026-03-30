@@ -189,6 +189,7 @@ def _build_xero_line_items_from_local_invoice(
 
 
 async def _rename_local_invoice_references(
+    company_id: int,
     original_invoice_number: str,
     synced_invoice_number: str,
 ) -> None:
@@ -196,8 +197,16 @@ async def _rename_local_invoice_references(
         return
     if original_invoice_number == synced_invoice_number:
         return
-    await billed_time_repo.rename_invoice_number(original_invoice_number, synced_invoice_number)
-    await tickets_repo.rename_xero_invoice_number(original_invoice_number, synced_invoice_number)
+    await billed_time_repo.rename_invoice_number(
+        company_id,
+        original_invoice_number,
+        synced_invoice_number,
+    )
+    await tickets_repo.rename_xero_invoice_number(
+        company_id,
+        original_invoice_number,
+        synced_invoice_number,
+    )
 
 
 async def fetch_xero_item_rates(
@@ -1533,7 +1542,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 xero_invoice_id=xero_invoice_id,
                 synced_to_xero_at=datetime.now(timezone.utc),
             )
-            await _rename_local_invoice_references(original_invoice_number, xero_invoice_number)
+            await _rename_local_invoice_references(company_id, original_invoice_number, xero_invoice_number)
 
             synced_results.append(
                 {
