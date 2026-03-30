@@ -4,6 +4,9 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+import aiomysql
+import aiosqlite
+
 from app.core.database import db
 
 
@@ -33,6 +36,24 @@ def _normalise_execution(row: dict[str, Any] | None) -> dict[str, Any] | None:
     for key in ("id", "company_id", "staff_id", "retries_used", "helpdesk_ticket_id"):
         if record.get(key) is not None:
             record[key] = int(record[key])
+    return record
+
+
+def _normalise_idempotency(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    record = dict(row)
+    for key in ("id", "api_key_id", "company_id", "staff_id", "response_status"):
+        if record.get(key) is not None:
+            record[key] = int(record[key])
+    response_payload_raw = record.get("response_payload_json")
+    if isinstance(response_payload_raw, str) and response_payload_raw.strip():
+        try:
+            record["response_payload"] = json.loads(response_payload_raw)
+        except json.JSONDecodeError:
+            record["response_payload"] = {}
+    else:
+        record["response_payload"] = {}
     return record
 
 
@@ -332,5 +353,80 @@ async def confirm_external_checkpoint(
             _utc_now_naive(),
             _utc_now_naive(),
             checkpoint_id,
+        ),
+    )
+
+
+async def try_create_external_confirmation_idempotency(
+    *,
+    api_key_id: int,
+    idempotency_key: str,
+    request_fingerprint: str,
+    company_id: int,
+    staff_id: int,
+) -> bool:
+    try:
+        await db.execute(
+            """
+            INSERT INTO staff_onboarding_external_confirmation_idempotency
+                (api_key_id, idempotency_key, request_fingerprint, company_id, staff_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                api_key_id,
+                idempotency_key,
+                request_fingerprint,
+                company_id,
+                staff_id,
+                _utc_now_naive(),
+                _utc_now_naive(),
+            ),
+        )
+    except (aiomysql.IntegrityError, aiosqlite.IntegrityError):
+        return False
+    return True
+
+
+async def get_external_confirmation_idempotency(
+    *,
+    api_key_id: int,
+    idempotency_key: str,
+) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT *
+        FROM staff_onboarding_external_confirmation_idempotency
+        WHERE api_key_id = %s
+          AND idempotency_key = %s
+        LIMIT 1
+        """,
+        (api_key_id, idempotency_key),
+    )
+    return _normalise_idempotency(row)
+
+
+async def finalize_external_confirmation_idempotency(
+    *,
+    api_key_id: int,
+    idempotency_key: str,
+    response_status: int,
+    response_payload: dict[str, Any],
+) -> None:
+    await db.execute(
+        """
+        UPDATE staff_onboarding_external_confirmation_idempotency
+        SET
+            response_status = %s,
+            response_payload_json = %s,
+            updated_at = %s
+        WHERE api_key_id = %s
+          AND idempotency_key = %s
+        """,
+        (
+            int(response_status),
+            json.dumps(response_payload or {}, ensure_ascii=False),
+            _utc_now_naive(),
+            api_key_id,
+            idempotency_key,
         ),
     )
