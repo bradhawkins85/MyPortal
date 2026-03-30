@@ -378,13 +378,28 @@
                           <input class="form-input" name="condition_parent_name" value="{{ field.condition_parent_name or '' }}" placeholder="Parent key" />
                         </div>
                         <div class="form-field">
-                          <select class="form-input" name="condition_operator">
+                          <select class="form-input" name="condition_operator" data-condition-operator-select>
                             {% for condition in ['equals', 'not_equals', 'is_checked', 'is_not_checked', 'select_map'] %}
                               <option value="{{ condition }}" {% if (field.condition_operator or 'is_checked') == condition %}selected{% endif %}>{{ condition }}</option>
                             {% endfor %}
                           </select>
                         </div>
-                        <div class="form-field">
+                        <div class="form-field" data-equals-condition-builder hidden>
+                          <div class="table-wrapper">
+                            <table class="table table--compact">
+                              <thead>
+                                <tr>
+                                  <th>Key</th>
+                                  <th>Options</th>
+                                  <th aria-label="Actions"></th>
+                                </tr>
+                              </thead>
+                              <tbody data-equals-condition-rows></tbody>
+                            </table>
+                          </div>
+                          <button type="button" class="button button--ghost button--small" data-add-equals-condition-row>Add condition row</button>
+                        </div>
+                        <div class="form-field" data-standard-condition-value>
                           <textarea class="form-input" name="condition_value" rows="3" placeholder="Condition value">{{ field.condition_value or '' }}</textarea>
                         </div>
                       </td>
@@ -1431,6 +1446,128 @@
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
     <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const editRows = document.querySelectorAll('form[action*="/staff-custom-fields/"]');
+        if (!editRows.length) return;
+
+        function parseEqualsConditionMap(rawValue) {
+          const rawText = String(rawValue || '').trim();
+          if (!rawText) return [];
+          const entries = rawText
+            .replace(/\r?\n/g, ';')
+            .split(';')
+            .map((item) => item.trim())
+            .filter(Boolean);
+          const rows = [];
+          entries.forEach((entry) => {
+            const arrowIndex = entry.indexOf('=>');
+            if (arrowIndex >= 0) {
+              const conditionKey = entry.slice(0, arrowIndex).trim();
+              const options = entry.slice(arrowIndex + 2).trim().split('|').map((item) => item.trim()).filter(Boolean);
+              rows.push({ conditionKey, options: options.join(', ') });
+              return;
+            }
+            rows.push({ conditionKey: entry, options: '' });
+          });
+          return rows;
+        }
+
+        function serializeEqualsConditionMap(rows) {
+          const mappedRows = rows
+            .map((row) => ({
+              conditionKey: String(row.conditionKey || '').trim(),
+              options: String(row.options || '').trim(),
+            }))
+            .filter((row) => row.conditionKey || row.options);
+
+          if (!mappedRows.length) return '';
+
+          return mappedRows
+            .map((row) => {
+              if (!row.options) return row.conditionKey;
+              const optionValues = row.options
+                .split(/[,\n|]/)
+                .map((value) => value.trim())
+                .filter(Boolean);
+              if (!optionValues.length) return row.conditionKey;
+              return `${row.conditionKey}=>${optionValues.join('|')}`;
+            })
+            .filter(Boolean)
+            .join(';');
+        }
+
+        function createRowElement(initialRow) {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td><input class="form-input" type="text" data-condition-key-input placeholder="Condition key (or fallback)" /></td>
+            <td><input class="form-input" type="text" data-condition-options-input placeholder="option_1, option_2" /></td>
+            <td><button type="button" class="button button--ghost button--small" data-remove-condition-row>Remove</button></td>
+          `;
+          const keyInput = row.querySelector('[data-condition-key-input]');
+          const optionsInput = row.querySelector('[data-condition-options-input]');
+          if (keyInput) keyInput.value = initialRow && initialRow.conditionKey ? initialRow.conditionKey : '';
+          if (optionsInput) optionsInput.value = initialRow && initialRow.options ? initialRow.options : '';
+          return row;
+        }
+
+        function syncConditionValue(builder, textarea) {
+          if (!builder || !textarea) return;
+          const rows = Array.from(builder.querySelectorAll('tr')).map((row) => ({
+            conditionKey: row.querySelector('[data-condition-key-input]')?.value || '',
+            options: row.querySelector('[data-condition-options-input]')?.value || '',
+          }));
+          textarea.value = serializeEqualsConditionMap(rows);
+        }
+
+        editRows.forEach((rowForm) => {
+          const operatorSelect = rowForm.querySelector('[data-condition-operator-select]');
+          const equalsBuilder = rowForm.querySelector('[data-equals-condition-builder]');
+          const standardConditionWrapper = rowForm.querySelector('[data-standard-condition-value]');
+          const textarea = rowForm.querySelector('textarea[name="condition_value"]');
+          const rowsContainer = rowForm.querySelector('[data-equals-condition-rows]');
+          const addRowButton = rowForm.querySelector('[data-add-equals-condition-row]');
+          if (!operatorSelect || !equalsBuilder || !standardConditionWrapper || !textarea || !rowsContainer || !addRowButton) return;
+
+          const parsedRows = parseEqualsConditionMap(textarea.value);
+          if (parsedRows.length) {
+            parsedRows.forEach((parsedRow) => rowsContainer.appendChild(createRowElement(parsedRow)));
+          } else {
+            rowsContainer.appendChild(createRowElement());
+          }
+
+          const toggleConditionEditor = () => {
+            const isEquals = operatorSelect.value === 'equals';
+            equalsBuilder.hidden = !isEquals;
+            standardConditionWrapper.hidden = isEquals;
+            if (isEquals) syncConditionValue(rowsContainer, textarea);
+          };
+
+          rowsContainer.addEventListener('input', () => syncConditionValue(rowsContainer, textarea));
+          rowsContainer.addEventListener('click', (event) => {
+            const removeButton = event.target.closest('[data-remove-condition-row]');
+            if (!removeButton) return;
+            const row = removeButton.closest('tr');
+            if (!row) return;
+            if (rowsContainer.querySelectorAll('tr').length === 1) {
+              row.querySelector('[data-condition-key-input]').value = '';
+              row.querySelector('[data-condition-options-input]').value = '';
+            } else {
+              row.remove();
+            }
+            syncConditionValue(rowsContainer, textarea);
+          });
+          addRowButton.addEventListener('click', () => {
+            rowsContainer.appendChild(createRowElement());
+          });
+          operatorSelect.addEventListener('change', toggleConditionEditor);
+          rowForm.addEventListener('submit', () => {
+            if (operatorSelect.value === 'equals') syncConditionValue(rowsContainer, textarea);
+          });
+
+          toggleConditionEditor();
+        });
+      });
+
       // Billing contacts management
       document.addEventListener('DOMContentLoaded', function() {
         const companyId = {{ company.id }};
