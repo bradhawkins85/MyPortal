@@ -11188,6 +11188,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
     name = str(form.get("name") or "").strip().lower().replace(" ", "_")
     display_name = str(form.get("display_name") or "").strip() or None
     field_type = str(form.get("field_type") or "text").strip().lower()
+    field_group = str(form.get("field_group") or "").strip() or None
     try:
         display_order = int(str(form.get("display_order") or "0").strip())
     except ValueError:
@@ -11207,6 +11208,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
         name=name,
         display_name=display_name,
         field_type=field_type,
+        field_group=field_group,
         display_order=display_order,
         condition_parent_name=condition_parent_name,
         condition_operator=condition_operator,
@@ -11229,6 +11231,7 @@ async def admin_update_company_staff_custom_field(
     form = await request.form()
     display_name = str(form.get("display_name") or "").strip() or None
     field_type = str(form.get("field_type") or "text").strip().lower()
+    field_group = str(form.get("field_group") or "").strip() or None
     try:
         display_order = int(str(form.get("display_order") or "0").strip())
     except ValueError:
@@ -11245,6 +11248,7 @@ async def admin_update_company_staff_custom_field(
         company_id=company_id,
         display_name=display_name,
         field_type=field_type,
+        field_group=field_group,
         display_order=display_order,
         is_active=is_active,
         condition_parent_name=condition_parent_name,

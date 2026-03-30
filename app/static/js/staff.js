@@ -265,6 +265,7 @@
     });
 
     const editCustomFieldInputs = new Map();
+    const editCustomFieldGroups = new Map();
     let currentEditStaffId = null;
     const editActionButtons = {
       invite: container.querySelector('[data-edit-action="invite"]'),
@@ -278,14 +279,40 @@
       delete: container.querySelector('[data-edit-action="delete"]'),
     };
     if (editCustomFieldsGrid && Array.isArray(customFieldDefinitions)) {
+      const normalizeGroupLabel = (group) => {
+        const raw = typeof group === 'string' ? group.trim() : '';
+        return raw || 'Additional details';
+      };
+
+      const ensureGroupContainer = (groupLabel) => {
+        const normalized = normalizeGroupLabel(groupLabel);
+        if (editCustomFieldGroups.has(normalized)) {
+          return editCustomFieldGroups.get(normalized);
+        }
+        const section = document.createElement('fieldset');
+        section.className = 'fieldset staff-modal__subsection';
+        section.dataset.customFieldGroup = normalized;
+        const legend = document.createElement('legend');
+        legend.textContent = normalized;
+        const grid = document.createElement('div');
+        grid.className = 'form-grid staff-modal-grid';
+        section.appendChild(legend);
+        section.appendChild(grid);
+        editCustomFieldsGrid.appendChild(section);
+        editCustomFieldGroups.set(normalized, grid);
+        return grid;
+      };
+
       customFieldDefinitions.forEach((field) => {
         if (!field || !field.name) {
           return;
         }
+        const groupLabel = normalizeGroupLabel(field.field_group);
         const wrapper = document.createElement('div');
         wrapper.className = field.field_type === 'checkbox' ? 'form-field form-field--checkbox' : 'form-field';
         wrapper.dataset.customFieldWrapper = '1';
         wrapper.dataset.customFieldName = field.name;
+        wrapper.dataset.customFieldGroup = groupLabel;
         wrapper.dataset.conditionParentName = field.condition_parent_name || '';
         wrapper.dataset.conditionOperator = field.condition_operator || '';
         wrapper.dataset.conditionValue = field.condition_value || '';
@@ -314,7 +341,7 @@
             <input class="form-input" id="${inputId}" type="${field.field_type === 'date' ? 'date' : 'text'}" />
           `;
         }
-        editCustomFieldsGrid.appendChild(wrapper);
+        ensureGroupContainer(groupLabel).appendChild(wrapper);
         editCustomFieldInputs.set(field.name, {
           field,
           wrapper,
