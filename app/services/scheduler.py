@@ -24,6 +24,7 @@ from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import staff_importer
+from app.services import staff_onboarding_workflows as staff_onboarding_workflows_service
 from app.services import subscription_price_changes
 from app.services import subscription_renewals
 from app.services import tickets as tickets_service
@@ -169,6 +170,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        if not self._scheduler.get_job("staff-workflow-due-runner"):
+            self._scheduler.add_job(
+                self._run_staff_workflow_due_runner,
+                "interval",
+                seconds=60,
+                id="staff-workflow-due-runner",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Run subscription renewal job daily at 02:00 (store timezone)
         if not self._scheduler.get_job("subscription-renewals"):
             self._scheduler.add_job(
@@ -214,6 +225,16 @@ class SchedulerService:
                 log_info("Automation runner already running on another worker, skipping")
                 return
             await automations_service.process_due_automations()
+
+    async def _run_staff_workflow_due_runner(self) -> None:
+        """Run due approved staff workflow executions with distributed lock."""
+        async with db.acquire_lock("staff_workflow_due_runner", timeout=1) as lock_acquired:
+            if not lock_acquired:
+                log_info("Staff workflow due runner already running on another worker, skipping")
+                return
+            result = await staff_onboarding_workflows_service.process_due_approved_executions()
+            if result.get("processed", 0) or result.get("skipped", 0):
+                log_info("Staff workflow due runner processed executions", **result)
     
     async def _run_subscription_renewals(self) -> None:
         """Run subscription renewal invoice creation (T-60 job) with distributed lock."""

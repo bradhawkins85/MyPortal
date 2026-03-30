@@ -845,25 +845,64 @@ async def enqueue_staff_onboarding_workflow(
         direction=direction,
         requested_timezone=requested_timezone,
     )
+    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    execution = await workflow_repo.create_or_reset_execution(
+        company_id=company_id,
+        staff_id=staff_id,
+        workflow_key=str(policy.get("workflow_key") or workflow_repo.DEFAULT_WORKFLOW_KEY),
+        direction=direction,
+        scheduled_for_utc=scheduled_for_utc,
+        requested_timezone=normalized_timezone,
+    )
+    queued_state = STATE_OFFBOARDING_APPROVED if direction == DIRECTION_OFFBOARDING else STATE_APPROVED
+    await workflow_repo.update_execution_state(
+        int(execution["id"]),
+        state=queued_state,
+        current_step="queued",
+        retries_used=0,
+        last_error=None,
+        completed_at=None,
+    )
     log_info(
-        "Queueing staff onboarding workflow",
+        "Queued staff onboarding workflow execution",
         company_id=company_id,
         staff_id=staff_id,
         initiated_by_user_id=initiated_by_user_id,
         direction=direction,
+        execution_id=int(execution["id"]),
+        state=queued_state,
         scheduled_for_utc=scheduled_for_utc.isoformat() if isinstance(scheduled_for_utc, datetime) else None,
         requested_timezone=normalized_timezone,
     )
-    asyncio.create_task(
-        run_staff_onboarding_workflow(
-            company_id=company_id,
-            staff_id=staff_id,
-            initiated_by_user_id=initiated_by_user_id,
-            direction=direction,
-            scheduled_for_utc=scheduled_for_utc,
-            requested_timezone=normalized_timezone,
-        )
-    )
+
+
+async def process_due_approved_executions(*, limit: int = 20) -> dict[str, int]:
+    processed = 0
+    skipped = 0
+    while processed < max(1, int(limit)):
+        execution = await workflow_repo.claim_next_due_approved_execution(now_utc=_utc_now_naive())
+        if not execution:
+            break
+        try:
+            await run_staff_onboarding_workflow(
+                company_id=int(execution["company_id"]),
+                staff_id=int(execution["staff_id"]),
+                initiated_by_user_id=None,
+                direction=str(execution.get("direction") or DIRECTION_ONBOARDING),
+                scheduled_for_utc=execution.get("scheduled_for_utc"),
+                requested_timezone=execution.get("requested_timezone"),
+            )
+            processed += 1
+        except Exception as exc:  # noqa: BLE001
+            skipped += 1
+            log_error(
+                "Failed processing due approved staff workflow execution",
+                execution_id=execution.get("id"),
+                company_id=execution.get("company_id"),
+                staff_id=execution.get("staff_id"),
+                error=str(exc),
+            )
+    return {"processed": processed, "skipped": skipped}
 
 
 async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
