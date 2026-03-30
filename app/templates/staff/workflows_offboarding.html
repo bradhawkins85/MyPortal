@@ -162,7 +162,7 @@
         const policy = payload.policy || {};
         const config = policy.config_json || {};
         existingConfig = config;
-        workflowKeyInput.value = policy.workflow_key || 'staff_onboarding_m365';
+        workflowKeyInput.value = policy.workflow_key || 'staff_offboarding_m365';
         maxRetriesInput.value = policy.max_retries || 0;
         enabledInput.checked = Boolean(policy.enabled);
         stepCatalog = Array.isArray(payload.step_catalog) ? payload.step_catalog : [];
@@ -193,7 +193,7 @@
           },
         }));
         const body = {
-          workflow_key: workflowKeyInput.value.trim() || 'staff_onboarding_m365',
+          workflow_key: workflowKeyInput.value.trim() || 'staff_offboarding_m365',
           enabled: enabledInput.checked,
           max_retries: Number(maxRetriesInput.value || 0),
           config: {
