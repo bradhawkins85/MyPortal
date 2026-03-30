@@ -617,6 +617,41 @@ def _resolve_step_failure_mode(step: dict[str, Any]) -> str:
     return mode
 
 
+def _normalize_condition_values(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        values = [item.strip() for item in raw.split(",")]
+    elif isinstance(raw, list):
+        values = [str(item or "").strip() for item in raw]
+    else:
+        return []
+    return [value for value in values if value]
+
+
+def _evaluate_step_conditions(
+    *,
+    step: dict[str, Any],
+    staff: dict[str, Any],
+    staff_custom_fields: dict[str, Any],
+) -> tuple[bool, str | None]:
+    conditions = step.get("conditions") if isinstance(step.get("conditions"), dict) else {}
+    if not conditions:
+        return True, None
+
+    allowed_departments = {
+        value.lower() for value in _normalize_condition_values(conditions.get("department_in"))
+    }
+    if allowed_departments:
+        staff_department = str(staff.get("department") or "").strip().lower()
+        if staff_department not in allowed_departments:
+            return False, "department_not_in_scope"
+
+    required_custom_fields = _normalize_condition_values(conditions.get("custom_fields_truthy"))
+    for field_name in required_custom_fields:
+        if not _is_truthy_custom_field(staff_custom_fields.get(field_name)):
+            return False, f"custom_field_not_truthy:{field_name}"
+    return True, None
+
+
 def _normalize_group_ids(raw_group_ids: Any) -> list[str]:
     if isinstance(raw_group_ids, str):
         raw_group_ids = [item.strip() for item in raw_group_ids.split(",") if item.strip()]
@@ -1241,6 +1276,28 @@ async def _execute_policy_steps(
             return {"paused": True, "confirmation_token": confirmation_token}
 
         resolved_step = _resolve_template_value(step, vars_map=vars_map)
+        should_execute, skip_reason = _evaluate_step_conditions(
+            step=resolved_step if isinstance(resolved_step, dict) else step,
+            staff=staff,
+            staff_custom_fields=staff_custom_fields,
+        )
+        if not should_execute:
+            await workflow_repo.append_step_log(
+                execution_id=execution_id,
+                step_name=step_name,
+                status="skipped",
+                attempt=1,
+                request_payload={
+                    "conditions": (resolved_step if isinstance(resolved_step, dict) else step).get("conditions") or {}
+                },
+                response_payload={"skipped": True, "reason": skip_reason or "conditions_not_met"},
+            )
+            await workflow_repo.update_execution_state(
+                execution_id,
+                state=STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING,
+                current_step=f"{index + 1}:{step_name}:skipped",
+            )
+            continue
         request_payload = _redact_payload(resolved_step, secret_vars=secret_vars)
         step_max_retries = _resolve_step_max_retries(step, default_max_retries=max_retries)
         step_failure_mode = _resolve_step_failure_mode(step)

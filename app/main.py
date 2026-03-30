@@ -8982,7 +8982,24 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
 
 _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     "*": {
-        "fields": [],
+        "fields": [
+            {
+                "name": "conditions.department_in",
+                "label": "Only run for departments",
+                "type": "text",
+                "default": "",
+                "description": "Optional comma-separated department names. Step is skipped when the staff department does not match.",
+                "example": "Finance, Operations",
+            },
+            {
+                "name": "conditions.custom_fields_truthy",
+                "label": "Required tick-box fields",
+                "type": "text",
+                "default": "",
+                "description": "Optional comma-separated custom field names that must be checked/true before this step runs.",
+                "example": "needs_laptop, needs_phone",
+            },
+        ],
         "retry_policy": {"max_retries": 0},
         "failure_policy": {"mode": "fail_fast", "create_ticket_on_failure": True},
     },
