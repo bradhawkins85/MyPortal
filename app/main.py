@@ -17532,6 +17532,8 @@ def _parse_automation_form_submission(
     scheduled_time_raw = _get_str_value("scheduledTime").strip()
     trigger_event_raw = _get_str_value("triggerEvent").strip()
     trigger_filters_raw = _get_str_value("triggerFilters").strip()
+    trigger_filters_mode_raw = _get_str_value("triggerFiltersMode").strip().lower()
+    trigger_filters_mode = "advanced" if trigger_filters_mode_raw == "advanced" else "builder"
     action_module_raw = _get_str_value("actionModule").strip()
     action_payload_raw = _get_str_value("actionPayload").strip()
 
@@ -17546,6 +17548,7 @@ def _parse_automation_form_submission(
         "scheduledTime": scheduled_time_raw,
         "triggerEvent": trigger_event_raw,
         "triggerFiltersRaw": trigger_filters_raw,
+        "triggerFiltersMode": trigger_filters_mode,
         "actionModule": action_module_raw,
         "actionPayloadRaw": action_payload_raw,
     }
@@ -17588,10 +17591,11 @@ def _parse_automation_form_submission(
     try:
         trigger_filters = json.loads(trigger_filters_raw) if trigger_filters_raw else None
     except json.JSONDecodeError:
+        invalid_section = "Advanced JSON trigger filters" if trigger_filters_mode == "advanced" else "Trigger filter builder payload"
         return (
             None,
             form_state,
-            "Trigger filters must be valid JSON.",
+            f"{invalid_section} is invalid JSON.",
             status.HTTP_400_BAD_REQUEST,
         )
 
