@@ -580,20 +580,31 @@
     let descriptionSunEditor = null;
 
     function sanitizeDescriptionHtml(value) {
-      const rawHtml = String(value || '');
+      let current = String(value || '');
       let previous;
-      let current = rawHtml;
-      do {
+        previous = current;
       do {
         previous = current;
 
         const withoutBlockedTags = previous.replace(
           /<\s*\/?\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi,
-        );
+
         );
 
         current = withoutBlockedTags
           .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
+          .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+          .replace(
+            /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
+            ''
+          )
+          .replace(
+            /\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi,
+            ''
+          );
+      } while (current !== previous);
+
+      return current;
           .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
           .replace(
             /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
