@@ -85,8 +85,12 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
         enabled=True,
         onboarding_complete=False,
         onboarding_status="requested",
+        offboarding_complete=False,
+        offboarding_status="approved",
         created_after="2026-01-01T00:00:00",
         updated_after="2026-01-02T00:00:00",
+        offboarding_requested_after="2026-01-04T00:00:00",
+        offboarding_updated_after="2026-01-05T00:00:00",
         cursor="2026-01-03T00:00:00|15",
         page_size=100,
     )
@@ -94,8 +98,11 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
     assert len(result) == 1
     assert "s.onboarding_complete = %s" in (dummy_db.last_sql or "")
     assert "LOWER(s.onboarding_status) = LOWER(%s)" in (dummy_db.last_sql or "")
+    assert "LOWER(s.onboarding_status) LIKE 'offboarding_%'" in (dummy_db.last_sql or "")
+    assert "LOWER(s.onboarding_status) <> 'offboarding_completed'" in (dummy_db.last_sql or "")
     assert "s.created_at > %s" in (dummy_db.last_sql or "")
     assert "s.updated_at > %s" in (dummy_db.last_sql or "")
+    assert "s.date_offboarded > %s" in (dummy_db.last_sql or "")
     assert "(s.updated_at > %s OR (s.updated_at = %s AND s.id > %s))" in (dummy_db.last_sql or "")
     assert "ORDER BY s.updated_at ASC, s.id ASC" in (dummy_db.last_sql or "")
     assert "LIMIT %s" in (dummy_db.last_sql or "")
