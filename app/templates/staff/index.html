@@ -537,6 +537,20 @@
         <legend>Custom fields</legend>
         <div class="form-grid" id="edit-custom-fields-grid"></div>
       </fieldset>
+      <fieldset class="fieldset" id="edit-actions-section">
+        <legend>Actions</legend>
+        <div class="form-actions" style="justify-content: flex-start; flex-wrap: wrap;">
+          <button type="button" class="button button--ghost" id="edit-action-invite" data-edit-action="invite">Invite</button>
+          <button type="button" class="button button--ghost" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request Offboarding</button>
+          <button type="button" class="button button--ghost" id="edit-action-approve" data-edit-action="approve">Approve</button>
+          <button type="button" class="button button--ghost" id="edit-action-deny" data-edit-action="deny">Deny</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-rerun" data-edit-action="workflow-rerun">Workflow rerun</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Workflow force-complete</button>
+          <button type="button" class="button button--danger" id="edit-action-delete" data-edit-action="delete">Delete</button>
+        </div>
+      </fieldset>
       <div class="form-actions">
         <button type="submit" class="button">Save changes</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
