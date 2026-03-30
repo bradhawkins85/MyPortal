@@ -605,31 +605,6 @@
       } while (current !== previous);
 
       return current;
-          .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
-          .replace(
-            /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
-            ''
-          )
-          .replace(
-            /\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi,
-            ''
-          );
-      } while (current !== previous);
-
-      return current;
-          .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
-          .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
-          .replace(
-            /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
-            ''
-          )
-          .replace(
-            /\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi,
-            ''
-          );
-      } while (sanitized !== previous);
-
-      return sanitized;
     }
 
     function getOrCreateDescriptionEditor() {
