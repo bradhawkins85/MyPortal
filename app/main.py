@@ -8980,6 +8980,68 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
     },
 ]
 
+_WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
+    "*": {
+        "fields": [],
+        "retry_policy": {"max_retries": 0},
+        "failure_policy": {"mode": "fail_fast", "create_ticket_on_failure": True},
+    },
+    "m365_rename_upn_display_name": {
+        "fields": [
+            {"name": "upn_prefix", "label": "UPN prefix", "type": "text", "default": "former"},
+            {
+                "name": "display_name",
+                "label": "Display name template",
+                "type": "text",
+                "default": "${vars.staff_full_name} (Former Staff)",
+            },
+        ],
+    },
+    "m365_update_org_fields": {
+        "fields": [
+            {"name": "department", "label": "Department value", "type": "text", "default": "Former Staff"},
+            {"name": "company_name", "label": "Company value", "type": "text", "default": "Former Staff"},
+        ],
+    },
+    "m365_hide_from_gal": {
+        "fields": [
+            {"name": "hidden", "label": "Hide from GAL", "type": "checkbox", "default": True},
+            {
+                "name": "property_path",
+                "label": "Graph property path",
+                "type": "text",
+                "default": "showInAddressList",
+            },
+        ],
+    },
+    "m365_identity_hygiene": {
+        "fields": [
+            {"name": "revoke_sign_in_sessions", "label": "Revoke sign-in sessions", "type": "checkbox", "default": True},
+            {
+                "name": "office_location",
+                "label": "Office location",
+                "type": "text",
+                "default": "Offboarded",
+                "target": "hygiene_updates.officeLocation",
+            },
+            {
+                "name": "job_title",
+                "label": "Job title",
+                "type": "text",
+                "default": "Former Staff",
+                "target": "hygiene_updates.jobTitle",
+            },
+            {
+                "name": "mobile_phone",
+                "label": "Mobile phone",
+                "type": "text",
+                "default": "",
+                "target": "hygiene_updates.mobilePhone",
+            },
+        ],
+    },
+}
+
 
 def _collect_validation_errors(exc: ValidationError) -> list[str]:
     errors: list[str] = []
@@ -9156,6 +9218,7 @@ async def staff_onboarding_workflow_policy(request: Request):
             "policy": _normalise_workflow_policy_response(policy),
             "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
             "step_catalog": _ONBOARDING_STEP_CATALOG,
+            "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
         }
     )
 
@@ -9243,6 +9306,7 @@ async def staff_offboarding_workflow_policy(request: Request):
             ),
             "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
             "step_catalog": _OFFBOARDING_STEP_CATALOG,
+            "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
         }
     )
 
