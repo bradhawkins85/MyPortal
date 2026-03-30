@@ -472,9 +472,9 @@ async def force_sync_recordings_from_filesystem(recordings_path: str) -> dict[st
             )
             created += 1
         except Exception as exc:  # pragma: no cover - database dependent
-            message = f"Failed to persist call recording {audio_file}: {exc}"
-            logger.error(message)
-            errors.append(message)
+            log_message = f"Failed to persist call recording {audio_file}: {exc}"
+            logger.error(log_message)
+            errors.append(f"Failed to persist call recording {audio_file}")
 
     return {
         "status": "ok",
