@@ -95,7 +95,18 @@
         });
         target[parts[parts.length - 1]] = value;
       };
-      const getSchemaForType = (stepType) => ({ ...(stepFormSchema['*'] || {}), ...(stepFormSchema[stepType] || {}) });
+      const getSchemaForType = (stepType) => {
+        const baseSchema = stepFormSchema['*'] && typeof stepFormSchema['*'] === 'object' ? stepFormSchema['*'] : {};
+        const typeSchema = stepFormSchema[stepType] && typeof stepFormSchema[stepType] === 'object' ? stepFormSchema[stepType] : {};
+        return {
+          ...baseSchema,
+          ...typeSchema,
+          fields: [
+            ...(Array.isArray(baseSchema.fields) ? baseSchema.fields : []),
+            ...(Array.isArray(typeSchema.fields) ? typeSchema.fields : []),
+          ],
+        };
+      };
       const getFieldValue = (step, field) => {
         const keyPath = field.target || field.name;
         const value = getNested(step.config || {}, keyPath);
