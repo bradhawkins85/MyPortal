@@ -195,6 +195,12 @@
     const editForm = document.getElementById('staff-edit-form');
     const editIdField = getField('edit-staff-id');
     const editCustomFieldsGrid = getField('edit-custom-fields-grid');
+    const offboardingModal = document.getElementById('staff-offboarding-modal');
+    const offboardingForm = document.getElementById('staff-offboarding-form');
+    const offboardingStaffIdField = getField('offboarding-staff-id');
+    const offboardingReasonField = getField('offboarding-reason');
+    const offboardingRequestedAtField = getField('offboarding-requested-at');
+    const offboardingNotesField = getField('offboarding-notes');
     const addForm = container.querySelector('form.staff-form');
 
     const editFields = {
@@ -219,6 +225,7 @@
     };
 
     bindModalDismissal(editModal);
+    bindModalDismissal(offboardingModal);
 
     const editCustomFieldInputs = new Map();
     if (editCustomFieldsGrid && Array.isArray(customFieldDefinitions)) {
@@ -299,6 +306,30 @@
       }
     }
 
+    function setDefaultOffboardingDateTime() {
+      if (!offboardingRequestedAtField) {
+        return;
+      }
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      offboardingRequestedAtField.value = now.toISOString().slice(0, 16);
+    }
+
+    container.querySelectorAll('[data-staff-offboarding-request]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const id = Number(button.getAttribute('data-staff-offboarding-request'));
+        const member = staffById.get(id);
+        if (!member || !offboardingStaffIdField || !offboardingReasonField || !offboardingRequestedAtField || !offboardingNotesField) {
+          return;
+        }
+        offboardingStaffIdField.value = String(id);
+        offboardingReasonField.value = '';
+        offboardingNotesField.value = '';
+        setDefaultOffboardingDateTime();
+        openModal(offboardingModal);
+      });
+    });
+
     container.querySelectorAll('[data-staff-edit]').forEach((button) => {
       button.addEventListener('click', () => {
         const id = Number(button.getAttribute('data-staff-edit'));
@@ -344,6 +375,29 @@
         openModal(editModal);
       });
     });
+
+    if (offboardingForm) {
+      offboardingForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const staffId = offboardingStaffIdField ? offboardingStaffIdField.value : '';
+        const reason = offboardingReasonField ? offboardingReasonField.value.trim() : '';
+        const requestedAt = offboardingRequestedAtField ? offboardingRequestedAtField.value : '';
+        const notes = offboardingNotesField ? offboardingNotesField.value.trim() : '';
+        if (!staffId || !reason || !requestedAt) {
+          alert('Reason and requested offboarding date/time are required.');
+          return;
+        }
+        try {
+          await requestJson(`/api/staff/${staffId}/offboarding/request`, {
+            method: 'POST',
+            body: JSON.stringify({ reason, requestedAt, notes: notes || null }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to submit offboarding request: ${error.message}`);
+        }
+      });
+    }
 
     if (editForm) {
       editForm.addEventListener('submit', async (event) => {
