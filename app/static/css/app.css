@@ -2955,7 +2955,7 @@ button.header-title-menu__link {
 }
 
 .text-muted {
-  color: rgba(55, 65, 81, 0.8);
+  color: var(--text-muted, rgba(148, 163, 184, 0.85));
   font-size: 0.9rem;
 }
 
@@ -8140,7 +8140,7 @@ dialog.dialog::backdrop {
   user-select: none;
 }
 
-.form-checkbox {
+input.form-checkbox {
   width: 1.25rem;
   height: 1.25rem;
   cursor: pointer;
