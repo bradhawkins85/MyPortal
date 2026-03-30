@@ -333,6 +333,7 @@ async def smtp2go_webhook(
         }
     except Exception as exc:
         error_message = str(exc)
+        user_friendly_error = "Failed to process webhook event"
         logger.error(
             "Error processing SMTP2Go webhook event",
             error=error_message,
@@ -343,10 +344,10 @@ async def smtp2go_webhook(
             payload=event,
             headers=request_headers,
             response_status=200,
-            response_body=error_message,
+            response_body=user_friendly_error,
             error_message=error_message,
         )
         return {
             "status": "failed",
-            "error": error_message,
+            "error": user_friendly_error,
         }
