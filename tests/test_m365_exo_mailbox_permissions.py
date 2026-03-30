@@ -310,6 +310,40 @@ def test_parse_exo_records_user_nested_object_raw_identity():
     assert result[0]["member_upn"] == "admin@contoso.com"
 
 
+def test_parse_exo_records_user_nested_object_user_principal_name():
+    """User serialised with UserPrincipalName key is handled."""
+    records = [
+        {
+            "User": {
+                "@odata.type": "#UserPrincipal",
+                "UserPrincipalName": "admin@contoso.com",
+            },
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object_primary_smtp_address():
+    """User serialised with PrimarySmtpAddress key is handled."""
+    records = [
+        {
+            "User": {
+                "@odata.type": "#UserPrincipal",
+                "PrimarySmtpAddress": "admin@contoso.com",
+            },
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
 def test_parse_exo_records_combined_rest_api_format():
     """Full REST API record with string Deny and nested AccessRights is handled."""
     records = [
