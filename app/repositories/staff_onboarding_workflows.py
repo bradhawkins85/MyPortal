@@ -11,6 +11,7 @@ from app.core.database import db
 
 
 DEFAULT_WORKFLOW_KEY = "staff_onboarding_m365"
+DEFAULT_OFFBOARDING_WORKFLOW_KEY = "staff_offboarding_m365"
 
 
 def _utc_now_naive() -> datetime:
@@ -59,7 +60,11 @@ def _normalise_idempotency(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return record
 
 
-async def get_company_workflow_policy(company_id: int) -> dict[str, Any]:
+async def get_company_workflow_policy(
+    company_id: int,
+    *,
+    default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
+) -> dict[str, Any]:
     company = await db.fetch_one(
         "SELECT company_onboarding_workflow_id FROM companies WHERE id = %s",
         (company_id,),
@@ -72,7 +77,7 @@ async def get_company_workflow_policy(company_id: int) -> dict[str, Any]:
         """,
         (company_id,),
     )
-    workflow_key = str((company or {}).get("company_onboarding_workflow_id") or "").strip() or DEFAULT_WORKFLOW_KEY
+    workflow_key = str((company or {}).get("company_onboarding_workflow_id") or "").strip() or default_workflow_key
     if not policy:
         return {
             "company_id": company_id,
@@ -83,7 +88,7 @@ async def get_company_workflow_policy(company_id: int) -> dict[str, Any]:
         }
     return {
         "company_id": int(policy["company_id"]),
-        "workflow_key": str(policy.get("workflow_key") or workflow_key or DEFAULT_WORKFLOW_KEY),
+        "workflow_key": str(policy.get("workflow_key") or workflow_key or default_workflow_key),
         "is_enabled": bool(int(policy.get("is_enabled") or 0)),
         "max_retries": max(0, int(policy.get("max_retries") or 0)),
         "config": _deserialise_json(policy.get("config_json")),
@@ -97,8 +102,15 @@ async def upsert_company_workflow_policy(
     is_enabled: bool,
     max_retries: int,
     config: dict[str, Any] | None,
+    default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
 ) -> dict[str, Any]:
-    clean_key = workflow_key.strip() or DEFAULT_WORKFLOW_KEY
+    clean_key = workflow_key.strip()
+    if not clean_key:
+        existing_policy = await get_company_workflow_policy(
+            company_id,
+            default_workflow_key=default_workflow_key,
+        )
+        clean_key = str(existing_policy.get("workflow_key") or "").strip() or default_workflow_key
     await db.execute(
         "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
         (clean_key, company_id),
@@ -122,7 +134,10 @@ async def upsert_company_workflow_policy(
             json.dumps(config or {}, ensure_ascii=False),
         ),
     )
-    return await get_company_workflow_policy(company_id)
+    return await get_company_workflow_policy(
+        company_id,
+        default_workflow_key=default_workflow_key,
+    )
 
 
 async def create_or_reset_execution(
