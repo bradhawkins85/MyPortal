@@ -8988,12 +8988,24 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     },
     "m365_rename_upn_display_name": {
         "fields": [
-            {"name": "upn_prefix", "label": "UPN prefix", "type": "text", "default": "former"},
+            {
+                "name": "upn_prefix",
+                "label": "UPN prefix",
+                "type": "text",
+                "default": "former",
+                "description": "Prefix added before the current UPN local-part.",
+                "example": "former",
+            },
             {
                 "name": "display_name",
                 "label": "Display name template",
                 "type": "text",
                 "default": "${vars.staff_full_name} (Former Staff)",
+                "description": (
+                    "Supports workflow variables, for example ${vars.staff.full_name}, "
+                    "${vars.staff.email}, ${vars.now.date}, or ${vars.now.local.display}."
+                ),
+                "example": "${vars.staff.full_name} (Former Staff - ${vars.now.local.display})",
             },
         ],
     },

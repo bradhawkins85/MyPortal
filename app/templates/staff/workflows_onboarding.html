@@ -75,6 +75,12 @@
       let steps = [];
       let existingConfig = {};
       let stepFormSchema = {};
+      const formatFieldHelp = (field) => {
+        const helpParts = [];
+        if (field && field.description) helpParts.push(String(field.description));
+        if (field && field.example) helpParts.push(`Example: ${field.example}`);
+        return helpParts.join(' ');
+      };
 
       const getNested = (source, path) => String(path || '').split('.').reduce((acc, part) => (
         acc && typeof acc === 'object' ? acc[part] : undefined
@@ -165,10 +171,24 @@
               wrap.append(input, text);
               input.addEventListener('change', () => setNested(steps[index].config, keyPath, input.checked));
               body.appendChild(wrap);
+              const helpText = formatFieldHelp(field);
+              if (helpText) {
+                const help = document.createElement('small');
+                help.className = 'text-muted';
+                help.textContent = helpText;
+                body.appendChild(help);
+              }
               return;
             }
             const input = makeInput(field, getFieldValue(step, field));
             body.append(makeLabel(field.label), input);
+            const helpText = formatFieldHelp(field);
+            if (helpText) {
+              const help = document.createElement('small');
+              help.className = 'text-muted';
+              help.textContent = helpText;
+              body.appendChild(help);
+            }
             input.addEventListener('change', () => {
               const value = field.type === 'number' ? Number(input.value || 0) : input.value;
               setNested(steps[index].config, keyPath, value);
