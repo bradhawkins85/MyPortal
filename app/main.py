@@ -8941,6 +8941,21 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Applies reversible profile cleanup and can revoke sign-in sessions.",
     },
     {
+        "type": "send_welcome_email",
+        "name": "Send welcome email",
+        "description": "Sends a templated email to configured destination(s). Supports ${vars.*} values from system and earlier steps.",
+    },
+    {
+        "type": "send_custom_email",
+        "name": "Send custom email",
+        "description": "Sends a custom email to configured destination(s) with custom subject/body and ${vars.*} interpolation.",
+    },
+    {
+        "type": "email_requestor",
+        "name": "Email requestor",
+        "description": "Sends workflow details to the requesting user using workflow/system variables.",
+    },
+    {
         "type": "http_get",
         "name": "HTTP GET request",
         "description": "Calls an external endpoint with optional headers/query parameters and stores response variables.",
