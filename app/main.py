@@ -8942,6 +8942,44 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
     },
 ]
 
+_ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
+    {
+        "type": "create_user",
+        "name": "Create user account",
+        "description": "Creates the staff user account in Microsoft 365 / Entra ID.",
+    },
+    {
+        "type": "assign_licenses",
+        "name": "Assign licenses",
+        "description": "Assigns one or more M365 licenses to the new starter.",
+    },
+    {
+        "type": "add_to_groups",
+        "name": "Add to groups",
+        "description": "Adds the new staff member to required security and distribution groups.",
+    },
+    {
+        "type": "set_manager",
+        "name": "Set manager",
+        "description": "Sets the direct manager relationship for org chart and approvals.",
+    },
+    {
+        "type": "send_welcome_email",
+        "name": "Send welcome email",
+        "description": "Sends a templated welcome email to the staff member. Supports ${vars.*} values from system and earlier steps.",
+    },
+    {
+        "type": "send_custom_email",
+        "name": "Send custom email",
+        "description": "Sends a custom email to configured destination(s) with custom subject/body and ${vars.*} interpolation.",
+    },
+    {
+        "type": "email_requestor",
+        "name": "Email requestor",
+        "description": "Sends onboarding details (for example login/password) to the requesting user using workflow/system variables.",
+    },
+]
+
 
 def _collect_validation_errors(exc: ValidationError) -> list[str]:
     errors: list[str] = []
@@ -9113,6 +9151,7 @@ async def staff_onboarding_workflow_policy(request: Request):
         {
             "policy": _normalise_workflow_policy_response(policy),
             "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
+            "step_catalog": _ONBOARDING_STEP_CATALOG,
         }
     )
 
