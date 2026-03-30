@@ -371,18 +371,27 @@ async def acquire_access_token(
             )
             return stored_token
 
+    # Legacy CSP deployments may still store the customer tenant mapping on the
+    # company record while credentials point at a shared partner tenant app.
+    # Use the mapped customer tenant when present to avoid cross-tenant sync.
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = csp_tenant_id or tenant_id
+    csp_mapping_applied = bool(csp_tenant_id)
+
     log_info(
         "M365 acquiring access token",
         company_id=company_id,
         tenant_id=tenant_id,
         client_id=client_id,
+        effective_tenant_id=effective_tenant_id,
+        csp_mapping_applied=csp_mapping_applied,
     )
 
     stored_refresh = None if force_client_credentials else creds.get("refresh_token")
     grant_type = "refresh_token" if stored_refresh else "client_credentials"
     try:
         access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=stored_refresh,
@@ -396,11 +405,11 @@ async def acquire_access_token(
         log_error(
             "M365 refresh token is invalid; falling back to client_credentials grant",
             company_id=company_id,
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             client_id=client_id,
         )
         access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=tenant_id,
+            tenant_id=effective_tenant_id,
             client_id=client_id,
             client_secret=creds.get("client_secret") or "",
             refresh_token=None,
@@ -413,7 +422,7 @@ async def acquire_access_token(
     log_info(
         "M365 access token acquired successfully",
         company_id=company_id,
-        tenant_id=tenant_id,
+        effective_tenant_id=effective_tenant_id,
         client_id=client_id,
         grant_type=grant_type,
     )
