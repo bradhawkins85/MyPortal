@@ -8940,6 +8940,16 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "Identity hygiene",
         "description": "Applies reversible profile cleanup and can revoke sign-in sessions.",
     },
+    {
+        "type": "http_get",
+        "name": "HTTP GET request",
+        "description": "Calls an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "http_post",
+        "name": "HTTP POST request",
+        "description": "Posts JSON data to an external endpoint with optional headers/query parameters and stores response variables.",
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
@@ -8977,6 +8987,16 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "email_requestor",
         "name": "Email requestor",
         "description": "Sends onboarding details (for example login/password) to the requesting user using workflow/system variables.",
+    },
+    {
+        "type": "http_get",
+        "name": "HTTP GET request",
+        "description": "Calls an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "http_post",
+        "name": "HTTP POST request",
+        "description": "Posts JSON data to an external endpoint with optional headers/query parameters and stores response variables.",
     },
 ]
 
@@ -9309,6 +9329,96 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "text",
                 "default": "",
                 "target": "hygiene_updates.mobilePhone",
+            },
+        ],
+    },
+    "http_get": {
+        "fields": [
+            {
+                "name": "url",
+                "label": "Request URL",
+                "type": "text",
+                "default": "",
+                "description": "Supports workflow variables like ${vars.staff.email}.",
+                "example": "https://api.example.com/users/${vars.staff.email}",
+            },
+            {
+                "name": "headers_json",
+                "label": "Headers (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object of headers. Values can include ${vars.*}.",
+                "example": "{\"Authorization\":\"Bearer ${vars.system.api_token}\"}",
+            },
+            {
+                "name": "query_params_json",
+                "label": "Query params (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object of query parameters.",
+                "example": "{\"staffId\":\"${vars.staff_id}\",\"status\":\"active\"}",
+            },
+            {
+                "name": "store_json",
+                "label": "Workflow variables to store (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
+                "example": "{\"external_user_id\":\"body.id\",\"sync_status\":\"body.status\"}",
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": 30,
+            },
+        ],
+    },
+    "http_post": {
+        "fields": [
+            {
+                "name": "url",
+                "label": "Request URL",
+                "type": "text",
+                "default": "",
+                "description": "Supports workflow variables like ${vars.staff.email}.",
+                "example": "https://api.example.com/users",
+            },
+            {
+                "name": "headers_json",
+                "label": "Headers (JSON object)",
+                "type": "textarea",
+                "default": "{\"Content-Type\":\"application/json\"}",
+                "description": "JSON object of headers. Values can include ${vars.*}.",
+            },
+            {
+                "name": "query_params_json",
+                "label": "Query params (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object of query parameters.",
+            },
+            {
+                "name": "json_body",
+                "label": "JSON body",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object/array sent as request body. Supports ${vars.*}.",
+                "example": "{\"email\":\"${vars.staff.email}\",\"firstName\":\"${vars.staff.first_name}\"}",
+            },
+            {
+                "name": "store_json",
+                "label": "Workflow variables to store (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
+                "example": "{\"external_user_id\":\"body.id\",\"external_ticket_id\":\"body.ticket.id\"}",
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": 30,
             },
         ],
     },

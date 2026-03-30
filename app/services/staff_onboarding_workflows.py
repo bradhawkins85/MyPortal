@@ -561,6 +561,46 @@ def _redact_payload(payload: Any, *, secret_vars: set[str]) -> Any:
     return payload
 
 
+def _parse_json_text(value: str) -> Any:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _coerce_step_json_fields(step: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(step)
+    json_field_targets = {
+        "headers_json": "headers",
+        "query_params_json": "query_params",
+        "json_body": "json",
+        "store_json": "store",
+    }
+    for source_field, target_field in json_field_targets.items():
+        raw_value = normalized.get(source_field)
+        if not isinstance(raw_value, str):
+            continue
+        parsed = _parse_json_text(raw_value)
+        if parsed is not None:
+            normalized[target_field] = parsed
+    return normalized
+
+
+def _resolve_json_object_candidate(raw: Any, *, field_name: str) -> dict[str, Any]:
+    if raw in (None, ""):
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        parsed = _parse_json_text(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    raise WorkflowStepError(f"{field_name} must be a JSON object")
+
+
 def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
     if direction == DIRECTION_OFFBOARDING:
         return [
@@ -800,10 +840,29 @@ async def _execute_policy_step(
         if not url:
             raise WorkflowStepError("HTTP step requires url")
         headers = _resolve_template_value(step.get("headers") or {}, vars_map=vars_map)
-        body = _resolve_template_value(step.get("body") or step.get("json") or {}, vars_map=vars_map)
+        headers = _resolve_json_object_candidate(headers, field_name="headers")
+        query_params = _resolve_template_value(
+            step.get("query_params") or step.get("query") or step.get("params") or {},
+            vars_map=vars_map,
+        )
+        query_params = _resolve_json_object_candidate(query_params, field_name="query_params")
+        body = _resolve_template_value(
+            step.get("json") if step.get("json") is not None else (step.get("body") or {}),
+            vars_map=vars_map,
+        )
+        if isinstance(body, str):
+            parsed_body = _parse_json_text(body)
+            if parsed_body is not None:
+                body = parsed_body
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            response = await client.request(method, url, headers=headers, json=body if method == "POST" else None)
+            response = await client.request(
+                method,
+                url,
+                headers=headers,
+                params=query_params or None,
+                json=body if method == "POST" else None,
+            )
         payload: dict[str, Any] = {"status_code": response.status_code}
         content_type = str(response.headers.get("content-type") or "").lower()
         if "json" in content_type:
@@ -1276,6 +1335,8 @@ async def _execute_policy_steps(
             return {"paused": True, "confirmation_token": confirmation_token}
 
         resolved_step = _resolve_template_value(step, vars_map=vars_map)
+        if isinstance(resolved_step, dict):
+            resolved_step = _coerce_step_json_fields(resolved_step)
         should_execute, skip_reason = _evaluate_step_conditions(
             step=resolved_step if isinstance(resolved_step, dict) else step,
             staff=staff,
