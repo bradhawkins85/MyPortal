@@ -1171,9 +1171,15 @@ async def sync_company_licenses(company_id: int) -> None:
                 sku_id=str(sku_id),
             )
     today = date.today()
+    m365_managed_sku_cache: dict[str, bool] = {}
     all_licenses = await license_repo.list_company_licenses(company_id)
     for lic in all_licenses:
         sku = lic.get("platform") or ""
+        if sku not in m365_managed_sku_cache:
+            app = await apps_repo.get_app_by_vendor_sku(sku) if sku else None
+            m365_managed_sku_cache[sku] = bool(app and app.get("license_sku_id"))
+        if not m365_managed_sku_cache.get(sku, False):
+            continue
         expiry = lic.get("expiry_date")
         if isinstance(expiry, datetime):
             expiry_date_only = expiry.date()
@@ -1523,4 +1529,3 @@ async def list_csp_customers(access_token: str) -> list[dict[str, Any]]:
         url = data.get("@odata.nextLink")
     customers.sort(key=lambda c: c["name"].lower())
     return customers
-
