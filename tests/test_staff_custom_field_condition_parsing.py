@@ -23,3 +23,15 @@ def test_select_map_legacy_condition_is_preserved():
     assert parent == "department"
     assert operator == "select_map"
     assert value == "sales=>a|b|c;*=>other"
+
+
+def test_one_of_condition_is_supported():
+    parent, operator, value = _parse_staff_custom_field_condition(
+        parent_name_value="Department",
+        operator_value="one_of",
+        condition_value="sales, support, hr",
+    )
+
+    assert parent == "department"
+    assert operator == "one_of"
+    assert value == "sales, support, hr"
