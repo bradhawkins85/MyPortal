@@ -8966,7 +8966,17 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
     {
         "type": "send_welcome_email",
         "name": "Send welcome email",
-        "description": "Sends a templated welcome and onboarding communication.",
+        "description": "Sends a templated welcome email to the staff member. Supports ${vars.*} values from system and earlier steps.",
+    },
+    {
+        "type": "send_custom_email",
+        "name": "Send custom email",
+        "description": "Sends a custom email to configured destination(s) with custom subject/body and ${vars.*} interpolation.",
+    },
+    {
+        "type": "email_requestor",
+        "name": "Email requestor",
+        "description": "Sends onboarding details (for example login/password) to the requesting user using workflow/system variables.",
     },
 ]
 
