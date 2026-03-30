@@ -87,54 +87,114 @@
         steps.forEach((step, index) => {
           const card = document.createElement('section');
           card.className = 'card card--panel';
-          card.innerHTML = `
-            <header class="card__header card__header--stacked">
-              <strong>${index + 1}. ${step.name}</strong>
-              <small class="text-muted">${step.type}</small>
-            </header>
-            <div class="card__body stack-xs">
-              <label class="form-label">Step name</label>
-              <input class="form-input" data-key="name" value="${step.name}" />
-              <label class="form-label">Step config JSON</label>
-              <textarea class="form-input" data-key="config" rows="4">${JSON.stringify(step.config || {}, null, 2)}</textarea>
-              <label class="form-label">Retry policy JSON</label>
-              <textarea class="form-input" data-key="retry_policy" rows="2">${JSON.stringify(step.retry_policy || {"max_retries": 0}, null, 2)}</textarea>
-              <label class="form-label">Failure policy JSON</label>
-              <textarea class="form-input" data-key="failure_policy" rows="2">${JSON.stringify(step.failure_policy || {"mode": "fail_fast"}, null, 2)}</textarea>
-              <div class="form-row">
-                <button type="button" class="btn btn-secondary" data-action="up">Move up</button>
-                <button type="button" class="btn btn-secondary" data-action="down">Move down</button>
-                <button type="button" class="btn btn-danger" data-action="delete">Remove</button>
-              </div>
-            </div>
-          `;
+          const header = document.createElement('header');
+          header.className = 'card__header card__header--stacked';
+          const title = document.createElement('strong');
+          title.textContent = `${index + 1}. ${step.name}`;
+          const type = document.createElement('small');
+          type.className = 'text-muted';
+          type.textContent = step.type;
+          header.append(title, type);
 
-          card.querySelectorAll('[data-key]').forEach((input) => {
-            input.addEventListener('change', () => {
-              const key = input.getAttribute('data-key');
-              if (key === 'name') {
-                steps[index].name = input.value.trim() || steps[index].name;
-                return;
-              }
-              try {
-                steps[index][key] = JSON.parse(input.value || '{}');
-              } catch (_err) {
-                message.textContent = `Invalid JSON in step ${index + 1} (${key}).`;
-              }
-            });
+          const body = document.createElement('div');
+          body.className = 'card__body stack-xs';
+
+          const stepNameLabel = document.createElement('label');
+          stepNameLabel.className = 'form-label';
+          stepNameLabel.textContent = 'Step name';
+          const stepNameInput = document.createElement('input');
+          stepNameInput.className = 'form-input';
+          stepNameInput.value = step.name;
+
+          const stepConfigLabel = document.createElement('label');
+          stepConfigLabel.className = 'form-label';
+          stepConfigLabel.textContent = 'Step config JSON';
+          const stepConfigInput = document.createElement('textarea');
+          stepConfigInput.className = 'form-input';
+          stepConfigInput.rows = 4;
+          stepConfigInput.value = JSON.stringify(step.config || {}, null, 2);
+
+          const retryPolicyLabel = document.createElement('label');
+          retryPolicyLabel.className = 'form-label';
+          retryPolicyLabel.textContent = 'Retry policy JSON';
+          const retryPolicyInput = document.createElement('textarea');
+          retryPolicyInput.className = 'form-input';
+          retryPolicyInput.rows = 2;
+          retryPolicyInput.value = JSON.stringify(step.retry_policy || {"max_retries": 0}, null, 2);
+
+          const failurePolicyLabel = document.createElement('label');
+          failurePolicyLabel.className = 'form-label';
+          failurePolicyLabel.textContent = 'Failure policy JSON';
+          const failurePolicyInput = document.createElement('textarea');
+          failurePolicyInput.className = 'form-input';
+          failurePolicyInput.rows = 2;
+          failurePolicyInput.value = JSON.stringify(step.failure_policy || {"mode": "fail_fast"}, null, 2);
+
+          const actionsRow = document.createElement('div');
+          actionsRow.className = 'form-row';
+          const moveUpBtn = document.createElement('button');
+          moveUpBtn.type = 'button';
+          moveUpBtn.className = 'btn btn-secondary';
+          moveUpBtn.textContent = 'Move up';
+          const moveDownBtn = document.createElement('button');
+          moveDownBtn.type = 'button';
+          moveDownBtn.className = 'btn btn-secondary';
+          moveDownBtn.textContent = 'Move down';
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'btn btn-danger';
+          removeBtn.textContent = 'Remove';
+          actionsRow.append(moveUpBtn, moveDownBtn, removeBtn);
+
+          body.append(
+            stepNameLabel,
+            stepNameInput,
+            stepConfigLabel,
+            stepConfigInput,
+            retryPolicyLabel,
+            retryPolicyInput,
+            failurePolicyLabel,
+            failurePolicyInput,
+            actionsRow,
+          );
+          card.append(header, body);
+
+          stepNameInput.addEventListener('change', () => {
+            steps[index].name = stepNameInput.value.trim() || steps[index].name;
+          });
+          stepConfigInput.addEventListener('change', () => {
+            try {
+              steps[index].config = JSON.parse(stepConfigInput.value || '{}');
+            } catch (_err) {
+              message.textContent = `Invalid JSON in step ${index + 1} (config).`;
+            }
+          });
+          retryPolicyInput.addEventListener('change', () => {
+            try {
+              steps[index].retry_policy = JSON.parse(retryPolicyInput.value || '{}');
+            } catch (_err) {
+              message.textContent = `Invalid JSON in step ${index + 1} (retry_policy).`;
+            }
+          });
+          failurePolicyInput.addEventListener('change', () => {
+            try {
+              steps[index].failure_policy = JSON.parse(failurePolicyInput.value || '{}');
+            } catch (_err) {
+              message.textContent = `Invalid JSON in step ${index + 1} (failure_policy).`;
+            }
           });
 
-          card.querySelector('[data-action="up"]').addEventListener('click', () => {
+          moveUpBtn.addEventListener('click', () => {
             if (index === 0) return;
             [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
             renderSteps();
           });
-          card.querySelector('[data-action="down"]').addEventListener('click', () => {
+          moveDownBtn.addEventListener('click', () => {
             if (index >= steps.length - 1) return;
             [steps[index + 1], steps[index]] = [steps[index], steps[index + 1]];
             renderSteps();
           });
-          card.querySelector('[data-action="delete"]').addEventListener('click', () => {
+          removeBtn.addEventListener('click', () => {
             steps.splice(index, 1);
             renderSteps();
           });
@@ -166,7 +226,13 @@
         maxRetriesInput.value = policy.max_retries || 0;
         enabledInput.checked = Boolean(policy.enabled);
         stepCatalog = Array.isArray(payload.step_catalog) ? payload.step_catalog : [];
-        stepTypeSelect.innerHTML = stepCatalog.map((item) => `<option value="${item.type}">${item.name}</option>`).join('');
+        stepTypeSelect.replaceChildren();
+        stepCatalog.forEach((item) => {
+          const option = document.createElement('option');
+          option.value = String(item.type || '');
+          option.textContent = String(item.name || item.type || 'step');
+          stepTypeSelect.appendChild(option);
+        });
         const configuredSteps = Array.isArray(config.steps) ? config.steps : [];
         steps = configuredSteps.map((step) => ({
           name: step.name || step.type || 'onboarding-step',
