@@ -8965,6 +8965,11 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "HTTP POST request",
         "description": "Posts JSON data to an external endpoint with optional headers/query parameters and stores response variables.",
     },
+    {
+        "type": "curl_text",
+        "name": "CURL text fetch",
+        "description": "Fetches data from an external web source using CURL and stores response as plain text only.",
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
@@ -9012,6 +9017,11 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "http_post",
         "name": "HTTP POST request",
         "description": "Posts JSON data to an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "curl_text",
+        "name": "CURL text fetch",
+        "description": "Fetches data from an external web source using CURL and stores response as plain text only.",
     },
 ]
 
@@ -9428,6 +9438,32 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "default": "{}",
                 "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
                 "example": "{\"external_user_id\":\"body.id\",\"external_ticket_id\":\"body.ticket.id\"}",
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": 30,
+            },
+        ],
+    },
+    "curl_text": {
+        "fields": [
+            {
+                "name": "url",
+                "label": "Request URL",
+                "type": "text",
+                "default": "",
+                "description": "HTTP/HTTPS URL to fetch via CURL. Supports workflow variables like ${vars.staff.email}.",
+                "example": "https://example.com/api/source?email=${vars.staff.email}",
+            },
+            {
+                "name": "store_json",
+                "label": "Workflow variables to store (JSON object)",
+                "type": "textarea",
+                "default": "{\"external_text\":\"body\"}",
+                "description": "Map variable name to response path. CURL response is stored as plain text in `body`.",
+                "example": "{\"external_text\":\"body\"}",
             },
             {
                 "name": "timeout_seconds",
