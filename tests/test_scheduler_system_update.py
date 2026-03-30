@@ -1,8 +1,6 @@
 from __future__ import annotations
 import asyncio
-from types import SimpleNamespace
-
-import pytest
+from pathlib import Path
 
 from app.services.scheduler import SchedulerService
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
@@ -34,43 +32,46 @@ def test_run_now_forces_restart_flag(monkeypatch):
     assert recorded["force_restart"] is True
 
 
-def test_system_update_sets_force_restart_env(monkeypatch):
+def test_system_update_schedules_flag_when_remote_ahead(monkeypatch, tmp_path: Path):
     scheduler = SchedulerService()
-    captured: dict[str, dict[str, str] | None] = {}
+    flag_path = tmp_path / "var" / "state" / "system_update.flag"
 
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        captured["env"] = kwargs.get("env")
+    async def fake_get_git_ref(self, ref: str):
+        assert ref == "HEAD"
+        return "localsha"
 
-        async def _communicate():
-            return b"ok", b""
+    async def fake_get_remote_main_ref(self):
+        return "remotesha"
 
-        return SimpleNamespace(returncode=0, communicate=_communicate)
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
+    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
 
     output = asyncio.run(scheduler._run_system_update(force_restart=True))
 
-    assert captured["env"] is not None
-    assert captured["env"].get("FORCE_RESTART") == "1"
-    assert output == "ok"
+    assert "Update scheduled" in output
+    assert flag_path.exists()
+    contents = flag_path.read_text(encoding="utf-8")
+    assert "requested_from_ui=true" in contents
+    assert "local_head=localsha" in contents
+    assert "remote_head=remotesha" in contents
 
 
-def test_system_update_default_env_sets_force_restart_false(monkeypatch):
+def test_system_update_skips_when_already_current(monkeypatch, tmp_path: Path):
     scheduler = SchedulerService()
-    captured: dict[str, dict[str, str] | None] = {}
+    flag_path = tmp_path / "var" / "state" / "system_update.flag"
 
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        captured["env"] = kwargs.get("env")
+    async def fake_get_git_ref(self, ref: str):
+        assert ref == "HEAD"
+        return "same"
 
-        async def _communicate():
-            return b"done", b""
+    async def fake_get_remote_main_ref(self):
+        return "same"
 
-        return SimpleNamespace(returncode=0, communicate=_communicate)
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
+    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
 
     output = asyncio.run(scheduler._run_system_update())
-
-    assert captured["env"] is not None
-    assert captured["env"].get("FORCE_RESTART") == "0"
-    assert output == "done"
+    assert output == "No GitHub update available; upgrade was not scheduled."
+    assert not flag_path.exists()

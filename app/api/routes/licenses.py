@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import licenses as license_repo
+from app.services import staff_onboarding_workflows as staff_workflow_service
 from app.schemas.licenses import (
     LicenseCreate,
     LicenseResponse,
@@ -34,6 +35,7 @@ async def create_license(
     __: dict = Depends(require_super_admin),
 ):
     created = await license_repo.create_license(**payload.model_dump())
+    await staff_workflow_service.process_paused_license_executions(company_id=int(created["company_id"]))
     return LicenseResponse.model_validate(created)
 
 
@@ -69,6 +71,7 @@ async def update_license(
         expiry_date=data.get("expiry_date"),
         contract_term=data.get("contract_term"),
     )
+    await staff_workflow_service.process_paused_license_executions(company_id=int(updated["company_id"]))
     return LicenseResponse.model_validate(updated)
 
 
@@ -82,6 +85,7 @@ async def delete_license(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
     await license_repo.delete_license(license_id)
+    await staff_workflow_service.process_paused_license_executions(company_id=int(existing["company_id"]))
     return None
 
 
@@ -109,6 +113,7 @@ async def link_staff(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
     await license_repo.link_staff_to_license(staff_id, license_id)
+    await staff_workflow_service.process_paused_license_executions(company_id=int(existing["company_id"]))
     return None
 
 
@@ -123,5 +128,5 @@ async def unlink_staff(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
     await license_repo.unlink_staff_from_license(staff_id, license_id)
+    await staff_workflow_service.process_paused_license_executions(company_id=int(existing["company_id"]))
     return None
-

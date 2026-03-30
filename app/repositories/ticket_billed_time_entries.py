@@ -90,3 +90,21 @@ async def get_billed_entries_by_invoice(xero_invoice_number: str) -> list[dict[s
         (xero_invoice_number,),
     )
     return [dict(row) for row in rows]
+
+
+async def rename_invoice_number(
+    company_id: int,
+    old_invoice_number: str,
+    new_invoice_number: str,
+) -> None:
+    """Update billed time entries to reference the new invoice number for one company."""
+    await db.execute(
+        """
+        UPDATE ticket_billed_time_entries bte
+        INNER JOIN tickets t ON t.id = bte.ticket_id
+        SET bte.xero_invoice_number = %s
+        WHERE bte.xero_invoice_number = %s
+          AND t.company_id = %s
+        """,
+        (new_invoice_number, old_invoice_number, company_id),
+    )

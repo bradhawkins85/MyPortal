@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Shared Mailboxes – Office 365{% endblock %}
+
+{% block header_actions %}
+  {% if has_credentials %}
+  <button type="button" class="button" id="sync-mailboxes-btn" data-sync-mailboxes>Sync mailboxes</button>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if success %}
+  <div class="alert alert--success" role="status">
+    {{ success }}
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">Shared Mailboxes</h2>
+        <p class="panel__subtitle">
+          Primary and archive mailbox sizes for shared, room and equipment mailboxes in the tenant.
+          {% if synced_at %}
+          Last synced {{ synced_at.strftime('%d %b %Y %H:%M') }} UTC.
+          {% endif %}
+        </p>
+      </div>
+    </header>
+    <div class="panel__body" {% if mailboxes %}style="padding:0"{% endif %}>
+      {% if not has_credentials %}
+      <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before syncing mailboxes.</p>
+      {% elif not mailboxes %}
+      <p class="text-muted">No shared mailbox data found. Click <strong>Sync mailboxes</strong> to fetch the latest data from Microsoft 365.</p>
+      {% else %}
+      <table class="table" data-table>
+        <thead>
+          <tr>
+            <th data-sort="string">Display Name</th>
+            <th data-sort="string">Email Address</th>
+            <th data-sort="number" style="text-align:right">Mailbox Size</th>
+            <th data-sort="number" style="text-align:right">Archive Size</th>
+            <th>Permissions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mb in mailboxes %}
+          <tr>
+            <td>{{ mb.display_name or mb.user_principal_name }}</td>
+            <td><small class="text-muted">{{ mb.user_principal_name }}</small></td>
+            <td data-value="{{ mb.storage_used_bytes }}" style="text-align:right;white-space:nowrap">{{ mb.storage_used_bytes | filesizeformat }}</td>
+            <td data-value="{{ mb.archive_storage_used_bytes or 0 }}" style="text-align:right;white-space:nowrap">
+              {% if mb.has_archive %}
+                {{ (mb.archive_storage_used_bytes or 0) | filesizeformat }}
+              {% else %}
+                <span class="text-muted">–</span>
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap">
+              <button
+                type="button"
+                class="button button--small"
+                data-perm-btn
+                data-upn="{{ mb.user_principal_name }}"
+                data-display-name="{{ mb.display_name or mb.user_principal_name }}"
+                aria-haspopup="dialog"
+                aria-controls="mailbox-perm-modal"
+              >Mailbox Permissions</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </section>
+
+  <div
+    class="modal"
+    id="mailbox-perm-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="mailbox-perm-title"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close mailbox permissions</span>
+        &times;
+      </button>
+      <h2 class="modal__title" id="mailbox-perm-title">Mailbox Permissions</h2>
+      <div class="modal__body">
+        <p id="perm-loading" style="display:none">Loading&hellip;</p>
+        <p id="perm-error" class="alert alert--error" role="alert" style="display:none"></p>
+        <div id="perm-content" style="display:none">
+          <h3 id="perm-can-access-heading" style="margin-top:0;font-size:1rem">Mailboxes I can access</h3>
+          <p class="panel__subtitle" style="margin-top:0">Shared mailboxes this identity can access via M365 group membership.</p>
+          <ul id="perm-can-access" style="margin:0 0 1.25rem;padding-left:1.25rem"></ul>
+          <h3 id="perm-accessible-by-heading" style="font-size:1rem">Users that can access me</h3>
+          <p class="panel__subtitle" style="margin-top:0">Users assigned full access to this mailbox.</p>
+          <ul id="perm-accessible-by" style="margin:0;padding-left:1.25rem"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script>
+  (function () {
+    var syncBtn = document.querySelector('[data-sync-mailboxes]');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', function () {
+        syncBtn.disabled = true;
+        var originalText = syncBtn.textContent;
+        fetch('/m365/mailboxes/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'{% if csrf_token %},
+            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+          }
+        })
+        .then(function (resp) { return resp.json(); })
+        .then(function () {
+          syncBtn.textContent = '\u2713 Sync started';
+          setTimeout(function () {
+            syncBtn.textContent = originalText;
+            syncBtn.disabled = false;
+          }, 3000);
+        })
+        .catch(function () {
+          syncBtn.textContent = originalText;
+          syncBtn.disabled = false;
+        });
+      });
+    }
+  }());
+  </script>
+  <script>
+  (function () {
+    var modal = document.getElementById('mailbox-perm-modal');
+    if (!modal) return;
+
+    var closeBtn = modal.querySelector('[data-modal-close]');
+    var titleEl = document.getElementById('mailbox-perm-title');
+    var loadingEl = document.getElementById('perm-loading');
+    var errorEl = document.getElementById('perm-error');
+    var contentEl = document.getElementById('perm-content');
+    var canAccessList = document.getElementById('perm-can-access');
+    var accessibleByList = document.getElementById('perm-accessible-by');
+    var activeTrigger = null;
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(String(str)));
+      return div.innerHTML;
+    }
+
+    function handleKeydown(e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+    }
+
+    function openModal(trigger) {
+      activeTrigger = trigger || null;
+      modal.hidden = false;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      document.addEventListener('keydown', handleKeydown);
+      if (closeBtn) { closeBtn.focus(); }
+    }
+
+    function closeModal() {
+      modal.classList.remove('is-visible');
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', handleKeydown);
+      if (activeTrigger && typeof activeTrigger.focus === 'function') {
+        activeTrigger.focus();
+      }
+      activeTrigger = null;
+    }
+
+    if (closeBtn) { closeBtn.addEventListener('click', closeModal); }
+    modal.addEventListener('click', function (e) { if (e.target === modal) { closeModal(); } });
+
+    function buildList(listEl, items, nameKey, subKey) {
+      listEl.innerHTML = '';
+      if (items && items.length > 0) {
+        items.forEach(function (item) {
+          var li = document.createElement('li');
+          li.innerHTML = escapeHtml(item[nameKey]) +
+            ' <small class="text-muted">' + escapeHtml(item[subKey]) + '</small>';
+          listEl.appendChild(li);
+        });
+      } else {
+        var li = document.createElement('li');
+        li.className = 'text-muted';
+        li.style.listStyle = 'none';
+        li.style.marginLeft = '-1.25rem';
+        li.textContent = 'None found.';
+        listEl.appendChild(li);
+      }
+    }
+
+    document.querySelectorAll('[data-perm-btn]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var upn = btn.getAttribute('data-upn');
+        var displayName = btn.getAttribute('data-display-name');
+
+        titleEl.textContent = displayName;
+        loadingEl.style.display = 'block';
+        errorEl.style.display = 'none';
+        contentEl.style.display = 'none';
+        openModal(btn);
+
+        fetch('/m365/mailboxes/permissions?upn=' + encodeURIComponent(upn))
+          .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+          .then(function (result) {
+            loadingEl.style.display = 'none';
+            if (!result.ok || result.data.error) {
+              errorEl.textContent = result.data.error || 'Failed to load permissions.';
+              errorEl.style.display = 'block';
+              return;
+            }
+            buildList(canAccessList, result.data.can_access, 'display_name', 'email');
+            buildList(accessibleByList, result.data.accessible_by, 'display_name', 'upn');
+            contentEl.style.display = 'block';
+          })
+          .catch(function () {
+            loadingEl.style.display = 'none';
+            errorEl.textContent = 'Failed to load permissions. Please try again.';
+            errorEl.style.display = 'block';
+          });
+      });
+    });
+  }());
+  </script>
+{% endblock %}

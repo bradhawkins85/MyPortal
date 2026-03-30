@@ -1,0 +1,7 @@
+{
+  "guid": "63cda989-3c1f-43ad-ad82-0c0e88e32e47",
+  "occurred_at": "2026-03-15T12:32:26.440921+00:00",
+  "change_type": "Fix",
+  "summary": "Fix CSP customer provisioning link to pass the selected customer tenant_id instead of routing through tenant discovery.",
+  "content_hash": "ae4fb8bcb196a8ddffcce7d5ab7eb699c6b63e6d55dfc21ef758259df0eaa6aa"
+}
