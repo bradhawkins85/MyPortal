@@ -6,6 +6,8 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
+
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -40,7 +42,16 @@ DIRECTION_OFFBOARDING = "offboarding"
 
 
 class WorkflowStepError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        step_name: str | None = None,
+        request_payload: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.step_name = step_name
+        self.request_payload = request_payload or {}
 
 
 class LicenseExhaustionError(WorkflowStepError):
@@ -410,7 +421,11 @@ async def _attempt_step(
             if attempt > max_retries:
                 break
             await asyncio.sleep(min(2 ** (attempt - 1), 5))
-    raise WorkflowStepError(str(last_error) if last_error else f"{step_name} failed")
+    raise WorkflowStepError(
+        str(last_error) if last_error else f"{step_name} failed",
+        step_name=step_name,
+        request_payload=request_payload,
+    )
 
 
 async def _run_provisioning_step(*, company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
@@ -466,11 +481,107 @@ async def _run_licensing_step(
     return {"assigned": True, "license_id": int(target_license_id)}
 
 
-async def _run_offboarding_step(*, company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
+async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.patch(url, headers=headers, json=payload)
+    if response.status_code not in (200, 204):
+        raise WorkflowStepError(
+            f"Microsoft Graph PATCH failed ({response.status_code})",
+            request_payload={"url": url, "payload": payload},
+        )
+    if response.status_code == 204:
+        return {}
+    return response.json()
+
+
+async def _resolve_staff_m365_user(company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
+    email = str(staff.get("email") or "").strip().lower()
+    if not email:
+        raise WorkflowStepError("Staff email is required for offboarding")
+    users = await m365_service.get_all_users(company_id)
+    matched = next(
+        (
+            user
+            for user in users
+            if str(user.get("mail") or user.get("userPrincipalName") or "").strip().lower() == email
+        ),
+        None,
+    )
+    if not matched or not matched.get("id"):
+        raise WorkflowStepError(f"Unable to locate M365 user for {email}")
+    return matched
+
+
+async def _run_offboarding_step(
+    *,
+    company_id: int,
+    staff: dict[str, Any],
+    policy_config: dict[str, Any],
+) -> dict[str, Any]:
+    disable_sign_in = bool(policy_config.get("offboarding_disable_sign_in", True))
+    remove_licenses = bool(policy_config.get("offboarding_remove_licenses", True))
+    remove_groups = bool(policy_config.get("offboarding_remove_groups", True))
+    configured_group_ids = [
+        str(group_id).strip()
+        for group_id in (policy_config.get("offboarding_group_ids") or [])
+        if str(group_id).strip()
+    ]
+
+    user = await _resolve_staff_m365_user(company_id, staff)
+    user_id = str(user["id"])
+    access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+    steps_executed: list[str] = []
+    removed_license_count = 0
+    removed_group_count = 0
+
+    if disable_sign_in:
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{user_id}",
+            {"accountEnabled": False},
+        )
+        steps_executed.append("disable_sign_in")
+
+    if remove_licenses:
+        license_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails",
+        )
+        sku_ids = [entry.get("skuId") for entry in (license_payload.get("value") or []) if entry.get("skuId")]
+        if sku_ids:
+            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{user_id}/assignLicense",
+                {"addLicenses": [], "removeLicenses": sku_ids},
+            )
+            removed_license_count = len(sku_ids)
+        steps_executed.append("remove_licenses")
+
+    if remove_groups:
+        group_ids = configured_group_ids
+        if not group_ids:
+            membership_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf?$select=id",
+            )
+            group_ids = [str(item.get("id")).strip() for item in (membership_payload.get("value") or []) if item.get("id")]
+        for group_id in group_ids:
+            await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{user_id}/$ref",
+            )
+            removed_group_count += 1
+        steps_executed.append("remove_groups")
+
     return {
         "company_id": int(company_id),
         "staff_id": int(staff["id"]),
         "offboarded": True,
+        "m365_user_id": user_id,
+        "steps_executed": steps_executed,
+        "licenses_removed": removed_license_count,
+        "groups_removed": removed_group_count,
     }
 
 
@@ -662,7 +773,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 step_name="offboard_account",
                 max_retries=max_retries,
                 request_payload={"company_id": company_id, "staff_id": staff_id},
-                callback=lambda: _run_offboarding_step(company_id=company_id, staff=staff),
+                callback=lambda: _run_offboarding_step(company_id=company_id, staff=staff, policy_config=policy_config),
             )
         else:
             await _attempt_step(
@@ -708,9 +819,9 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
             email=staff.get("email") or "",
             mobile_phone=staff.get("mobile_phone"),
             date_onboarded=staff.get("date_onboarded"),
-            date_offboarded=staff.get("date_offboarded"),
-            enabled=bool(staff.get("enabled", True)),
-            is_ex_staff=bool(staff.get("is_ex_staff", False)),
+            date_offboarded=completed_at if direction == DIRECTION_OFFBOARDING else staff.get("date_offboarded"),
+            enabled=False if direction == DIRECTION_OFFBOARDING else bool(staff.get("enabled", True)),
+            is_ex_staff=True if direction == DIRECTION_OFFBOARDING else bool(staff.get("is_ex_staff", False)),
             street=staff.get("street"),
             city=staff.get("city"),
             state=staff.get("state"),
@@ -720,11 +831,11 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
             job_title=staff.get("job_title"),
             org_company=staff.get("org_company"),
             manager_name=staff.get("manager_name"),
-            account_action=staff.get("account_action"),
             syncro_contact_id=staff.get("syncro_contact_id"),
             onboarding_status=completed_state,
             onboarding_complete=direction == DIRECTION_ONBOARDING,
             onboarding_completed_at=completed_at if direction == DIRECTION_ONBOARDING else None,
+            account_action="Offboard Completed" if direction == DIRECTION_OFFBOARDING else staff.get("account_action"),
         )
         await audit_service.log_action(
             user_id=initiated_by_user_id,
@@ -741,6 +852,8 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         return {"state": completed_state, "execution_id": execution_id}
     except Exception as exc:  # noqa: BLE001
         error_text = str(exc)
+        failed_step = exc.step_name if isinstance(exc, WorkflowStepError) else None
+        failed_payload = exc.request_payload if isinstance(exc, WorkflowStepError) else None
         if linked_license_id is not None:
             try:
                 await license_repo.unlink_staff_from_license(staff_id, linked_license_id)
@@ -762,7 +875,8 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                     "execution_id": execution_id,
                     "workflow_key": workflow_key,
                     "current_state": in_progress_state,
-                    "step": "provisioning_pipeline",
+                    "step": failed_step or "provisioning_pipeline",
+                    "payload": failed_payload,
                 },
             )
         except Exception as ticket_exc:  # noqa: BLE001

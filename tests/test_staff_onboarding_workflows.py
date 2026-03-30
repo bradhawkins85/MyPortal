@@ -235,6 +235,61 @@ async def test_run_workflow_allows_offboarding_approved_state(monkeypatch):
     assert create_execution_mock.await_args.kwargs["direction"] == workflows.DIRECTION_OFFBOARDING
 
 
+@pytest.mark.anyio
+async def test_resume_offboarding_marks_staff_disabled_only_after_success(monkeypatch):
+    staff_record = {
+        "id": 501,
+        "company_id": 8,
+        "first_name": "Remy",
+        "last_name": "Park",
+        "email": "remy@example.com",
+        "enabled": True,
+        "is_ex_staff": False,
+        "onboarding_status": workflows.STATE_OFFBOARDING_APPROVED,
+    }
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_company_workflow_policy",
+        AsyncMock(return_value={"workflow_key": "staff_onboarding_m365", "max_retries": 0, "config": {}}),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_execution_by_staff_id",
+        AsyncMock(return_value={"id": 71, "direction": workflows.DIRECTION_OFFBOARDING}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    update_mock = AsyncMock(return_value=staff_record)
+    monkeypatch.setattr(workflows.staff_repo, "update_staff", update_mock)
+    monkeypatch.setattr(workflows, "_attempt_step", AsyncMock(return_value={"offboarded": True}))
+    monkeypatch.setattr(workflows.audit_service, "log_action", AsyncMock())
+
+    result = await workflows.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=8,
+        staff_id=501,
+        execution_id=71,
+        initiated_by_user_id=22,
+    )
+
+    assert result["state"] == workflows.STATE_OFFBOARDING_COMPLETED
+    final_kwargs = update_mock.await_args_list[-1].kwargs
+    assert final_kwargs["enabled"] is False
+    assert final_kwargs["is_ex_staff"] is True
+    assert final_kwargs["date_offboarded"] is not None
+
+
+@pytest.mark.anyio
+async def test_resume_offboarding_failure_creates_ticket_with_step_payload(monkeypatch):
+    staff_record = {
+        "id": 502,
+        "company_id": 8,
+        "first_name": "Kai",
+        "last_name": "Lee",
+        "email": "kai@example.com",
+        "enabled": True,
+        "is_ex_staff": False,
+        "onboarding_status": workflows.STATE_OFFBOARDING_APPROVED,
+    }
 def test_compute_scheduled_execution_onboarding_uses_local_midnight_minus_three_days():
     scheduled_for_utc, requested_timezone = workflows._compute_scheduled_execution(
         staff={"date_onboarded": "2026-04-10T09:30:00"},
@@ -266,6 +321,41 @@ async def test_enqueue_workflow_creates_approved_execution(monkeypatch):
     monkeypatch.setattr(
         workflows.workflow_repo,
         "get_company_workflow_policy",
+        AsyncMock(return_value={"workflow_key": "staff_onboarding_m365", "max_retries": 0, "config": {}}),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_execution_by_staff_id",
+        AsyncMock(return_value={"id": 72, "direction": workflows.DIRECTION_OFFBOARDING}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    monkeypatch.setattr(workflows.staff_repo, "update_staff", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows,
+        "_attempt_step",
+        AsyncMock(
+            side_effect=workflows.WorkflowStepError(
+                "group removal failed",
+                step_name="remove_groups",
+                request_payload={"group_id": "abc"},
+            )
+        ),
+    )
+    ticket_mock = AsyncMock(return_value=9911)
+    monkeypatch.setattr(workflows, "_create_failure_ticket", ticket_mock)
+    monkeypatch.setattr(workflows.audit_service, "log_action", AsyncMock())
+
+    result = await workflows.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=8,
+        staff_id=502,
+        execution_id=72,
+        initiated_by_user_id=22,
+    )
+
+    assert result["state"] == workflows.STATE_OFFBOARDING_FAILED
+    context = ticket_mock.await_args.kwargs["error_context"]
+    assert context["step"] == "remove_groups"
+    assert context["payload"] == {"group_id": "abc"}
         AsyncMock(return_value={"workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY}),
     )
     monkeypatch.setattr(
