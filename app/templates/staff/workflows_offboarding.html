@@ -137,11 +137,12 @@
             return label;
           };
           const makeInput = (field, currentValue) => {
-            const input = document.createElement(field.type === 'select' ? 'select' : 'input');
-            if (field.type !== 'checkbox' && field.type !== 'select') input.type = field.type === 'number' ? 'number' : 'text';
+            const elementType = field.type === 'select' ? 'select' : (field.type === 'textarea' ? 'textarea' : 'input');
+            const input = document.createElement(elementType);
+            if (elementType === 'input' && field.type !== 'checkbox' && field.type !== 'boolean') input.type = field.type === 'number' ? 'number' : 'text';
             input.className = field.type === 'checkbox' ? '' : 'form-input';
             if (field.type === 'number') input.value = String(Number(currentValue || 0));
-            else if (field.type === 'checkbox') input.checked = Boolean(currentValue);
+            else if (field.type === 'checkbox' || field.type === 'boolean') input.checked = Boolean(currentValue);
             else if (field.type === 'select') {
               (field.options || []).forEach((opt) => {
                 const option = document.createElement('option');
@@ -161,7 +162,7 @@
 
           (schema.fields || []).forEach((field) => {
             const keyPath = field.target || field.name;
-            if (field.type === 'checkbox') {
+            if (field.type === 'checkbox' || field.type === 'boolean') {
               const wrap = document.createElement('label');
               wrap.className = 'form-checkbox';
               const input = makeInput(field, getFieldValue(step, field));
