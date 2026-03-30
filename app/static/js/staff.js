@@ -206,9 +206,11 @@
     const offboardingModal = document.getElementById('staff-offboarding-modal');
     const offboardingForm = document.getElementById('staff-offboarding-form');
     const offboardingStaffIdField = getField('offboarding-staff-id');
-    const offboardingReasonField = getField('offboarding-reason');
-    const offboardingRequestedAtField = getField('offboarding-requested-at');
-    const offboardingNotesField = getField('offboarding-notes');
+    const offboardingDateField = getField('offboarding-date');
+    const offboardingTimeField = getField('offboarding-time');
+    const offboardingTimezoneField = getField('offboarding-timezone');
+    const offboardingReasonNotesField = getField('offboarding-reason-notes');
+    const offboardingImmediateButton = getField('offboarding-immediate');
     const addForm = container.querySelector('form.staff-form');
 
     const editFields = {
@@ -319,28 +321,43 @@
     }
 
     function setDefaultOffboardingDateTime() {
-      if (!offboardingRequestedAtField) {
+      if (!offboardingDateField || !offboardingTimeField) {
         return;
       }
       const now = new Date();
-      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-      offboardingRequestedAtField.value = now.toISOString().slice(0, 16);
+      const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const localTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      offboardingDateField.value = localDate;
+      offboardingTimeField.value = localTime;
     }
 
     container.querySelectorAll('[data-staff-offboarding-request]').forEach((button) => {
       button.addEventListener('click', () => {
         const id = Number(button.getAttribute('data-staff-offboarding-request'));
         const member = staffById.get(id);
-        if (!member || !offboardingStaffIdField || !offboardingReasonField || !offboardingRequestedAtField || !offboardingNotesField) {
+        if (
+          !member
+          || !offboardingStaffIdField
+          || !offboardingDateField
+          || !offboardingTimeField
+          || !offboardingTimezoneField
+          || !offboardingReasonNotesField
+        ) {
           return;
         }
         offboardingStaffIdField.value = String(id);
-        offboardingReasonField.value = '';
-        offboardingNotesField.value = '';
+        offboardingReasonNotesField.value = '';
+        offboardingTimezoneField.value = getBrowserTimezone() || '';
         setDefaultOffboardingDateTime();
         openModal(offboardingModal);
       });
     });
+
+    if (offboardingImmediateButton) {
+      offboardingImmediateButton.addEventListener('click', () => {
+        setDefaultOffboardingDateTime();
+      });
+    }
 
     container.querySelectorAll('[data-staff-edit]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -392,21 +409,23 @@
       offboardingForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const staffId = offboardingStaffIdField ? offboardingStaffIdField.value : '';
-        const reason = offboardingReasonField ? offboardingReasonField.value.trim() : '';
-        const requestedAt = offboardingRequestedAtField ? offboardingRequestedAtField.value : '';
-        const notes = offboardingNotesField ? offboardingNotesField.value.trim() : '';
-        if (!staffId || !reason || !requestedAt) {
-          alert('Reason and requested offboarding date/time are required.');
+        const date = offboardingDateField ? offboardingDateField.value : '';
+        const time = offboardingTimeField ? offboardingTimeField.value : '';
+        const reasonNotes = offboardingReasonNotesField ? offboardingReasonNotesField.value.trim() : '';
+        const timezone = offboardingTimezoneField ? offboardingTimezoneField.value.trim() : '';
+        const requestedAt = date && time ? `${date}T${time}` : '';
+        if (!staffId || !date || !time || !timezone || !reasonNotes) {
+          alert('Offboarding date, time, timezone, and reason/notes are required.');
           return;
         }
         try {
           await requestJson(`/api/staff/${staffId}/offboarding/request`, {
             method: 'POST',
             body: JSON.stringify({
-              reason,
+              reason: reasonNotes,
               requestedAt,
-              requestedTimezone: getBrowserTimezone() || null,
-              notes: notes || null,
+              requestedTimezone: timezone,
+              notes: null,
             }),
           });
           window.location.reload();
