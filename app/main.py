@@ -17658,6 +17658,15 @@ def _parse_automation_form_submission(
                     f"Trigger action {index} payload must be an object.",
                     status.HTTP_400_BAD_REQUEST,
                 )
+            try:
+                modules_service.validate_action_payload(module_value, payload_value)
+            except ValueError as exc:
+                return (
+                    None,
+                    form_state,
+                    f"Trigger action {index}: {exc}",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             action_entry: dict[str, Any] = {"module": module_value, "payload": payload_value}
             raw_order = entry.get("order")
             if raw_order is not None:
@@ -17675,6 +17684,16 @@ def _parse_automation_form_submission(
         action_module = normalised_actions[0]["module"] if normalised_actions else None
         form_state["actionPayloadRaw"] = json.dumps(action_payload)
         form_state["actionModule"] = action_module or ""
+    elif action_module and isinstance(action_payload, dict):
+        try:
+            modules_service.validate_action_payload(action_module, action_payload)
+        except ValueError as exc:
+            return (
+                None,
+                form_state,
+                str(exc),
+                status.HTTP_400_BAD_REQUEST,
+            )
 
     data = {
         "name": name,
