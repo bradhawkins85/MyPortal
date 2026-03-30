@@ -102,14 +102,14 @@ def _load_json_metadata(audio_path: Path, *, errors: list[str]) -> dict[str, Any
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:  # pragma: no cover - defensive logging
-            message = f"Failed to parse metadata JSON {candidate}: {exc}"
-            logger.warning(message)
-            errors.append(message)
+            log_message = f"Failed to parse metadata JSON {candidate}: {exc}"
+            logger.warning(log_message)
+            errors.append(f"Failed to parse metadata JSON {candidate}")
             continue
         except OSError as exc:  # pragma: no cover - filesystem dependent
-            message = f"Unable to read metadata file {candidate}: {exc}"
-            logger.warning(message)
-            errors.append(message)
+            log_message = f"Unable to read metadata file {candidate}: {exc}"
+            logger.warning(log_message)
+            errors.append(f"Unable to read metadata file {candidate}")
             continue
 
         if isinstance(data, dict):
@@ -469,9 +469,9 @@ async def force_sync_recordings_from_filesystem(recordings_path: str) -> dict[st
             )
             created += 1
         except Exception as exc:  # pragma: no cover - database dependent
-            message = f"Failed to persist call recording {audio_file}: {exc}"
-            logger.error(message)
-            errors.append(message)
+            log_message = f"Failed to persist call recording {audio_file}: {exc}"
+            logger.error(log_message)
+            errors.append(f"Failed to persist call recording {audio_file}")
 
     return {
         "status": "ok",
