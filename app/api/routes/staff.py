@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.api_keys import require_api_key
@@ -78,6 +80,28 @@ async def _require_staff_approval_access(current_user: dict, company_id: int) ->
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions to approve staff onboarding requests",
         )
+
+
+def _external_confirmation_fingerprint(
+    *,
+    path_staff_id: int,
+    api_key_id: int,
+    payload: StaffExternalCheckpointCallback,
+) -> str:
+    digest_payload = {
+        "path_staff_id": int(path_staff_id),
+        "body_staff_id": int(payload.staff_id),
+        "company_id": int(payload.company_id),
+        "confirmation_token": payload.confirmation_token,
+        "source": payload.source,
+        "callback_timestamp": payload.callback_timestamp.isoformat() if payload.callback_timestamp else None,
+        "proof_reference_id": payload.proof_reference_id,
+        "payload_hash": payload.payload_hash,
+        "callback_payload": payload.callback_payload or {},
+        "api_key_id": int(api_key_id),
+    }
+    encoded = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @router.get("", response_model=list[StaffResponse])
@@ -224,7 +248,8 @@ async def create_staff_request(
     return StaffResponse.model_validate(created)
 
 
-@router.post("/{staff_id}/approve", response_model=StaffResponse)
+@router.post("/{staff_id}/approve", response_model=StaffResponse, include_in_schema=False)
+@router.post("/{staff_id}/onboarding/approve", response_model=StaffResponse)
 async def approve_staff_request(
     staff_id: int,
     payload: StaffApprovalDecision,
@@ -285,7 +310,8 @@ async def approve_staff_request(
     return StaffResponse.model_validate(updated)
 
 
-@router.post("/{staff_id}/deny", response_model=StaffResponse)
+@router.post("/{staff_id}/deny", response_model=StaffResponse, include_in_schema=False)
+@router.post("/{staff_id}/onboarding/deny", response_model=StaffResponse)
 async def deny_staff_request(
     staff_id: int,
     payload: StaffApprovalDecision,
@@ -352,18 +378,17 @@ async def deny_staff_request(
     return StaffResponse.model_validate(updated)
 
 
-@router.post(
-    "/external-checkpoints/confirm",
-    response_model=StaffExternalCheckpointResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def confirm_external_checkpoint(
+async def _confirm_external_checkpoint(
+    staff_id: int,
     payload: StaffExternalCheckpointCallback,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=255),
     api_key_record: dict = Depends(require_api_key),
     _: None = Depends(require_database),
 ):
     company_id = int(payload.company_id)
-    staff_id = int(payload.staff_id)
+    body_staff_id = int(payload.staff_id)
+    if body_staff_id != staff_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Staff ID mismatch between path and body")
     policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
     policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
     allowed_api_key_ids_raw = policy_config.get("external_confirmation_api_key_ids")
@@ -380,6 +405,40 @@ async def confirm_external_checkpoint(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="API key is not allowed for this company's external checkpoint scope",
         )
+    request_fingerprint = _external_confirmation_fingerprint(
+        path_staff_id=staff_id,
+        api_key_id=api_key_id,
+        payload=payload,
+    )
+    created = await staff_workflow_repo.try_create_external_confirmation_idempotency(
+        api_key_id=api_key_id,
+        idempotency_key=idempotency_key.strip(),
+        request_fingerprint=request_fingerprint,
+        company_id=company_id,
+        staff_id=staff_id,
+    )
+    if not created:
+        existing = await staff_workflow_repo.get_external_confirmation_idempotency(
+            api_key_id=api_key_id,
+            idempotency_key=idempotency_key.strip(),
+        )
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Callback with this Idempotency-Key is already being processed",
+            )
+        if str(existing.get("request_fingerprint") or "") != request_fingerprint:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Idempotency-Key has already been used with different callback data",
+            )
+        response_payload = existing.get("response_payload") if isinstance(existing.get("response_payload"), dict) else {}
+        if existing.get("response_status") is not None and response_payload:
+            return StaffExternalCheckpointResponse.model_validate(response_payload)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Callback with this Idempotency-Key is already being processed",
+        )
 
     try:
         result = await staff_onboarding_workflow_service.confirm_external_checkpoint_and_resume(
@@ -394,15 +453,68 @@ async def confirm_external_checkpoint(
             confirmed_by_api_key_id=api_key_id,
         )
     except ValueError as exc:
+        await staff_workflow_repo.finalize_external_confirmation_idempotency(
+            api_key_id=api_key_id,
+            idempotency_key=idempotency_key.strip(),
+            response_status=status.HTTP_400_BAD_REQUEST,
+            response_payload={"detail": str(exc)},
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    return StaffExternalCheckpointResponse.model_validate(
-        {
-            "state": result.get("state") or "unknown",
-            "executionId": int(result.get("execution_id") or 0),
-            "staffId": staff_id,
-            "companyId": company_id,
-        }
+    response_payload = {
+        "state": result.get("state") or "unknown",
+        "executionId": int(result.get("execution_id") or 0),
+        "staffId": staff_id,
+        "companyId": company_id,
+    }
+    await staff_workflow_repo.finalize_external_confirmation_idempotency(
+        api_key_id=api_key_id,
+        idempotency_key=idempotency_key.strip(),
+        response_status=status.HTTP_202_ACCEPTED,
+        response_payload=response_payload,
+    )
+    return StaffExternalCheckpointResponse.model_validate(response_payload)
+
+
+@router.post(
+    "/external-checkpoints/confirm",
+    response_model=StaffExternalCheckpointResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+)
+async def confirm_external_checkpoint_legacy(
+    payload: StaffExternalCheckpointCallback,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=255),
+    api_key_record: dict = Depends(require_api_key),
+    _: None = Depends(require_database),
+):
+    return await _confirm_external_checkpoint(
+        staff_id=int(payload.staff_id),
+        payload=payload,
+        idempotency_key=idempotency_key,
+        api_key_record=api_key_record,
+        _=_,
+    )
+
+
+@router.post(
+    "/{staff_id}/onboarding/external-confirm",
+    response_model=StaffExternalCheckpointResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def confirm_external_checkpoint(
+    staff_id: int,
+    payload: StaffExternalCheckpointCallback,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=255),
+    api_key_record: dict = Depends(require_api_key),
+    _: None = Depends(require_database),
+):
+    return await _confirm_external_checkpoint(
+        staff_id=staff_id,
+        payload=payload,
+        idempotency_key=idempotency_key,
+        api_key_record=api_key_record,
+        _=_,
     )
 
 
