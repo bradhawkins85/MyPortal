@@ -517,7 +517,13 @@ def _redact_payload(payload: Any, *, secret_vars: set[str]) -> Any:
 
 def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
     if direction == DIRECTION_OFFBOARDING:
-        return [{"name": "offboard_account", "type": "offboard_account"}]
+        return [
+            {"name": "disable_and_cleanup_account", "type": "offboard_account"},
+            {"name": "rename_identity", "type": "m365_rename_upn_display_name"},
+            {"name": "update_org_fields", "type": "m365_update_org_fields"},
+            {"name": "hide_from_gal", "type": "m365_hide_from_gal"},
+            {"name": "identity_hygiene", "type": "m365_identity_hygiene"},
+        ]
     return [
         {"name": "provision_account", "type": "provision_account"},
         {"name": "assign_license", "type": "m365_assign_license"},
@@ -525,7 +531,8 @@ def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
 
 
 def _normalise_workflow_steps(policy_config: dict[str, Any], *, direction: str) -> list[dict[str, Any]]:
-    configured = policy_config.get("steps")
+    configured_key = "offboarding_steps" if direction == DIRECTION_OFFBOARDING else "steps"
+    configured = policy_config.get(configured_key)
     if not isinstance(configured, list) or not configured:
         configured = _default_workflow_steps(direction)
     steps: list[dict[str, Any]] = []
@@ -545,6 +552,35 @@ def _normalise_workflow_steps(policy_config: dict[str, Any], *, direction: str) 
         step_record["type"] = step_type
         steps.append(step_record)
     return steps
+
+
+def _resolve_step_max_retries(step: dict[str, Any], *, default_max_retries: int) -> int:
+    retry_policy = step.get("retry_policy") if isinstance(step.get("retry_policy"), dict) else {}
+    value = retry_policy.get("max_retries", step.get("max_retries", default_max_retries))
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return max(0, int(default_max_retries))
+
+
+def _resolve_step_failure_mode(step: dict[str, Any]) -> str:
+    failure_policy = step.get("failure_policy") if isinstance(step.get("failure_policy"), dict) else {}
+    mode = str(failure_policy.get("mode") or "fail_fast").strip().lower()
+    if mode not in {"fail_fast", "continue"}:
+        return "fail_fast"
+    return mode
+
+
+def _set_nested_payload_value(payload: dict[str, Any], *, path: str, value: Any) -> None:
+    parts = [part.strip() for part in path.split(".") if part.strip()]
+    if not parts:
+        return
+    cursor = payload
+    for part in parts[:-1]:
+        if not isinstance(cursor.get(part), dict):
+            cursor[part] = {}
+        cursor = cursor[part]
+    cursor[parts[-1]] = value
 
 
 async def _execute_policy_step(
@@ -615,6 +651,97 @@ async def _execute_policy_step(
             {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
         )
         return {"group_id": group_id, "m365_user_id": m365_user_id, "added": True}
+
+    if step_type == "m365_rename_upn_display_name":
+        user = await _resolve_staff_m365_user(company_id, staff)
+        user_id = str(user["id"])
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        current_display_name = str(user.get("displayName") or "").strip()
+        current_upn = str(user.get("userPrincipalName") or user.get("mail") or "").strip()
+        upn_prefix = str(_resolve_template_value(step.get("upn_prefix"), vars_map=vars_map) or "former").strip()
+        upn_local, _, upn_domain = current_upn.partition("@")
+        next_upn = current_upn
+        if upn_domain and upn_local:
+            next_upn = f"{upn_prefix}.{upn_local}@{upn_domain}" if upn_prefix else current_upn
+        next_display_name = str(
+            _resolve_template_value(step.get("display_name"), vars_map=vars_map)
+            or f"{current_display_name} (Former Staff)"
+        ).strip()
+        patch_payload = {
+            "displayName": next_display_name,
+            "userPrincipalName": next_upn,
+        }
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        return {
+            "m365_user_id": user_id,
+            "renamed": True,
+            "previous": {"displayName": current_display_name, "userPrincipalName": current_upn},
+            "updated": patch_payload,
+        }
+
+    if step_type == "m365_update_org_fields":
+        user = await _resolve_staff_m365_user(company_id, staff)
+        user_id = str(user["id"])
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        next_department = str(
+            _resolve_template_value(step.get("department"), vars_map=vars_map) or step.get("department_value") or "Former Staff"
+        ).strip()
+        next_company = str(
+            _resolve_template_value(step.get("company_name"), vars_map=vars_map) or step.get("company_value") or "Former Staff"
+        ).strip()
+        patch_payload = {
+            "department": next_department,
+            "companyName": next_company,
+        }
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        return {
+            "m365_user_id": user_id,
+            "updated": patch_payload,
+        }
+
+    if step_type == "m365_hide_from_gal":
+        user = await _resolve_staff_m365_user(company_id, staff)
+        user_id = str(user["id"])
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        property_path = str(step.get("property_path") or "showInAddressList").strip() or "showInAddressList"
+        hidden_value = bool(step.get("hidden", True))
+        patch_payload: dict[str, Any] = {}
+        _set_nested_payload_value(patch_payload, path=property_path, value=not hidden_value)
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        return {
+            "m365_user_id": user_id,
+            "property_path": property_path,
+            "hidden": hidden_value,
+            "updated": patch_payload,
+        }
+
+    if step_type == "m365_identity_hygiene":
+        user = await _resolve_staff_m365_user(company_id, staff)
+        user_id = str(user["id"])
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        hygiene_updates = step.get("hygiene_updates") if isinstance(step.get("hygiene_updates"), dict) else {
+            "officeLocation": "Offboarded",
+            "jobTitle": "Former Staff",
+            "mobilePhone": None,
+            "businessPhones": [],
+        }
+        patch_payload = _resolve_template_value(hygiene_updates, vars_map=vars_map)
+        if not isinstance(patch_payload, dict):
+            raise WorkflowStepError("m365_identity_hygiene requires hygiene_updates object")
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        revoked_sessions = False
+        if bool(step.get("revoke_sign_in_sessions", True)):
+            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{user_id}/revokeSignInSessions",
+                {},
+            )
+            revoked_sessions = True
+        return {
+            "m365_user_id": user_id,
+            "updated": patch_payload,
+            "revoke_sign_in_sessions": revoked_sessions,
+        }
 
     if step_type == "create_ticket":
         subject = str(_resolve_template_value(step.get("subject"), vars_map=vars_map) or "Staff onboarding workflow checkpoint").strip()
@@ -858,19 +985,31 @@ async def _execute_policy_steps(
 
         resolved_step = _resolve_template_value(step, vars_map=vars_map)
         request_payload = _redact_payload(resolved_step, secret_vars=secret_vars)
-        response_payload = await _attempt_step(
-            execution_id=execution_id,
-            step_name=step_name,
-            max_retries=max_retries,
-            request_payload=request_payload if isinstance(request_payload, dict) else {"request": request_payload},
-            callback=lambda: _execute_policy_step(
-                step=resolved_step if isinstance(resolved_step, dict) else step,
-                company_id=company_id,
-                staff=staff,
-                policy_config=policy_config,
-                vars_map=vars_map,
-            ),
-        )
+        step_max_retries = _resolve_step_max_retries(step, default_max_retries=max_retries)
+        step_failure_mode = _resolve_step_failure_mode(step)
+        try:
+            response_payload = await _attempt_step(
+                execution_id=execution_id,
+                step_name=step_name,
+                max_retries=step_max_retries,
+                request_payload=request_payload if isinstance(request_payload, dict) else {"request": request_payload},
+                callback=lambda: _execute_policy_step(
+                    step=resolved_step if isinstance(resolved_step, dict) else step,
+                    company_id=company_id,
+                    staff=staff,
+                    policy_config=policy_config,
+                    vars_map=vars_map,
+                ),
+            )
+        except WorkflowStepError:
+            if step_failure_mode == "continue":
+                await workflow_repo.update_execution_state(
+                    execution_id,
+                    state=STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING,
+                    current_step=f"{index + 1}:{step_name}:failed_continue",
+                )
+                continue
+            raise
         step_outputs = response_payload if isinstance(response_payload, dict) else {"result": response_payload}
         context_patch: dict[str, Any] = {"vars": {}, "secret_vars": []}
         output_var = str(step.get("output_var") or "").strip()
