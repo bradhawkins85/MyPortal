@@ -62,6 +62,21 @@ async def _require_staff_request_access(current_user: dict, company_id: int) -> 
         )
 
 
+async def _has_company_admin_access(current_user: dict, company_id: int) -> bool:
+    if current_user.get("is_super_admin"):
+        return True
+    user_id = current_user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    membership = await membership_repo.get_membership_by_company_user(company_id, user_id_int)
+    if not membership or str(membership.get("status", "")).lower() != "active":
+        return False
+    permissions = set(membership.get("combined_permissions") or membership.get("permissions") or [])
+    return "company.admin" in permissions
+
+
 async def _require_staff_approval_access(current_user: dict, company_id: int) -> None:
     if current_user.get("is_super_admin"):
         return
@@ -258,6 +273,15 @@ async def create_staff_request(
     payload_data = payload.model_dump(by_alias=False)
     payload_data.pop("company_id", None)
     custom_fields = payload_data.pop("custom_fields", None) or {}
+    if custom_fields and not await _has_company_admin_access(current_user, company_id):
+        policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+        policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+        mapped_custom_fields = set(staff_onboarding_workflow_service._normalise_custom_field_group_mappings(policy_config).keys())
+        custom_fields = {
+            field_name: value
+            for field_name, value in custom_fields.items()
+            if field_name not in mapped_custom_fields
+        }
     payload_data["company_id"] = company_id
     payload_data["onboarding_status"] = "awaiting_approval"
     payload_data.setdefault("onboarding_complete", False)
