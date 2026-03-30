@@ -173,7 +173,10 @@
         const parentName = wrapper.dataset.conditionParentName || '';
         const operator = wrapper.dataset.conditionOperator || '';
         const expected = wrapper.dataset.conditionValue || '';
-        const shouldShow = !parentName || evaluateCondition(getInputByName(parentName), operator, expected);
+        const parentInput = parentName ? getInputByName(parentName) : null;
+        const shouldShow = !parentName
+          ? true
+          : (parentInput ? evaluateCondition(parentInput, operator, expected) : false);
         wrapper.hidden = !shouldShow;
         wrapper.querySelectorAll('input, select, textarea').forEach((input) => {
           input.disabled = !shouldShow;
