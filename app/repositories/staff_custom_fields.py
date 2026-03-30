@@ -21,6 +21,7 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
             COALESCE(ovr.name, base.name) AS name,
             COALESCE(ovr.display_name, base.display_name) AS display_name,
             COALESCE(ovr.field_type, base.field_type) AS field_type,
+            COALESCE(ovr.field_group, base.field_group) AS field_group,
             COALESCE(ovr.display_order, base.display_order) AS display_order,
             COALESCE(ovr.is_active, base.is_active) AS is_active,
             COALESCE(ovr.condition_parent_name, base.condition_parent_name) AS condition_parent_name,
@@ -34,7 +35,11 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
         WHERE base.base_definition_id IS NULL
           AND (base.company_id IS NULL OR base.company_id = %s)
           AND COALESCE(ovr.is_active, base.is_active) = 1
-        ORDER BY COALESCE(ovr.display_order, base.display_order), COALESCE(ovr.id, base.id)
+        ORDER BY
+            CASE WHEN COALESCE(ovr.field_group, base.field_group) IS NULL OR TRIM(COALESCE(ovr.field_group, base.field_group)) = '' THEN 0 ELSE 1 END,
+            COALESCE(ovr.field_group, base.field_group),
+            COALESCE(ovr.display_order, base.display_order),
+            COALESCE(ovr.id, base.id)
         """,
         (company_id, company_id),
     )
@@ -78,6 +83,7 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
             name,
             display_name,
             field_type,
+            field_group,
             display_order,
             is_active,
             condition_parent_name,
@@ -87,7 +93,11 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
             updated_at
         FROM staff_custom_field_definitions
         WHERE company_id = %s
-        ORDER BY display_order, id
+        ORDER BY
+            CASE WHEN field_group IS NULL OR TRIM(field_group) = '' THEN 0 ELSE 1 END,
+            field_group,
+            display_order,
+            id
         """,
         (company_id,),
     )
@@ -125,6 +135,7 @@ async def create_company_definition(
     name: str,
     display_name: str | None,
     field_type: str,
+    field_group: str | None = None,
     display_order: int = 0,
     condition_parent_name: str | None = None,
     condition_operator: str | None = None,
@@ -139,18 +150,20 @@ async def create_company_definition(
             name,
             display_name,
             field_type,
+            field_group,
             display_order,
             is_active,
             condition_parent_name,
             condition_operator,
             condition_value
-        ) VALUES (%s, NULL, %s, %s, %s, %s, 1, %s, %s, %s)
+        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, 1, %s, %s, %s)
         """,
         (
             company_id,
             name,
             display_name or None,
             field_type,
+            field_group or None,
             display_order,
             condition_parent_name or None,
             condition_operator or None,
@@ -169,6 +182,7 @@ async def update_company_definition(
     company_id: int,
     display_name: str | None,
     field_type: str,
+    field_group: str | None,
     display_order: int,
     is_active: bool,
     condition_parent_name: str | None,
@@ -181,6 +195,7 @@ async def update_company_definition(
         UPDATE staff_custom_field_definitions
         SET display_name = %s,
             field_type = %s,
+            field_group = %s,
             display_order = %s,
             is_active = %s,
             condition_parent_name = %s,
@@ -191,6 +206,7 @@ async def update_company_definition(
         (
             display_name or None,
             field_type,
+            field_group or None,
             display_order,
             1 if is_active else 0,
             condition_parent_name or None,

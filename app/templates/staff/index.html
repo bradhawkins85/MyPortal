@@ -340,12 +340,26 @@
             {% endif %}
           {% endif %}
         {% endfor %}
+        {% set custom_sections = namespace(active='', open=False) %}
         {% for field in staff_custom_field_definitions %}
+          {% set group_label = (field.field_group or 'Additional details') %}
+          {% if group_label != custom_sections.active %}
+            {% if custom_sections.open %}
+                </div>
+              </fieldset>
+            {% endif %}
+            <fieldset class="fieldset staff-form__section">
+              <legend>{{ group_label }}</legend>
+              <div class="form-grid staff-form__section-grid">
+            {% set custom_sections.active = group_label %}
+            {% set custom_sections.open = True %}
+          {% endif %}
           {% if field.field_type == 'checkbox' %}
             <div
               class="form-field form-field--checkbox"
               data-custom-field-wrapper
               data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
               data-condition-parent-name="{{ field.condition_parent_name or '' }}"
               data-condition-operator="{{ field.condition_operator or '' }}"
               data-condition-value="{{ field.condition_value or '' }}"
@@ -360,6 +374,7 @@
               class="form-field"
               data-custom-field-wrapper
               data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
               data-condition-parent-name="{{ field.condition_parent_name or '' }}"
               data-condition-operator="{{ field.condition_operator or '' }}"
               data-condition-value="{{ field.condition_value or '' }}"
@@ -377,6 +392,7 @@
               class="form-field"
               data-custom-field-wrapper
               data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
               data-condition-parent-name="{{ field.condition_parent_name or '' }}"
               data-condition-operator="{{ field.condition_operator or '' }}"
               data-condition-value="{{ field.condition_value or '' }}"
@@ -386,6 +402,10 @@
             </div>
           {% endif %}
         {% endfor %}
+        {% if custom_sections.open %}
+            </div>
+          </fieldset>
+        {% endif %}
         <div class="form-actions staff-form__actions">
           <button type="submit" class="button">Add staff</button>
           <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
@@ -552,7 +572,7 @@
       </fieldset>
       <fieldset class="fieldset staff-modal__section" id="edit-custom-fields-section">
         <legend>Custom fields</legend>
-        <div class="form-grid staff-modal-grid" id="edit-custom-fields-grid"></div>
+        <div class="staff-modal__group-stack" id="edit-custom-fields-grid"></div>
       </fieldset>
       <fieldset class="fieldset staff-modal__section" id="edit-actions-section">
         <legend>Secondary actions</legend>
