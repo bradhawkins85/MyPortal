@@ -416,9 +416,9 @@ async def approve_staff_offboarding(
         job_title=staff.get("job_title"),
         org_company=staff.get("org_company"),
         manager_name=staff.get("manager_name"),
-        account_action="Offboarded",
+        account_action="Offboard Approved",
         syncro_contact_id=staff.get("syncro_contact_id"),
-        onboarding_status=staff.get("onboarding_status"),
+        onboarding_status=staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED,
         onboarding_complete=bool(staff.get("onboarding_complete", False)),
         onboarding_completed_at=staff.get("onboarding_completed_at"),
         approval_status="approved",
@@ -435,6 +435,12 @@ async def approve_staff_offboarding(
             "company_id": int(updated["company_id"]),
             "decision_notes": decision_notes,
         },
+    )
+    await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+        company_id=int(updated["company_id"]),
+        staff_id=staff_id,
+        initiated_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
     )
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
     return StaffResponse.model_validate(updated)
@@ -482,7 +488,7 @@ async def deny_staff_offboarding(
         manager_name=staff.get("manager_name"),
         account_action=None,
         syncro_contact_id=staff.get("syncro_contact_id"),
-        onboarding_status=staff.get("onboarding_status"),
+        onboarding_status=staff_onboarding_workflow_service.STATE_OFFBOARDING_DENIED,
         onboarding_complete=bool(staff.get("onboarding_complete", False)),
         onboarding_completed_at=staff.get("onboarding_completed_at"),
         approval_status="denied",
@@ -711,11 +717,19 @@ async def update_staff(
         updated = await staff_repo.get_staff_by_id(staff_id) or updated
 
     status_value = str((data.get("onboarding_status") or "")).strip().lower()
-    if status_value == "approved":
+    if status_value in {
+        staff_onboarding_workflow_service.STATE_APPROVED,
+        staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED,
+    }:
         await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
             company_id=int(updated["company_id"]),
             staff_id=staff_id,
             initiated_by_user_id=int(__.get("id")) if __.get("id") is not None else None,
+            direction=(
+                staff_onboarding_workflow_service.DIRECTION_OFFBOARDING
+                if status_value == staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
+                else staff_onboarding_workflow_service.DIRECTION_ONBOARDING
+            ),
         )
 
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)

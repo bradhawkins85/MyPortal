@@ -26,6 +26,16 @@ STATE_WAITING_EXTERNAL = "waiting_external"
 STATE_PROVISIONING = "provisioning"
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
+STATE_OFFBOARDING_AWAITING_APPROVAL = "offboarding_awaiting_approval"
+STATE_OFFBOARDING_APPROVED = "offboarding_approved"
+STATE_OFFBOARDING_DENIED = "offboarding_denied"
+STATE_OFFBOARDING_WAITING_EXTERNAL = "offboarding_waiting_external"
+STATE_OFFBOARDING_IN_PROGRESS = "offboarding_in_progress"
+STATE_OFFBOARDING_COMPLETED = "offboarding_completed"
+STATE_OFFBOARDING_FAILED = "offboarding_failed"
+
+DIRECTION_ONBOARDING = "onboarding"
+DIRECTION_OFFBOARDING = "offboarding"
 
 
 class WorkflowStepError(RuntimeError):
@@ -185,6 +195,14 @@ async def _escalate_stale_non_actionable_state(
         ),
         STATE_WAITING_EXTERNAL: _parse_timeout_hours(
             policy_config.get("waiting_external_timeout_hours"),
+            default_hours=24,
+        ),
+        STATE_OFFBOARDING_AWAITING_APPROVAL: _parse_timeout_hours(
+            policy_config.get("offboarding_awaiting_approval_timeout_hours"),
+            default_hours=48,
+        ),
+        STATE_OFFBOARDING_WAITING_EXTERNAL: _parse_timeout_hours(
+            policy_config.get("offboarding_waiting_external_timeout_hours"),
             default_hours=24,
         ),
     }
@@ -388,18 +406,36 @@ async def _run_licensing_step(
     return {"assigned": True, "license_id": int(target_license_id)}
 
 
+async def _run_offboarding_step(*, company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "company_id": int(company_id),
+        "staff_id": int(staff["id"]),
+        "offboarded": True,
+    }
+
+
 async def run_staff_onboarding_workflow(
     *,
     company_id: int,
     staff_id: int,
     initiated_by_user_id: int | None,
+    direction: str = DIRECTION_ONBOARDING,
 ) -> dict[str, Any]:
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise ValueError("Staff not found")
     onboarding_status = str(staff.get("onboarding_status") or "").strip().lower()
-    if onboarding_status not in {STATE_APPROVED, STATE_PROVISIONING}:
-        if onboarding_status in {STATE_AWAITING_APPROVAL, STATE_WAITING_EXTERNAL}:
+    if direction == DIRECTION_OFFBOARDING:
+        actionable_states = {STATE_OFFBOARDING_APPROVED, STATE_OFFBOARDING_IN_PROGRESS}
+        stale_states = {STATE_OFFBOARDING_AWAITING_APPROVAL, STATE_OFFBOARDING_WAITING_EXTERNAL}
+        waiting_external_state = STATE_OFFBOARDING_WAITING_EXTERNAL
+    else:
+        actionable_states = {STATE_APPROVED, STATE_PROVISIONING}
+        stale_states = {STATE_AWAITING_APPROVAL, STATE_WAITING_EXTERNAL}
+        waiting_external_state = STATE_WAITING_EXTERNAL
+
+    if onboarding_status not in actionable_states:
+        if onboarding_status in stale_states:
             return await _escalate_stale_non_actionable_state(
                 company_id=company_id,
                 staff=staff,
@@ -409,8 +445,9 @@ async def run_staff_onboarding_workflow(
         return {
             "state": "ignored",
             "reason": "not_actionable",
-            "required_state": f"{STATE_APPROVED}|{STATE_PROVISIONING}",
+            "required_state": "|".join(sorted(actionable_states)),
             "current_state": onboarding_status or None,
+            "direction": direction,
         }
 
     policy = await workflow_repo.get_company_workflow_policy(company_id)
@@ -425,10 +462,15 @@ async def run_staff_onboarding_workflow(
         company_id=company_id,
         staff_id=staff_id,
         workflow_key=workflow_key,
+        direction=direction,
     )
     execution_id = int(execution["id"])
 
-    requires_external_confirmation = bool(policy_config.get("requires_external_confirmation"))
+    requires_external_confirmation = bool(
+        policy_config.get("requires_external_confirmation")
+        if direction == DIRECTION_ONBOARDING
+        else policy_config.get("requires_onprem_confirmation")
+    )
     if requires_external_confirmation:
         confirmation_token = secrets.token_urlsafe(32)
         await workflow_repo.create_external_checkpoint(
@@ -439,7 +481,7 @@ async def run_staff_onboarding_workflow(
         )
         await workflow_repo.update_execution_state(
             execution_id,
-            state=STATE_WAITING_EXTERNAL,
+            state=waiting_external_state,
             current_step="await_external_confirmation",
         )
         await staff_repo.update_staff(
@@ -464,13 +506,13 @@ async def run_staff_onboarding_workflow(
             manager_name=staff.get("manager_name"),
             account_action=staff.get("account_action"),
             syncro_contact_id=staff.get("syncro_contact_id"),
-            onboarding_status=STATE_WAITING_EXTERNAL,
+            onboarding_status=waiting_external_state,
             onboarding_complete=False,
             onboarding_completed_at=None,
         )
         await audit_service.log_action(
             user_id=initiated_by_user_id,
-            action="staff.onboarding.workflow.waiting_external",
+            action=f"staff.{direction}.workflow.waiting_external",
             entity_type="staff",
             entity_id=staff_id,
             metadata={
@@ -480,7 +522,7 @@ async def run_staff_onboarding_workflow(
             },
         )
         return {
-            "state": STATE_WAITING_EXTERNAL,
+            "state": waiting_external_state,
             "execution_id": execution_id,
             "confirmation_token": confirmation_token,
         }
@@ -508,10 +550,17 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
 
+    direction = str((await workflow_repo.get_execution_by_staff_id(staff_id) or {}).get("direction") or DIRECTION_ONBOARDING).strip().lower()
+    if direction not in {DIRECTION_ONBOARDING, DIRECTION_OFFBOARDING}:
+        direction = DIRECTION_ONBOARDING
+    in_progress_state = STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING
+    completed_state = STATE_OFFBOARDING_COMPLETED if direction == DIRECTION_OFFBOARDING else STATE_COMPLETED
+    failed_state = STATE_OFFBOARDING_FAILED if direction == DIRECTION_OFFBOARDING else STATE_FAILED
+
     await workflow_repo.update_execution_state(
         execution_id,
-        state=STATE_PROVISIONING,
-        current_step="provision_account",
+        state=in_progress_state,
+        current_step="offboarding_pipeline" if direction == DIRECTION_OFFBOARDING else "provision_account",
         started_at=_utc_now_naive(),
     )
     await staff_repo.update_staff(
@@ -536,43 +585,52 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         manager_name=staff.get("manager_name"),
         account_action=staff.get("account_action"),
         syncro_contact_id=staff.get("syncro_contact_id"),
-        onboarding_status=STATE_PROVISIONING,
+        onboarding_status=in_progress_state,
         onboarding_complete=False,
         onboarding_completed_at=None,
     )
 
     linked_license_id: int | None = None
     try:
-        await _attempt_step(
-            execution_id=execution_id,
-            step_name="provision_account",
-            max_retries=max_retries,
-            request_payload={"company_id": company_id, "staff_id": staff_id},
-            callback=lambda: _run_provisioning_step(company_id=company_id, staff=staff),
-        )
+        if direction == DIRECTION_OFFBOARDING:
+            await _attempt_step(
+                execution_id=execution_id,
+                step_name="offboard_account",
+                max_retries=max_retries,
+                request_payload={"company_id": company_id, "staff_id": staff_id},
+                callback=lambda: _run_offboarding_step(company_id=company_id, staff=staff),
+            )
+        else:
+            await _attempt_step(
+                execution_id=execution_id,
+                step_name="provision_account",
+                max_retries=max_retries,
+                request_payload={"company_id": company_id, "staff_id": staff_id},
+                callback=lambda: _run_provisioning_step(company_id=company_id, staff=staff),
+            )
 
-        licensing_result = await _attempt_step(
-            execution_id=execution_id,
-            step_name="assign_license",
-            max_retries=max_retries,
-            request_payload={
-                "company_id": company_id,
-                "staff_id": staff_id,
-                "policy": policy_config,
-            },
-            callback=lambda: _run_licensing_step(
-                company_id=company_id,
-                staff=staff,
-                policy_config=policy_config,
-            ),
-        )
-        if licensing_result.get("license_id") is not None:
-            linked_license_id = int(licensing_result["license_id"])
+            licensing_result = await _attempt_step(
+                execution_id=execution_id,
+                step_name="assign_license",
+                max_retries=max_retries,
+                request_payload={
+                    "company_id": company_id,
+                    "staff_id": staff_id,
+                    "policy": policy_config,
+                },
+                callback=lambda: _run_licensing_step(
+                    company_id=company_id,
+                    staff=staff,
+                    policy_config=policy_config,
+                ),
+            )
+            if licensing_result.get("license_id") is not None:
+                linked_license_id = int(licensing_result["license_id"])
 
         completed_at = _utc_now_naive()
         await workflow_repo.update_execution_state(
             execution_id,
-            state=STATE_COMPLETED,
+            state=completed_state,
             current_step="completed",
             retries_used=0,
             completed_at=completed_at,
@@ -600,13 +658,13 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
             manager_name=staff.get("manager_name"),
             account_action=staff.get("account_action"),
             syncro_contact_id=staff.get("syncro_contact_id"),
-            onboarding_status=STATE_COMPLETED,
-            onboarding_complete=True,
-            onboarding_completed_at=completed_at,
+            onboarding_status=completed_state,
+            onboarding_complete=direction == DIRECTION_ONBOARDING,
+            onboarding_completed_at=completed_at if direction == DIRECTION_ONBOARDING else None,
         )
         await audit_service.log_action(
             user_id=initiated_by_user_id,
-            action="staff.onboarding.workflow.completed",
+            action=f"staff.{direction}.workflow.completed",
             entity_type="staff",
             entity_id=staff_id,
             metadata={
@@ -616,7 +674,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 "linked_license_id": linked_license_id,
             },
         )
-        return {"state": STATE_COMPLETED, "execution_id": execution_id}
+        return {"state": completed_state, "execution_id": execution_id}
     except Exception as exc:  # noqa: BLE001
         error_text = str(exc)
         if linked_license_id is not None:
@@ -639,7 +697,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 error_context={
                     "execution_id": execution_id,
                     "workflow_key": workflow_key,
-                    "current_state": STATE_PROVISIONING,
+                    "current_state": in_progress_state,
                     "step": "provisioning_pipeline",
                 },
             )
@@ -653,7 +711,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
 
         await workflow_repo.update_execution_state(
             execution_id,
-            state=STATE_FAILED,
+            state=failed_state,
             current_step="failed",
             retries_used=max_retries,
             last_error=error_text,
@@ -682,13 +740,13 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
             manager_name=staff.get("manager_name"),
             account_action=staff.get("account_action"),
             syncro_contact_id=staff.get("syncro_contact_id"),
-            onboarding_status=STATE_FAILED,
+            onboarding_status=failed_state,
             onboarding_complete=False,
             onboarding_completed_at=None,
         )
         await audit_service.log_action(
             user_id=initiated_by_user_id,
-            action="staff.onboarding.workflow.failed",
+            action=f"staff.{direction}.workflow.failed",
             entity_type="staff",
             entity_id=staff_id,
             metadata={
@@ -706,7 +764,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
             execution_id=execution_id,
             error=error_text,
         )
-        return {"state": STATE_FAILED, "execution_id": execution_id, "error": error_text}
+        return {"state": failed_state, "execution_id": execution_id, "error": error_text}
 
 
 async def enqueue_staff_onboarding_workflow(
@@ -714,18 +772,21 @@ async def enqueue_staff_onboarding_workflow(
     company_id: int,
     staff_id: int,
     initiated_by_user_id: int | None,
+    direction: str = DIRECTION_ONBOARDING,
 ) -> None:
     log_info(
         "Queueing staff onboarding workflow",
         company_id=company_id,
         staff_id=staff_id,
         initiated_by_user_id=initiated_by_user_id,
+        direction=direction,
     )
     asyncio.create_task(
         run_staff_onboarding_workflow(
             company_id=company_id,
             staff_id=staff_id,
             initiated_by_user_id=initiated_by_user_id,
+            direction=direction,
         )
     )
 
@@ -735,6 +796,7 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
     if not execution:
         return None
     return {
+        "direction": execution.get("direction") or DIRECTION_ONBOARDING,
         "state": execution.get("state"),
         "current_step": execution.get("current_step"),
         "retries_used": execution.get("retries_used"),
@@ -765,7 +827,8 @@ async def confirm_external_checkpoint_and_resume(
         raise ValueError("Workflow execution not found")
     if int(execution.get("company_id") or 0) != company_id:
         raise ValueError("Company scope mismatch")
-    if str(execution.get("state") or "").strip().lower() != STATE_WAITING_EXTERNAL:
+    execution_state = str(execution.get("state") or "").strip().lower()
+    if execution_state not in {STATE_WAITING_EXTERNAL, STATE_OFFBOARDING_WAITING_EXTERNAL}:
         raise ValueError("Workflow execution is not waiting for external confirmation")
 
     checkpoint = await workflow_repo.get_pending_external_checkpoint(

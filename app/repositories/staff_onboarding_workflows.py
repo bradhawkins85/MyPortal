@@ -36,6 +36,8 @@ def _normalise_execution(row: dict[str, Any] | None) -> dict[str, Any] | None:
     for key in ("id", "company_id", "staff_id", "retries_used", "helpdesk_ticket_id"):
         if record.get(key) is not None:
             record[key] = int(record[key])
+    if record.get("direction") is None:
+        record["direction"] = "onboarding"
     return record
 
 
@@ -128,16 +130,18 @@ async def create_or_reset_execution(
     company_id: int,
     staff_id: int,
     workflow_key: str,
+    direction: str = "onboarding",
 ) -> dict[str, Any]:
     now = _utc_now_naive()
     await db.execute(
         """
         INSERT INTO staff_onboarding_workflow_executions
-            (company_id, staff_id, workflow_key, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, started_at, completed_at)
-        VALUES (%s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, NULL, NULL)
+            (company_id, staff_id, workflow_key, direction, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, started_at, completed_at)
+        VALUES (%s, %s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, NULL, NULL)
         ON DUPLICATE KEY UPDATE
             company_id = VALUES(company_id),
             workflow_key = VALUES(workflow_key),
+            direction = VALUES(direction),
             state = 'requested',
             current_step = NULL,
             retries_used = 0,
@@ -147,7 +151,7 @@ async def create_or_reset_execution(
             started_at = NULL,
             completed_at = NULL
         """,
-        (company_id, staff_id, workflow_key, now),
+        (company_id, staff_id, workflow_key, direction, now),
     )
     execution = await get_execution_by_staff_id(staff_id)
     if not execution:

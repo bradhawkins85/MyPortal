@@ -138,7 +138,7 @@ async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
             "email": "ada@example.com",
             "enabled": False,
             "is_ex_staff": True,
-            "account_action": "Offboarded",
+            "account_action": "Offboard Approved",
             "approval_status": "approved",
             "approved_by_user_id": 99,
             "approval_notes": "HR validated",
@@ -148,6 +148,8 @@ async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
     monkeypatch.setattr(staff.staff_repo, "update_staff", update_mock)
     workflow_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(staff.staff_onboarding_workflow_service, "get_staff_workflow_status", workflow_mock)
+    enqueue_mock = AsyncMock()
+    monkeypatch.setattr(staff.staff_onboarding_workflow_service, "enqueue_staff_onboarding_workflow", enqueue_mock)
     audit_mock = AsyncMock()
     monkeypatch.setattr(staff.audit_service, "log_action", audit_mock)
 
@@ -161,15 +163,18 @@ async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
     assert result.approval_status == "approved"
     assert result.approved_by_user_id == 99
     assert result.approval_notes == "HR validated"
-    assert result.account_action == "Offboarded"
+    assert result.account_action == "Offboard Approved"
     kwargs = update_mock.await_args.kwargs
     assert kwargs["approved_by_user_id"] == 99
     assert kwargs["approved_at"] is not None
     assert kwargs["approval_notes"] == "HR validated"
     assert kwargs["enabled"] is False
     assert kwargs["is_ex_staff"] is True
+    assert kwargs["onboarding_status"] == staff.staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
     audit_mock.assert_awaited_once()
     assert audit_mock.await_args.kwargs["action"] == "staff.offboarding.approved"
+    enqueue_mock.assert_awaited_once()
+    assert enqueue_mock.await_args.kwargs["direction"] == staff.staff_onboarding_workflow_service.DIRECTION_OFFBOARDING
 
 
 @pytest.mark.anyio
