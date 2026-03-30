@@ -114,6 +114,14 @@
     return String(value ?? '').trim().toLowerCase();
   }
 
+  function getBrowserTimezone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (error) {
+      return '';
+    }
+  }
+
   function getInputCurrentValue(input) {
     if (!input) {
       return '';
@@ -275,6 +283,10 @@
     }
 
     if (addForm) {
+      const timezoneField = addForm.querySelector('input[name="browser_timezone"]');
+      if (timezoneField) {
+        timezoneField.value = getBrowserTimezone();
+      }
       const addWrappers = Array.from(addForm.querySelectorAll('[data-custom-field-wrapper]'));
       initCustomFieldConditionals({
         wrappers: addWrappers,
@@ -390,7 +402,12 @@
         try {
           await requestJson(`/api/staff/${staffId}/offboarding/request`, {
             method: 'POST',
-            body: JSON.stringify({ reason, requestedAt, notes: notes || null }),
+            body: JSON.stringify({
+              reason,
+              requestedAt,
+              requestedTimezone: getBrowserTimezone() || null,
+              notes: notes || null,
+            }),
           });
           window.location.reload();
         } catch (error) {
