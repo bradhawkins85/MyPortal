@@ -329,11 +329,12 @@
                 <option value="is_not_checked">Checkbox is not checked</option>
                 <option value="equals">Equals value</option>
                 <option value="not_equals">Not equal to value</option>
+                <option value="select_map">Select option map</option>
               </select>
             </div>
             <div class="form-field">
-              <label class="form-label" for="new-custom-condition-value">Condition value (for equals/not equals)</label>
-              <input class="form-input" id="new-custom-condition-value" name="condition_value" placeholder="e.g. yes" />
+              <label class="form-label" for="new-custom-condition-value">Condition value</label>
+              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="3" placeholder="equals/not_equals example: sales&#10;select_map example: sales=&gt;a|b|c;support=&gt;d|e|f;*=&gt;other"></textarea>
             </div>
             <div class="form-actions admin-grid__full">
               <button type="submit" class="button">Add custom field</button>
@@ -378,13 +379,13 @@
                         </div>
                         <div class="form-field">
                           <select class="form-input" name="condition_operator">
-                            {% for condition in ['equals', 'not_equals', 'is_checked', 'is_not_checked'] %}
+                            {% for condition in ['equals', 'not_equals', 'is_checked', 'is_not_checked', 'select_map'] %}
                               <option value="{{ condition }}" {% if (field.condition_operator or 'is_checked') == condition %}selected{% endif %}>{{ condition }}</option>
                             {% endfor %}
                           </select>
                         </div>
                         <div class="form-field">
-                          <input class="form-input" name="condition_value" value="{{ field.condition_value or '' }}" placeholder="Condition value" />
+                          <textarea class="form-input" name="condition_value" rows="3" placeholder="Condition value">{{ field.condition_value or '' }}</textarea>
                         </div>
                       </td>
                       <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
