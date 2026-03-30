@@ -333,12 +333,13 @@
                 <option value="is_not_checked">Checkbox is not checked</option>
                 <option value="equals">Equals value</option>
                 <option value="not_equals">Not equal to value</option>
+                <option value="one_of">One Of (comma separated)</option>
                 <option value="select_map">Select option map</option>
               </select>
             </div>
             <div class="form-field">
               <label class="form-label" for="new-custom-condition-value">Condition value</label>
-              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="6" placeholder='equals/not_equals example: sales&#10;select_map JSON example: {&#10;  &quot;sales&quot;: &quot;a,b,c&quot;,&#10;  &quot;support&quot;: &quot;d,e,f&quot;,&#10;  &quot;fallback&quot;: &quot;other&quot;&#10;}'></textarea>
+              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="6" placeholder='equals/not_equals example: sales&#10;one_of example: sales, support, hr&#10;select_map JSON example: {&#10;  &quot;sales&quot;: &quot;a,b,c&quot;,&#10;  &quot;support&quot;: &quot;d,e,f&quot;,&#10;  &quot;fallback&quot;: &quot;other&quot;&#10;}'></textarea>
             </div>
             <div class="form-actions admin-grid__full">
               <button type="submit" class="button">Add custom field</button>
@@ -385,13 +386,13 @@
                         </div>
                         <div class="form-field">
                           <select class="form-input" name="condition_operator">
-                            {% for condition in ['equals', 'not_equals', 'is_checked', 'is_not_checked', 'select_map'] %}
+                            {% for condition in ['equals', 'not_equals', 'one_of', 'is_checked', 'is_not_checked', 'select_map'] %}
                               <option value="{{ condition }}" {% if (field.condition_operator or 'is_checked') == condition %}selected{% endif %}>{{ condition }}</option>
                             {% endfor %}
                           </select>
                         </div>
                         <div class="form-field">
-                          <textarea class="form-input" name="condition_value" rows="6" placeholder='Use JSON for select_map, e.g. {&quot;sales&quot;:&quot;a,b,c&quot;,&quot;fallback&quot;:&quot;other&quot;}'>{{ field.condition_value or '' }}</textarea>
+                          <textarea class="form-input" name="condition_value" rows="6" placeholder='one_of: sales, support, hr&#10;Use JSON for select_map, e.g. {&quot;sales&quot;:&quot;a,b,c&quot;,&quot;fallback&quot;:&quot;other&quot;}'>{{ field.condition_value or '' }}</textarea>
                         </div>
                       </td>
                       <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>

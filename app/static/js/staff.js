@@ -165,6 +165,13 @@
     }
     const actual = normalizeValue(getInputCurrentValue(input));
     const expected = normalizeValue(expectedValue);
+    if (normalizedOperator === 'one_of') {
+      const acceptedValues = String(expectedValue || '')
+        .split(',')
+        .map((value) => normalizeValue(value))
+        .filter(Boolean);
+      return acceptedValues.includes(actual);
+    }
     if (normalizedOperator === 'not_equals') {
       return actual !== expected;
     }
