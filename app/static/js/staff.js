@@ -278,7 +278,31 @@
     const normalizedParentValue = normalizeValue(expectedMatch);
     const desiredValues = optionMap.get(normalizedParentValue) || fallbackOptions || [];
     const availableValues = new Set(desiredValues.map((value) => normalizeValue(value)));
-    const matchingOptions = allOptions.filter((option) => availableValues.has(normalizeValue(option.value)));
+    const matchingOptions = [];
+    const matchedValues = new Set();
+    allOptions.forEach((option) => {
+      const optionValue = normalizeValue(option.value);
+      const optionLabel = normalizeValue(option.label || option.value);
+      if (!availableValues.has(optionValue) && !availableValues.has(optionLabel)) {
+        return;
+      }
+      matchingOptions.push(option);
+      matchedValues.add(optionValue);
+      if (optionLabel) {
+        matchedValues.add(optionLabel);
+      }
+    });
+    desiredValues.forEach((value) => {
+      const normalizedValue = normalizeValue(value);
+      if (!normalizedValue || matchedValues.has(normalizedValue)) {
+        return;
+      }
+      matchingOptions.push({
+        value,
+        label: value,
+      });
+      matchedValues.add(normalizedValue);
+    });
     const currentValue = normalizeValue(selectInput.value);
 
     while (selectInput.firstChild) {
