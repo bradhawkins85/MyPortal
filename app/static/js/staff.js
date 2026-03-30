@@ -344,6 +344,15 @@
         }
         wrapper.hidden = !shouldShow;
         wrapper.querySelectorAll('input, select, textarea').forEach((input) => {
+          if (!shouldShow) {
+            if (input.tagName === 'SELECT') {
+              input.value = '';
+            } else if (input.type === 'checkbox' || input.type === 'radio') {
+              input.checked = false;
+            } else {
+              input.value = '';
+            }
+          }
           input.disabled = !shouldShow;
         });
       });
