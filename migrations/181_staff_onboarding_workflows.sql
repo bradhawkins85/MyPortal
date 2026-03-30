@@ -4,8 +4,8 @@ ALTER TABLE companies
     ADD COLUMN IF NOT EXISTS company_onboarding_workflow_id VARCHAR(128) NULL;
 
 CREATE TABLE IF NOT EXISTS company_onboarding_workflow_policies (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    company_id BIGINT UNSIGNED NOT NULL,
+    id INT NOT NULL AUTO_INCREMENT,
+    company_id INT NOT NULL,
     workflow_key VARCHAR(128) NOT NULL DEFAULT 'staff_onboarding_m365',
     is_enabled TINYINT(1) NOT NULL DEFAULT 1,
     max_retries INT NOT NULL DEFAULT 2,
@@ -19,15 +19,15 @@ CREATE TABLE IF NOT EXISTS company_onboarding_workflow_policies (
 );
 
 CREATE TABLE IF NOT EXISTS staff_onboarding_workflow_executions (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    company_id BIGINT UNSIGNED NOT NULL,
-    staff_id BIGINT UNSIGNED NOT NULL,
+    id INT NOT NULL AUTO_INCREMENT,
+    company_id INT NOT NULL,
+    staff_id INT NOT NULL,
     workflow_key VARCHAR(128) NOT NULL DEFAULT 'staff_onboarding_m365',
     state VARCHAR(32) NOT NULL DEFAULT 'requested',
     current_step VARCHAR(128) NULL,
     retries_used INT NOT NULL DEFAULT 0,
     last_error TEXT NULL,
-    helpdesk_ticket_id BIGINT UNSIGNED NULL,
+    helpdesk_ticket_id INT NULL,
     requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at DATETIME NULL,
     completed_at DATETIME NULL,
@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS staff_onboarding_workflow_executions (
 );
 
 CREATE TABLE IF NOT EXISTS staff_onboarding_workflow_step_logs (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    execution_id BIGINT UNSIGNED NOT NULL,
+    id INT NOT NULL AUTO_INCREMENT,
+    execution_id INT NOT NULL,
     step_name VARCHAR(128) NOT NULL,
     status VARCHAR(32) NOT NULL,
     attempt INT NOT NULL DEFAULT 1,
