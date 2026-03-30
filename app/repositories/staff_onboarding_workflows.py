@@ -131,13 +131,15 @@ async def create_or_reset_execution(
     staff_id: int,
     workflow_key: str,
     direction: str = "onboarding",
+    scheduled_for_utc: datetime | None = None,
+    requested_timezone: str | None = None,
 ) -> dict[str, Any]:
     now = _utc_now_naive()
     await db.execute(
         """
         INSERT INTO staff_onboarding_workflow_executions
-            (company_id, staff_id, workflow_key, direction, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, started_at, completed_at)
-        VALUES (%s, %s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, NULL, NULL)
+            (company_id, staff_id, workflow_key, direction, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, scheduled_for_utc, requested_timezone, started_at, completed_at)
+        VALUES (%s, %s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, %s, %s, NULL, NULL)
         ON DUPLICATE KEY UPDATE
             company_id = VALUES(company_id),
             workflow_key = VALUES(workflow_key),
@@ -148,10 +150,20 @@ async def create_or_reset_execution(
             last_error = NULL,
             helpdesk_ticket_id = NULL,
             requested_at = VALUES(requested_at),
+            scheduled_for_utc = COALESCE(VALUES(scheduled_for_utc), scheduled_for_utc),
+            requested_timezone = COALESCE(VALUES(requested_timezone), requested_timezone),
             started_at = NULL,
             completed_at = NULL
         """,
-        (company_id, staff_id, workflow_key, direction, now),
+        (
+            company_id,
+            staff_id,
+            workflow_key,
+            direction,
+            now,
+            scheduled_for_utc,
+            requested_timezone,
+        ),
     )
     execution = await get_execution_by_staff_id(staff_id)
     if not execution:
