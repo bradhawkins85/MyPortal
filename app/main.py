@@ -2998,6 +2998,36 @@ def _sanitize_message(value: str | None) -> str | None:
     return text[:200]
 
 
+def _sanitize_local_redirect_target(
+    candidate: str | None,
+    *,
+    fallback: str,
+    allowed_prefixes: Sequence[str] | None = None,
+) -> str:
+    """Return a safe local redirect target, or fallback when invalid."""
+    if not isinstance(candidate, str):
+        return fallback
+
+    target = candidate.strip()
+    if not target:
+        return fallback
+
+    parsed = URL(target)
+    if parsed.is_absolute_url or parsed.netloc:
+        return fallback
+
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return fallback
+
+    if any(ord(char) < 32 for char in target):
+        return fallback
+
+    if allowed_prefixes and not any(target.startswith(prefix) for prefix in allowed_prefixes):
+        return fallback
+
+    return target
+
+
 async def _validate_recommendation_product_ids(
     raw_ids: Sequence[int | str] | None,
     *,
@@ -4852,11 +4882,7 @@ async def switch_company(
         user["company_id"] = company_id
         request.state.active_company_id = company_id
 
-    destination = "/"
-    if return_url:
-        candidate = return_url.strip()
-        if candidate.startswith("/") and not candidate.startswith("//"):
-            destination = candidate
+    destination = _sanitize_local_redirect_target(return_url, fallback="/")
 
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -16490,7 +16516,11 @@ async def admin_update_issue_assignment_status(
         updated_by=_get_current_user_id(current_user),
     )
 
-    destination = return_url or f"/admin/issues?issueId={issue_id}&success={quote('Status updated.')}"
+    destination = _sanitize_local_redirect_target(
+        return_url,
+        fallback=f"/admin/issues?issueId={issue_id}&success={quote('Status updated.')}",
+        allowed_prefixes=("/admin/issues",),
+    )
     if "success=" not in destination:
         separator = "&" if "?" in destination else "?"
         destination = f"{destination}{separator}success={quote('Status updated.')}"
@@ -16521,7 +16551,11 @@ async def admin_delete_issue_assignment(
         removed_by=_get_current_user_id(current_user),
     )
 
-    destination = return_url or f"/admin/issues?issueId={issue_id}"
+    destination = _sanitize_local_redirect_target(
+        return_url,
+        fallback=f"/admin/issues?issueId={issue_id}",
+        allowed_prefixes=("/admin/issues",),
+    )
     separator = "&" if "?" in destination else "?"
     destination = f"{destination}{separator}success={quote('Assignment removed.')}"
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
@@ -16719,9 +16753,10 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     )
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
-    if return_url and return_url.startswith("/") and not return_url.startswith("//"):
-        separator = "&" if "?" in return_url else "?"
-        destination = f"{return_url}{separator}success={message}"
+    safe_return_url = _sanitize_local_redirect_target(return_url, fallback="")
+    if safe_return_url:
+        separator = "&" if "?" in safe_return_url else "?"
+        destination = f"{safe_return_url}{separator}success={message}"
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -17328,9 +17363,10 @@ async def admin_bulk_delete_tickets(request: Request):
 
     return_url_raw = form.get("returnUrl")
     return_url = str(return_url_raw) if isinstance(return_url_raw, str) else ""
-    if return_url and return_url.startswith("/") and not return_url.startswith("//"):
-        separator = "&" if "?" in return_url else "?"
-        destination = f"{return_url}{separator}success={message}"
+    safe_return_url = _sanitize_local_redirect_target(return_url, fallback="")
+    if safe_return_url:
+        separator = "&" if "?" in safe_return_url else "?"
+        destination = f"{safe_return_url}{separator}success={message}"
     else:
         destination = f"/admin/tickets?success={message}"
 
