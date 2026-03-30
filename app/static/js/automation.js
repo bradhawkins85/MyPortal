@@ -1813,8 +1813,10 @@
       .map((entry) => ({
         value: String(entry.slug || '').trim(),
         label: String(entry.name || entry.slug || '').trim(),
+        payloadSchema: entry && entry.payload_schema ? entry.payload_schema : null,
       }))
       .filter((option) => option.value);
+    const moduleBySlug = new Map(moduleOptions.map((option) => [option.value, option]));
 
     const createModuleSelect = (value) => {
       const select = document.createElement('select');
@@ -1854,7 +1856,9 @@
         const payloadFieldInput = row.querySelector('[data-action-payload]');
         const orderInput = row.querySelector('[data-action-order]');
         const noteInput = row.querySelector('[data-action-note]');
+        const payloadModeInput = row.querySelector('[data-action-payload-mode]');
         const moduleValue = moduleSelect ? moduleSelect.value.trim() : '';
+        const payloadMode = payloadModeInput ? payloadModeInput.value : 'raw';
         const payloadText = payloadFieldInput ? payloadFieldInput.value.trim() : '';
         const orderValue = orderInput ? parseInt(orderInput.value, 10) : index;
         const noteValue = noteInput ? noteInput.value.trim() : '';
@@ -1864,7 +1868,54 @@
           return;
         }
         let payload = {};
-        if (payloadText) {
+        if (payloadMode === 'schema') {
+          const schemaFields = Array.from(row.querySelectorAll('[data-action-schema-field]'));
+          const parsedPayload = {};
+          for (const field of schemaFields) {
+            const fieldName = field.dataset.fieldName || '';
+            const fieldType = (field.dataset.fieldType || 'string').toLowerCase();
+            const required = field.dataset.required === 'true';
+            const rawValue = fieldType === 'boolean' ? String(field.checked) : field.value.trim();
+            if (required && !rawValue) {
+              errorMessage = `Trigger action ${index + 1} requires '${fieldName}'.`;
+              firstErrorRow = row;
+              return;
+            }
+            if (!rawValue && fieldType !== 'boolean') {
+              continue;
+            }
+            if (fieldType === 'integer') {
+              const parsed = parseInt(rawValue, 10);
+              if (Number.isNaN(parsed)) {
+                errorMessage = `Trigger action ${index + 1} field '${fieldName}' must be an integer.`;
+                firstErrorRow = row;
+                return;
+              }
+              parsedPayload[fieldName] = parsed;
+            } else if (fieldType === 'number') {
+              const parsed = Number(rawValue);
+              if (Number.isNaN(parsed)) {
+                errorMessage = `Trigger action ${index + 1} field '${fieldName}' must be a number.`;
+                firstErrorRow = row;
+                return;
+              }
+              parsedPayload[fieldName] = parsed;
+            } else if (fieldType === 'boolean') {
+              parsedPayload[fieldName] = !!field.checked;
+            } else if (fieldType === 'json') {
+              try {
+                parsedPayload[fieldName] = JSON.parse(rawValue);
+              } catch (error) {
+                errorMessage = `Trigger action ${index + 1} field '${fieldName}' must be valid JSON.`;
+                firstErrorRow = row;
+                return;
+              }
+            } else {
+              parsedPayload[fieldName] = rawValue;
+            }
+          }
+          payload = parsedPayload;
+        } else if (payloadText) {
           try {
             const parsed = JSON.parse(payloadText);
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -1883,7 +1934,13 @@
           if (!isNew) {
             const origModule = row.dataset.actionOriginalModule || '';
             const origPayload = row.dataset.actionOriginalPayload || '';
-            isModified = moduleValue !== origModule || payloadText !== origPayload;
+            let currentPayload = '';
+            try {
+              currentPayload = JSON.stringify(payload);
+            } catch (error) {
+              currentPayload = '';
+            }
+            isModified = moduleValue !== origModule || currentPayload !== origPayload;
           }
           if ((isNew || isModified) && !noteValue) {
             errorMessage = `Add a note for action ${index + 1}.`;
@@ -1951,11 +2008,12 @@
         if (isLoaded) {
           row.dataset.actionOriginalModule = action.module || '';
           try {
-            row.dataset.actionOriginalPayload = action.payload ? JSON.stringify(action.payload) : '';
+          row.dataset.actionOriginalPayload = action.payload ? JSON.stringify(action.payload) : '';
           } catch (e) {
             row.dataset.actionOriginalPayload = '';
           }
         }
+        row.dataset.actionPayloadMode = 'raw';
 
         // ── Header (always visible) ──────────────────────────────
         const header = document.createElement('div');
@@ -2049,9 +2107,28 @@
         leftCol.appendChild(removeButton);
         columns.appendChild(leftCol);
 
-        // Right column: template row + payload textarea
+        // Right column: mode + schema/raw payload
         const rightCol = document.createElement('div');
         rightCol.className = 'automation-action__right';
+
+        const payloadModeLabel = document.createElement('label');
+        payloadModeLabel.className = 'form-label';
+        payloadModeLabel.setAttribute('for', `automation-action-payload-mode-${rowId}`);
+        payloadModeLabel.textContent = 'Payload mode';
+        const payloadModeSelect = document.createElement('select');
+        payloadModeSelect.className = 'form-input';
+        payloadModeSelect.id = `automation-action-payload-mode-${rowId}`;
+        payloadModeSelect.setAttribute('data-action-payload-mode', 'true');
+        const modeSchema = document.createElement('option');
+        modeSchema.value = 'schema';
+        modeSchema.textContent = 'Schema fields';
+        const modeRaw = document.createElement('option');
+        modeRaw.value = 'raw';
+        modeRaw.textContent = 'Raw payload JSON';
+        payloadModeSelect.appendChild(modeSchema);
+        payloadModeSelect.appendChild(modeRaw);
+        rightCol.appendChild(payloadModeLabel);
+        rightCol.appendChild(payloadModeSelect);
 
         const quickAddWrapper = document.createElement('div');
         quickAddWrapper.className = 'form-quick-add';
@@ -2108,14 +2185,142 @@
         refreshQuickAddOptions = () => {
           populateActionQuickAdd(quickAddSelect, quickAddButton, quickAddWrapper, moduleSelect.value);
         };
+        const schemaContainer = document.createElement('div');
+        schemaContainer.setAttribute('data-action-schema-container', 'true');
+        schemaContainer.hidden = true;
+        const rawContainer = document.createElement('div');
+        rawContainer.setAttribute('data-action-raw-container', 'true');
+        rawContainer.appendChild(quickAddWrapper);
+        rawContainer.appendChild(payloadInput);
+
+        const buildSchemaFields = (moduleSlug, existingPayload) => {
+          schemaContainer.textContent = '';
+          const moduleMeta = moduleBySlug.get(moduleSlug);
+          const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
+          const fields = schema && Array.isArray(schema.fields) ? schema.fields : [];
+          if (!fields.length) {
+            return false;
+          }
+          fields.forEach((fieldDef) => {
+            const fieldName = String(fieldDef.name || '').trim();
+            if (!fieldName) {
+              return;
+            }
+            const fieldType = String(fieldDef.type || 'string').toLowerCase();
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-field';
+            const label = document.createElement('label');
+            label.className = 'form-label';
+            label.textContent = String(fieldDef.label || fieldName);
+            const inputId = `automation-action-${rowId}-${fieldName}`;
+            label.setAttribute('for', inputId);
+            let input;
+            if (fieldType === 'boolean') {
+              input = document.createElement('input');
+              input.type = 'checkbox';
+              input.className = 'form-checkbox';
+              const value = existingPayload && Object.prototype.hasOwnProperty.call(existingPayload, fieldName)
+                ? !!existingPayload[fieldName]
+                : false;
+              input.checked = value;
+            } else if (fieldType === 'json') {
+              input = document.createElement('textarea');
+              input.rows = 3;
+              input.className = 'form-input';
+              const value = existingPayload ? existingPayload[fieldName] : undefined;
+              input.value = value !== undefined ? JSON.stringify(value, null, 2) : '';
+              input.placeholder = String(fieldDef.placeholder || '{}');
+            } else if (fieldDef.enum && Array.isArray(fieldDef.enum)) {
+              input = document.createElement('select');
+              input.className = 'form-input';
+              const empty = document.createElement('option');
+              empty.value = '';
+              empty.textContent = 'Select value';
+              input.appendChild(empty);
+              fieldDef.enum.forEach((enumValue) => {
+                const opt = document.createElement('option');
+                opt.value = String(enumValue);
+                opt.textContent = String(enumValue);
+                input.appendChild(opt);
+              });
+              const value = existingPayload ? existingPayload[fieldName] : undefined;
+              if (value !== undefined && value !== null) {
+                input.value = String(value);
+              }
+            } else {
+              input = document.createElement('input');
+              input.type = fieldType === 'integer' || fieldType === 'number' ? 'number' : 'text';
+              input.className = 'form-input';
+              const value = existingPayload ? existingPayload[fieldName] : undefined;
+              input.value = value !== undefined && value !== null ? String(value) : '';
+              if (fieldDef.placeholder) {
+                input.placeholder = String(fieldDef.placeholder);
+              }
+            }
+            input.id = inputId;
+            input.dataset.actionSchemaField = 'true';
+            input.dataset.fieldName = fieldName;
+            input.dataset.fieldType = fieldType;
+            input.dataset.required = fieldDef.required ? 'true' : 'false';
+            input.addEventListener(fieldType === 'boolean' ? 'change' : 'input', updateState);
+            wrapper.appendChild(label);
+            wrapper.appendChild(input);
+            schemaContainer.appendChild(wrapper);
+          });
+          return true;
+        };
+
+        const applyPayloadMode = () => {
+          const moduleSlug = moduleSelect.value;
+          const moduleMeta = moduleBySlug.get(moduleSlug);
+          const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
+          const schemaFields = schema && Array.isArray(schema.fields) ? schema.fields : [];
+          const schemaFieldNames = new Set(schemaFields.map((field) => String(field.name || '').trim()).filter(Boolean));
+          let existingPayload = {};
+          try {
+            existingPayload = payloadInput.value.trim() ? JSON.parse(payloadInput.value) : {};
+          } catch (error) {
+            existingPayload = {};
+          }
+          const hasSchema = buildSchemaFields(moduleSlug, existingPayload);
+          if (!hasSchema) {
+            payloadModeSelect.value = 'raw';
+            payloadModeSelect.disabled = true;
+            modeSchema.disabled = true;
+            schemaContainer.hidden = true;
+            rawContainer.hidden = false;
+            row.dataset.actionPayloadMode = 'raw';
+            return;
+          }
+          payloadModeSelect.disabled = false;
+          modeSchema.disabled = false;
+          const hasUnknownKeys = Object.keys(existingPayload).some((key) => !schemaFieldNames.has(key));
+          const preferredMode =
+            row.dataset.actionPayloadMode === 'raw' || hasUnknownKeys ? 'raw' : 'schema';
+          payloadModeSelect.value = preferredMode;
+          schemaContainer.hidden = preferredMode !== 'schema';
+          rawContainer.hidden = preferredMode !== 'raw';
+          row.dataset.actionPayloadMode = preferredMode;
+        };
+
+        payloadModeSelect.addEventListener('change', () => {
+          row.dataset.actionPayloadMode = payloadModeSelect.value;
+          applyPayloadMode();
+          updateState();
+        });
+
         refreshQuickAddOptions();
-        rightCol.appendChild(quickAddWrapper);
-        rightCol.appendChild(payloadInput);
+        moduleSelect.addEventListener('change', () => {
+          applyPayloadMode();
+        });
+        rightCol.appendChild(schemaContainer);
+        rightCol.appendChild(rawContainer);
         columns.appendChild(rightCol);
 
         body.appendChild(columns);
         row.appendChild(body);
 
+        applyPayloadMode();
         return row;
       };
 

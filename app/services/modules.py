@@ -1099,6 +1099,144 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "m365-admin",     # M365 Admin - configuration only, not an action module
 }
 
+_ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
+    "smtp": {
+        "fields": [
+            {"name": "recipients", "label": "Recipients", "type": "json", "required": True, "placeholder": '["support@example.com"]'},
+            {"name": "subject", "label": "Subject", "type": "string", "required": True},
+            {"name": "html", "label": "HTML body", "type": "string"},
+            {"name": "text", "label": "Text body", "type": "string"},
+            {"name": "sender", "label": "Sender", "type": "string"},
+        ],
+    },
+    "ntfy": {
+        "fields": [
+            {"name": "topic", "label": "Topic", "type": "string"},
+            {"name": "title", "label": "Title", "type": "string"},
+            {"name": "message", "label": "Message", "type": "string", "required": True},
+            {
+                "name": "priority",
+                "label": "Priority",
+                "type": "string",
+                "enum": ["min", "low", "default", "high", "urgent", "max"],
+            },
+        ],
+    },
+    "create-ticket": {
+        "fields": [
+            {"name": "subject", "label": "Subject", "type": "string", "required": True},
+            {"name": "description", "label": "Description", "type": "string", "required": True},
+            {"name": "status", "label": "Status", "type": "string"},
+            {"name": "priority", "label": "Priority", "type": "string"},
+            {"name": "company_id", "label": "Company ID", "type": "string"},
+            {"name": "requester_id", "label": "Requester ID", "type": "string"},
+            {"name": "assigned_user_id", "label": "Assigned user ID", "type": "string"},
+            {"name": "module_slug", "label": "Module slug", "type": "string"},
+        ],
+    },
+    "create-task": {
+        "fields": [
+            {"name": "task_name", "label": "Task name", "type": "string"},
+            {"name": "sort_order", "label": "Sort order", "type": "integer"},
+            {"name": "context", "label": "Context (JSON)", "type": "json"},
+            {"name": "tasks", "label": "Tasks (JSON array)", "type": "json"},
+        ],
+    },
+    "update-ticket": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+            {"name": "status", "label": "Status", "type": "string"},
+            {"name": "priority", "label": "Priority", "type": "string"},
+            {"name": "assigned_user_id", "label": "Assigned user ID", "type": "string"},
+            {"name": "requester_id", "label": "Requester ID", "type": "string"},
+            {"name": "category", "label": "Category", "type": "string"},
+        ],
+    },
+    "update-ticket-description": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {"name": "description", "label": "Description", "type": "string", "required": True},
+        ],
+    },
+    "reprocess-ai": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {"name": "refresh_summary", "label": "Refresh summary", "type": "boolean"},
+            {"name": "refresh_tags", "label": "Refresh tags", "type": "boolean"},
+        ],
+    },
+    "add-ticket-reply": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {"name": "body", "label": "Body", "type": "string", "required": True},
+            {"name": "is_internal", "label": "Internal note", "type": "boolean"},
+            {"name": "minutes_spent", "label": "Minutes spent", "type": "integer"},
+            {"name": "is_billable", "label": "Billable", "type": "boolean"},
+            {"name": "author_id", "label": "Author ID", "type": "string"},
+        ],
+    },
+    "whisperx": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+            {"name": "add_note", "label": "Add note", "type": "boolean"},
+            {"name": "language", "label": "Language", "type": "string"},
+        ],
+    },
+}
+
+
+def get_action_payload_schema(slug: str) -> dict[str, Any] | None:
+    return _ACTION_PAYLOAD_SCHEMAS.get(str(slug or "").strip())
+
+
+def validate_action_payload(module_slug: str, payload: Mapping[str, Any] | None) -> None:
+    schema = get_action_payload_schema(module_slug)
+    if not schema:
+        return
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, Mapping):
+        raise ValueError("Action payload must be an object.")
+
+    fields = schema.get("fields")
+    if not isinstance(fields, list):
+        return
+    for field in fields:
+        if not isinstance(field, Mapping):
+            continue
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        required = bool(field.get("required"))
+        value = payload.get(name)
+        if required and (value is None or (isinstance(value, str) and not value.strip())):
+            raise ValueError(f"Action payload field '{name}' is required for module '{module_slug}'.")
+        if value is None:
+            continue
+        field_type = str(field.get("type") or "string").strip().lower()
+        if field_type == "string":
+            if not isinstance(value, str):
+                raise ValueError(f"Action payload field '{name}' must be a string.")
+        elif field_type == "integer":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Action payload field '{name}' must be an integer.")
+        elif field_type == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Action payload field '{name}' must be a number.")
+        elif field_type == "boolean":
+            if not isinstance(value, bool):
+                raise ValueError(f"Action payload field '{name}' must be a boolean.")
+        elif field_type == "json":
+            # Any JSON-compatible value is allowed; type-specific validation should
+            # be implemented by module handlers for advanced cases.
+            pass
+
+        enum_values = field.get("enum")
+        if enum_values and isinstance(enum_values, list) and value not in enum_values:
+            raise ValueError(
+                f"Action payload field '{name}' must be one of: {', '.join(str(v) for v in enum_values)}."
+            )
+
 
 async def list_trigger_action_modules() -> list[dict[str, Any]]:
     """Return modules that can be used as trigger actions in automations.
@@ -1111,12 +1249,13 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     in the trigger actions menu.
     """
     modules = await module_repo.list_modules()
-    actionable_modules = [
-        _redact_module_settings(module)
-        for module in modules
-        if module.get("slug") not in _NON_TRIGGERABLE_MODULE_SLUGS
-        and module.get("enabled", False)
-    ]
+    actionable_modules: list[dict[str, Any]] = []
+    for module in modules:
+        if module.get("slug") in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get("enabled", False):
+            continue
+        redacted = _redact_module_settings(module)
+        redacted["payload_schema"] = get_action_payload_schema(str(module.get("slug") or ""))
+        actionable_modules.append(redacted)
     return actionable_modules
 
 
