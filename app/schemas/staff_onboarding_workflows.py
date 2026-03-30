@@ -64,6 +64,10 @@ class WorkflowConfigSchema(BaseModel):
     version: int = Field(default=1, ge=1, le=10)
     steps: list[WorkflowStepDefinition] = Field(default_factory=list)
     offboarding_steps: list[WorkflowStepDefinition] = Field(default_factory=list)
+    custom_field_group_mappings: dict[str, list[str]] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("custom_field_group_mappings", "customFieldGroupMappings"),
+    )
     failure_policy: WorkflowFailurePolicy = Field(default_factory=WorkflowFailurePolicy)
     offboarding_failure_policy: WorkflowFailurePolicy = Field(default_factory=WorkflowFailurePolicy)
 

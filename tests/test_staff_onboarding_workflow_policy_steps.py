@@ -12,6 +12,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _mock_staff_custom_fields(monkeypatch):
+    monkeypatch.setattr(
+        workflows.staff_custom_fields_repo,
+        "get_all_staff_field_values",
+        AsyncMock(return_value={}),
+    )
+
+
 def test_normalise_workflow_steps_uses_step_type_from_config():
     policy_config = {
         "steps": [
@@ -44,6 +53,29 @@ def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_directi
     assert len(steps) == 1
     assert steps[0]["name"] == "Hide from GAL"
     assert steps[0]["type"] == "m365_hide_from_gal"
+
+
+def test_normalise_custom_field_group_mappings_supports_dict_and_list_inputs():
+    from_dict = workflows._normalise_custom_field_group_mappings(
+        {"custom_field_group_mappings": {"field_one": ["group-a", "group-b"], "field_two": "group-c,group-d"}}
+    )
+    from_list = workflows._normalise_custom_field_group_mappings(
+        {
+            "customFieldGroupMappings": [
+                {"field_name": "field_three", "group_ids": ["group-e"]},
+                {"field": "field_four", "group_id": "group-f"},
+            ]
+        }
+    )
+
+    assert from_dict == {
+        "field_one": ["group-a", "group-b"],
+        "field_two": ["group-c", "group-d"],
+    }
+    assert from_list == {
+        "field_three": ["group-e"],
+        "field_four": ["group-f"],
+    }
 
 
 @pytest.mark.anyio
@@ -159,3 +191,46 @@ async def test_execute_policy_steps_continues_when_step_failure_mode_continue(mo
     assert result["paused"] is False
     assert workflows._attempt_step.await_count == 2
     assert update_mock.await_count >= 1
+
+
+@pytest.mark.anyio
+async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(monkeypatch):
+    monkeypatch.setattr(workflows, "_normalise_workflow_steps", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_step_logs_for_execution_ids",
+        AsyncMock(return_value={79: []}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "append_step_log", AsyncMock())
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    monkeypatch.setattr(
+        workflows.staff_custom_fields_repo,
+        "get_all_staff_field_values",
+        AsyncMock(return_value={702: {"entra_sales": True, "entra_ops": False}}),
+    )
+    attempt_mock = AsyncMock(return_value={"added": True})
+    monkeypatch.setattr(workflows, "_attempt_step", attempt_mock)
+    monkeypatch.setattr(workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-123"}))
+
+    result = await workflows._execute_policy_steps(
+        execution_id=79,
+        company_id=9,
+        staff={"id": 702, "email": "new.user@example.com"},
+        direction=workflows.DIRECTION_ONBOARDING,
+        policy_config={
+            "custom_field_group_mappings": {
+                "entra_sales": ["group-sales", "group-announce"],
+                "entra_ops": ["group-ops"],
+            }
+        },
+        max_retries=3,
+        waiting_external_state=workflows.STATE_WAITING_EXTERNAL,
+    )
+
+    assert result["paused"] is False
+    assert attempt_mock.await_count == 2
+    step_names = [call.kwargs["step_name"] for call in attempt_mock.await_args_list]
+    assert step_names == [
+        "custom_field_group:entra_sales:group-sales",
+        "custom_field_group:entra_sales:group-announce",
+    ]
