@@ -15,6 +15,7 @@ from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import licenses as license_repo
 from app.repositories import staff as staff_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as workflow_repo
 from app.services import audit as audit_service
 from app.services import m365 as m365_service
@@ -571,6 +572,120 @@ def _resolve_step_failure_mode(step: dict[str, Any]) -> str:
     return mode
 
 
+def _normalize_group_ids(raw_group_ids: Any) -> list[str]:
+    if isinstance(raw_group_ids, str):
+        raw_group_ids = [item.strip() for item in raw_group_ids.split(",") if item.strip()]
+    if not isinstance(raw_group_ids, list):
+        return []
+    normalized: list[str] = []
+    for raw_group_id in raw_group_ids:
+        group_id = str(raw_group_id or "").strip()
+        if group_id:
+            normalized.append(group_id)
+    return normalized
+
+
+def _normalise_custom_field_group_mappings(policy_config: dict[str, Any]) -> dict[str, list[str]]:
+    raw_mappings = (
+        policy_config.get("custom_field_group_mappings")
+        or policy_config.get("customFieldGroupMappings")
+        or {}
+    )
+    mappings: dict[str, list[str]] = {}
+    if isinstance(raw_mappings, dict):
+        iterable = raw_mappings.items()
+    elif isinstance(raw_mappings, list):
+        iterable = []
+        for item in raw_mappings:
+            if not isinstance(item, dict):
+                continue
+            field_name = (
+                item.get("field_name")
+                or item.get("field")
+                or item.get("custom_field_name")
+                or item.get("customFieldName")
+            )
+            iterable.append(
+                (
+                    field_name,
+                    item.get("group_ids") or item.get("groupIds") or item.get("groups") or item.get("group_id"),
+                )
+            )
+    else:
+        return mappings
+
+    for raw_field_name, raw_group_ids in iterable:
+        field_name = str(raw_field_name or "").strip()
+        if not field_name:
+            continue
+        group_ids = _normalize_group_ids(raw_group_ids)
+        if not group_ids:
+            continue
+        mappings[field_name] = group_ids
+    return mappings
+
+
+def _is_truthy_custom_field(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "checked"}
+
+
+async def _execute_custom_field_group_memberships(
+    *,
+    execution_id: int,
+    company_id: int,
+    staff: dict[str, Any],
+    custom_fields: dict[str, Any],
+    policy_config: dict[str, Any],
+    vars_map: dict[str, Any],
+    max_retries: int,
+) -> dict[str, Any]:
+    mappings = _normalise_custom_field_group_mappings(policy_config)
+    if not mappings:
+        return {"executed": False, "groups_added": []}
+
+    selected_groups: list[tuple[str, str]] = []
+    for field_name, group_ids in mappings.items():
+        if not _is_truthy_custom_field(custom_fields.get(field_name)):
+            continue
+        for group_id in group_ids:
+            selected_groups.append((field_name, group_id))
+    if not selected_groups:
+        return {"executed": False, "groups_added": []}
+
+    m365_user_id = str(vars_map.get("m365_user_id") or "").strip()
+    if not m365_user_id:
+        resolved_user = await _resolve_staff_m365_user(company_id, staff)
+        m365_user_id = str(resolved_user.get("id") or "").strip()
+    if not m365_user_id:
+        raise WorkflowStepError("Unable to resolve M365 user for custom-field group assignments")
+
+    added_groups: list[str] = []
+    for field_name, group_id in selected_groups:
+        step_name = f"custom_field_group:{field_name}:{group_id}"
+        await _attempt_step(
+            execution_id=execution_id,
+            step_name=step_name,
+            max_retries=max_retries,
+            request_payload={"field_name": field_name, "group_id": group_id, "m365_user_id": m365_user_id},
+            callback=lambda group_id=group_id: _execute_policy_step(
+                step={"type": "m365_add_group", "group_id": group_id, "user_id": m365_user_id},
+                company_id=company_id,
+                staff=staff,
+                policy_config=policy_config,
+                vars_map=vars_map,
+            ),
+        )
+        added_groups.append(group_id)
+    vars_map["m365_groups_added_from_custom_fields"] = added_groups
+    return {"executed": True, "groups_added": added_groups}
+
+
 def _set_nested_payload_value(payload: dict[str, Any], *, path: str, value: Any) -> None:
     parts = [part.strip() for part in path.split(".") if part.strip()]
     if not parts:
@@ -941,11 +1056,20 @@ async def _execute_policy_steps(
     steps = _normalise_workflow_steps(policy_config, direction=direction)
     prior_logs = (await workflow_repo.list_step_logs_for_execution_ids([execution_id])).get(execution_id, [])
     succeeded_steps = {str(item.get("step_name")) for item in prior_logs if str(item.get("status")) == "success"}
+    custom_field_map = await staff_custom_fields_repo.get_all_staff_field_values(
+        company_id,
+        [int(staff["id"])],
+    )
+    staff_custom_fields = custom_field_map.get(int(staff["id"]), {})
     vars_map: dict[str, Any] = {
         "company_id": company_id,
         "staff_id": int(staff["id"]),
         "staff_email": staff.get("email"),
+        "staff_custom_fields": dict(staff_custom_fields),
     }
+    for name, value in staff_custom_fields.items():
+        vars_map[f"custom_fields.{name}"] = value
+        vars_map[f"staff_custom_fields.{name}"] = value
     secret_vars: set[str] = set()
 
     for item in prior_logs:
@@ -1057,6 +1181,16 @@ async def _execute_policy_steps(
             execution_id,
             state=STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING,
             current_step=f"{index + 1}:{step_name}",
+        )
+    if direction == DIRECTION_ONBOARDING:
+        await _execute_custom_field_group_memberships(
+            execution_id=execution_id,
+            company_id=company_id,
+            staff=staff,
+            custom_fields=staff_custom_fields,
+            policy_config=policy_config,
+            vars_map=vars_map,
+            max_retries=max_retries,
         )
     return {"paused": False}
 
