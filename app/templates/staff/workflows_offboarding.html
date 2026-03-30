@@ -139,7 +139,10 @@
           const makeInput = (field, currentValue) => {
             const elementType = field.type === 'select' ? 'select' : (field.type === 'textarea' ? 'textarea' : 'input');
             const input = document.createElement(elementType);
-            if (elementType === 'input' && field.type !== 'checkbox' && field.type !== 'boolean') input.type = field.type === 'number' ? 'number' : 'text';
+            if (elementType === 'input') {
+              if (field.type === 'checkbox' || field.type === 'boolean') input.type = 'checkbox';
+              else input.type = field.type === 'number' ? 'number' : 'text';
+            }
             input.className = field.type === 'checkbox' ? '' : 'form-input';
             if (field.type === 'number') input.value = String(Number(currentValue || 0));
             else if (field.type === 'checkbox' || field.type === 'boolean') input.checked = Boolean(currentValue);
