@@ -580,31 +580,20 @@
     let descriptionSunEditor = null;
 
     function sanitizeDescriptionHtml(value) {
-      const doc = new DOMParser().parseFromString(value || '', 'text/html');
-      doc.body
-        .querySelectorAll('script, iframe, object, embed, link, meta, base, form')
-        .forEach((node) => node.remove());
+      const rawHtml = String(value || '');
+      const withoutBlockedTags = rawHtml.replace(
+        /<\s*\/?\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi,
+        ''
+      );
 
-      doc.body.querySelectorAll('*').forEach((node) => {
-        Array.from(node.attributes).forEach((attr) => {
-          const attrName = attr.name.toLowerCase();
-          const attrValue = String(attr.value || '').trim().toLowerCase();
-          if (attrName.startsWith('on')) {
-            node.removeAttribute(attr.name);
-            return;
-          }
-          if (
-            (attrName === 'href' || attrName === 'src') &&
-            (attrValue.startsWith('javascript:') ||
-              attrValue.startsWith('data:') ||
-              attrValue.startsWith('vbscript:'))
-          ) {
-            node.removeAttribute(attr.name);
-          }
-        });
-      });
-
-      return doc.body ? doc.body.innerHTML : '';
+      return withoutBlockedTags
+        .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
+        .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+        .replace(
+          /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
+          ''
+        )
+        .replace(/\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi, '');
     }
 
     function getOrCreateDescriptionEditor() {
