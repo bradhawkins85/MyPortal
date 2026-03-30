@@ -94,6 +94,24 @@ class StaffWorkflowStatus(BaseModel):
     requested_at: Optional[datetime] = None
 
 
+class StaffExternalCheckpointCallback(BaseModel):
+    company_id: int = Field(validation_alias="companyId")
+    staff_id: int = Field(validation_alias="staffId")
+    confirmation_token: str = Field(validation_alias="confirmationToken", min_length=24, max_length=255)
+    source: str = Field(min_length=2, max_length=128)
+    callback_timestamp: Optional[datetime] = Field(default=None, validation_alias="callbackTimestamp")
+    proof_reference_id: Optional[str] = Field(default=None, validation_alias="proofReferenceId", max_length=255)
+    payload_hash: Optional[str] = Field(default=None, validation_alias="payloadHash", max_length=128)
+    callback_payload: dict[str, Any] | None = Field(default=None, validation_alias="callbackPayload")
+
+
+class StaffExternalCheckpointResponse(BaseModel):
+    state: str
+    execution_id: int = Field(validation_alias="executionId")
+    staff_id: int = Field(validation_alias="staffId")
+    company_id: int = Field(validation_alias="companyId")
+
+
 class StaffResponse(BaseModel):
     id: int
     company_id: int

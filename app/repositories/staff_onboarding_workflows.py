@@ -236,3 +236,101 @@ async def append_step_log(
             _utc_now_naive(),
         ),
     )
+
+
+async def create_external_checkpoint(
+    *,
+    execution_id: int,
+    company_id: int,
+    staff_id: int,
+    confirmation_token_hash: str,
+) -> dict[str, Any]:
+    await db.execute(
+        """
+        INSERT INTO staff_onboarding_external_checkpoints
+            (execution_id, company_id, staff_id, confirmation_token_hash, status, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, 'pending', %s, %s)
+        """,
+        (
+            execution_id,
+            company_id,
+            staff_id,
+            confirmation_token_hash,
+            _utc_now_naive(),
+            _utc_now_naive(),
+        ),
+    )
+    row = await db.fetch_one(
+        """
+        SELECT *
+        FROM staff_onboarding_external_checkpoints
+        WHERE execution_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (execution_id,),
+    )
+    return dict(row or {})
+
+
+async def get_pending_external_checkpoint(
+    *,
+    execution_id: int,
+    company_id: int,
+    staff_id: int,
+    confirmation_token_hash: str,
+) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT *
+        FROM staff_onboarding_external_checkpoints
+        WHERE execution_id = %s
+          AND company_id = %s
+          AND staff_id = %s
+          AND confirmation_token_hash = %s
+          AND status = 'pending'
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (execution_id, company_id, staff_id, confirmation_token_hash),
+    )
+    return dict(row) if row else None
+
+
+async def confirm_external_checkpoint(
+    checkpoint_id: int,
+    *,
+    source: str,
+    callback_timestamp: datetime,
+    proof_reference_id: str | None,
+    payload_hash: str | None,
+    callback_payload: dict[str, Any] | None,
+    confirmed_by_api_key_id: int,
+) -> None:
+    await db.execute(
+        """
+        UPDATE staff_onboarding_external_checkpoints
+        SET
+            status = 'confirmed',
+            source = %s,
+            callback_timestamp = %s,
+            proof_reference_id = %s,
+            payload_hash = %s,
+            callback_payload_json = %s,
+            confirmed_by_api_key_id = %s,
+            confirmed_at = %s,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        (
+            source,
+            callback_timestamp,
+            proof_reference_id,
+            payload_hash,
+            json.dumps(callback_payload or {}, ensure_ascii=False),
+            confirmed_by_api_key_id,
+            _utc_now_naive(),
+            _utc_now_naive(),
+            checkpoint_id,
+        ),
+    )

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
+from app.api.dependencies.api_keys import require_api_key
 from app.api.dependencies.database import require_database
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -14,6 +15,8 @@ from app.repositories import staff_onboarding_workflows as staff_workflow_repo
 from app.schemas.staff import (
     StaffApprovalDecision,
     StaffCreate,
+    StaffExternalCheckpointCallback,
+    StaffExternalCheckpointResponse,
     StaffRequestCreate,
     StaffResponse,
     StaffUpdate,
@@ -347,6 +350,60 @@ async def deny_staff_request(
     )
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
     return StaffResponse.model_validate(updated)
+
+
+@router.post(
+    "/external-checkpoints/confirm",
+    response_model=StaffExternalCheckpointResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def confirm_external_checkpoint(
+    payload: StaffExternalCheckpointCallback,
+    api_key_record: dict = Depends(require_api_key),
+    _: None = Depends(require_database),
+):
+    company_id = int(payload.company_id)
+    staff_id = int(payload.staff_id)
+    policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+    policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+    allowed_api_key_ids_raw = policy_config.get("external_confirmation_api_key_ids")
+    allowed_api_key_ids: set[int] = set()
+    if isinstance(allowed_api_key_ids_raw, list):
+        for raw in allowed_api_key_ids_raw:
+            try:
+                allowed_api_key_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+    api_key_id = int(api_key_record["id"])
+    if allowed_api_key_ids and api_key_id not in allowed_api_key_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key is not allowed for this company's external checkpoint scope",
+        )
+
+    try:
+        result = await staff_onboarding_workflow_service.confirm_external_checkpoint_and_resume(
+            company_id=company_id,
+            staff_id=staff_id,
+            confirmation_token=payload.confirmation_token,
+            source=payload.source.strip(),
+            callback_timestamp=payload.callback_timestamp or datetime.now(timezone.utc),
+            proof_reference_id=payload.proof_reference_id,
+            payload_hash=payload.payload_hash,
+            callback_payload=payload.callback_payload,
+            confirmed_by_api_key_id=api_key_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return StaffExternalCheckpointResponse.model_validate(
+        {
+            "state": result.get("state") or "unknown",
+            "executionId": int(result.get("execution_id") or 0),
+            "staffId": staff_id,
+            "companyId": company_id,
+        }
+    )
 
 
 @router.get("/{staff_id}", response_model=StaffResponse)

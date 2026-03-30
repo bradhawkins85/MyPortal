@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,7 @@ from app.services import audit as audit_service
 from app.services import m365 as m365_service
 from app.services import notifications as notifications_service
 from app.services import tickets as tickets_service
+from app.security.api_keys import hash_api_key
 
 
 STATE_REQUESTED = "requested"
@@ -250,11 +252,11 @@ async def run_staff_onboarding_workflow(
     if not staff:
         raise ValueError("Staff not found")
     onboarding_status = str(staff.get("onboarding_status") or "").strip().lower()
-    if onboarding_status != STATE_APPROVED:
+    if onboarding_status not in {STATE_APPROVED, STATE_WAITING_EXTERNAL}:
         return {
             "state": "ignored",
             "reason": "not_approved",
-            "required_state": STATE_APPROVED,
+            "required_state": f"{STATE_APPROVED}|{STATE_WAITING_EXTERNAL}",
             "current_state": onboarding_status or None,
         }
 
@@ -272,6 +274,86 @@ async def run_staff_onboarding_workflow(
         workflow_key=workflow_key,
     )
     execution_id = int(execution["id"])
+
+    requires_external_confirmation = bool(policy_config.get("requires_external_confirmation"))
+    if requires_external_confirmation:
+        confirmation_token = secrets.token_urlsafe(32)
+        await workflow_repo.create_external_checkpoint(
+            execution_id=execution_id,
+            company_id=company_id,
+            staff_id=staff_id,
+            confirmation_token_hash=hash_api_key(confirmation_token),
+        )
+        await workflow_repo.update_execution_state(
+            execution_id,
+            state=STATE_WAITING_EXTERNAL,
+            current_step="await_external_confirmation",
+        )
+        await staff_repo.update_staff(
+            staff_id,
+            company_id=company_id,
+            first_name=staff.get("first_name") or "",
+            last_name=staff.get("last_name") or "",
+            email=staff.get("email") or "",
+            mobile_phone=staff.get("mobile_phone"),
+            date_onboarded=staff.get("date_onboarded"),
+            date_offboarded=staff.get("date_offboarded"),
+            enabled=bool(staff.get("enabled", True)),
+            is_ex_staff=bool(staff.get("is_ex_staff", False)),
+            street=staff.get("street"),
+            city=staff.get("city"),
+            state=staff.get("state"),
+            postcode=staff.get("postcode"),
+            country=staff.get("country"),
+            department=staff.get("department"),
+            job_title=staff.get("job_title"),
+            org_company=staff.get("org_company"),
+            manager_name=staff.get("manager_name"),
+            account_action=staff.get("account_action"),
+            syncro_contact_id=staff.get("syncro_contact_id"),
+            onboarding_status=STATE_WAITING_EXTERNAL,
+            onboarding_complete=False,
+            onboarding_completed_at=None,
+        )
+        await audit_service.log_action(
+            user_id=initiated_by_user_id,
+            action="staff.onboarding.workflow.waiting_external",
+            entity_type="staff",
+            entity_id=staff_id,
+            metadata={
+                "company_id": company_id,
+                "execution_id": execution_id,
+                "workflow_key": workflow_key,
+            },
+        )
+        return {
+            "state": STATE_WAITING_EXTERNAL,
+            "execution_id": execution_id,
+            "confirmation_token": confirmation_token,
+        }
+
+    return await resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=company_id,
+        staff_id=staff_id,
+        execution_id=execution_id,
+        initiated_by_user_id=initiated_by_user_id,
+    )
+
+
+async def resume_staff_onboarding_workflow_after_external_confirmation(
+    *,
+    company_id: int,
+    staff_id: int,
+    execution_id: int,
+    initiated_by_user_id: int | None,
+) -> dict[str, Any]:
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise ValueError("Staff not found")
+    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    workflow_key = str(policy.get("workflow_key") or workflow_repo.DEFAULT_WORKFLOW_KEY)
+    max_retries = max(0, int(policy.get("max_retries") or 0))
+    policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
 
     await workflow_repo.update_execution_state(
         execution_id,
@@ -503,3 +585,65 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
         "completed_at": execution.get("completed_at"),
         "requested_at": execution.get("requested_at"),
     }
+
+
+async def confirm_external_checkpoint_and_resume(
+    *,
+    company_id: int,
+    staff_id: int,
+    confirmation_token: str,
+    source: str,
+    callback_timestamp: datetime,
+    proof_reference_id: str | None,
+    payload_hash: str | None,
+    callback_payload: dict[str, Any] | None,
+    confirmed_by_api_key_id: int,
+) -> dict[str, Any]:
+    if callback_timestamp.tzinfo is not None:
+        callback_timestamp = callback_timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+    execution = await workflow_repo.get_execution_by_staff_id(staff_id)
+    if not execution:
+        raise ValueError("Workflow execution not found")
+    if int(execution.get("company_id") or 0) != company_id:
+        raise ValueError("Company scope mismatch")
+    if str(execution.get("state") or "").strip().lower() != STATE_WAITING_EXTERNAL:
+        raise ValueError("Workflow execution is not waiting for external confirmation")
+
+    checkpoint = await workflow_repo.get_pending_external_checkpoint(
+        execution_id=int(execution["id"]),
+        company_id=company_id,
+        staff_id=staff_id,
+        confirmation_token_hash=hash_api_key(confirmation_token),
+    )
+    if not checkpoint:
+        raise ValueError("Invalid confirmation token")
+
+    await workflow_repo.confirm_external_checkpoint(
+        int(checkpoint["id"]),
+        source=source,
+        callback_timestamp=callback_timestamp,
+        proof_reference_id=proof_reference_id,
+        payload_hash=payload_hash,
+        callback_payload=callback_payload,
+        confirmed_by_api_key_id=confirmed_by_api_key_id,
+    )
+    await audit_service.log_action(
+        user_id=None,
+        action="staff.onboarding.workflow.external_confirmed",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": company_id,
+            "execution_id": int(execution["id"]),
+            "source": source,
+            "payload_hash": payload_hash,
+            "proof_reference_id": proof_reference_id,
+            "confirmed_by_api_key_id": confirmed_by_api_key_id,
+        },
+    )
+    return await resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=company_id,
+        staff_id=staff_id,
+        execution_id=int(execution["id"]),
+        initiated_by_user_id=None,
+    )
