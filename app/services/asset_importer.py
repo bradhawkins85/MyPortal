@@ -7,7 +7,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import asset_custom_fields as acf_repo
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
-from app.services import syncro, tacticalrmm
+from app.services import company_id_lookup, syncro, tacticalrmm
 
 
 def _clean_string(value: Any) -> str | None:
@@ -272,6 +272,22 @@ async def import_all_tactical_assets() -> dict[str, Any]:
         except (TypeError, ValueError):
             continue
         client_identifier = _clean_string(company.get("tacticalrmm_client_id"))
+        if not client_identifier:
+            company_name = _clean_string(company.get("name"))
+            if company_name:
+                matched_client_id = await company_id_lookup._lookup_tactical_client_id(company_name)
+                if matched_client_id:
+                    client_identifier = matched_client_id
+                    await company_repo.update_company(
+                        company_id,
+                        tacticalrmm_client_id=client_identifier,
+                    )
+                    log_info(
+                        "Auto-matched company to Tactical RMM client",
+                        company_id=company_id,
+                        company_name=company_name,
+                        tactical_client_id=client_identifier,
+                    )
         if not client_identifier:
             summary["skipped"].append(
                 {"company_id": company_id, "reason": "missing_mapping"}
