@@ -15,6 +15,8 @@ def test_staff_onboarding_routes_include_new_paths():
     paths = {route.path for route in staff.router.routes}
     assert "/api/staff/{staff_id}/onboarding/approve" in paths
     assert "/api/staff/{staff_id}/onboarding/deny" in paths
+    assert "/api/staff/{staff_id}/offboarding/approve" in paths
+    assert "/api/staff/{staff_id}/offboarding/deny" in paths
     assert "/api/staff/{staff_id}/onboarding/external-confirm" in paths
 
 
@@ -103,3 +105,103 @@ async def test_external_confirm_rejects_path_body_staff_mismatch(monkeypatch):
         )
     assert exc.value.status_code == 400
     assert "mismatch" in str(exc.value.detail).lower()
+
+
+@pytest.mark.anyio
+async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffApprovalDecision
+
+    monkeypatch.setattr(
+        staff.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(
+            return_value={
+                "id": 22,
+                "company_id": 4,
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "email": "ada@example.com",
+                "enabled": True,
+                "is_ex_staff": False,
+                "account_action": "Offboard Requested",
+                "onboarding_complete": False,
+            }
+        ),
+    )
+    update_mock = AsyncMock(
+        return_value={
+            "id": 22,
+            "company_id": 4,
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@example.com",
+            "enabled": False,
+            "is_ex_staff": True,
+            "account_action": "Offboarded",
+            "approval_status": "approved",
+            "approved_by_user_id": 99,
+            "approval_notes": "HR validated",
+            "custom_fields": {},
+        }
+    )
+    monkeypatch.setattr(staff.staff_repo, "update_staff", update_mock)
+    workflow_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(staff.staff_onboarding_workflow_service, "get_staff_workflow_status", workflow_mock)
+    audit_mock = AsyncMock()
+    monkeypatch.setattr(staff.audit_service, "log_action", audit_mock)
+
+    result = await staff.approve_staff_offboarding(
+        staff_id=22,
+        payload=StaffApprovalDecision(comment="HR validated"),
+        _=None,
+        current_user={"id": 99, "is_super_admin": True},
+    )
+
+    assert result.approval_status == "approved"
+    assert result.approved_by_user_id == 99
+    assert result.approval_notes == "HR validated"
+    assert result.account_action == "Offboarded"
+    kwargs = update_mock.await_args.kwargs
+    assert kwargs["approved_by_user_id"] == 99
+    assert kwargs["approved_at"] is not None
+    assert kwargs["approval_notes"] == "HR validated"
+    assert kwargs["enabled"] is False
+    assert kwargs["is_ex_staff"] is True
+    audit_mock.assert_awaited_once()
+    assert audit_mock.await_args.kwargs["action"] == "staff.offboarding.approved"
+
+
+@pytest.mark.anyio
+async def test_offboarding_deny_requires_reason(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffApprovalDecision
+
+    monkeypatch.setattr(
+        staff.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(
+            return_value={
+                "id": 22,
+                "company_id": 4,
+                "first_name": "Ada",
+                "last_name": "Lovelace",
+                "email": "ada@example.com",
+                "enabled": True,
+                "is_ex_staff": False,
+                "account_action": "Offboard Requested",
+                "onboarding_complete": False,
+            }
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await staff.deny_staff_offboarding(
+            staff_id=22,
+            payload=StaffApprovalDecision(comment=None, reason=None),
+            _=None,
+            current_user={"id": 99, "is_super_admin": True},
+        )
+
+    assert exc.value.status_code == 400
+    assert "reason" in str(exc.value.detail).lower()
