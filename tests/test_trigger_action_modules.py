@@ -120,6 +120,8 @@ async def test_list_trigger_action_modules_redacts_settings(monkeypatch):
     
     # The settings should be present (redaction is done by _redact_module_settings)
     assert "settings" in result[0]
+    assert "payload_schema" in result[0]
+    assert isinstance(result[0]["payload_schema"], dict)
 
 
 def test_internal_action_modules_enabled_by_default():
