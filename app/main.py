@@ -9191,7 +9191,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         email=existing.get("email") or "",
         mobile_phone=existing.get("mobile_phone"),
         date_onboarded=_parse_input_datetime(existing.get("date_onboarded")),
-        date_offboarded=requested_at,
+        date_offboarded=None,
         enabled=bool(existing.get("enabled", True)),
         is_ex_staff=bool(existing.get("is_ex_staff", False)),
         street=existing.get("street"),
@@ -9225,7 +9225,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         entity_id=staff_id,
         metadata={
             "company_id": int(existing.get("company_id") or company_id or 0),
-            "requested_offboarding_at": updated.get("date_offboarded"),
+            "requested_offboarding_at": requested_at,
             "reason": reason,
             "notes": notes,
             "requested_offboarding_input": {
