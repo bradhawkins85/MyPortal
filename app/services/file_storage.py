@@ -10,6 +10,16 @@ from fastapi import HTTPException, UploadFile, status
 
 _MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._-]")
+_DISALLOWED_PORT_DOCUMENT_EXTENSIONS = {".html", ".htm", ".xhtml", ".svg", ".svgz", ".xml", ".js", ".mjs"}
+_DISALLOWED_PORT_DOCUMENT_CONTENT_TYPES = {
+    "text/html",
+    "application/xhtml+xml",
+    "image/svg+xml",
+    "text/xml",
+    "application/xml",
+    "application/javascript",
+    "text/javascript",
+}
 _ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 _IMAGE_CONTENT_TYPE_MAP = {
     "image/png": ".png",
@@ -54,6 +64,15 @@ async def store_port_document(
 
     original_name = sanitize_filename(upload.filename or upload.content_type or "upload")
     suffix = Path(original_name).suffix.lower()
+    content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+
+    if suffix in _DISALLOWED_PORT_DOCUMENT_EXTENSIONS or content_type in _DISALLOWED_PORT_DOCUMENT_CONTENT_TYPES:
+        await upload.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported document type.",
+        )
+
     stored_name = f"{uuid4().hex}{suffix}"
     destination = port_directory / stored_name
 
