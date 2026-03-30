@@ -114,6 +114,48 @@ def _resolve_timezone(value: str | None) -> tuple[ZoneInfo | None, str | None]:
         return None, None
 
 
+def _extract_timezone_name(source: dict[str, Any] | None) -> str | None:
+    if not isinstance(source, dict):
+        return None
+    candidate_keys = ("timezone", "time_zone", "tz", "iana_timezone")
+    for key in candidate_keys:
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for container_key in ("settings", "preferences", "profile"):
+        container = source.get(container_key)
+        if isinstance(container, dict):
+            for key in candidate_keys:
+                value = container.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
+
+
+def _format_datetime_tokens(dt: datetime, *, prefix: str) -> dict[str, str]:
+    return {
+        f"{prefix}.iso": dt.isoformat(),
+        f"{prefix}.date": dt.strftime("%Y-%m-%d"),
+        f"{prefix}.display": dt.strftime("%b %d, %Y"),
+    }
+
+
+def _build_now_tokens(*, timezone_name: str | None) -> tuple[dict[str, str], str | None]:
+    utc_now = datetime.now(timezone.utc)
+    tokens = {
+        "now.iso": utc_now.isoformat(),
+        "now.date": utc_now.strftime("%Y-%m-%d"),
+        "now.datetime_utc": utc_now.strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+    local_zone, resolved_zone_name = _resolve_timezone(timezone_name)
+    if local_zone is None:
+        return tokens, None
+    local_now = utc_now.astimezone(local_zone)
+    tokens.update(_format_datetime_tokens(local_now, prefix="now.local"))
+    tokens["now.local.datetime"] = local_now.strftime("%Y-%m-%d %H:%M:%S %Z")
+    return tokens, resolved_zone_name
+
+
 def _to_utc_naive(value: datetime, *, requested_zone: ZoneInfo | None) -> datetime:
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1117,11 +1159,23 @@ async def _execute_policy_steps(
         [int(staff["id"])],
     )
     staff_custom_fields = custom_field_map.get(int(staff["id"]), {})
+    staff_first_name = str(staff.get("first_name") or "").strip()
+    staff_last_name = str(staff.get("last_name") or "").strip()
+    staff_full_name = " ".join(part for part in [staff_first_name, staff_last_name] if part).strip()
+    staff_email = str(staff.get("email") or "").strip().lower() or None
     vars_map: dict[str, Any] = {
         "company_id": company_id,
         "staff_id": int(staff["id"]),
-        "staff_email": staff.get("email"),
+        "staff_email": staff_email,
         "staff_custom_fields": dict(staff_custom_fields),
+        "staff.first_name": staff_first_name,
+        "staff.last_name": staff_last_name,
+        "staff.full_name": staff_full_name,
+        "staff.email": staff_email,
+        # Backward-compatible aliases.
+        "staff_first_name": staff_first_name,
+        "staff_last_name": staff_last_name,
+        "staff_full_name": staff_full_name,
     }
     requestor_email = await _resolve_requestor_email(staff)
     if requestor_email:
@@ -1129,6 +1183,21 @@ async def _execute_policy_steps(
     company = await company_repo.get_company_by_id(company_id)
     if company:
         vars_map["company_name"] = company.get("name")
+    requestor_timezone_name: str | None = None
+    requestor_user_id = staff.get("requested_by_user_id")
+    if requestor_user_id is not None:
+        try:
+            requestor = await user_repo.get_user_by_id(int(requestor_user_id))
+        except (TypeError, ValueError):
+            requestor = None
+        requestor_timezone_name = _extract_timezone_name(requestor)
+    company_timezone_name = _extract_timezone_name(company)
+    now_tokens, resolved_timezone_name = _build_now_tokens(
+        timezone_name=company_timezone_name or requestor_timezone_name
+    )
+    vars_map.update(now_tokens)
+    if resolved_timezone_name:
+        vars_map["now.local.timezone"] = resolved_timezone_name
     for name, value in system_variables.get_system_variables().items():
         vars_map[f"system.{name}"] = value
     for name, value in staff_custom_fields.items():

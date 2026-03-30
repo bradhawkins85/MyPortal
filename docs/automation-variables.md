@@ -190,3 +190,38 @@ same context as the surrounding payload before being substituted.
 
 All tokens resolve to empty strings when the underlying value is missing, so
 payloads can safely reference them without additional guards.
+
+## Staff onboarding/offboarding workflow variables
+
+Staff workflow steps (onboarding and offboarding) support `${vars.*}` interpolation in step fields such as rename/display templates, email subjects, and request payload bodies.
+
+### Staff identity tokens
+
+| Variable | Description | Example |
+| --- | --- | --- |
+| `${vars.staff.first_name}` | Staff first name. | `Alex` |
+| `${vars.staff.last_name}` | Staff last name. | `Morgan` |
+| `${vars.staff.full_name}` | Staff full name (first + last). | `Alex Morgan` |
+| `${vars.staff.email}` | Staff email address. | `alex.morgan@example.com` |
+
+Backward-compatible aliases remain available: `${vars.staff_first_name}`, `${vars.staff_last_name}`, `${vars.staff_full_name}`, and `${vars.staff_email}`.
+
+### Date/time tokens (`now.*`)
+
+Workflow execution context always includes UTC date/time tokens:
+
+| Variable | Format | Example |
+| --- | --- | --- |
+| `${vars.now.iso}` | ISO-8601 UTC datetime | `2026-03-30T14:22:01.123456+00:00` |
+| `${vars.now.date}` | `YYYY-MM-DD` (UTC) | `2026-03-30` |
+| `${vars.now.datetime_utc}` | Display UTC datetime | `2026-03-30 14:22:01 UTC` |
+
+When a valid company or requester timezone is available, local tokens are also populated:
+
+| Variable | Format | Example |
+| --- | --- | --- |
+| `${vars.now.local.iso}` | ISO-8601 local datetime | `2026-03-30T10:22:01.123456-04:00` |
+| `${vars.now.local.date}` | `YYYY-MM-DD` (local) | `2026-03-30` |
+| `${vars.now.local.display}` | Local display date (`Mon DD, YYYY`) | `Mar 30, 2026` |
+| `${vars.now.local.datetime}` | Local display datetime | `2026-03-30 10:22:01 EDT` |
+| `${vars.now.local.timezone}` | Resolved IANA timezone | `America/New_York` |
