@@ -65,17 +65,17 @@
       <select
         class="form-input shop-category-select"
         aria-label="Select product category"
-        onchange="window.location.href=this.value;"
+        onchange="window.location.href=this.options[this.selectedIndex].getAttribute('data-url');"
       >
-        <option value="{{ request.url_for('shop_page') }}{{ shop_query() }}" {% if not current_category or current_category == 'packages' %}selected{% endif %}>All products</option>
+        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query() }}" {% if not current_category or current_category == 'packages' %}selected{% endif %}>All products</option>
         {% for category in categories %}
           {% if category.children %}
-            <option value="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
+            <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
             {% for child in category.children %}
-              <option value="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}" {% if current_category == child.id %}selected{% endif %}>— {{ child.name }}</option>
+              <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}" {% if current_category == child.id %}selected{% endif %}>— {{ child.name }}</option>
             {% endfor %}
           {% else %}
-            <option value="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
+            <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
           {% endif %}
         {% endfor %}
       </select>
