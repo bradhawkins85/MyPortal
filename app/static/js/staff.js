@@ -286,7 +286,7 @@
         const selectInput = wrapper.querySelector('select');
         const fieldName = wrapper.dataset.customFieldName || '';
         const fieldDefinition = fieldName ? getFieldDefinitionByName(fieldName) : null;
-        const mappedOptions = (operator === 'select_map' || operator === 'equals')
+        const mappedOptions = operator === 'select_map'
           ? parseConditionalSelectOptions(expected)
           : null;
         let shouldShow = !parentName
