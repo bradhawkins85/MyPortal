@@ -11167,7 +11167,7 @@ def _parse_staff_custom_field_condition(
     normalized_condition_value = str(condition_value or "").strip()
     if not parent_name:
         return None, None, None
-    if operator not in {"equals", "not_equals", "is_checked", "is_not_checked", "select_map"}:
+    if operator not in {"equals", "not_equals", "one_of", "is_checked", "is_not_checked", "select_map"}:
         operator = "equals"
     if operator == "select_map":
         if normalized_condition_value.startswith("{"):
