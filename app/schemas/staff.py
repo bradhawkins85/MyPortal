@@ -115,6 +115,20 @@ class StaffExternalCheckpointResponse(BaseModel):
     company_id: int = Field(validation_alias="companyId")
 
 
+class StaffWorkflowManualActionRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=1000)
+    step_name: Optional[str] = Field(default=None, validation_alias="stepName", max_length=255)
+
+
+class StaffWorkflowManualActionResponse(BaseModel):
+    state: str
+    execution_id: int = Field(validation_alias="executionId")
+    staff_id: int = Field(validation_alias="staffId")
+    company_id: int = Field(validation_alias="companyId")
+    idempotent_replay: bool = Field(default=False, validation_alias="idempotentReplay")
+    detail: Optional[str] = None
+
+
 class StaffResponse(BaseModel):
     id: int
     company_id: int

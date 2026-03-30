@@ -122,6 +122,11 @@
     }
   }
 
+  function makeIdempotencyKey(prefix, staffId) {
+    const randomPart = Math.random().toString(36).slice(2, 12);
+    return `${prefix}-${staffId}-${Date.now()}-${randomPart}`;
+  }
+
   function getInputCurrentValue(input) {
     if (!input) {
       return '';
@@ -584,6 +589,103 @@
           window.location.reload();
         } catch (error) {
           alert(`Failed to deny onboarding request: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-staff-workflow-rerun]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-workflow-rerun');
+        if (!id) {
+          return;
+        }
+        const reason = prompt('Optional reason for rerunning this workflow:', '') || '';
+        try {
+          await requestJson(`/api/staff/${id}/workflow/rerun`, {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': makeIdempotencyKey('rerun', id),
+            },
+            body: JSON.stringify({ reason: reason.trim() || null }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to rerun workflow: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-staff-workflow-retry]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-workflow-retry');
+        if (!id) {
+          return;
+        }
+        const reason = prompt('Optional reason for retrying the failed step:', '') || '';
+        try {
+          await requestJson(`/api/staff/${id}/workflow/retry-failed-step`, {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': makeIdempotencyKey('retry', id),
+            },
+            body: JSON.stringify({ reason: reason.trim() || null }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to retry failed step: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-staff-workflow-resume]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-workflow-resume');
+        if (!id) {
+          return;
+        }
+        const reason = prompt('Optional reason for resuming this workflow:', '') || '';
+        try {
+          await requestJson(`/api/staff/${id}/workflow/resume`, {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': makeIdempotencyKey('resume', id),
+            },
+            body: JSON.stringify({ reason: reason.trim() || null }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to resume workflow: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-staff-workflow-force-complete]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-workflow-force-complete');
+        const currentStep = (button.getAttribute('data-current-step') || '').trim();
+        if (!id) {
+          return;
+        }
+        const promptedStep = prompt('Step name to force-complete:', currentStep || '');
+        const stepName = (promptedStep || '').trim();
+        if (!stepName) {
+          return;
+        }
+        const reason = prompt('Reason for force-completing this step (recommended):', '') || '';
+        try {
+          await requestJson(`/api/staff/${id}/workflow/force-complete-step`, {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': makeIdempotencyKey('force-complete', id),
+            },
+            body: JSON.stringify({
+              stepName,
+              reason: reason.trim() || null,
+            }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to force-complete workflow step: ${error.message}`);
         }
       });
     });
