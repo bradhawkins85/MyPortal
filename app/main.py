@@ -5069,7 +5069,11 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
         permissions = await m365_service.get_mailbox_permissions(company_id, upn)
         return JSONResponse(permissions)
     except m365_service.M365Error as exc:
-        return JSONResponse({"error": str(exc)}, status_code=503)
+        logger.exception("Failed to get mailbox permissions for UPN %s", upn)
+        return JSONResponse(
+            {"error": "Unable to retrieve mailbox permissions at this time."},
+            status_code=503,
+        )
 
 
 @app.post("/m365/checks/report-privacy", response_class=RedirectResponse)
