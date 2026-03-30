@@ -63,7 +63,9 @@ class WorkflowFailurePolicy(BaseModel):
 class WorkflowConfigSchema(BaseModel):
     version: int = Field(default=1, ge=1, le=10)
     steps: list[WorkflowStepDefinition] = Field(default_factory=list)
+    offboarding_steps: list[WorkflowStepDefinition] = Field(default_factory=list)
     failure_policy: WorkflowFailurePolicy = Field(default_factory=WorkflowFailurePolicy)
+    offboarding_failure_policy: WorkflowFailurePolicy = Field(default_factory=WorkflowFailurePolicy)
 
 
 class CompanyWorkflowPolicyUpsertSchema(BaseModel):

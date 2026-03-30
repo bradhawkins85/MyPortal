@@ -8914,6 +8914,34 @@ _WORKFLOW_POLICY_FORM_SCHEMA: dict[str, Any] = {
     ],
 }
 
+_OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
+    {
+        "type": "offboard_account",
+        "name": "Disable sign-in & remove access",
+        "description": "Disables sign-in and optionally removes licenses/group membership.",
+    },
+    {
+        "type": "m365_rename_upn_display_name",
+        "name": "Rename UPN/display name",
+        "description": "Renames the account UPN and display name for offboarded identity hygiene.",
+    },
+    {
+        "type": "m365_update_org_fields",
+        "name": "Update department/company",
+        "description": "Sets Entra ID department/companyName fields to offboarding values.",
+    },
+    {
+        "type": "m365_hide_from_gal",
+        "name": "Hide from GAL",
+        "description": "Updates showInAddressList (or configured property path) to hide mailbox from GAL.",
+    },
+    {
+        "type": "m365_identity_hygiene",
+        "name": "Identity hygiene",
+        "description": "Applies reversible profile cleanup and can revoke sign-in sessions.",
+    },
+]
+
 
 def _collect_validation_errors(exc: ValidationError) -> list[str]:
     errors: list[str] = []
@@ -8970,12 +8998,7 @@ def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, A
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"message": "Invalid workflow config.", "errors": _collect_validation_errors(exc)},
         ) from exc
-    normalized = validated.model_dump(mode="python")
-    normalized["steps"] = sorted(
-        normalized.get("steps") or [],
-        key=lambda step: str(step.get("key") or ""),
-    )
-    return normalized
+    return validated.model_dump(mode="python")
 
 
 def _normalise_workflow_policy_response(policy: dict[str, Any]) -> dict[str, Any]:
@@ -9149,6 +9172,62 @@ async def staff_offboarding_workflow_page(request: Request):
         "company": company,
     }
     return await _render_template("staff/workflows_offboarding.html", request, user, extra=extra)
+
+
+@app.get("/staff/workflows/offboarding/policy")
+async def staff_offboarding_workflow_policy(request: Request):
+    (
+        _user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+    return JSONResponse(
+        {
+            "policy": _normalise_workflow_policy_response(policy),
+            "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
+            "step_catalog": _OFFBOARDING_STEP_CATALOG,
+        }
+    )
+
+
+@app.post("/staff/workflows/offboarding/policy")
+async def upsert_staff_offboarding_workflow_policy(request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy_input = await _extract_workflow_policy_payload(request)
+    updated = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=company_id,
+        workflow_key=policy_input.workflow_key or staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+        is_enabled=bool(policy_input.enabled),
+        max_retries=int(policy_input.max_retries),
+        config=policy_input.config,
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.workflows.offboarding.policy.upserted",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"policy": _normalise_workflow_policy_response(updated)},
+    )
+    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated)})
 
 
 @app.post("/staff", response_class=HTMLResponse)
