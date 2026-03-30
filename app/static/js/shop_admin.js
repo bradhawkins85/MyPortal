@@ -587,10 +587,10 @@
       );
 
       return withoutBlockedTags
-        .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
+        .replace(/\son[a-z]+\s*=\s*(["'])[\s\S]*?\1/gi, '')
         .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
         .replace(
-          /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
+          /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:)[\s\S]*?\2/gi,
           ''
         )
         .replace(/\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi, '');
