@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import secrets
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
@@ -39,6 +41,8 @@ STATE_OFFBOARDING_FAILED = "offboarding_failed"
 
 DIRECTION_ONBOARDING = "onboarding"
 DIRECTION_OFFBOARDING = "offboarding"
+_VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
+_SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
 
 
 class WorkflowStepError(RuntimeError):
@@ -428,6 +432,195 @@ async def _attempt_step(
     )
 
 
+def _is_secret_var(name: str) -> bool:
+    lowered = name.strip().lower()
+    return any(token in lowered for token in _SECRET_KEY_TOKENS)
+
+
+def _get_nested_value(payload: Any, path: str) -> Any:
+    current = payload
+    for part in [piece for piece in str(path or "").split(".") if piece]:
+        if isinstance(current, dict):
+            if part not in current:
+                return None
+            current = current.get(part)
+            continue
+        if isinstance(current, list):
+            try:
+                index = int(part)
+            except ValueError:
+                return None
+            if index < 0 or index >= len(current):
+                return None
+            current = current[index]
+            continue
+        return None
+    return current
+
+
+def _resolve_template_value(raw: Any, *, vars_map: dict[str, Any]) -> Any:
+    if isinstance(raw, str):
+        exact_match = _VAR_PATTERN.fullmatch(raw.strip())
+        if exact_match:
+            return vars_map.get(exact_match.group(1))
+
+        def _replace(match: re.Match[str]) -> str:
+            value = vars_map.get(match.group(1))
+            if value is None:
+                return ""
+            return str(value)
+
+        return _VAR_PATTERN.sub(_replace, raw)
+    if isinstance(raw, dict):
+        return {key: _resolve_template_value(value, vars_map=vars_map) for key, value in raw.items()}
+    if isinstance(raw, list):
+        return [_resolve_template_value(item, vars_map=vars_map) for item in raw]
+    return raw
+
+
+def _redact_payload(payload: Any, *, secret_vars: set[str]) -> Any:
+    if isinstance(payload, dict):
+        redacted: dict[str, Any] = {}
+        for key, value in payload.items():
+            if _is_secret_var(str(key)) or str(key) in secret_vars:
+                redacted[key] = "***redacted***"
+            else:
+                redacted[key] = _redact_payload(value, secret_vars=secret_vars)
+        return redacted
+    if isinstance(payload, list):
+        return [_redact_payload(item, secret_vars=secret_vars) for item in payload]
+    return payload
+
+
+def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
+    if direction == DIRECTION_OFFBOARDING:
+        return [{"name": "offboard_account", "type": "offboard_account"}]
+    return [
+        {"name": "provision_account", "type": "provision_account"},
+        {"name": "assign_license", "type": "m365_assign_license"},
+    ]
+
+
+def _normalise_workflow_steps(policy_config: dict[str, Any], *, direction: str) -> list[dict[str, Any]]:
+    configured = policy_config.get("steps")
+    if not isinstance(configured, list) or not configured:
+        configured = _default_workflow_steps(direction)
+    steps: list[dict[str, Any]] = []
+    for index, raw_step in enumerate(configured):
+        if not isinstance(raw_step, dict):
+            continue
+        config = raw_step.get("config") if isinstance(raw_step.get("config"), dict) else raw_step
+        enabled = bool(raw_step.get("enabled", config.get("enabled", True)))
+        if not enabled:
+            continue
+        step_type = str(config.get("type") or raw_step.get("type") or raw_step.get("key") or "").strip().lower()
+        if not step_type:
+            continue
+        step_name = str(raw_step.get("name") or config.get("name") or f"step_{index + 1}_{step_type}").strip()
+        step_record = dict(config)
+        step_record["name"] = step_name
+        step_record["type"] = step_type
+        steps.append(step_record)
+    return steps
+
+
+async def _execute_policy_step(
+    *,
+    step: dict[str, Any],
+    company_id: int,
+    staff: dict[str, Any],
+    policy_config: dict[str, Any],
+    vars_map: dict[str, Any],
+) -> dict[str, Any]:
+    step_type = str(step.get("type") or "").strip().lower()
+    if step_type == "provision_account":
+        return await _run_provisioning_step(company_id=company_id, staff=staff)
+    if step_type == "offboard_account":
+        return await _run_offboarding_step(company_id=company_id, staff=staff, policy_config=policy_config)
+    if step_type == "m365_assign_license":
+        return await _run_licensing_step(company_id=company_id, staff=staff, policy_config=policy_config)
+
+    if step_type in {"http_get", "http_post"}:
+        method = "GET" if step_type == "http_get" else "POST"
+        url = str(_resolve_template_value(step.get("url"), vars_map=vars_map) or "").strip()
+        if not url:
+            raise WorkflowStepError("HTTP step requires url")
+        headers = _resolve_template_value(step.get("headers") or {}, vars_map=vars_map)
+        body = _resolve_template_value(step.get("body") or step.get("json") or {}, vars_map=vars_map)
+        timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            response = await client.request(method, url, headers=headers, json=body if method == "POST" else None)
+        payload: dict[str, Any] = {"status_code": response.status_code}
+        content_type = str(response.headers.get("content-type") or "").lower()
+        if "json" in content_type:
+            payload["body"] = response.json()
+        else:
+            payload["body"] = response.text[:4000]
+        if response.status_code >= 400:
+            raise WorkflowStepError(f"HTTP {method} failed ({response.status_code})", request_payload={"url": url})
+        return payload
+
+    if step_type == "m365_create_user":
+        email = str(staff.get("email") or "").strip().lower()
+        if not email:
+            raise WorkflowStepError("Staff email is required for m365_create_user")
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        nickname = email.split("@", 1)[0]
+        password = secrets.token_urlsafe(18)
+        payload = {
+            "accountEnabled": True,
+            "displayName": " ".join(part for part in [staff.get("first_name"), staff.get("last_name")] if part).strip() or email,
+            "mailNickname": str(step.get("mail_nickname") or nickname).strip(),
+            "userPrincipalName": str(step.get("user_principal_name") or email).strip(),
+            "passwordProfile": {
+                "forceChangePasswordNextSignIn": bool(step.get("force_password_change", True)),
+                "password": password,
+            },
+        }
+        result = await m365_service._graph_post(access_token, "https://graph.microsoft.com/v1.0/users", payload)  # pyright: ignore[reportPrivateUsage]
+        return {"m365_user_id": result.get("id"), "user_principal_name": payload["userPrincipalName"], "generated_password": password}
+
+    if step_type == "m365_add_group":
+        group_id = str(_resolve_template_value(step.get("group_id"), vars_map=vars_map) or "").strip()
+        m365_user_id = str(_resolve_template_value(step.get("user_id"), vars_map=vars_map) or vars_map.get("m365_user_id") or "").strip()
+        if not group_id or not m365_user_id:
+            raise WorkflowStepError("m365_add_group requires group_id and user_id")
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
+            {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
+        )
+        return {"group_id": group_id, "m365_user_id": m365_user_id, "added": True}
+
+    if step_type == "create_ticket":
+        subject = str(_resolve_template_value(step.get("subject"), vars_map=vars_map) or "Staff onboarding workflow checkpoint").strip()
+        description = str(_resolve_template_value(step.get("description"), vars_map=vars_map) or "").strip()
+        status_value = await tickets_service.resolve_status_or_default(None)
+        ticket = await tickets_service.create_ticket(
+            subject=subject,
+            description=description or subject,
+            requester_id=None,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority=str(step.get("priority") or "normal"),
+            status=status_value,
+            category=str(step.get("category") or "staff-onboarding"),
+            module_slug=str(step.get("module_slug") or "m365"),
+            external_reference=f"staff-workflow:{staff.get('id')}:{step.get('name')}",
+        )
+        return {"ticket_id": ticket.get("id")}
+
+    if step_type == "conditional_pause":
+        left = _resolve_template_value(step.get("if"), vars_map=vars_map)
+        equals = _resolve_template_value(step.get("equals"), vars_map=vars_map)
+        if left == equals:
+            return {"pause": True, "reason": str(step.get("reason") or "condition matched")}
+        return {"pause": False}
+
+    raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
+
+
 async def _run_provisioning_step(*, company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
     email = (staff.get("email") or "").strip().lower()
     if not email:
@@ -585,6 +778,127 @@ async def _run_offboarding_step(
     }
 
 
+async def _execute_policy_steps(
+    *,
+    execution_id: int,
+    company_id: int,
+    staff: dict[str, Any],
+    direction: str,
+    policy_config: dict[str, Any],
+    max_retries: int,
+    waiting_external_state: str,
+) -> dict[str, Any]:
+    steps = _normalise_workflow_steps(policy_config, direction=direction)
+    prior_logs = (await workflow_repo.list_step_logs_for_execution_ids([execution_id])).get(execution_id, [])
+    succeeded_steps = {str(item.get("step_name")) for item in prior_logs if str(item.get("status")) == "success"}
+    vars_map: dict[str, Any] = {
+        "company_id": company_id,
+        "staff_id": int(staff["id"]),
+        "staff_email": staff.get("email"),
+    }
+    secret_vars: set[str] = set()
+
+    for item in prior_logs:
+        if str(item.get("status")) != "success":
+            continue
+        response_payload = item.get("response_payload")
+        if isinstance(response_payload, str):
+            try:
+                response_payload = json.loads(response_payload)
+            except Exception:  # noqa: BLE001
+                response_payload = {}
+        if isinstance(response_payload, dict) and isinstance(response_payload.get("context_patch"), dict):
+            patch = response_payload["context_patch"]
+            for key, value in (patch.get("vars") or {}).items():
+                vars_map[str(key)] = value
+            for name in (patch.get("secret_vars") or []):
+                secret_vars.add(str(name))
+
+    for index, step in enumerate(steps):
+        step_name = str(step.get("name") or f"step_{index + 1}")
+        if step_name in succeeded_steps:
+            continue
+        if str(step.get("type")).strip().lower() == "wait_external_checkpoint":
+            confirmation_token = secrets.token_urlsafe(32)
+            await workflow_repo.create_external_checkpoint(
+                execution_id=execution_id,
+                company_id=company_id,
+                staff_id=int(staff["id"]),
+                confirmation_token_hash=hash_api_key(confirmation_token),
+            )
+            await workflow_repo.update_execution_state(
+                execution_id,
+                state=waiting_external_state,
+                current_step=f"{index}:{step_name}",
+            )
+            return {"paused": True, "confirmation_token": confirmation_token}
+
+        resolved_step = _resolve_template_value(step, vars_map=vars_map)
+        request_payload = _redact_payload(resolved_step, secret_vars=secret_vars)
+        response_payload = await _attempt_step(
+            execution_id=execution_id,
+            step_name=step_name,
+            max_retries=max_retries,
+            request_payload=request_payload if isinstance(request_payload, dict) else {"request": request_payload},
+            callback=lambda: _execute_policy_step(
+                step=resolved_step if isinstance(resolved_step, dict) else step,
+                company_id=company_id,
+                staff=staff,
+                policy_config=policy_config,
+                vars_map=vars_map,
+            ),
+        )
+        step_outputs = response_payload if isinstance(response_payload, dict) else {"result": response_payload}
+        context_patch: dict[str, Any] = {"vars": {}, "secret_vars": []}
+        output_var = str(step.get("output_var") or "").strip()
+        if output_var:
+            vars_map[output_var] = step_outputs
+            context_patch["vars"][output_var] = step_outputs
+            if _is_secret_var(output_var):
+                secret_vars.add(output_var)
+                context_patch["secret_vars"].append(output_var)
+        if isinstance(step.get("store"), dict):
+            for variable_name, source_path in step["store"].items():
+                value = _get_nested_value(step_outputs, str(source_path))
+                vars_map[str(variable_name)] = value
+                if _is_secret_var(str(variable_name)):
+                    secret_vars.add(str(variable_name))
+                    context_patch["secret_vars"].append(str(variable_name))
+                else:
+                    context_patch["vars"][str(variable_name)] = value
+        if isinstance(step_outputs, dict):
+            for key, value in step_outputs.items():
+                if key in {"generated_password", "secret", "token"}:
+                    secret_vars.add(key)
+                vars_map[key] = value
+                if _is_secret_var(key):
+                    context_patch["secret_vars"].append(key)
+                else:
+                    context_patch["vars"][key] = value
+        await workflow_repo.append_step_log(
+            execution_id=execution_id,
+            step_name=f"{step_name}:context",
+            status="success",
+            attempt=1,
+            request_payload={"source_step": step_name},
+            response_payload={"context_patch": _redact_payload(context_patch, secret_vars=secret_vars)},
+        )
+        if bool(step_outputs.get("pause")):
+            await workflow_repo.update_execution_state(
+                execution_id,
+                state=waiting_external_state,
+                current_step=f"{index}:{step_name}",
+                last_error=str(step_outputs.get("reason") or "paused"),
+            )
+            return {"paused": True, "confirmation_token": None}
+        await workflow_repo.update_execution_state(
+            execution_id,
+            state=STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING,
+            current_step=f"{index + 1}:{step_name}",
+        )
+    return {"paused": False}
+
+
 async def run_staff_onboarding_workflow(
     *,
     company_id: int,
@@ -646,61 +960,8 @@ async def run_staff_onboarding_workflow(
         if direction == DIRECTION_ONBOARDING
         else policy_config.get("requires_onprem_confirmation")
     )
-    if requires_external_confirmation:
-        confirmation_token = secrets.token_urlsafe(32)
-        await workflow_repo.create_external_checkpoint(
-            execution_id=execution_id,
-            company_id=company_id,
-            staff_id=staff_id,
-            confirmation_token_hash=hash_api_key(confirmation_token),
-        )
-        await workflow_repo.update_execution_state(
-            execution_id,
-            state=waiting_external_state,
-            current_step="await_external_confirmation",
-        )
-        await staff_repo.update_staff(
-            staff_id,
-            company_id=company_id,
-            first_name=staff.get("first_name") or "",
-            last_name=staff.get("last_name") or "",
-            email=staff.get("email") or "",
-            mobile_phone=staff.get("mobile_phone"),
-            date_onboarded=staff.get("date_onboarded"),
-            date_offboarded=staff.get("date_offboarded"),
-            enabled=bool(staff.get("enabled", True)),
-            is_ex_staff=bool(staff.get("is_ex_staff", False)),
-            street=staff.get("street"),
-            city=staff.get("city"),
-            state=staff.get("state"),
-            postcode=staff.get("postcode"),
-            country=staff.get("country"),
-            department=staff.get("department"),
-            job_title=staff.get("job_title"),
-            org_company=staff.get("org_company"),
-            manager_name=staff.get("manager_name"),
-            account_action=staff.get("account_action"),
-            syncro_contact_id=staff.get("syncro_contact_id"),
-            onboarding_status=waiting_external_state,
-            onboarding_complete=False,
-            onboarding_completed_at=None,
-        )
-        await audit_service.log_action(
-            user_id=initiated_by_user_id,
-            action=f"staff.{direction}.workflow.waiting_external",
-            entity_type="staff",
-            entity_id=staff_id,
-            metadata={
-                "company_id": company_id,
-                "execution_id": execution_id,
-                "workflow_key": workflow_key,
-            },
-        )
-        return {
-            "state": waiting_external_state,
-            "execution_id": execution_id,
-            "confirmation_token": confirmation_token,
-        }
+    if requires_external_confirmation and not isinstance(policy_config.get("steps"), list):
+        policy_config["steps"] = [{"name": "await_external_confirmation", "type": "wait_external_checkpoint"}]
 
     return await resume_staff_onboarding_workflow_after_external_confirmation(
         company_id=company_id,
@@ -765,42 +1026,49 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         onboarding_completed_at=None,
     )
 
-    linked_license_id: int | None = None
     try:
-        if direction == DIRECTION_OFFBOARDING:
-            await _attempt_step(
-                execution_id=execution_id,
-                step_name="offboard_account",
-                max_retries=max_retries,
-                request_payload={"company_id": company_id, "staff_id": staff_id},
-                callback=lambda: _run_offboarding_step(company_id=company_id, staff=staff, policy_config=policy_config),
+        execution_result = await _execute_policy_steps(
+            execution_id=execution_id,
+            company_id=company_id,
+            staff=staff,
+            direction=direction,
+            policy_config=policy_config,
+            max_retries=max_retries,
+            waiting_external_state=STATE_OFFBOARDING_WAITING_EXTERNAL if direction == DIRECTION_OFFBOARDING else STATE_WAITING_EXTERNAL,
+        )
+        if execution_result.get("paused"):
+            paused_state = STATE_OFFBOARDING_WAITING_EXTERNAL if direction == DIRECTION_OFFBOARDING else STATE_WAITING_EXTERNAL
+            await staff_repo.update_staff(
+                staff_id,
+                company_id=company_id,
+                first_name=staff.get("first_name") or "",
+                last_name=staff.get("last_name") or "",
+                email=staff.get("email") or "",
+                mobile_phone=staff.get("mobile_phone"),
+                date_onboarded=staff.get("date_onboarded"),
+                date_offboarded=staff.get("date_offboarded"),
+                enabled=bool(staff.get("enabled", True)),
+                is_ex_staff=bool(staff.get("is_ex_staff", False)),
+                street=staff.get("street"),
+                city=staff.get("city"),
+                state=staff.get("state"),
+                postcode=staff.get("postcode"),
+                country=staff.get("country"),
+                department=staff.get("department"),
+                job_title=staff.get("job_title"),
+                org_company=staff.get("org_company"),
+                manager_name=staff.get("manager_name"),
+                account_action=staff.get("account_action"),
+                syncro_contact_id=staff.get("syncro_contact_id"),
+                onboarding_status=paused_state,
+                onboarding_complete=False,
+                onboarding_completed_at=None,
             )
-        else:
-            await _attempt_step(
-                execution_id=execution_id,
-                step_name="provision_account",
-                max_retries=max_retries,
-                request_payload={"company_id": company_id, "staff_id": staff_id},
-                callback=lambda: _run_provisioning_step(company_id=company_id, staff=staff),
-            )
-
-            licensing_result = await _attempt_step(
-                execution_id=execution_id,
-                step_name="assign_license",
-                max_retries=max_retries,
-                request_payload={
-                    "company_id": company_id,
-                    "staff_id": staff_id,
-                    "policy": policy_config,
-                },
-                callback=lambda: _run_licensing_step(
-                    company_id=company_id,
-                    staff=staff,
-                    policy_config=policy_config,
-                ),
-            )
-            if licensing_result.get("license_id") is not None:
-                linked_license_id = int(licensing_result["license_id"])
+            return {
+                "state": paused_state,
+                "execution_id": execution_id,
+                "confirmation_token": execution_result.get("confirmation_token"),
+            }
 
         completed_at = _utc_now_naive()
         await workflow_repo.update_execution_state(
@@ -846,7 +1114,6 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 "company_id": company_id,
                 "execution_id": execution_id,
                 "workflow_key": workflow_key,
-                "linked_license_id": linked_license_id,
             },
         )
         return {"state": completed_state, "execution_id": execution_id}
@@ -854,16 +1121,6 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         error_text = str(exc)
         failed_step = exc.step_name if isinstance(exc, WorkflowStepError) else None
         failed_payload = exc.request_payload if isinstance(exc, WorkflowStepError) else None
-        if linked_license_id is not None:
-            try:
-                await license_repo.unlink_staff_from_license(staff_id, linked_license_id)
-            except Exception as compensation_exc:  # noqa: BLE001
-                log_warning(
-                    "Compensation failed while unlinking staff license",
-                    staff_id=staff_id,
-                    license_id=linked_license_id,
-                    error=str(compensation_exc),
-                )
 
         ticket_id: int | None = None
         try:
