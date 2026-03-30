@@ -11170,6 +11170,13 @@ def _parse_staff_custom_field_condition(
     if operator not in {"equals", "not_equals", "is_checked", "is_not_checked", "select_map"}:
         operator = "equals"
     if operator == "select_map":
+        if normalized_condition_value.startswith("{"):
+            try:
+                parsed_map = json.loads(normalized_condition_value)
+            except (TypeError, ValueError):
+                return parent_name, operator, normalized_condition_value or None
+            if isinstance(parsed_map, dict):
+                return parent_name, operator, json.dumps(parsed_map, separators=(",", ":"))
         return parent_name, operator, normalized_condition_value or None
     if operator in {"is_checked", "is_not_checked"}:
         normalized_condition_value = None
