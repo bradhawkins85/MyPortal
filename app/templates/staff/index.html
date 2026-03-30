@@ -192,6 +192,12 @@
                 <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
                 Enabled
               </label>
+              {% for field in staff_custom_field_definitions %}
+                <label class="ticket-columns__option">
+                  <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
+                  {{ field.display_name or field.name }}
+                </label>
+              {% endfor %}
             </div>
           </div>
         </div>
