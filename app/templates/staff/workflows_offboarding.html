@@ -24,6 +24,27 @@
 {% endblock %}
 
 {% block content %}
+  <style>
+    .workflow-section {
+      border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+    }
+
+    .workflow-section__title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+    }
+
+    .workflow-field-help {
+      display: block;
+      margin-top: 0.25rem;
+      margin-bottom: 0.5rem;
+      line-height: 1.35;
+    }
+  </style>
+
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
@@ -137,6 +158,9 @@
         }
         steps.forEach((step, index) => {
           const schema = getSchemaForType(step.type);
+          const schemaFields = Array.isArray(schema.fields) ? schema.fields : [];
+          const conditionFields = schemaFields.filter((field) => String(field.name || field.target || '').startsWith('conditions.'));
+          const actionFields = schemaFields.filter((field) => !String(field.name || field.target || '').startsWith('conditions.'));
           const card = document.createElement('section');
           card.className = 'card card--panel';
           const details = document.createElement('details');
@@ -194,7 +218,7 @@
           body.append(makeLabel('Step name'), nameInput);
           nameInput.addEventListener('change', () => { steps[index].name = nameInput.value.trim() || steps[index].name; });
 
-          (schema.fields || []).forEach((field) => {
+          const appendField = (field, targetContainer) => {
             const keyPath = field.target || field.name;
             if (field.type === 'checkbox' || field.type === 'boolean') {
               const wrap = document.createElement('label');
@@ -204,30 +228,32 @@
               text.textContent = field.label;
               wrap.append(input, text);
               input.addEventListener('change', () => setNested(steps[index].config, keyPath, input.checked));
-              body.appendChild(wrap);
+              targetContainer.appendChild(wrap);
               const helpText = formatFieldHelp(field);
               if (helpText) {
                 const help = document.createElement('small');
-                help.className = 'text-muted';
+                help.className = 'text-muted workflow-field-help';
                 help.textContent = helpText;
-                body.appendChild(help);
+                targetContainer.appendChild(help);
               }
               return;
             }
             const input = makeInput(field, getFieldValue(step, field));
-            body.append(makeLabel(field.label), input);
+            targetContainer.append(makeLabel(field.label), input);
             const helpText = formatFieldHelp(field);
             if (helpText) {
               const help = document.createElement('small');
-              help.className = 'text-muted';
-              help.textContent = helpText;
-              body.appendChild(help);
+                help.className = 'text-muted workflow-field-help';
+                help.textContent = helpText;
+                targetContainer.appendChild(help);
             }
             input.addEventListener('change', () => {
               const value = field.type === 'number' ? Number(input.value || 0) : input.value;
               setNested(steps[index].config, keyPath, value);
             });
-          });
+          };
+
+          actionFields.forEach((field) => appendField(field, body));
 
           const retryInput = makeInput({ type: 'number' }, step.retry_policy.max_retries);
           body.append(makeLabel('Max retries'), retryInput);
@@ -248,6 +274,17 @@
           ticketWrap.append(ticketInput, ticketText);
           ticketInput.addEventListener('change', () => { steps[index].failure_policy.create_ticket_on_failure = ticketInput.checked; });
           body.appendChild(ticketWrap);
+
+          if (conditionFields.length) {
+            const conditionsSection = document.createElement('section');
+            conditionsSection.className = 'workflow-section stack-xs';
+            const conditionsTitle = document.createElement('h4');
+            conditionsTitle.className = 'workflow-section__title';
+            conditionsTitle.textContent = 'Conditions';
+            conditionsSection.appendChild(conditionsTitle);
+            conditionFields.forEach((field) => appendField(field, conditionsSection));
+            body.appendChild(conditionsSection);
+          }
 
           const actions = document.createElement('div');
           actions.className = 'form-row';
