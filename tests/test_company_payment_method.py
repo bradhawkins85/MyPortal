@@ -195,3 +195,31 @@ def test_admin_update_company_defaults_invalid_payment_method(monkeypatch, activ
         r = client.post("/admin/companies/1", data={"name": "TC", "paymentMethod": "paypal", "_csrf": active_session.csrf_token})
     assert r.status_code == 303
     assert updated.get("payment_method") == "invoice"
+
+
+def test_cart_place_order_blocks_when_payment_method_is_stripe(monkeypatch, active_session):
+    from fastapi.testclient import TestClient
+
+    list_items = AsyncMock(return_value=[{"product_id": 1, "quantity": 1, "unit_price": 10}])
+
+    async def fake_ctx(request, *, permission_field):
+        return (
+            {"id": 10},
+            {"company_id": 1, "can_access_cart": True},
+            {"id": 1, "name": "E", "is_vip": 0, "payment_method": "stripe"},
+            1,
+            None,
+        )
+
+    monkeypatch.setattr(main, "_load_company_section_context", fake_ctx)
+    monkeypatch.setattr(main.cart_repo, "list_items", list_items)
+
+    with TestClient(main.app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/place-order",
+            data={"poNumber": "PO-1", "_csrf": active_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    assert "cartError=" in response.headers["location"]
+    list_items.assert_not_called()

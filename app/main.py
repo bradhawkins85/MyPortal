@@ -7025,6 +7025,14 @@ async def place_order(request: Request) -> RedirectResponse:
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
 
+    payment_method = str((company or {}).get("payment_method") or "invoice").strip().lower()
+    if payment_method == "stripe":
+        message = quote("Order placement is unavailable while Stripe checkout is required.")
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?cartError={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     form = await request.form()
     po_number_raw = form.get("poNumber")
     po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
