@@ -555,13 +555,32 @@
     }
 
     if (editCustomFieldsGrid) {
+      const resolveEditParentInput = (name) => {
+        const normalizedName = String(name || '').trim();
+        if (!normalizedName) {
+          return null;
+        }
+
+        const customEntry = editCustomFieldInputs.get(normalizedName);
+        if (customEntry && customEntry.input) {
+          return customEntry.input;
+        }
+
+        const normalizedId = normalizedName.replace(/_/g, '-');
+        const directField = document.getElementById(`edit-${normalizedId}`);
+        if (directField) {
+          return directField;
+        }
+
+        const modalField = staffModal
+          ? staffModal.querySelector(`[name="${normalizedName}"], #edit-${normalizedName}`)
+          : null;
+        return modalField || null;
+      };
       const editWrappers = Array.from(editCustomFieldsGrid.querySelectorAll('[data-custom-field-wrapper]'));
       initCustomFieldConditionals({
         wrappers: editWrappers,
-        getInputByName: (name) => {
-          const entry = editCustomFieldInputs.get(name);
-          return entry && entry.input ? entry.input : null;
-        },
+        getInputByName: resolveEditParentInput,
         getFieldDefinitionByName: (name) => (
           customFieldDefinitions.find((field) => field && field.name === name) || null
         ),
