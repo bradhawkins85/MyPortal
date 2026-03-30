@@ -432,8 +432,23 @@
     bindModalDismissal(addModal);
     bindModalDismissal(offboardingModal);
 
+    function resetAddStaffForm() {
+      if (!addForm) {
+        return;
+      }
+      addForm.reset();
+      const timezoneField = addForm.querySelector('input[name="browser_timezone"]');
+      if (timezoneField) {
+        timezoneField.value = getBrowserTimezone();
+      }
+      addForm.querySelectorAll('input, select, textarea').forEach((field) => {
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+
     container.querySelectorAll('[data-open-add-staff-modal]').forEach((button) => {
       button.addEventListener('click', () => {
+        resetAddStaffForm();
         openModal(addModal);
       });
     });
