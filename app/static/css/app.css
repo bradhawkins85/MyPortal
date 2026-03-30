@@ -1030,6 +1030,8 @@ html {
   background: rgba(15, 23, 42, 0.7);
   backdrop-filter: blur(10px);
   gap: var(--space-gap-tight);
+  position: relative;
+  z-index: 100;
 }
 
 .header__leading {
