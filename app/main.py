@@ -8986,6 +8986,249 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
         "retry_policy": {"max_retries": 0},
         "failure_policy": {"mode": "fail_fast", "create_ticket_on_failure": True},
     },
+    "create_user": {
+        "fields": [
+            {
+                "name": "display_name",
+                "label": "Display name",
+                "type": "text",
+                "default": "${vars.staff.full_name}",
+                "description": "Full name shown in Microsoft 365 and address lists.",
+                "example": "${vars.staff.first_name} ${vars.staff.last_name}",
+            },
+            {
+                "name": "given_name",
+                "label": "First name",
+                "type": "text",
+                "default": "${vars.staff.first_name}",
+            },
+            {
+                "name": "surname",
+                "label": "Last name",
+                "type": "text",
+                "default": "${vars.staff.last_name}",
+            },
+            {
+                "name": "job_title",
+                "label": "Job title",
+                "type": "text",
+                "default": "${vars.staff.job_title}",
+            },
+            {
+                "name": "department",
+                "label": "Department",
+                "type": "text",
+                "default": "${vars.staff.department}",
+            },
+            {
+                "name": "company_name",
+                "label": "Company",
+                "type": "text",
+                "default": "${vars.staff.company_name}",
+            },
+            {
+                "name": "office_location",
+                "label": "Office location",
+                "type": "text",
+                "default": "${vars.staff.office_location}",
+            },
+            {
+                "name": "usage_location",
+                "label": "Usage location",
+                "type": "text",
+                "default": "US",
+                "description": "Two-letter country code used for licensing.",
+                "example": "US",
+            },
+            {
+                "name": "mail_nickname",
+                "label": "Mail nickname",
+                "type": "text",
+                "default": "${vars.staff.email_local_part}",
+                "description": "Alias/local-part used for mailbox nickname.",
+            },
+            {
+                "name": "password",
+                "label": "Initial password",
+                "type": "text",
+                "default": "${vars.password.strong}",
+                "description": "Use variables where possible; avoid static passwords.",
+            },
+            {
+                "name": "force_change_password_next_signin",
+                "label": "Require password change at first sign-in",
+                "type": "checkbox",
+                "default": True,
+            },
+            {
+                "name": "account_enabled",
+                "label": "Enable account immediately",
+                "type": "checkbox",
+                "default": True,
+            },
+        ],
+    },
+    "assign_licenses": {
+        "fields": [
+            {
+                "name": "licenses_csv",
+                "label": "License SKUs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Comma-separated SKU part numbers to assign.",
+                "example": "ENTERPRISEPACK,BUSINESS_PREMIUM",
+            },
+            {
+                "name": "remove_existing_licenses",
+                "label": "Remove existing licenses first",
+                "type": "checkbox",
+                "default": False,
+            },
+        ],
+    },
+    "add_to_groups": {
+        "fields": [
+            {
+                "name": "group_ids_csv",
+                "label": "Group IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Microsoft 365 group object IDs.",
+            },
+            {
+                "name": "group_names_csv",
+                "label": "Group names (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Optional display names for readable configuration.",
+            },
+        ],
+    },
+    "set_manager": {
+        "fields": [
+            {
+                "name": "manager_email",
+                "label": "Manager email",
+                "type": "text",
+                "default": "",
+                "description": "Primary manager identifier for Microsoft Graph lookup.",
+                "example": "manager@company.com",
+            },
+            {
+                "name": "manager_id",
+                "label": "Manager object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "send_welcome_email": {
+        "fields": [
+            {
+                "name": "to",
+                "label": "To address",
+                "type": "text",
+                "default": "${vars.staff.email}",
+            },
+            {
+                "name": "cc",
+                "label": "CC addresses",
+                "type": "text",
+                "default": "",
+                "description": "Comma-separated email addresses.",
+            },
+            {
+                "name": "bcc",
+                "label": "BCC addresses",
+                "type": "text",
+                "default": "",
+                "description": "Comma-separated email addresses.",
+            },
+            {
+                "name": "subject",
+                "label": "Email subject",
+                "type": "text",
+                "default": "Welcome to ${vars.staff.company_name}, ${vars.staff.first_name}",
+            },
+            {
+                "name": "body",
+                "label": "Email body",
+                "type": "textarea",
+                "default": "Hi ${vars.staff.first_name}, welcome to ${vars.staff.company_name}.",
+            },
+            {
+                "name": "is_html",
+                "label": "Body is HTML",
+                "type": "checkbox",
+                "default": False,
+            },
+        ],
+    },
+    "send_custom_email": {
+        "fields": [
+            {"name": "to", "label": "To addresses", "type": "text", "default": ""},
+            {"name": "cc", "label": "CC addresses", "type": "text", "default": ""},
+            {"name": "bcc", "label": "BCC addresses", "type": "text", "default": ""},
+            {"name": "subject", "label": "Email subject", "type": "text", "default": ""},
+            {"name": "body", "label": "Email body", "type": "textarea", "default": ""},
+            {"name": "is_html", "label": "Body is HTML", "type": "checkbox", "default": False},
+            {
+                "name": "reply_to",
+                "label": "Reply-to address",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "email_requestor": {
+        "fields": [
+            {
+                "name": "to",
+                "label": "To address",
+                "type": "text",
+                "default": "${vars.requestor.email}",
+                "description": "Defaults to the user who requested onboarding.",
+            },
+            {
+                "name": "subject",
+                "label": "Email subject",
+                "type": "text",
+                "default": "Onboarding update for ${vars.staff.full_name}",
+            },
+            {
+                "name": "body",
+                "label": "Email body",
+                "type": "textarea",
+                "default": "Account provisioning complete for ${vars.staff.full_name}.",
+            },
+            {"name": "is_html", "label": "Body is HTML", "type": "checkbox", "default": False},
+        ],
+    },
+    "offboard_account": {
+        "fields": [
+            {"name": "disable_sign_in", "label": "Disable sign-in", "type": "checkbox", "default": True},
+            {"name": "revoke_licenses", "label": "Remove assigned licenses", "type": "checkbox", "default": False},
+            {
+                "name": "remove_from_groups",
+                "label": "Remove from groups",
+                "type": "checkbox",
+                "default": False,
+            },
+            {
+                "name": "forwarding_address",
+                "label": "Forward mail to",
+                "type": "text",
+                "default": "",
+                "example": "manager@company.com",
+            },
+            {
+                "name": "out_of_office_message",
+                "label": "Out of office message",
+                "type": "textarea",
+                "default": "",
+            },
+        ],
+    },
     "m365_rename_upn_display_name": {
         "fields": [
             {
