@@ -1,0 +1,7 @@
+{
+  "guid": "29e90590-31c2-41f9-9dab-03c3ac16a84e",
+  "occurred_at": "2026-03-17T11:19:28Z",
+  "change_type": "Feature",
+  "summary": "Add mobile pull-to-refresh with a minimal top banner shown only while refresh is triggered.",
+  "content_hash": "d3db7de6f8c260601c98f8f419884ca0df35948ad7ebde00a93e1a340c80095f"
+}

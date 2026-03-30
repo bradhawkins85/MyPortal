@@ -84,6 +84,12 @@ def _base_monkeypatches(monkeypatch, company_id: int = 1):
         "list_staff",
         AsyncMock(return_value=[]),
     )
+    # Mock per-company admin credentials (returns None by default)
+    monkeypatch.setattr(
+        main.m365_service,
+        "get_company_admin_credentials",
+        AsyncMock(return_value=None),
+    )
 
 
 def _capture_render_template() -> tuple[dict[str, Any], Any]:

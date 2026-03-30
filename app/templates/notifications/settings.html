@@ -331,7 +331,15 @@
       </select>
     </div>
     <div class="automation-action__field">
-      <textarea class="form-input" rows="3" placeholder='{"topic": "alerts"}' data-action-payload></textarea>
+      <label class="sr-only">Payload mode</label>
+      <select class="form-input" data-action-payload-mode>
+        <option value="schema">Schema fields</option>
+        <option value="raw">Raw payload JSON</option>
+      </select>
+      <div data-action-schema-container hidden></div>
+      <div data-action-raw-container>
+        <textarea class="form-input" rows="3" placeholder='{"topic": "alerts"}' data-action-payload></textarea>
+      </div>
     </div>
     <div class="automation-action__field automation-action__field--actions">
       <button type="button" class="button button--ghost" data-action-remove>Remove</button>
@@ -344,5 +352,6 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/notification-preferences.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/notification-event-settings.js') }}" defer></script>
 {% endblock %}

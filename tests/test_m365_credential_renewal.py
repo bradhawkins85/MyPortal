@@ -449,3 +449,21 @@ async def test_renew_expiring_empty_list_returns_zeros():
         result = await m365_service.renew_expiring_client_secrets()
 
     assert result == {"renewed": 0, "skipped": 0, "failed": 0}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_test_connectivity_returns_org_details():
+    """test_connectivity returns organization details when Graph call succeeds."""
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="token")),
+        patch.object(
+            m365_service,
+            "_graph_get",
+            AsyncMock(return_value={"value": [{"id": "org-1", "displayName": "Contoso"}]}),
+        ),
+    ):
+        result = await m365_service.test_connectivity(3)
+
+    assert result["graph_access"] is True
+    assert result["organization_id"] == "org-1"
+    assert result["organization_name"] == "Contoso"

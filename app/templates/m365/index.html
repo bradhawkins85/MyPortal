@@ -2,9 +2,29 @@
 
 {% block title %}Office 365{% endblock %}
 
+{% block styles %}
+<style>
+  .provision-step {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .provision-step__label {
+    white-space: nowrap;
+    font-weight: 600;
+    min-width: 4rem;
+  }
+  .provision-step + .provision-step {
+    margin-top: 0.75rem;
+  }
+</style>
+{% endblock %}
+
 {% block header_actions %}
   {% if has_credentials %}
-    <a class="button" href="/m365/connect">Authorize portal access</a>
+    <a class="button button--ghost" href="/m365/mailboxes/users">User Mailboxes</a>
+    <a class="button button--ghost" href="/m365/mailboxes/shared">Shared Mailboxes</a>
+    <a class="button button--ghost" href="/m365/benchmarks">CIS Benchmarks</a>
   {% endif %}
 {% endblock %}
 
@@ -12,6 +32,12 @@
   {% if error %}
   <div class="alert alert--error" role="alert">
     {{ error }}
+  </div>
+  {% endif %}
+
+  {% if success %}
+  <div class="alert alert--success" role="status">
+    {{ success }}
   </div>
   {% endif %}
 
@@ -47,54 +73,117 @@
     </div>
   </section>
 
-  {% if admin_credentials_configured and is_super_admin %}
+  {% if is_super_admin %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">Auto-provision enterprise app</h3>
     </header>
     <div class="panel__body">
-      <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The portal admin credentials are used to perform the provisioning — no manual Azure portal steps required.</p>
+      <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The customer's Global Admin signs in to grant consent — no manual Azure portal steps required.</p>
       <div style="margin-top: 1rem;">
-        <a href="/m365/discover" class="button">Sign in as Global Admin</a>
+        <div class="provision-step">
+          <span class="provision-step__label">Step 1</span>
+          <a href="/m365/discover" class="button">Sign in as Global Admin</a>
+        </div>
         <p class="form-help" style="margin-top: 0.5rem;">The Global Admin signs in to identify the tenant automatically, then grants consent for the required permissions.</p>
+        {% if has_credentials %}
+        <div class="provision-step">
+          <span class="provision-step__label">Step 2</span>
+          <a href="/m365/connect" class="button">Authorise portal access</a>
+        </div>
+        {% endif %}
       </div>
-      <details style="margin-top: 1.5rem;">
-        <summary class="form-help" style="cursor: pointer;">Already know the Tenant ID? Enter it manually</summary>
-        <form method="get" action="/m365/provision" class="form-grid" style="margin-top: 0.75rem;">
-          <label class="form-field">
-            <span class="form-label">Tenant ID</span>
-            <input
-              type="text"
-              name="tenant_id"
-              class="input"
-              value="{{ credential.tenant_id if credential else '' }}"
-              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              required
-            />
-            <span class="form-help">The Azure AD tenant ID of the Microsoft 365 organisation to provision.</span>
-          </label>
-          <div class="form-actions">
-            <button type="submit" class="button button--ghost">Auto-provision with known ID</button>
-          </div>
-        </form>
-      </details>
     </div>
   </section>
   {% endif %}
 
   {% if is_super_admin %}
-  <section class="panel">
-    <header class="panel__header">
-      <h3 class="panel__title">Manage credentials</h3>
-    </header>
-    <div class="panel__body">
+  <details class="card card--panel card-collapsible">
+    <summary class="card__header card__header--collapsible">
+      <div>
+        <h3 class="card__title">Admin enterprise app</h3>
+      </div>
+      <div class="card__collapsible-meta" aria-hidden="true">
+        <span class="card__toggle-icon"></span>
+      </div>
+    </summary>
+    <div class="card-collapsible__content">
+      <p class="text-muted" style="margin-bottom: 1rem;">
+        Configure per-company admin credentials for the enterprise app used to auto-provision customer app registrations. These settings override the global module configuration.
+      </p>
+      {% if admin_credential %}
+      <dl class="definition-list" style="margin-bottom: 1rem;">
+        <div class="definition-list__item">
+          <dt>Admin Client ID</dt>
+          <dd>{{ admin_credential.client_id }}</dd>
+        </div>
+        {% if admin_credential.tenant_id %}
+        <div class="definition-list__item">
+          <dt>Admin Tenant ID</dt>
+          <dd>{{ admin_credential.tenant_id }}</dd>
+        </div>
+        {% endif %}
+        {% if admin_credential.client_secret_expires_at %}
+        <div class="definition-list__item">
+          <dt>Secret expires</dt>
+          <dd>{{ admin_credential.client_secret_expires_at }}</dd>
+        </div>
+        {% endif %}
+      </dl>
+      {% endif %}
+      <form method="post" action="/m365/admin-credentials" class="form-grid">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <label class="form-field">
+          <span class="form-label">Admin Client ID</span>
+          <input type="text" name="adminClientId" class="input" value="{{ admin_credential.client_id if admin_credential else '' }}" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <span class="form-help">The Azure AD application ID for the admin enterprise app registration.</span>
+        </label>
+        <label class="form-field">
+          <span class="form-label">Admin Client Secret</span>
+          <input type="password" name="adminClientSecret" class="input" placeholder="Enter a new client secret" {% if not admin_credential %}required{% endif %} />
+          <span class="form-help">Leave blank to keep existing secret. Secrets are encrypted at rest.</span>
+        </label>
+        <label class="form-field">
+          <span class="form-label">Admin Tenant ID (optional)</span>
+          <input type="text" name="adminTenantId" class="input" value="{{ admin_credential.tenant_id if admin_credential else '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <span class="form-help">The tenant ID for the admin app (usually the partner/MSP tenant).</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="button">Save admin credentials</button>
+        </div>
+      </form>
+      {% if admin_credential %}
+      <form method="post" action="/m365/admin-credentials/delete" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--secondary" onclick="return confirm('Delete admin enterprise app credentials? This company will fall back to global module settings.');">Delete admin credentials</button>
+      </form>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if is_super_admin %}
+  <details class="card card--panel card-collapsible">
+    <summary class="card__header card__header--collapsible">
+      <div>
+        <h3 class="card__title">Manage credentials</h3>
+      </div>
+      <div class="card__collapsible-meta" aria-hidden="true">
+        <span class="card__toggle-icon"></span>
+      </div>
+    </summary>
+    <div class="card-collapsible__content">
       <form method="post" action="/m365/credentials" class="form-grid">
         {% if csrf_token %}
         <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
         {% endif %}
         <label class="form-field">
           <span class="form-label">Tenant ID</span>
-          <input type="text" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
+          <input type="text" id="manage-cred-tenant-id" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
         </label>
         <label class="form-field">
           <span class="form-label">Client ID</span>
@@ -110,6 +199,12 @@
         </div>
       </form>
       {% if credential %}
+      <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--ghost">Test connectivity</button>
+      </form>
       <form method="post" action="/m365/credentials/delete" class="form-inline">
         {% if csrf_token %}
         <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -117,6 +212,34 @@
         <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
       </form>
       {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if has_credentials and is_super_admin %}
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">Mailbox report privacy check</h3>
+    </header>
+    <div class="panel__body">
+      <p>
+        Microsoft 365 can conceal mailbox identifiers in usage reports when the admin centre privacy
+        option <em>Display concealed user, group, and site names in all reports</em> is enabled.
+        When active, mailbox sync will fail because real user addresses cannot be identified.
+      </p>
+      <p class="text-muted">
+        Use this check to confirm whether the privacy setting is interfering with mailbox sync.
+        If the check reports concealment, sign in to the
+        <a href="https://admin.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft 365 admin centre</a>,
+        go to <strong>Settings → Org settings → Services → Reports</strong> and disable
+        <em>Display concealed user, group, and site names in all reports</em>, then re-run the check.
+      </p>
+      <form method="post" action="/m365/checks/report-privacy" class="form-inline" style="margin-top: 0.75rem;">
+        {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <button type="submit" class="button button--ghost">Check mailbox report privacy</button>
+      </form>
     </div>
   </section>
   {% endif %}

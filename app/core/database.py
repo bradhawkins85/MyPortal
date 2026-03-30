@@ -236,14 +236,126 @@ class Database:
                     await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchall()
 
-    def _adapt_params_for_mysql(self, sql: str, params: tuple | dict | None) -> tuple[str, tuple | dict | None]:
-        """Translate SQLite-style named params to MySQL pyformat style when needed."""
+    def _adapt_params_for_mysql(
+        self, sql: str, params: tuple | list | dict | None
+    ) -> tuple[str, tuple | list | dict | None]:
+        """Translate SQLite-style positional (`?`) or named (`:name`) params to MySQL format."""
 
-        if params is None or not isinstance(params, dict):
+        if params is None:
             return sql, params
 
-        adapted_sql = re.sub(r":(\w+)", r"%(\1)s", sql)
-        return adapted_sql, params
+        if isinstance(params, dict):
+            adapted_sql = re.sub(r":(\w+)", r"%(\1)s", sql)
+            return adapted_sql, params
+
+        # aiomysql uses the "format" paramstyle (`%s` placeholders). When a query
+        # was authored with SQLite-style positional placeholders (`?`) and is
+        # executed against MySQL, PyMySQL will attempt to apply `%` formatting to
+        # the SQL string and raise ``TypeError: not all arguments converted during
+        # string formatting`` because it cannot find any `%s` tokens. Replace
+        # positional `?` placeholders with `%s` for MySQL while leaving existing
+        # `%`-style placeholders untouched.
+        if isinstance(params, (tuple, list)) and "?" in sql:
+            placeholder_count = sql.count("?")
+            if (
+                placeholder_count == len(params)
+                and "'" not in sql
+                and '"' not in sql
+                and "--" not in sql
+                and "/*" not in sql
+            ):
+                # Fast path when placeholder count matches parameter count and no
+                # obvious quotes or comments are present anywhere in the statement.
+                # This intentionally errs on the side of safety and may skip the fast
+                # path when these tokens appear inside identifiers or other text,
+                # falling back to the slower but safer parser below.
+                return sql.replace("?", "%s"), params
+
+            # Only replace placeholders that are not inside quoted string literals.
+            result_chars: list[str] = []
+            in_single_quote = False
+            in_double_quote = False
+            in_line_comment = False
+            in_block_comment = False
+            length = len(sql)
+            i = 0
+
+            while i < length:
+                char = sql[i]
+                next_char = sql[i + 1] if i + 1 < length else ""
+
+                if not in_single_quote and not in_double_quote and not in_block_comment:
+                    if not in_line_comment and char == "-" and next_char == "-":
+                        in_line_comment = True
+                        result_chars.append(char)
+                        result_chars.append(next_char)
+                        i += 2
+                        continue
+                    if not in_line_comment and char == "/" and next_char == "*":
+                        in_block_comment = True
+                        result_chars.append(char)
+                        result_chars.append(next_char)
+                        i += 2
+                        continue
+
+                if in_line_comment:
+                    result_chars.append(char)
+                    i += 1
+                    if char == "\n":
+                        in_line_comment = False
+                    continue
+
+                if in_block_comment:
+                    result_chars.append(char)
+                    i += 1
+                    if char == "*" and next_char == "/":
+                        result_chars.append(next_char)
+                        i += 1
+                        in_block_comment = False
+                    continue
+
+                if (in_single_quote or in_double_quote) and char == "\\":
+                    result_chars.append(char)
+                    if next_char:
+                        result_chars.append(next_char)
+                        i += 2
+                        continue
+                    i += 1
+                    continue
+
+                if char == "'" and not in_double_quote:
+                    result_chars.append(char)
+                    if in_single_quote and next_char == "'":
+                        # Doubled single quote representing a literal quote in SQL strings.
+                        result_chars.append(next_char)
+                        i += 2
+                        continue
+                    in_single_quote = not in_single_quote
+                    i += 1
+                    continue
+
+                if char == '"' and not in_single_quote:
+                    result_chars.append(char)
+                    if in_double_quote and next_char == '"':
+                        # Doubled double quote representing a literal quote in identifiers.
+                        result_chars.append(next_char)
+                        i += 2
+                        continue
+                    in_double_quote = not in_double_quote
+                    i += 1
+                    continue
+
+                if char == "?" and not in_single_quote and not in_double_quote:
+                    result_chars.append("%s")
+                    i += 1
+                    continue
+
+                result_chars.append(char)
+                i += 1
+
+            return "".join(result_chars), params
+
+        return sql, params
 
     def _get_migrations_dir(self) -> Path:
         return Path(__file__).resolve().parent.parent.parent / "migrations"

@@ -56,7 +56,7 @@ async def test_list_tasks_shows_all_when_requested():
         {
             "id": 2,
             "name": "Inactive Task",
-            "command": "sync_o365",
+            "command": "sync_m365_data",
             "cron": "0 1 * * *",
             "active": 0,
             "company_id": None,

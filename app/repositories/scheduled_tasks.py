@@ -46,6 +46,24 @@ def _normalise_run(row: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+async def get_commands_for_company(company_id: int) -> set[str]:
+    """Return the set of command names already scheduled for *company_id*."""
+    rows = await db.fetch_all(
+        "SELECT command FROM scheduled_tasks WHERE company_id = %s",
+        (company_id,),
+    )
+    return {row["command"] for row in rows}
+
+async def get_task_for_company_by_command(company_id: int, command: str) -> dict[str, Any] | None:
+    """Return the first task matching *command* for *company_id*, or None."""
+    row = await db.fetch_one(
+        "SELECT * FROM scheduled_tasks WHERE company_id = %s AND command = %s LIMIT 1",
+        (company_id, command),
+    )
+    return _normalise_task(row) if row else None
+
+
+
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"
     rows = await db.fetch_all(
@@ -237,3 +255,19 @@ async def mark_task_run(task_id: int) -> None:
         "UPDATE scheduled_tasks SET last_run_at = %s WHERE id = %s",
         (now, task_id),
     )
+
+
+async def disable_tasks_for_commands(commands: Iterable[str]) -> int:
+    """Disable all active scheduled tasks whose command is in *commands*.
+
+    Returns the number of tasks that were deactivated.
+    """
+    command_list = [c for c in commands if c]
+    if not command_list:
+        return 0
+    placeholders = ",".join(["%s"] * len(command_list))
+    result = await db.execute(
+        f"UPDATE scheduled_tasks SET active = 0 WHERE active = 1 AND command IN ({placeholders})",
+        tuple(command_list),
+    )
+    return int(result or 0)

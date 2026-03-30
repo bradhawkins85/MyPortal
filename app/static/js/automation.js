@@ -1,4 +1,5 @@
 (function () {
+  const actionPayloadEditor = window.MyPortalActionPayloadEditor || null;
   let taskModal = null;
   let logsModal = null;
   let activeTaskContext = { id: '', name: '' };
@@ -466,6 +467,23 @@
           body: '<p>This issue has been automatically resolved. Please contact us if you experience any further problems.</p>',
           is_internal: false,
           author_id: null,
+        }),
+      },
+    ],
+    whisperx: [
+      {
+        label: 'Transcribe voicemail attachments and add internal note',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          add_note: true,
+        }),
+      },
+      {
+        label: 'Transcribe with language override (no note)',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          add_note: false,
+          language: 'en',
         }),
       },
     ],
@@ -1281,41 +1299,370 @@
     }
   }
 
-  function setupFilterQuickAdd() {
-    const select = document.querySelector('[data-filter-quick-add]');
-    const button = document.querySelector('[data-filter-quick-add-apply]');
-    const textarea = document.getElementById('automation-filters');
-    if (!select || !button || !textarea) {
+  function setupTriggerFilterBuilder() {
+    const container = document.querySelector('[data-filter-builder]');
+    if (!container) {
+      return;
+    }
+    const list = container.querySelector('[data-filter-builder-list]');
+    const addButton = container.querySelector('[data-filter-add-condition]');
+    const errorEl = container.querySelector('[data-filter-builder-error]');
+    const advancedToggle = container.querySelector('[data-filter-advanced-toggle]');
+    const advancedPanel = container.querySelector('[data-filter-advanced-panel]');
+    const advancedEditor = query('automation-filters-advanced');
+    const hiddenInput = query('automation-filters-data');
+    const modeInput = query('automation-filters-mode');
+    if (!list || !addButton || !advancedToggle || !advancedPanel || !advancedEditor || !hiddenInput || !modeInput) {
       return;
     }
 
-    FILTER_SNIPPETS.filter((snippet) => snippet && snippet.value).forEach((snippet) => {
-      const option = document.createElement('option');
-      option.value = snippet.value;
-      option.textContent = snippet.label;
-      select.appendChild(option);
-    });
+    let builderState = { all: [] };
+    let advancedMode = false;
 
-    const hasTemplates = select.options.length > 1;
-    select.disabled = !hasTemplates;
-    button.disabled = !hasTemplates;
-    select.value = '';
-
-    button.addEventListener('click', () => {
-      const value = select.value;
-      if (!value) {
-        select.focus();
+    const setError = (message) => {
+      if (!errorEl) {
         return;
       }
-      insertSnippet(textarea, value);
-      select.value = '';
+      if (!message) {
+        errorEl.hidden = true;
+        errorEl.textContent = '';
+        return;
+      }
+      errorEl.hidden = false;
+      errorEl.textContent = message;
+    };
+
+    const parseTypedValue = (valueType, rawValue) => {
+      if (valueType === 'null') {
+        return null;
+      }
+      if (valueType === 'boolean') {
+        return String(rawValue).trim().toLowerCase() === 'true';
+      }
+      if (valueType === 'number') {
+        const parsed = Number(String(rawValue).trim());
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      return String(rawValue);
+    };
+
+    const inferType = (value) => {
+      if (value === null) {
+        return 'null';
+      }
+      if (typeof value === 'boolean') {
+        return 'boolean';
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return 'number';
+      }
+      return 'string';
+    };
+
+    const makeRowState = (partial) => ({
+      conditionType: partial && partial.conditionType ? partial.conditionType : 'match',
+      fieldPath: partial && partial.fieldPath ? partial.fieldPath : '',
+      operator: partial && partial.operator ? partial.operator : 'equals',
+      valueType: partial && partial.valueType ? partial.valueType : 'string',
+      value: partial && Object.prototype.hasOwnProperty.call(partial, 'value') ? partial.value : '',
     });
 
-    select.addEventListener('change', () => {
-      if (select.value) {
-        button.focus();
+    const filterNodeToRow = (node) => {
+      if (!node || typeof node !== 'object') {
+        return null;
+      }
+      if (node.match && typeof node.match === 'object' && !Array.isArray(node.match)) {
+        const entries = Object.entries(node.match);
+        if (entries.length < 1) {
+          return null;
+        }
+        const [fieldPath, value] = entries[0];
+        return makeRowState({
+          conditionType: 'match',
+          fieldPath: String(fieldPath),
+          valueType: inferType(value),
+          value: value === null ? '' : String(value),
+        });
+      }
+      if (Array.isArray(node.all) || Array.isArray(node.any)) {
+        const key = Array.isArray(node.all) ? 'all' : 'any';
+        const clauses = node[key];
+        if (!Array.isArray(clauses) || clauses.length < 1) {
+          return null;
+        }
+        const child = filterNodeToRow(clauses[0]);
+        if (!child) {
+          return null;
+        }
+        return makeRowState({
+          ...child,
+          conditionType: key,
+        });
+      }
+      if (node.not && typeof node.not === 'object') {
+        const child = filterNodeToRow(node.not);
+        if (!child) {
+          return null;
+        }
+        return makeRowState({
+          ...child,
+          conditionType: 'not',
+        });
+      }
+      return null;
+    };
+
+    const filtersToRows = (filters) => {
+      if (!filters || typeof filters !== 'object') {
+        return [];
+      }
+      const asNode = filterNodeToRow(filters);
+      if (asNode) {
+        return [asNode];
+      }
+      if (Array.isArray(filters.all)) {
+        return filters.all.map((node) => filterNodeToRow(node)).filter(Boolean);
+      }
+      return [];
+    };
+
+    const rowToFilterNode = (row) => {
+      const fieldPath = String(row.fieldPath || '').trim();
+      if (!fieldPath) {
+        return null;
+      }
+      const typedValue = parseTypedValue(row.valueType, row.value);
+      const matchNode = { match: { [fieldPath]: typedValue } };
+      if (row.conditionType === 'all') {
+        return { all: [matchNode] };
+      }
+      if (row.conditionType === 'any') {
+        return { any: [matchNode] };
+      }
+      if (row.conditionType === 'not') {
+        return { not: matchNode };
+      }
+      return matchNode;
+    };
+
+    const serializeBuilderState = () => {
+      const rows = Array.isArray(builderState.all) ? builderState.all : [];
+      const nodes = rows.map((row) => rowToFilterNode(row)).filter(Boolean);
+      if (nodes.length < 1) {
+        return null;
+      }
+      return nodes.length === 1 ? nodes[0] : { all: nodes };
+    };
+
+    const updateHiddenValue = () => {
+      const payload = serializeBuilderState();
+      const serialized = payload ? JSON.stringify(payload, null, 2) : '';
+      hiddenInput.value = serialized;
+      return serialized;
+    };
+
+    const handleRowChange = (index, key, value) => {
+      if (!builderState.all[index]) {
+        return;
+      }
+      builderState.all[index][key] = value;
+      const serialized = updateHiddenValue();
+      if (advancedMode) {
+        advancedEditor.value = serialized;
+      }
+    };
+
+    const removeRow = (index) => {
+      builderState.all.splice(index, 1);
+      renderRows();
+    };
+
+    function renderRows() {
+      list.textContent = '';
+      if (!Array.isArray(builderState.all) || builderState.all.length < 1) {
+        const empty = document.createElement('p');
+        empty.className = 'form-help';
+        empty.textContent = 'No conditions yet. Add one to build trigger filters.';
+        list.appendChild(empty);
+      }
+      builderState.all.forEach((row, index) => {
+        const rowWrap = document.createElement('div');
+        rowWrap.className = 'form-grid';
+
+        const typeSelect = document.createElement('select');
+        typeSelect.className = 'form-input';
+        ['match', 'all', 'any', 'not'].forEach((type) => {
+          const option = document.createElement('option');
+          option.value = type;
+          option.textContent = type;
+          if (row.conditionType === type) {
+            option.selected = true;
+          }
+          typeSelect.appendChild(option);
+        });
+        typeSelect.addEventListener('change', () => handleRowChange(index, 'conditionType', typeSelect.value));
+
+        const fieldInput = document.createElement('input');
+        fieldInput.className = 'form-input';
+        fieldInput.type = 'text';
+        fieldInput.placeholder = 'ticket.status';
+        fieldInput.value = row.fieldPath || '';
+        fieldInput.addEventListener('input', () => handleRowChange(index, 'fieldPath', fieldInput.value));
+
+        const operatorSelect = document.createElement('select');
+        operatorSelect.className = 'form-input';
+        const equalsOption = document.createElement('option');
+        equalsOption.value = 'equals';
+        equalsOption.textContent = 'equals';
+        operatorSelect.appendChild(equalsOption);
+        operatorSelect.value = row.operator || 'equals';
+        operatorSelect.addEventListener('change', () => handleRowChange(index, 'operator', operatorSelect.value));
+
+        const valueTypeSelect = document.createElement('select');
+        valueTypeSelect.className = 'form-input';
+        ['string', 'number', 'boolean', 'null'].forEach((type) => {
+          const option = document.createElement('option');
+          option.value = type;
+          option.textContent = type;
+          if (row.valueType === type) {
+            option.selected = true;
+          }
+          valueTypeSelect.appendChild(option);
+        });
+
+        const valueInput = document.createElement('input');
+        valueInput.className = 'form-input';
+        valueInput.type = 'text';
+        valueInput.placeholder = 'value';
+        valueInput.value = row.value || '';
+        valueInput.disabled = row.valueType === 'null';
+
+        valueTypeSelect.addEventListener('change', () => {
+          handleRowChange(index, 'valueType', valueTypeSelect.value);
+          valueInput.disabled = valueTypeSelect.value === 'null';
+        });
+        valueInput.addEventListener('input', () => handleRowChange(index, 'value', valueInput.value));
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--ghost';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => removeRow(index));
+
+        rowWrap.appendChild(typeSelect);
+        rowWrap.appendChild(fieldInput);
+        rowWrap.appendChild(operatorSelect);
+        rowWrap.appendChild(valueTypeSelect);
+        rowWrap.appendChild(valueInput);
+        rowWrap.appendChild(removeButton);
+        list.appendChild(rowWrap);
+      });
+      const serialized = updateHiddenValue();
+      if (advancedMode) {
+        advancedEditor.value = serialized;
+      }
+    }
+
+    const addRow = (row) => {
+      builderState.all.push(makeRowState(row));
+      renderRows();
+    };
+
+    const setAdvancedMode = (enabled) => {
+      advancedMode = enabled;
+      modeInput.value = enabled ? 'advanced' : 'builder';
+      advancedPanel.hidden = !enabled;
+      advancedToggle.setAttribute('aria-expanded', enabled ? 'true' : 'false');
+      if (enabled) {
+        advancedEditor.value = hiddenInput.value || '';
+      } else {
+        setError('');
+      }
+    };
+
+    addButton.addEventListener('click', () => addRow());
+    advancedToggle.addEventListener('click', () => {
+      if (!advancedMode) {
+        setAdvancedMode(true);
+        return;
+      }
+      const raw = (advancedEditor.value || '').trim();
+      if (!raw) {
+        builderState = { all: [] };
+        setAdvancedMode(false);
+        renderRows();
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        const rows = filtersToRows(parsed);
+        if (!rows.length) {
+          throw new Error('Advanced JSON could not be represented in the builder.');
+        }
+        builderState = { all: rows };
+        setError('');
+        setAdvancedMode(false);
+        renderRows();
+      } catch (error) {
+        setError(error && error.message ? error.message : 'Advanced JSON is invalid.');
       }
     });
+
+    const initialRaw = (container.dataset.filterRaw || hiddenInput.value || '').trim();
+    if (initialRaw) {
+      try {
+        const parsed = JSON.parse(initialRaw);
+        const rows = filtersToRows(parsed);
+        if (rows.length) {
+          builderState = { all: rows };
+          modeInput.value = 'builder';
+        } else {
+          advancedEditor.value = initialRaw;
+          modeInput.value = 'advanced';
+          setAdvancedMode(true);
+        }
+      } catch (error) {
+        advancedEditor.value = initialRaw;
+        modeInput.value = 'advanced';
+        setAdvancedMode(true);
+      }
+    } else if (FILTER_SNIPPETS.length > 0) {
+      try {
+        const defaultSnippet = FILTER_SNIPPETS[0];
+        const parsed = JSON.parse(defaultSnippet.value);
+        const rows = filtersToRows(parsed);
+        if (rows.length) {
+          builderState = { all: rows };
+        }
+      } catch (error) {
+        // Ignore malformed fallback snippet.
+      }
+    }
+
+    renderRows();
+
+    const form = container.closest('form');
+    if (form) {
+      form.addEventListener('submit', (event) => {
+        if (advancedMode) {
+          const raw = (advancedEditor.value || '').trim();
+          if (!raw) {
+            hiddenInput.value = '';
+            return;
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            hiddenInput.value = JSON.stringify(parsed, null, 2);
+            setError('');
+          } catch (error) {
+            event.preventDefault();
+            setError('Advanced JSON is invalid. Fix trigger filters before submitting.');
+          }
+          return;
+        }
+        updateHiddenValue();
+      });
+    }
   }
 
   function getActionTemplates(moduleValue) {
@@ -1467,8 +1814,10 @@
       .map((entry) => ({
         value: String(entry.slug || '').trim(),
         label: String(entry.name || entry.slug || '').trim(),
+        payloadSchema: entry && entry.payload_schema ? entry.payload_schema : null,
       }))
       .filter((option) => option.value);
+    const moduleBySlug = new Map(moduleOptions.map((option) => [option.value, option]));
 
     const createModuleSelect = (value) => {
       const select = document.createElement('select');
@@ -1508,7 +1857,9 @@
         const payloadFieldInput = row.querySelector('[data-action-payload]');
         const orderInput = row.querySelector('[data-action-order]');
         const noteInput = row.querySelector('[data-action-note]');
+        const payloadModeInput = row.querySelector('[data-action-payload-mode]');
         const moduleValue = moduleSelect ? moduleSelect.value.trim() : '';
+        const payloadMode = payloadModeInput ? payloadModeInput.value : 'raw';
         const payloadText = payloadFieldInput ? payloadFieldInput.value.trim() : '';
         const orderValue = orderInput ? parseInt(orderInput.value, 10) : index;
         const noteValue = noteInput ? noteInput.value.trim() : '';
@@ -1518,18 +1869,34 @@
           return;
         }
         let payload = {};
-        if (payloadText) {
-          try {
-            const parsed = JSON.parse(payloadText);
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-              throw new Error('Invalid payload');
-            }
-            payload = parsed;
-          } catch (error) {
-            errorMessage = `Trigger action ${index + 1} payload must be valid JSON.`;
+        if (payloadMode === 'schema') {
+          const parsedPayload = actionPayloadEditor
+            ? actionPayloadEditor.parseSchemaFields({
+              container: row,
+              rowIndex: index,
+              errorPrefix: 'Trigger action',
+            })
+            : { ok: true, payload: {} };
+          if (!parsedPayload.ok) {
+            errorMessage = parsedPayload.error;
             firstErrorRow = row;
             return;
           }
+          payload = parsedPayload.payload;
+        } else {
+          const parsedPayload = actionPayloadEditor
+            ? actionPayloadEditor.parseRawPayload({
+              text: payloadText,
+              rowIndex: index,
+              errorPrefix: 'Trigger action',
+            })
+            : { ok: true, payload: {} };
+          if (!parsedPayload.ok) {
+            errorMessage = parsedPayload.error;
+            firstErrorRow = row;
+            return;
+          }
+          payload = parsedPayload.payload;
         }
         if (validateNotes) {
           const isNew = row.dataset.actionLoaded !== 'true';
@@ -1537,7 +1904,13 @@
           if (!isNew) {
             const origModule = row.dataset.actionOriginalModule || '';
             const origPayload = row.dataset.actionOriginalPayload || '';
-            isModified = moduleValue !== origModule || payloadText !== origPayload;
+            let currentPayload = '';
+            try {
+              currentPayload = JSON.stringify(payload);
+            } catch (error) {
+              currentPayload = '';
+            }
+            isModified = moduleValue !== origModule || currentPayload !== origPayload;
           }
           if ((isNew || isModified) && !noteValue) {
             errorMessage = `Add a note for action ${index + 1}.`;
@@ -1605,11 +1978,12 @@
         if (isLoaded) {
           row.dataset.actionOriginalModule = action.module || '';
           try {
-            row.dataset.actionOriginalPayload = action.payload ? JSON.stringify(action.payload) : '';
+          row.dataset.actionOriginalPayload = action.payload ? JSON.stringify(action.payload) : '';
           } catch (e) {
             row.dataset.actionOriginalPayload = '';
           }
         }
+        row.dataset.actionPayloadMode = 'raw';
 
         // ── Header (always visible) ──────────────────────────────
         const header = document.createElement('div');
@@ -1703,9 +2077,28 @@
         leftCol.appendChild(removeButton);
         columns.appendChild(leftCol);
 
-        // Right column: template row + payload textarea
+        // Right column: mode + schema/raw payload
         const rightCol = document.createElement('div');
         rightCol.className = 'automation-action__right';
+
+        const payloadModeLabel = document.createElement('label');
+        payloadModeLabel.className = 'form-label';
+        payloadModeLabel.setAttribute('for', `automation-action-payload-mode-${rowId}`);
+        payloadModeLabel.textContent = 'Payload mode';
+        const payloadModeSelect = document.createElement('select');
+        payloadModeSelect.className = 'form-input';
+        payloadModeSelect.id = `automation-action-payload-mode-${rowId}`;
+        payloadModeSelect.setAttribute('data-action-payload-mode', 'true');
+        const modeSchema = document.createElement('option');
+        modeSchema.value = 'schema';
+        modeSchema.textContent = 'Schema fields';
+        const modeRaw = document.createElement('option');
+        modeRaw.value = 'raw';
+        modeRaw.textContent = 'Raw payload JSON';
+        payloadModeSelect.appendChild(modeSchema);
+        payloadModeSelect.appendChild(modeRaw);
+        rightCol.appendChild(payloadModeLabel);
+        rightCol.appendChild(payloadModeSelect);
 
         const quickAddWrapper = document.createElement('div');
         quickAddWrapper.className = 'form-quick-add';
@@ -1762,14 +2155,84 @@
         refreshQuickAddOptions = () => {
           populateActionQuickAdd(quickAddSelect, quickAddButton, quickAddWrapper, moduleSelect.value);
         };
+        const schemaContainer = document.createElement('div');
+        schemaContainer.setAttribute('data-action-schema-container', 'true');
+        schemaContainer.hidden = true;
+        const rawContainer = document.createElement('div');
+        rawContainer.setAttribute('data-action-raw-container', 'true');
+        rawContainer.appendChild(quickAddWrapper);
+        rawContainer.appendChild(payloadInput);
+
+        const buildSchemaFields = (moduleSlug, existingPayload) => {
+          const moduleMeta = moduleBySlug.get(moduleSlug);
+          const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
+          if (!actionPayloadEditor) {
+            schemaContainer.textContent = '';
+            return false;
+          }
+          const result = actionPayloadEditor.buildSchemaFields({
+            container: schemaContainer,
+            schema,
+            existingPayload,
+            idPrefix: `automation-action-${rowId}`,
+            onValueChange: updateState,
+          });
+          return result.hasSchema;
+        };
+
+        const applyPayloadMode = () => {
+          const moduleSlug = moduleSelect.value;
+          const moduleMeta = moduleBySlug.get(moduleSlug);
+          const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
+          const schemaFields = actionPayloadEditor ? actionPayloadEditor.getSchemaFields(schema) : [];
+          const schemaFieldNames = new Set(schemaFields.map((field) => field.name));
+          let existingPayload = {};
+          try {
+            existingPayload = payloadInput.value.trim() ? JSON.parse(payloadInput.value) : {};
+          } catch (error) {
+            existingPayload = {};
+          }
+          const hasSchema = buildSchemaFields(moduleSlug, existingPayload);
+          if (!hasSchema) {
+            payloadModeSelect.value = 'raw';
+            payloadModeSelect.disabled = true;
+            modeSchema.disabled = true;
+            schemaContainer.hidden = true;
+            rawContainer.hidden = false;
+            row.dataset.actionPayloadMode = 'raw';
+            return;
+          }
+          payloadModeSelect.disabled = false;
+          modeSchema.disabled = false;
+          const hasUnknownKeys = actionPayloadEditor
+            ? actionPayloadEditor.hasUnknownKeys(existingPayload, schemaFieldNames)
+            : false;
+          const preferredMode =
+            row.dataset.actionPayloadMode === 'raw' || hasUnknownKeys ? 'raw' : 'schema';
+          payloadModeSelect.value = preferredMode;
+          schemaContainer.hidden = preferredMode !== 'schema';
+          rawContainer.hidden = preferredMode !== 'raw';
+          row.dataset.actionPayloadMode = preferredMode;
+        };
+
+        payloadModeSelect.addEventListener('change', () => {
+          row.dataset.actionPayloadMode = payloadModeSelect.value;
+          applyPayloadMode();
+          updateState();
+        });
+
         refreshQuickAddOptions();
-        rightCol.appendChild(quickAddWrapper);
-        rightCol.appendChild(payloadInput);
+        moduleSelect.addEventListener('change', () => {
+          applyPayloadMode();
+        });
+        rightCol.appendChild(schemaContainer);
+        rightCol.appendChild(rawContainer);
         columns.appendChild(rightCol);
 
         body.appendChild(columns);
         row.appendChild(body);
 
+        applyPayloadMode();
         return row;
       };
 
@@ -1818,7 +2281,7 @@
 
   function setupAutomationForm() {
     setupTriggerField();
-    setupFilterQuickAdd();
+    setupTriggerFilterBuilder();
     setupActionBuilder();
     setupScheduleVisibility();
   }

@@ -7,6 +7,7 @@ from app.core.logging import log_info
 from app.repositories import companies as company_repo
 from app.repositories import staff as staff_repo
 from app.services import syncro
+from app.services import m365 as m365_service
 
 
 @dataclass(slots=True)
@@ -15,6 +16,7 @@ class ImportSummary:
     created: int
     updated: int
     skipped: int
+    removed: int = 0
 
     @property
     def total(self) -> int:
@@ -23,6 +25,10 @@ class ImportSummary:
 
 def _normalise(value: str | None) -> str:
     return value.strip() if value else ""
+
+
+def _default_account_action(*, account_enabled: bool) -> str:
+    return "Onboarded" if account_enabled else "Offboarded"
 
 
 def _find_existing_staff(
@@ -57,9 +63,21 @@ async def import_contacts_for_company(
     if not company:
         raise ValueError(f"Company {company_id} not found")
     syncro_id = syncro_company_id or company.get("syncro_company_id")
-    if not syncro_id:
-        raise syncro.SyncroConfigurationError("Company is missing a Syncro mapping")
 
+    if syncro_id:
+        return await _import_from_syncro(company_id, syncro_id)
+
+    # Fall back to M365 directory if the company has M365 credentials.
+    m365_creds = await m365_service.get_credentials(company_id)
+    if m365_creds:
+        return await _import_from_m365(company_id)
+
+    raise syncro.SyncroConfigurationError(
+        "Company is missing a Syncro mapping and has no M365 credentials configured"
+    )
+
+
+async def _import_from_syncro(company_id: int, syncro_id: str) -> ImportSummary:
     log_info("Starting Syncro contact import", company_id=company_id, syncro_id=syncro_id)
     contacts = await syncro.get_contacts(syncro_id)
     existing_staff = await staff_repo.list_staff(company_id)
@@ -139,7 +157,7 @@ async def import_contacts_for_company(
             created_staff = await staff_repo.create_staff(
                 company_id=company_id,
                 first_name=first_name or "Unknown",
-                last_name=last_name or last_name or "",
+                last_name=last_name or "",
                 email=email or "",
                 mobile_phone=phone,
                 date_onboarded=None,
@@ -156,6 +174,7 @@ async def import_contacts_for_company(
                 manager_name=None,
                 account_action=None,
                 syncro_contact_id=str(contact.get("id")) if contact.get("id") else None,
+                source="syncro",
             )
             existing_staff.append(created_staff)
             created += 1
@@ -168,6 +187,133 @@ async def import_contacts_for_company(
         skipped=skipped,
     )
     return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped)
+
+
+async def _import_from_m365(company_id: int) -> ImportSummary:
+    log_info("Starting M365 directory staff import", company_id=company_id)
+    users = await m365_service.get_all_users(company_id)
+    existing_staff = await staff_repo.list_staff(company_id)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    seen_emails: set[str] = set()
+
+    for user in users:
+        first_name = _normalise(user.get("givenName")) or None
+        last_name = _normalise(user.get("surname")) or None
+        display_name = _normalise(user.get("displayName") or None)
+        if not first_name and not last_name:
+            if display_name:
+                parts = display_name.split()
+                first_name = parts[0]
+                last_name = " ".join(parts[1:]) if len(parts) > 1 else None
+            else:
+                skipped += 1
+                continue
+
+        email = _normalise(user.get("mail") or user.get("userPrincipalName")) or None
+        phones = user.get("businessPhones") or []
+        phone = _normalise(user.get("mobilePhone") or (phones[0] if phones else None)) or None
+        street = _normalise(user.get("streetAddress")) or None
+        city = _normalise(user.get("city")) or None
+        state = _normalise(user.get("state")) or None
+        postcode = _normalise(user.get("postalCode")) or None
+        country = _normalise(user.get("country")) or None
+        department = _normalise(user.get("department")) or None
+        job_title = _normalise(user.get("jobTitle")) or None
+        sign_in_activity = user.get("signInActivity") or {}
+        m365_last_sign_in = m365_service.parse_graph_datetime(
+            sign_in_activity.get("lastSignInDateTime")
+        )
+        account_enabled = bool(user.get("accountEnabled", True))
+        is_ex_staff = not account_enabled
+
+        existing = _find_existing_staff(
+            existing_staff,
+            first_name=first_name or "Unknown",
+            last_name=last_name or "",
+            email=email,
+        )
+
+        if email:
+            seen_emails.add(email.lower())
+
+        if existing:
+            await staff_repo.update_staff(
+                existing["id"],
+                company_id=company_id,
+                first_name=first_name or existing.get("first_name", ""),
+                last_name=last_name or existing.get("last_name", ""),
+                email=email or existing.get("email", ""),
+                mobile_phone=phone or existing.get("mobile_phone"),
+                date_onboarded=existing.get("date_onboarded"),
+                date_offboarded=existing.get("date_offboarded"),
+                enabled=account_enabled,
+                is_ex_staff=is_ex_staff,
+                street=street or existing.get("street"),
+                city=city or existing.get("city"),
+                state=state or existing.get("state"),
+                postcode=postcode or existing.get("postcode"),
+                country=country or existing.get("country"),
+                department=department or existing.get("department"),
+                job_title=job_title or existing.get("job_title"),
+                org_company=existing.get("org_company"),
+                manager_name=existing.get("manager_name"),
+                account_action=existing.get("account_action")
+                or _default_account_action(account_enabled=account_enabled),
+                syncro_contact_id=existing.get("syncro_contact_id"),
+                m365_last_sign_in=m365_last_sign_in,
+            )
+            updated += 1
+        else:
+            created_staff = await staff_repo.create_staff(
+                company_id=company_id,
+                first_name=first_name or "Unknown",
+                last_name=last_name or "",
+                email=email or "",
+                mobile_phone=phone,
+                date_onboarded=None,
+                date_offboarded=None,
+                enabled=account_enabled,
+                is_ex_staff=is_ex_staff,
+                street=street,
+                city=city,
+                state=state,
+                postcode=postcode,
+                country=country,
+                department=department,
+                job_title=job_title,
+                org_company=None,
+                manager_name=None,
+                account_action=_default_account_action(account_enabled=account_enabled),
+                syncro_contact_id=None,
+                source="m365",
+                m365_last_sign_in=m365_last_sign_in,
+            )
+            existing_staff.append(created_staff)
+            created += 1
+
+    removed = await staff_repo.delete_m365_staff_not_in(company_id, seen_emails)
+
+    log_info(
+        "Completed M365 directory staff import",
+        company_id=company_id,
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        removed=removed,
+    )
+    return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped, removed=removed)
+
+
+async def import_m365_contacts_for_company(company_id: int) -> ImportSummary:
+    """Import staff from Microsoft 365 only, ignoring any Syncro mapping."""
+    m365_creds = await m365_service.get_credentials(company_id)
+    if not m365_creds:
+        log_info("Skipping M365 staff import: no M365 credentials configured", company_id=company_id)
+        return ImportSummary(company_id=company_id, created=0, updated=0, skipped=0)
+    return await _import_from_m365(company_id)
 
 
 async def import_contacts_for_syncro_id(syncro_company_id: str) -> ImportSummary:

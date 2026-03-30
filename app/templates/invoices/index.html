@@ -68,7 +68,9 @@
         <tbody>
           {% for invoice in invoices %}
           <tr data-status="{{ invoice.status_slug }}"{% if invoice.is_overdue %} class="invoice-row--overdue"{% endif %}>
-            <td data-label="Invoice number">{{ invoice.invoice_number }}</td>
+            <td data-label="Invoice number">
+              <a href="/invoices/{{ invoice.id }}" class="link">{{ invoice.invoice_number }}</a>
+            </td>
             <td data-label="Amount" data-value="{{ invoice.amount }}">{{ invoice.amount_display }}</td>
             <td data-label="Due date" data-value="{{ invoice.due_sort }}" data-utc="{{ invoice.due_iso }}">
               {% if invoice.due_display %}
