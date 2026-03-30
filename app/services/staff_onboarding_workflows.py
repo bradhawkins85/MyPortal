@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import secrets
+from urllib.parse import urlparse
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -601,6 +602,22 @@ def _resolve_json_object_candidate(raw: Any, *, field_name: str) -> dict[str, An
     raise WorkflowStepError(f"{field_name} must be a JSON object")
 
 
+def _validate_web_url(value: str, *, field_name: str) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise WorkflowStepError(f"{field_name} must be a valid http/https URL")
+    return url
+
+
+def _normalize_plain_text_payload(raw_text: str) -> str:
+    # Keep external data as plain text only, avoid HTML/script interpretation in downstream consumers.
+    normalized = str(raw_text or "")
+    normalized = normalized.replace("\x00", "")
+    normalized = normalized.replace("<", "&lt;").replace(">", "&gt;")
+    return normalized[:4000]
+
+
 def _default_workflow_steps(direction: str) -> list[dict[str, Any]]:
     if direction == DIRECTION_OFFBOARDING:
         return [
@@ -836,9 +853,7 @@ async def _execute_policy_step(
 
     if step_type in {"http_get", "http_post"}:
         method = "GET" if step_type == "http_get" else "POST"
-        url = str(_resolve_template_value(step.get("url"), vars_map=vars_map) or "").strip()
-        if not url:
-            raise WorkflowStepError("HTTP step requires url")
+        url = _validate_web_url(_resolve_template_value(step.get("url"), vars_map=vars_map), field_name="url")
         headers = _resolve_template_value(step.get("headers") or {}, vars_map=vars_map)
         headers = _resolve_json_object_candidate(headers, field_name="headers")
         query_params = _resolve_template_value(
@@ -864,13 +879,34 @@ async def _execute_policy_step(
                 json=body if method == "POST" else None,
             )
         payload: dict[str, Any] = {"status_code": response.status_code}
-        content_type = str(response.headers.get("content-type") or "").lower()
-        if "json" in content_type:
-            payload["body"] = response.json()
-        else:
-            payload["body"] = response.text[:4000]
+        payload["body"] = _normalize_plain_text_payload(response.text)
         if response.status_code >= 400:
             raise WorkflowStepError(f"HTTP {method} failed ({response.status_code})", request_payload={"url": url})
+        return payload
+
+    if step_type == "curl_text":
+        url = _validate_web_url(_resolve_template_value(step.get("url"), vars_map=vars_map), field_name="url")
+        timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
+        process = await asyncio.create_subprocess_exec(
+            "curl",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            str(timeout_seconds),
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        body_text = _normalize_plain_text_payload(stdout.decode("utf-8", errors="replace"))
+        payload = {"status_code": int(process.returncode or 0), "body": body_text}
+        if process.returncode != 0:
+            err_text = _normalize_plain_text_payload(stderr.decode("utf-8", errors="replace"))
+            raise WorkflowStepError(
+                f"CURL request failed (exit {process.returncode})",
+                request_payload={"url": url, "error": err_text},
+            )
         return payload
 
     if step_type == "m365_create_user":
