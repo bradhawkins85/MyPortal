@@ -325,10 +325,10 @@
             <div class="form-field">
               <label class="form-label" for="new-custom-condition-operator">Condition</label>
               <select class="form-input" id="new-custom-condition-operator" name="condition_operator">
-                <option value="equals">Equals value</option>
-                <option value="not_equals">Not equal to value</option>
                 <option value="is_checked">Checkbox is checked</option>
                 <option value="is_not_checked">Checkbox is not checked</option>
+                <option value="equals">Equals value</option>
+                <option value="not_equals">Not equal to value</option>
               </select>
             </div>
             <div class="form-field">
@@ -379,7 +379,7 @@
                         <div class="form-field">
                           <select class="form-input" name="condition_operator">
                             {% for condition in ['equals', 'not_equals', 'is_checked', 'is_not_checked'] %}
-                              <option value="{{ condition }}" {% if (field.condition_operator or 'equals') == condition %}selected{% endif %}>{{ condition }}</option>
+                              <option value="{{ condition }}" {% if (field.condition_operator or 'is_checked') == condition %}selected{% endif %}>{{ condition }}</option>
                             {% endfor %}
                           </select>
                         </div>
