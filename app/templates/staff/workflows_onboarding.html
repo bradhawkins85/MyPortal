@@ -128,8 +128,10 @@
           const schema = getSchemaForType(step.type);
           const card = document.createElement('section');
           card.className = 'card card--panel';
+          const details = document.createElement('details');
+          details.className = 'card__body stack-xs';
           const body = document.createElement('div');
-          body.className = 'card__body stack-xs';
+          body.className = 'stack-xs';
 
           const makeLabel = (text) => {
             const label = document.createElement('label');
@@ -159,7 +161,25 @@
             return input;
           };
 
-          card.innerHTML = `<header class="card__header card__header--stacked"><strong>${index + 1}. ${step.name}</strong><small class="text-muted">${step.type}</small></header>`;
+          const summary = document.createElement('summary');
+          summary.className = 'card__header form-row';
+          const title = document.createElement('strong');
+          title.textContent = `${index + 1}. ${step.name}`;
+          const headerActions = document.createElement('div');
+          headerActions.className = 'form-row';
+          const moveUpButton = document.createElement('button');
+          moveUpButton.type = 'button';
+          moveUpButton.className = 'btn btn-secondary';
+          moveUpButton.textContent = 'Move up';
+          if (index === 0) moveUpButton.disabled = true;
+          const moveDownButton = document.createElement('button');
+          moveDownButton.type = 'button';
+          moveDownButton.className = 'btn btn-secondary';
+          moveDownButton.textContent = 'Move down';
+          if (index >= steps.length - 1) moveDownButton.disabled = true;
+          headerActions.append(moveUpButton, moveDownButton);
+          summary.append(title, headerActions);
+          details.appendChild(summary);
           const nameInput = makeInput({ type: 'text' }, step.name);
           body.append(makeLabel('Step name'), nameInput);
           nameInput.addEventListener('change', () => { steps[index].name = nameInput.value.trim() || steps[index].name; });
@@ -221,13 +241,17 @@
 
           const actions = document.createElement('div');
           actions.className = 'form-row';
-          actions.innerHTML = '<button type="button" class="btn btn-secondary" data-action="up">Move up</button><button type="button" class="btn btn-secondary" data-action="down">Move down</button><button type="button" class="btn btn-danger" data-action="delete">Remove</button>';
-          actions.querySelector('[data-action="up"]').addEventListener('click', () => {
+          actions.innerHTML = '<button type="button" class="btn btn-danger" data-action="delete">Remove</button>';
+          moveUpButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (index === 0) return;
             [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
             renderSteps();
           });
-          actions.querySelector('[data-action="down"]').addEventListener('click', () => {
+          moveDownButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             if (index >= steps.length - 1) return;
             [steps[index + 1], steps[index]] = [steps[index], steps[index + 1]];
             renderSteps();
@@ -237,7 +261,8 @@
             renderSteps();
           });
           body.appendChild(actions);
-          card.appendChild(body);
+          details.appendChild(body);
+          card.appendChild(details);
           stepsContainer.appendChild(card);
         });
       };
