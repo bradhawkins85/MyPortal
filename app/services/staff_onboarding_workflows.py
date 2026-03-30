@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
@@ -48,6 +49,65 @@ class LicenseExhaustionError(WorkflowStepError):
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_timezone(value: str | None) -> tuple[ZoneInfo | None, str | None]:
+    zone_name = str(value or "").strip()
+    if not zone_name:
+        return None, None
+    try:
+        return ZoneInfo(zone_name), zone_name
+    except ZoneInfoNotFoundError:
+        return None, None
+
+
+def _to_utc_naive(value: datetime, *, requested_zone: ZoneInfo | None) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    if requested_zone is not None:
+        return value.replace(tzinfo=requested_zone).astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _compute_scheduled_execution(
+    *,
+    staff: dict[str, Any],
+    direction: str,
+    requested_timezone: str | None,
+) -> tuple[datetime | None, str | None]:
+    requested_zone, requested_zone_name = _resolve_timezone(requested_timezone)
+    if direction == DIRECTION_OFFBOARDING:
+        offboard_local = _parse_datetime(staff.get("date_offboarded"))
+        if offboard_local is None:
+            return None, requested_zone_name
+        scheduled_for_utc = _to_utc_naive(offboard_local, requested_zone=requested_zone)
+        return scheduled_for_utc, requested_zone_name
+
+    onboard_local = _parse_datetime(staff.get("date_onboarded"))
+    if onboard_local is None:
+        return None, requested_zone_name
+
+    if onboard_local.tzinfo is not None:
+        local_zone = requested_zone or onboard_local.tzinfo
+        onboard_local = onboard_local.astimezone(local_zone)
+    else:
+        local_zone = requested_zone or timezone.utc
+        onboard_local = onboard_local.replace(tzinfo=local_zone)
+
+    run_date_local = (onboard_local - timedelta(days=3)).date()
+    scheduled_local = datetime.combine(run_date_local, time.min, tzinfo=local_zone)
+    return scheduled_local.astimezone(timezone.utc).replace(tzinfo=None), requested_zone_name
 
 
 async def resolve_approver_user_ids(
@@ -420,6 +480,8 @@ async def run_staff_onboarding_workflow(
     staff_id: int,
     initiated_by_user_id: int | None,
     direction: str = DIRECTION_ONBOARDING,
+    scheduled_for_utc: datetime | None = None,
+    requested_timezone: str | None = None,
 ) -> dict[str, Any]:
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
@@ -463,6 +525,8 @@ async def run_staff_onboarding_workflow(
         staff_id=staff_id,
         workflow_key=workflow_key,
         direction=direction,
+        scheduled_for_utc=scheduled_for_utc,
+        requested_timezone=requested_timezone,
     )
     execution_id = int(execution["id"])
 
@@ -773,13 +837,22 @@ async def enqueue_staff_onboarding_workflow(
     staff_id: int,
     initiated_by_user_id: int | None,
     direction: str = DIRECTION_ONBOARDING,
+    requested_timezone: str | None = None,
 ) -> None:
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    scheduled_for_utc, normalized_timezone = _compute_scheduled_execution(
+        staff=staff or {},
+        direction=direction,
+        requested_timezone=requested_timezone,
+    )
     log_info(
         "Queueing staff onboarding workflow",
         company_id=company_id,
         staff_id=staff_id,
         initiated_by_user_id=initiated_by_user_id,
         direction=direction,
+        scheduled_for_utc=scheduled_for_utc.isoformat() if isinstance(scheduled_for_utc, datetime) else None,
+        requested_timezone=normalized_timezone,
     )
     asyncio.create_task(
         run_staff_onboarding_workflow(
@@ -787,6 +860,8 @@ async def enqueue_staff_onboarding_workflow(
             staff_id=staff_id,
             initiated_by_user_id=initiated_by_user_id,
             direction=direction,
+            scheduled_for_utc=scheduled_for_utc,
+            requested_timezone=normalized_timezone,
         )
     )
 
@@ -805,6 +880,8 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
         "started_at": execution.get("started_at"),
         "completed_at": execution.get("completed_at"),
         "requested_at": execution.get("requested_at"),
+        "scheduled_for_utc": execution.get("scheduled_for_utc"),
+        "requested_timezone": execution.get("requested_timezone"),
     }
 
 

@@ -93,6 +93,8 @@ class StaffWorkflowStatus(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     requested_at: Optional[datetime] = None
+    scheduled_for_utc: Optional[datetime] = None
+    requested_timezone: Optional[str] = None
 
 
 class StaffExternalCheckpointCallback(BaseModel):
