@@ -987,6 +987,19 @@ html {
   margin: 0;
 }
 
+.staff-form__section {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  padding: var(--space-gap-base);
+  margin: 0;
+}
+
+.staff-form__section-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-gap-base);
+}
+
 .staff-form__actions {
   grid-column: 1 / -1;
   justify-content: flex-end;
@@ -4033,6 +4046,18 @@ dialog.modal:not([open]) {
 
 .staff-modal__section + .staff-modal__section {
   margin-top: var(--space-gap-roomy);
+}
+
+.staff-modal__group-stack {
+  display: grid;
+  gap: var(--space-gap-base);
+}
+
+.staff-modal__subsection {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 0.75rem;
+  padding: var(--space-gap-tight);
+  margin: 0;
 }
 
 .staff-actions {
