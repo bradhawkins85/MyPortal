@@ -1,12 +1,12 @@
 -- Migration 190: Idempotency records for staff onboarding external confirmation callbacks
 
 CREATE TABLE IF NOT EXISTS staff_onboarding_external_confirmation_idempotency (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    api_key_id BIGINT UNSIGNED NOT NULL,
+    id INT NOT NULL AUTO_INCREMENT,
+    api_key_id INT NOT NULL,
     idempotency_key VARCHAR(255) NOT NULL,
     request_fingerprint CHAR(64) NOT NULL,
-    company_id BIGINT UNSIGNED NOT NULL,
-    staff_id BIGINT UNSIGNED NOT NULL,
+    company_id INT NOT NULL,
+    staff_id INT NOT NULL,
     response_status INT NULL,
     response_payload_json LONGTEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
