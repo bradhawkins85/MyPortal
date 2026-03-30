@@ -17,9 +17,12 @@ from app.repositories import licenses as license_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as workflow_repo
+from app.repositories import users as user_repo
 from app.services import audit as audit_service
+from app.services import email as email_service
 from app.services import m365 as m365_service
 from app.services import notifications as notifications_service
+from app.services import system_variables
 from app.services import tickets as tickets_service
 from app.security.api_keys import hash_api_key
 
@@ -883,7 +886,60 @@ async def _execute_policy_step(
             return {"pause": True, "reason": str(step.get("reason") or "condition matched")}
         return {"pause": False}
 
+    if step_type in {"send_welcome_email", "send_custom_email", "email_requestor"}:
+        recipients = _normalize_email_recipients(_resolve_template_value(step.get("to") or step.get("recipients"), vars_map=vars_map))
+        if step_type == "send_welcome_email" and not recipients:
+            recipients = _normalize_email_recipients(vars_map.get("staff_email"))
+        if step_type == "email_requestor" and not recipients:
+            recipients = _normalize_email_recipients(vars_map.get("requestor_email"))
+        if not recipients:
+            raise WorkflowStepError(f"{step_type} requires at least one recipient")
+
+        subject = str(_resolve_template_value(step.get("subject"), vars_map=vars_map) or "").strip()
+        if not subject:
+            subject = "Welcome to the team" if step_type == "send_welcome_email" else "Staff onboarding update"
+
+        html_body = str(
+            _resolve_template_value(step.get("html_body") or step.get("body_html") or step.get("body"), vars_map=vars_map) or ""
+        ).strip()
+        text_body = str(_resolve_template_value(step.get("text_body"), vars_map=vars_map) or "").strip() or None
+        if not html_body and not text_body:
+            raise WorkflowStepError(f"{step_type} requires html_body/body or text_body")
+        if not html_body and text_body:
+            html_body = text_body.replace("\n", "<br>")
+
+        sent, provider_metadata = await email_service.send_email(
+            subject=subject,
+            recipients=recipients,
+            html_body=html_body,
+            text_body=text_body,
+            sender=str(_resolve_template_value(step.get("from"), vars_map=vars_map) or "").strip() or None,
+            reply_to=str(_resolve_template_value(step.get("reply_to"), vars_map=vars_map) or "").strip() or None,
+        )
+        if not sent:
+            raise WorkflowStepError("Email delivery was skipped or failed")
+        return {
+            "email_sent": True,
+            "email_type": step_type,
+            "recipients": recipients,
+            "subject": subject,
+            "provider_metadata": provider_metadata or {},
+        }
+
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
+
+
+def _normalize_email_recipients(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    if isinstance(raw, list):
+        normalized: list[str] = []
+        for item in raw:
+            value = str(item or "").strip()
+            if value:
+                normalized.append(value)
+        return normalized
+    return []
 
 
 async def _run_provisioning_step(*, company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
@@ -1067,6 +1123,14 @@ async def _execute_policy_steps(
         "staff_email": staff.get("email"),
         "staff_custom_fields": dict(staff_custom_fields),
     }
+    requestor_email = await _resolve_requestor_email(staff)
+    if requestor_email:
+        vars_map["requestor_email"] = requestor_email
+    company = await company_repo.get_company_by_id(company_id)
+    if company:
+        vars_map["company_name"] = company.get("name")
+    for name, value in system_variables.get_system_variables().items():
+        vars_map[f"system.{name}"] = value
     for name, value in staff_custom_fields.items():
         vars_map[f"custom_fields.{name}"] = value
         vars_map[f"staff_custom_fields.{name}"] = value
@@ -1193,6 +1257,21 @@ async def _execute_policy_steps(
             max_retries=max_retries,
         )
     return {"paused": False}
+
+
+async def _resolve_requestor_email(staff: dict[str, Any]) -> str | None:
+    requestor_user_id = staff.get("requested_by_user_id")
+    if requestor_user_id is None:
+        return None
+    try:
+        user_id = int(requestor_user_id)
+    except (TypeError, ValueError):
+        return None
+    requestor = await user_repo.get_user_by_id(user_id)
+    if not requestor:
+        return None
+    email = str(requestor.get("email") or "").strip().lower()
+    return email or None
 
 
 async def run_staff_onboarding_workflow(
