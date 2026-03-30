@@ -8872,6 +8872,56 @@ async def staff_page(
     return await _render_template("staff/index.html", request, user, extra=extra)
 
 
+@app.get("/staff/workflows/onboarding", response_class=HTMLResponse)
+async def staff_onboarding_workflow_page(request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        _company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
+    extra = {
+        "title": "Staff onboarding workflow",
+        "is_super_admin": is_super_admin,
+        "is_admin": is_admin,
+        "staff_permission": staff_permission,
+        "company": company,
+    }
+    return await _render_template("staff/workflows_onboarding.html", request, user, extra=extra)
+
+
+@app.get("/staff/workflows/offboarding", response_class=HTMLResponse)
+async def staff_offboarding_workflow_page(request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        _company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
+    extra = {
+        "title": "Staff offboarding workflow",
+        "is_super_admin": is_super_admin,
+        "is_admin": is_admin,
+        "staff_permission": staff_permission,
+        "company": company,
+    }
+    return await _render_template("staff/workflows_offboarding.html", request, user, extra=extra)
+
+
 @app.post("/staff", response_class=HTMLResponse)
 async def create_staff_member(request: Request):
     (
