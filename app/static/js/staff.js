@@ -616,6 +616,7 @@
       offboardingReasonNotesField.value = '';
       offboardingTimezoneField.value = getBrowserTimezone() || '';
       setDefaultOffboardingDateTime();
+      closeModal(editModal);
       openModal(offboardingModal);
     }
 
