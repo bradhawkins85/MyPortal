@@ -175,3 +175,61 @@ async def test_run_workflow_allows_provisioning_state(monkeypatch):
 
     assert result["state"] == workflows.STATE_COMPLETED
     workflows.workflow_repo.create_or_reset_execution.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_run_workflow_allows_offboarding_approved_state(monkeypatch):
+    staff_record = {
+        "id": 121,
+        "company_id": 7,
+        "first_name": "Jamie",
+        "last_name": "Wong",
+        "email": "jamie@example.com",
+        "mobile_phone": None,
+        "date_onboarded": None,
+        "date_offboarded": None,
+        "enabled": False,
+        "is_ex_staff": True,
+        "street": None,
+        "city": None,
+        "state": None,
+        "postcode": None,
+        "country": None,
+        "department": None,
+        "job_title": None,
+        "org_company": None,
+        "manager_name": None,
+        "account_action": "Offboard Approved",
+        "syncro_contact_id": None,
+        "onboarding_status": workflows.STATE_OFFBOARDING_APPROVED,
+    }
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_company_workflow_policy",
+        AsyncMock(
+            return_value={
+                "is_enabled": True,
+                "workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY,
+                "max_retries": 0,
+                "config": {},
+            }
+        ),
+    )
+    create_execution_mock = AsyncMock(return_value={"id": 12})
+    monkeypatch.setattr(workflows.workflow_repo, "create_or_reset_execution", create_execution_mock)
+    monkeypatch.setattr(
+        workflows,
+        "resume_staff_onboarding_workflow_after_external_confirmation",
+        AsyncMock(return_value={"state": workflows.STATE_OFFBOARDING_COMPLETED, "execution_id": 12}),
+    )
+
+    result = await workflows.run_staff_onboarding_workflow(
+        company_id=7,
+        staff_id=121,
+        initiated_by_user_id=None,
+        direction=workflows.DIRECTION_OFFBOARDING,
+    )
+
+    assert result["state"] == workflows.STATE_OFFBOARDING_COMPLETED
+    assert create_execution_mock.await_args.kwargs["direction"] == workflows.DIRECTION_OFFBOARDING

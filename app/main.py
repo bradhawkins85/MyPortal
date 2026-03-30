@@ -9032,11 +9032,19 @@ async def update_staff_member(staff_id: int, request: Request):
             updated = refreshed
 
     requested_status = str(get_value("onboardingStatus", "onboarding_status") or "").strip().lower()
-    if requested_status == "approved":
+    if requested_status in {
+        staff_onboarding_workflow_service.STATE_APPROVED,
+        staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED,
+    }:
         await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
             company_id=int(updated.get("company_id") or company_id or 0),
             staff_id=staff_id,
             initiated_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+            direction=(
+                staff_onboarding_workflow_service.DIRECTION_OFFBOARDING
+                if requested_status == staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
+                else staff_onboarding_workflow_service.DIRECTION_ONBOARDING
+            ),
         )
 
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
@@ -9113,7 +9121,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         manager_name=existing.get("manager_name"),
         account_action="Offboard Requested",
         syncro_contact_id=existing.get("syncro_contact_id"),
-        onboarding_status=existing.get("onboarding_status"),
+        onboarding_status=staff_onboarding_workflow_service.STATE_OFFBOARDING_AWAITING_APPROVAL,
         onboarding_complete=bool(existing.get("onboarding_complete", False)),
         onboarding_completed_at=existing.get("onboarding_completed_at"),
         approval_status="pending",
