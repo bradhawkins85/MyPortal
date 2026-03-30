@@ -14,6 +14,72 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
+async def test_http_post_step_supports_query_headers_and_json_string(monkeypatch):
+    captured_request: dict[str, object] = {}
+
+    class DummyResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"ok": True, "id": "123"}
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            return
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def request(self, method, url, **kwargs):
+            captured_request["method"] = method
+            captured_request["url"] = url
+            captured_request.update(kwargs)
+            return DummyResponse()
+
+    monkeypatch.setattr(workflows.httpx, "AsyncClient", DummyClient)
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "http_post",
+            "url": "https://example.test/provision",
+            "headers": "{\"Authorization\":\"Bearer ${vars.api_token}\"}",
+            "query_params": "{\"staffId\":\"${vars.staff_id}\"}",
+            "json": "{\"email\":\"${vars.staff_email}\"}",
+            "timeout_seconds": 12,
+        },
+        company_id=7,
+        staff={"id": 88, "email": "new.user@example.com"},
+        policy_config={},
+        vars_map={"api_token": "abc123", "staff_id": 88, "staff_email": "new.user@example.com"},
+    )
+
+    assert result["status_code"] == 200
+    assert captured_request["method"] == "POST"
+    assert captured_request["params"] == {"staffId": "88"}
+    assert captured_request["headers"] == {"Authorization": "Bearer abc123"}
+    assert captured_request["json"] == {"email": "new.user@example.com"}
+
+
+def test_coerce_step_json_fields_parses_store_and_http_payload_fields():
+    normalized = workflows._coerce_step_json_fields(
+        {
+            "headers_json": "{\"Authorization\":\"Bearer token\"}",
+            "query_params_json": "{\"include\":\"licenses\"}",
+            "json_body": "{\"enabled\":true}",
+            "store_json": "{\"external_user_id\":\"body.id\"}",
+        }
+    )
+
+    assert normalized["headers"] == {"Authorization": "Bearer token"}
+    assert normalized["query_params"] == {"include": "licenses"}
+    assert normalized["json"] == {"enabled": True}
+    assert normalized["store"] == {"external_user_id": "body.id"}
+
+
+@pytest.mark.anyio
 async def test_run_workflow_ignores_waiting_external_within_timeout(monkeypatch):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     monkeypatch.setattr(
