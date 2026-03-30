@@ -6,13 +6,18 @@
       <span class="header-title-menu__label">Staff workspace</span>
       <details class="header-title-menu__dropdown" data-header-menu>
         <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-          Workflows
+          Tools
           <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
             <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
           </svg>
           <span class="visually-hidden">Toggle staff workflow menu</span>
         </summary>
         <ul class="header-title-menu__list" role="menu">
+          <li class="header-title-menu__item" role="none">
+            <button type="button" class="header-title-menu__link" role="menuitem" data-open-add-staff-modal>
+              Add Staff Member
+            </button>
+          </li>
           <li class="header-title-menu__item" role="none">
             <a href="/staff/workflows/onboarding" class="header-title-menu__link" role="menuitem">Onboarding workflow</a>
           </li>
@@ -27,115 +32,6 @@
 
 {% block content %}
 <div class="admin-grid">
-  {% if is_admin %}
-    <details class="card card--panel card-collapsible admin-grid__full staff-form-card" data-staff-form>
-      <summary class="card__header card__header--collapsible">
-        <div>
-          <h2 class="card__title">Add staff member</h2>
-          <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
-        </div>
-        <div class="card__collapsible-meta">
-          <span class="card__toggle-icon" aria-hidden="true"></span>
-        </div>
-      </summary>
-      <div class="card-collapsible__content">
-        <form action="/staff" method="post" class="staff-form">
-          {% include "partials/csrf.html" %}
-          <input type="hidden" name="browser_timezone" value="" />
-          {% for field in staff_field_config %}
-            {% if field.visible %}
-              {% if field.type == 'checkbox' %}
-                <div class="form-field form-field--checkbox">
-                  <label class="checkbox" for="{{ field.input_id }}">
-                    <input
-                      id="{{ field.input_id }}"
-                      type="checkbox"
-                      name="{{ field.input_name }}"
-                      value="1"
-                      {% if field.key == 'enabled' %}checked{% endif %}
-                      {% if field.required %}required{% endif %}
-                    />
-                    <span>{{ field.label }}</span>
-                  </label>
-                </div>
-              {% elif field.type == 'select' %}
-                <div class="form-field">
-                  <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
-                  <select class="form-input" id="{{ field.input_id }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
-                    <option value="">Select {{ field.label|lower }}</option>
-                    {% for option in field.options %}
-                      <option value="{{ option.value }}">{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-              {% else %}
-                <div class="form-field">
-                  <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
-                  <input
-                    class="form-input"
-                    id="{{ field.input_id }}"
-                    name="{{ field.input_name }}"
-                    type="{% if field.type == 'date' %}date{% else %}{% if field.validation_metadata.format == 'email' %}email{% else %}text{% endif %}{% endif %}"
-                    {% if field.required %}required{% endif %}
-                  />
-                </div>
-              {% endif %}
-            {% endif %}
-          {% endfor %}
-          {% for field in staff_custom_field_definitions %}
-            {% if field.field_type == 'checkbox' %}
-              <div
-                class="form-field form-field--checkbox"
-                data-custom-field-wrapper
-                data-custom-field-name="{{ field.name }}"
-                data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-                data-condition-operator="{{ field.condition_operator or '' }}"
-                data-condition-value="{{ field.condition_value or '' }}"
-              >
-                <label class="checkbox" for="staff-custom-{{ field.name }}">
-                  <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
-                  <span>{{ field.display_name or field.name }}</span>
-                </label>
-              </div>
-            {% elif field.field_type == 'select' %}
-              <div
-                class="form-field"
-                data-custom-field-wrapper
-                data-custom-field-name="{{ field.name }}"
-                data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-                data-condition-operator="{{ field.condition_operator or '' }}"
-                data-condition-value="{{ field.condition_value or '' }}"
-              >
-                <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
-                <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
-                  <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
-                  {% for option in field.options %}
-                    <option value="{{ option.value }}">{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            {% else %}
-              <div
-                class="form-field"
-                data-custom-field-wrapper
-                data-custom-field-name="{{ field.name }}"
-                data-condition-parent-name="{{ field.condition_parent_name or '' }}"
-                data-condition-operator="{{ field.condition_operator or '' }}"
-                data-condition-value="{{ field.condition_value or '' }}"
-              >
-                <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
-                <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
-              </div>
-            {% endif %}
-          {% endfor %}
-          <div class="form-actions staff-form__actions">
-            <button type="submit" class="button">Add staff</button>
-          </div>
-        </form>
-      </div>
-    </details>
-  {% endif %}
-
   <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div>
@@ -418,6 +314,113 @@
     </div>
   </section>
 </div>
+
+{% if is_admin %}
+  <div class="modal" id="staff-add-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close add staff member modal</span>
+        &times;
+      </button>
+      <h2 class="modal__title">Add staff member</h2>
+      <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
+      <form action="/staff" method="post" class="staff-form form-grid">
+        {% include "partials/csrf.html" %}
+        <input type="hidden" name="browser_timezone" value="" />
+        {% for field in staff_field_config %}
+          {% if field.visible %}
+            {% if field.type == 'checkbox' %}
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox" for="{{ field.input_id }}">
+                  <input
+                    id="{{ field.input_id }}"
+                    type="checkbox"
+                    name="{{ field.input_name }}"
+                    value="1"
+                    {% if field.key == 'enabled' %}checked{% endif %}
+                    {% if field.required %}required{% endif %}
+                  />
+                  <span>{{ field.label }}</span>
+                </label>
+              </div>
+            {% elif field.type == 'select' %}
+              <div class="form-field">
+                <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
+                <select class="form-input" id="{{ field.input_id }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
+                  <option value="">Select {{ field.label|lower }}</option>
+                  {% for option in field.options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% else %}
+              <div class="form-field">
+                <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
+                <input
+                  class="form-input"
+                  id="{{ field.input_id }}"
+                  name="{{ field.input_name }}"
+                  type="{% if field.type == 'date' %}date{% else %}{% if field.validation_metadata.format == 'email' %}email{% else %}text{% endif %}{% endif %}"
+                  {% if field.required %}required{% endif %}
+                />
+              </div>
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {% for field in staff_custom_field_definitions %}
+          {% if field.field_type == 'checkbox' %}
+            <div
+              class="form-field form-field--checkbox"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="checkbox" for="staff-custom-{{ field.name }}">
+                <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
+                <span>{{ field.display_name or field.name }}</span>
+              </label>
+            </div>
+          {% elif field.field_type == 'select' %}
+            <div
+              class="form-field"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+              <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
+                <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
+                {% for option in field.options %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% else %}
+            <div
+              class="form-field"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+              <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
+            </div>
+          {% endif %}
+        {% endfor %}
+        <div class="form-actions staff-form__actions">
+          <button type="submit" class="button">Add staff</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endif %}
 
 <div class="modal" id="staff-offboarding-modal" role="dialog" aria-modal="true" hidden>
   <div class="modal__content" role="document">
