@@ -215,6 +215,9 @@ _ticket_dashboard_reference_cache: dict[str, Any] = {
     "user_lookup": {},
 }
 _ticket_dashboard_reference_lock = asyncio.Lock()
+_PKCE_VERIFIER_TTL_SECONDS = 600
+_pkce_verifier_store: dict[str, tuple[str, datetime]] = {}
+_pkce_verifier_store_lock = asyncio.Lock()
 
 # Load app version for cache busting static files
 _APP_VERSION = ""
@@ -271,6 +274,37 @@ def _build_xero_redirect_uri() -> str:
     # Fallback to relative path if PORTAL_URL not set
     # This maintains backward compatibility but may cause issues
     return "/xero/callback"
+
+
+async def _store_pkce_verifier(code_verifier: str) -> str:
+    """Store a PKCE code_verifier server-side and return an opaque handle."""
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=_PKCE_VERIFIER_TTL_SECONDS)
+    handle = secrets.token_urlsafe(32)
+    async with _pkce_verifier_store_lock:
+        # Opportunistically purge expired entries.
+        expired_handles = [
+            key for key, (_, expiry) in _pkce_verifier_store.items() if expiry <= now
+        ]
+        for key in expired_handles:
+            _pkce_verifier_store.pop(key, None)
+        _pkce_verifier_store[handle] = (code_verifier, expires_at)
+    return handle
+
+
+async def _pop_pkce_verifier(handle: str) -> str | None:
+    """Consume a stored PKCE verifier handle and return the verifier once."""
+
+    now = datetime.now(timezone.utc)
+    async with _pkce_verifier_store_lock:
+        value = _pkce_verifier_store.pop(handle, None)
+    if not value:
+        return None
+    verifier, expires_at = value
+    if expires_at <= now:
+        return None
+    return verifier
 
 
 def _serialise_for_json(value: Any) -> Any:
@@ -4896,17 +4930,19 @@ async def admin_csp_provision(request: Request):
     bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
 
     code_verifier: str | None = None
+    pkce_handle: str | None = None
     if existing_client_id:
         oauth_client_id = existing_client_id
     elif bootstrap_client_id:
         oauth_client_id = bootstrap_client_id
     else:
-        # No credentials configured – use PKCE with a public client.  The
-        # code_verifier is stored in the signed state so the callback can
-        # exchange the auth code without a client secret.
+        # No credentials configured – use PKCE with a public client.
+        # Persist the code_verifier server-side and send only an opaque
+        # one-time handle in state so the verifier is never exposed in URLs.
         # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
         # Azure CLI public client (which may be blocked in some tenants).
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
+        pkce_handle = await _store_pkce_verifier(code_verifier)
         oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
@@ -4914,8 +4950,8 @@ async def admin_csp_provision(request: Request):
         "user_id": current_user.get("id"),
         "flow": "csp_admin_provision",
     }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
+    if pkce_handle:
+        state_payload["pkce_handle"] = pkce_handle
 
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
@@ -5210,11 +5246,18 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
 
         # Determine the token exchange method.  When the flow was initiated
-        # using PKCE (state contains a code_verifier), the exchange is done
-        # with the public Azure CLI client – no client secret is required.
+        # using PKCE (state contains a verifier handle), the exchange is done
+        # with the configured PKCE public client – no client secret required.
         # Otherwise fall back to the traditional secret-based exchange using
         # existing admin credentials or the M365_BOOTSTRAP_* env vars.
-        code_verifier: str | None = state_data.get("code_verifier")
+        code_verifier: str | None = None
+        pkce_handle = state_data.get("pkce_handle")
+        if isinstance(pkce_handle, str) and pkce_handle:
+            code_verifier = await _pop_pkce_verifier(pkce_handle)
+            if not code_verifier:
+                return _csp_provision_error(
+                    "Provisioning session expired. Please restart the CSP provisioning flow."
+                )
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
