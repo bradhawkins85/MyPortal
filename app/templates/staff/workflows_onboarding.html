@@ -32,7 +32,191 @@
       </div>
     </header>
     <div class="card__body">
-      <p class="text-muted">Workflow controls for onboarding will appear here.</p>
+      <form id="onboarding-workflow-form" class="stack-sm">
+        <label class="form-label" for="workflow-key">Workflow key</label>
+        <input id="workflow-key" name="workflow_key" class="form-input" required />
+
+        <label class="form-label" for="max-retries">Default max retries</label>
+        <input id="max-retries" name="max_retries" type="number" min="0" max="20" class="form-input" />
+
+        <label class="form-checkbox">
+          <input id="workflow-enabled" name="enabled" type="checkbox" />
+          <span>Enable onboarding workflow</span>
+        </label>
+
+        <div class="stack-xs">
+          <label class="form-label" for="step-type-select">Add onboarding step</label>
+          <div class="form-row">
+            <select id="step-type-select" class="form-input"></select>
+            <button id="add-step-btn" type="button" class="btn btn-secondary">Add step</button>
+          </div>
+        </div>
+
+        <div id="steps-container" class="stack-sm"></div>
+
+        <button type="submit" class="btn btn-primary">Save onboarding workflow</button>
+      </form>
+      <p id="onboarding-workflow-message" class="text-muted" role="status" aria-live="polite"></p>
     </div>
   </section>
+
+  <script>
+    (() => {
+      const form = document.getElementById('onboarding-workflow-form');
+      const message = document.getElementById('onboarding-workflow-message');
+      const stepTypeSelect = document.getElementById('step-type-select');
+      const addStepBtn = document.getElementById('add-step-btn');
+      const stepsContainer = document.getElementById('steps-container');
+      const workflowKeyInput = document.getElementById('workflow-key');
+      const maxRetriesInput = document.getElementById('max-retries');
+      const enabledInput = document.getElementById('workflow-enabled');
+
+      let stepCatalog = [];
+      let steps = [];
+      let existingConfig = {};
+
+      const renderSteps = () => {
+        stepsContainer.innerHTML = '';
+        if (!steps.length) {
+          const empty = document.createElement('p');
+          empty.className = 'text-muted';
+          empty.textContent = 'No steps configured yet.';
+          stepsContainer.appendChild(empty);
+          return;
+        }
+        steps.forEach((step, index) => {
+          const card = document.createElement('section');
+          card.className = 'card card--panel';
+          card.innerHTML = `
+            <header class="card__header card__header--stacked">
+              <strong>${index + 1}. ${step.name}</strong>
+              <small class="text-muted">${step.type}</small>
+            </header>
+            <div class="card__body stack-xs">
+              <label class="form-label">Step name</label>
+              <input class="form-input" data-key="name" value="${step.name}" />
+              <label class="form-label">Step config JSON</label>
+              <textarea class="form-input" data-key="config" rows="4">${JSON.stringify(step.config || {}, null, 2)}</textarea>
+              <label class="form-label">Retry policy JSON</label>
+              <textarea class="form-input" data-key="retry_policy" rows="2">${JSON.stringify(step.retry_policy || {"max_retries": 0}, null, 2)}</textarea>
+              <label class="form-label">Failure policy JSON</label>
+              <textarea class="form-input" data-key="failure_policy" rows="2">${JSON.stringify(step.failure_policy || {"mode": "fail_fast"}, null, 2)}</textarea>
+              <div class="form-row">
+                <button type="button" class="btn btn-secondary" data-action="up">Move up</button>
+                <button type="button" class="btn btn-secondary" data-action="down">Move down</button>
+                <button type="button" class="btn btn-danger" data-action="delete">Remove</button>
+              </div>
+            </div>
+          `;
+
+          card.querySelectorAll('[data-key]').forEach((input) => {
+            input.addEventListener('change', () => {
+              const key = input.getAttribute('data-key');
+              if (key === 'name') {
+                steps[index].name = input.value.trim() || steps[index].name;
+                return;
+              }
+              try {
+                steps[index][key] = JSON.parse(input.value || '{}');
+              } catch (_err) {
+                message.textContent = `Invalid JSON in step ${index + 1} (${key}).`;
+              }
+            });
+          });
+
+          card.querySelector('[data-action="up"]').addEventListener('click', () => {
+            if (index === 0) return;
+            [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
+            renderSteps();
+          });
+          card.querySelector('[data-action="down"]').addEventListener('click', () => {
+            if (index >= steps.length - 1) return;
+            [steps[index + 1], steps[index]] = [steps[index], steps[index + 1]];
+            renderSteps();
+          });
+          card.querySelector('[data-action="delete"]').addEventListener('click', () => {
+            steps.splice(index, 1);
+            renderSteps();
+          });
+          stepsContainer.appendChild(card);
+        });
+      };
+
+      const addStep = () => {
+        const selectedType = stepTypeSelect.value;
+        if (!selectedType) return;
+        const selected = stepCatalog.find((item) => item.type === selectedType);
+        steps.push({
+          name: selected ? selected.name : selectedType,
+          type: selectedType,
+          config: {"type": selectedType},
+          retry_policy: {"max_retries": 0},
+          failure_policy: {"mode": "fail_fast"},
+        });
+        renderSteps();
+      };
+
+      const loadPolicy = async () => {
+        const response = await fetch('/staff/workflows/onboarding/policy', { headers: { Accept: 'application/json' } });
+        const payload = await response.json();
+        const policy = payload.policy || {};
+        const config = policy.config_json || {};
+        existingConfig = config;
+        workflowKeyInput.value = policy.workflow_key || 'staff_onboarding_m365';
+        maxRetriesInput.value = policy.max_retries || 0;
+        enabledInput.checked = Boolean(policy.enabled);
+        stepCatalog = Array.isArray(payload.step_catalog) ? payload.step_catalog : [];
+        stepTypeSelect.innerHTML = stepCatalog.map((item) => `<option value="${item.type}">${item.name}</option>`).join('');
+        const configuredSteps = Array.isArray(config.steps) ? config.steps : [];
+        steps = configuredSteps.map((step) => ({
+          name: step.name || step.type || 'onboarding-step',
+          type: step.type || step.key || 'create_user',
+          config: step.config || {"type": step.type || step.key || 'create_user'},
+          retry_policy: step.retry_policy || {"max_retries": 0},
+          failure_policy: step.failure_policy || {"mode": "fail_fast"},
+        }));
+        renderSteps();
+      };
+
+      addStepBtn.addEventListener('click', addStep);
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const onboardingSteps = steps.map((step) => ({
+          key: step.type,
+          name: step.name,
+          enabled: true,
+          config: {
+            ...(step.config || {}),
+            type: step.type,
+            retry_policy: step.retry_policy || {"max_retries": 0},
+            failure_policy: step.failure_policy || {"mode": "fail_fast"},
+          },
+        }));
+        const body = {
+          workflow_key: workflowKeyInput.value.trim() || 'staff_onboarding_m365',
+          enabled: enabledInput.checked,
+          max_retries: Number(maxRetriesInput.value || 0),
+          config: {
+            ...existingConfig,
+            version: Number(existingConfig.version || 1),
+            steps: onboardingSteps,
+          },
+        };
+        const response = await fetch('/staff/workflows/onboarding/policy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          message.textContent = 'Failed to save onboarding workflow policy.';
+          return;
+        }
+        message.textContent = 'Onboarding workflow saved.';
+      });
+
+      loadPolicy().catch(() => {
+        message.textContent = 'Failed to load onboarding workflow policy.';
+      });
+    })();
+  </script>
 {% endblock %}
