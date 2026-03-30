@@ -456,5 +456,47 @@
       });
     });
 
+    container.querySelectorAll('[data-staff-approve]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-approve');
+        if (!id) {
+          return;
+        }
+        const comment = prompt('Optional approval comment:', '') || '';
+        try {
+          await requestJson(`/api/staff/${id}/onboarding/approve`, {
+            method: 'POST',
+            body: JSON.stringify({ comment }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to approve onboarding request: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-staff-deny]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-deny');
+        if (!id) {
+          return;
+        }
+        const reason = prompt('Deny reason (required):', '');
+        if (!reason || !reason.trim()) {
+          alert('A deny reason is required.');
+          return;
+        }
+        try {
+          await requestJson(`/api/staff/${id}/onboarding/deny`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason.trim() }),
+          });
+          window.location.reload();
+        } catch (error) {
+          alert(`Failed to deny onboarding request: ${error.message}`);
+        }
+      });
+    });
+
   });
 })();
