@@ -13,7 +13,7 @@ import shutil
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -30,6 +30,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
+_GRAPH_ALLOWED_HOSTS = frozenset({"graph.microsoft.com"})
 
 # Exchange Online (Office 365 Exchange Online) service principal app ID and scope.
 # Used to acquire app-only tokens for Exchange Online PowerShell REST API calls
@@ -766,6 +767,7 @@ async def _graph_get(
     *,
     extra_headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    _validate_graph_url(url)
     req_headers: dict[str, str] = {"Authorization": f"Bearer {access_token}"}
     if extra_headers:
         req_headers.update(extra_headers)
@@ -802,11 +804,23 @@ async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:
     return items
 
 
+def _validate_graph_url(url: str) -> None:
+    """Reject non-Microsoft Graph targets to prevent SSRF via forwarded URLs."""
+    parsed = urlsplit(url)
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+
+    if scheme != "https" or host not in _GRAPH_ALLOWED_HOSTS:
+        log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
+        raise M365Error("Invalid Microsoft Graph URL", http_status=400)
+
+
 async def _graph_post(
     access_token: str,
     url: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(url, headers=headers, json=payload)
@@ -828,6 +842,7 @@ async def _graph_post(
 
 async def _graph_delete(access_token: str, url: str) -> None:
     """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
+    _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.delete(url, headers=headers)
