@@ -230,6 +230,9 @@ _ticket_dashboard_reference_cache: dict[str, Any] = {
     "user_lookup": {},
 }
 _ticket_dashboard_reference_lock = asyncio.Lock()
+_PKCE_VERIFIER_TTL_SECONDS = 600
+_pkce_verifier_store: dict[str, tuple[str, datetime]] = {}
+_pkce_verifier_store_lock = asyncio.Lock()
 
 # Load app version for cache busting static files
 _APP_VERSION = ""
@@ -288,35 +291,35 @@ def _build_xero_redirect_uri() -> str:
     return "/xero/callback"
 
 
-def _build_m365_redirect_uri(request: Request) -> str:
-    """Build M365 OAuth redirect URI using PORTAL_URL setting.
+async def _store_pkce_verifier(code_verifier: str) -> str:
+    """Store a PKCE code_verifier server-side and return an opaque handle."""
 
-    This ensures the redirect_uri uses HTTPS when the app is behind a
-    reverse proxy, preventing Microsoft from rejecting the redirect_uri.
-    Falls back to the request-derived URL when PORTAL_URL is not set,
-    forcing the scheme to HTTPS so Microsoft accepts the reply address.
-    """
-    if settings.portal_url:
-        base = str(settings.portal_url).rstrip("/")
-        return f"{base}/m365/callback"
-    uri = str(request.url_for("m365_callback"))
-    # Microsoft requires HTTPS redirect URIs; force the scheme when the
-    # request arrives over HTTP (e.g. via a plain reverse proxy).
-    if uri.startswith("http://"):
-        uri = "https://" + uri[len("http://"):]
-    return uri
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=_PKCE_VERIFIER_TTL_SECONDS)
+    handle = secrets.token_urlsafe(32)
+    async with _pkce_verifier_store_lock:
+        # Opportunistically purge expired entries.
+        expired_handles = [
+            key for key, (_, expiry) in _pkce_verifier_store.items() if expiry <= now
+        ]
+        for key in expired_handles:
+            _pkce_verifier_store.pop(key, None)
+        _pkce_verifier_store[handle] = (code_verifier, expires_at)
+    return handle
 
 
-def _random_daily_cron() -> str:
-    """Return a randomised daily cron expression (``M H * * *``).
+async def _pop_pkce_verifier(handle: str) -> str | None:
+    """Consume a stored PKCE verifier handle and return the verifier once."""
 
-    Mirrors the ``randomDailyCron()`` helper in ``automation.js`` so that
-    automatically-provisioned tasks are spread across the day rather than
-    all firing at the same time.
-    """
-    minute = secrets.randbelow(60)
-    hour = secrets.randbelow(24)
-    return f"{minute} {hour} * * *"
+    now = datetime.now(timezone.utc)
+    async with _pkce_verifier_store_lock:
+        value = _pkce_verifier_store.pop(handle, None)
+    if not value:
+        return None
+    verifier, expires_at = value
+    if expires_at <= now:
+        return None
+    return verifier
 
 
 def _serialise_for_json(value: Any) -> Any:
@@ -5528,6 +5531,50 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
     )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/admin/csp/provision")
+async def admin_csp_provision(request: Request):
+    """Provision the CSP/Lighthouse admin app registration automatically.
+
+    Redirects the super-admin to Microsoft's OAuth consent page.  The admin
+    must sign in with an account that has ``Application.ReadWrite.All`` and
+    ``AppRoleAssignment.ReadWrite.All`` permissions in their partner tenant.
+    After consent, the callback creates a dedicated app registration in the
+    partner tenant and stores the resulting credentials in the ``m365-admin``
+    integration module so that subsequent CSP sign-in can use them.
+
+    When no bootstrap credentials are configured the flow uses PKCE with the
+    well-known Azure CLI public client so that the admin can log in without
+    needing to pre-create an Azure app registration.
+    """
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    redirect_uri = str(request.url_for("m365_callback"))
+
+    # Prefer existing admin credentials, then an explicitly configured
+    # bootstrap client, and finally fall back to PKCE with the well-known
+    # Azure CLI public client so no manual credential setup is required.
+    existing_client_id, _ = await _get_m365_admin_credentials()
+    bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
+
+    code_verifier: str | None = None
+    pkce_handle: str | None = None
+    if existing_client_id:
+        oauth_client_id = existing_client_id
+    elif bootstrap_client_id:
+        oauth_client_id = bootstrap_client_id
+    else:
+        # No credentials configured – use PKCE with a public client.
+        # Persist the code_verifier server-side and send only an opaque
+        # one-time handle in state so the verifier is never exposed in URLs.
+        # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
+        # Azure CLI public client (which may be blocked in some tenants).
+        code_verifier, code_challenge = m365_service.generate_pkce_pair()
+        pkce_handle = await _store_pkce_verifier(code_verifier)
+        oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
         "company_id": company_id,
@@ -5536,6 +5583,8 @@ async def admin_company_m365_discover(company_id: int, request: Request):
         "return_to": "company_edit",
         "code_verifier": code_verifier,
     }
+    if pkce_handle:
+        state_payload["pkce_handle"] = pkce_handle
 
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
@@ -5728,7 +5777,19 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         _discover_cid, _discover_csec = await _get_m365_admin_credentials(company_id)
 
-        code_verifier: str | None = state_data.get("code_verifier")
+        # Determine the token exchange method.  When the flow was initiated
+        # using PKCE (state contains a verifier handle), the exchange is done
+        # with the configured PKCE public client – no client secret required.
+        # Otherwise fall back to the traditional secret-based exchange using
+        # existing admin credentials or the M365_BOOTSTRAP_* env vars.
+        code_verifier: str | None = None
+        pkce_handle = state_data.get("pkce_handle")
+        if isinstance(pkce_handle, str) and pkce_handle:
+            code_verifier = await _pop_pkce_verifier(pkce_handle)
+            if not code_verifier:
+                return _csp_provision_error(
+                    "Provisioning session expired. Please restart the CSP provisioning flow."
+                )
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
