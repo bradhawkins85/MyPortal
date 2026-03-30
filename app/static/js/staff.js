@@ -176,6 +176,44 @@
     if (!rawText) {
       return null;
     }
+
+    if (rawText.startsWith('{')) {
+      try {
+        const parsedJson = JSON.parse(rawText);
+        if (parsedJson && typeof parsedJson === 'object' && !Array.isArray(parsedJson)) {
+          const matchToOptions = new Map();
+          let fallbackOptions = null;
+          Object.entries(parsedJson).forEach(([rawMatch, rawOptions]) => {
+            const normalizedMatch = normalizeValue(rawMatch);
+            const parsedOptions = Array.isArray(rawOptions)
+              ? rawOptions.map((option) => String(option || '').trim()).filter(Boolean)
+              : String(rawOptions || '')
+                .split(/[,|]/)
+                .map((option) => option.trim())
+                .filter(Boolean);
+            if (!parsedOptions.length) {
+              return;
+            }
+            if (normalizedMatch === '*' || normalizedMatch === 'fallback' || normalizedMatch === 'default') {
+              if (!fallbackOptions) {
+                fallbackOptions = parsedOptions;
+              }
+              return;
+            }
+            if (!normalizedMatch || matchToOptions.has(normalizedMatch)) {
+              return;
+            }
+            matchToOptions.set(normalizedMatch, parsedOptions);
+          });
+          if (matchToOptions.size || fallbackOptions) {
+            return { matchToOptions, fallbackOptions };
+          }
+        }
+      } catch (error) {
+        // Fall back to legacy parser format.
+      }
+    }
+
     const separatorNormalized = rawText.replace(/\r?\n/g, ';');
     const chunks = separatorNormalized.split(';').map((entry) => entry.trim()).filter(Boolean);
     if (!chunks.length) {

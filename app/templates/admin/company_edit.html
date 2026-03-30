@@ -334,7 +334,7 @@
             </div>
             <div class="form-field">
               <label class="form-label" for="new-custom-condition-value">Condition value</label>
-              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="3" placeholder="equals/not_equals example: sales&#10;select_map example: sales=&gt;a|b|c;support=&gt;d|e|f;*=&gt;other"></textarea>
+              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="6" placeholder='equals/not_equals example: sales&#10;select_map JSON example: {&#10;  &quot;sales&quot;: &quot;a,b,c&quot;,&#10;  &quot;support&quot;: &quot;d,e,f&quot;,&#10;  &quot;fallback&quot;: &quot;other&quot;&#10;}'></textarea>
             </div>
             <div class="form-actions admin-grid__full">
               <button type="submit" class="button">Add custom field</button>
@@ -385,7 +385,7 @@
                           </select>
                         </div>
                         <div class="form-field">
-                          <textarea class="form-input" name="condition_value" rows="3" placeholder="Condition value">{{ field.condition_value or '' }}</textarea>
+                          <textarea class="form-input" name="condition_value" rows="6" placeholder='Use JSON for select_map, e.g. {&quot;sales&quot;:&quot;a,b,c&quot;,&quot;fallback&quot;:&quot;other&quot;}'>{{ field.condition_value or '' }}</textarea>
                         </div>
                       </td>
                       <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
