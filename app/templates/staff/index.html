@@ -248,6 +248,12 @@
                 {% if workflow.get('current_step') %}
                   <div class="text-muted text-small">Step: {{ workflow.get('current_step')|replace('_', ' ')|title }}</div>
                 {% endif %}
+                {% if member.account_action == 'Offboard Requested' %}
+                  <span class="status-pill status-pill--pending">Offboarding Pending</span>
+                  {% if member.date_offboarded %}
+                    <div class="text-muted text-small">Requested for {{ member.date_offboarded }}</div>
+                  {% endif %}
+                {% endif %}
                 {% if member.onboarding_pending_details %}
                   <div class="text-small">{{ member.onboarding_pending_details }}</div>
                 {% endif %}
@@ -308,6 +314,9 @@
                   {% if is_admin or is_super_admin %}
                     <button type="button" class="button button--ghost" data-staff-invite="{{ member.id }}">Invite</button>
                   {% endif %}
+                  {% if (is_admin or is_super_admin) and member.enabled and not member.is_ex_staff and member.account_action != 'Offboard Requested' %}
+                    <button type="button" class="button button--ghost" data-staff-offboarding-request="{{ member.id }}">Request Offboarding</button>
+                  {% endif %}
                   {% if can_approve_onboarding and not member.onboarding_complete and member.onboarding_status != 'onboarded' and (member.approval_status == 'pending' or member.onboarding_status == 'awaiting_approval') %}
                     <button type="button" class="button button--ghost" data-staff-approve="{{ member.id }}">Approve</button>
                     <button type="button" class="button button--danger" data-staff-deny="{{ member.id }}">Deny</button>
@@ -348,6 +357,35 @@
       <p class="table-pagination__status" data-page-info aria-live="polite"></p>
     </div>
   </section>
+</div>
+
+<div class="modal" id="staff-offboarding-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close offboarding request modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Request offboarding</h2>
+    <form id="staff-offboarding-form" class="form-grid">
+      <input type="hidden" id="offboarding-staff-id" />
+      <div class="form-field">
+        <label class="form-label" for="offboarding-reason">Reason</label>
+        <input class="form-input" id="offboarding-reason" maxlength="255" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="offboarding-requested-at">Requested offboarding date &amp; time</label>
+        <input class="form-input" id="offboarding-requested-at" type="datetime-local" required />
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-notes">Notes (optional)</label>
+        <textarea class="form-input" id="offboarding-notes" rows="4" maxlength="2000"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Submit request</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <div class="modal" id="staff-edit-modal" role="dialog" aria-modal="true" hidden>
