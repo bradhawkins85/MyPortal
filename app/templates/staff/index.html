@@ -396,7 +396,7 @@
 {% endif %}
 
 <div class="modal" id="staff-offboarding-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
+  <div class="modal__content modal__content--staff" role="document">
     <button type="button" class="modal__close" data-modal-close>
       <span class="visually-hidden">Close offboarding request modal</span>
       &times;
@@ -404,6 +404,7 @@
     <h2 class="modal__title">Request offboarding</h2>
     <form id="staff-offboarding-form" class="form-grid">
       <input type="hidden" id="offboarding-staff-id" />
+      <p class="form-help form-field--full">Schedule when access should be removed. Use "Immediate" to use your current local time.</p>
       <div class="form-field">
         <label class="form-label" for="offboarding-date">Offboarding date</label>
         <input class="form-input" id="offboarding-date" type="date" required />
@@ -423,6 +424,7 @@
         <label class="form-label" for="offboarding-reason-notes">Reason / notes</label>
         <textarea class="form-input" id="offboarding-reason-notes" rows="4" maxlength="2000" required></textarea>
       </div>
+      <p class="form-help form-help--error form-field--full" id="offboarding-form-error" hidden role="alert" aria-live="polite"></p>
       <div class="form-actions">
         <button type="submit" class="button">Submit request</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
@@ -432,60 +434,100 @@
 </div>
 
 <div class="modal" id="staff-edit-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
+  <div class="modal__content modal__content--staff" role="document">
     <button type="button" class="modal__close" data-modal-close>
       <span class="visually-hidden">Close edit staff modal</span>
       &times;
     </button>
-    <h2 class="modal__title">Edit staff member</h2>
-    <form id="staff-edit-form" class="form-grid">
+    <div class="staff-modal__header">
+      <h2 class="modal__title">Edit staff member</h2>
+      <p class="staff-modal__staff-name" id="edit-modal-staff-name"></p>
+    </div>
+    <form id="staff-edit-form" class="form-grid staff-modal-grid">
       <input type="hidden" id="edit-staff-id" />
-      <div class="form-field">
-        <label class="form-label" for="edit-first-name">First name</label>
-        <input class="form-input" id="edit-first-name" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-last-name">Last name</label>
-        <input class="form-input" id="edit-last-name" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-email">Email</label>
-        <input class="form-input" id="edit-email" type="email" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-mobile">Mobile phone</label>
-        <input class="form-input" id="edit-mobile" type="tel" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-date-onboarded">Onboard date</label>
-        <input class="form-input" id="edit-date-onboarded" type="date" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
-        <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-account-action">Account action</label>
-        <select class="form-input" id="edit-account-action" {% if not is_super_admin %}disabled{% endif %}>
-          <option value="Onboard Requested">Onboard Requested</option>
-          <option value="Onboard Approved">Onboard Approved</option>
-          <option value="Onboarding In Progress">Onboarding In Progress</option>
-          <option value="Onboarded">Onboarded</option>
-          <option value="Offboard Requested">Offboard Requested</option>
-          <option value="Offboard Approved">Offboard Approved</option>
-          <option value="Offboard Scheduled">Offboard Scheduled</option>
-          <option value="Offboarded">Offboarded</option>
-        </select>
-      </div>
-      <div class="form-field form-field--checkbox">
-        <label class="checkbox">
-          <input type="checkbox" id="edit-enabled" {% if not is_super_admin %}disabled{% endif %} />
-          <span>Enabled</span>
-        </label>
-      </div>
-      <fieldset class="fieldset">
+      <fieldset class="fieldset staff-modal__section">
+        <legend>Identity</legend>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-first-name">First name</label>
+            <input class="form-input" id="edit-first-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-last-name">Last name</label>
+            <input class="form-input" id="edit-last-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-email">Email</label>
+            <input class="form-input" id="edit-email" type="email" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-mobile">Mobile phone</label>
+            <input class="form-input" id="edit-mobile" type="tel" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field form-field--checkbox form-field--full">
+            <label class="checkbox">
+              <input type="checkbox" id="edit-enabled" {% if not is_super_admin %}disabled{% endif %} />
+              <span>Enabled</span>
+            </label>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section">
+        <legend>Employment / Organisation</legend>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-department">Department</label>
+            <input class="form-input" id="edit-department" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-job-title">Job title</label>
+            <input class="form-input" id="edit-job-title" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company">Company</label>
+            <input class="form-input" id="edit-company" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-manager-name">Manager</label>
+            <input class="form-input" id="edit-manager-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section">
+        <legend>Workflow &amp; lifecycle</legend>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-account-action">Account action</label>
+            <select class="form-input" id="edit-account-action" {% if not is_super_admin %}disabled{% endif %}>
+              <option value="Onboard Requested">Onboard Requested</option>
+              <option value="Onboard Approved">Onboard Approved</option>
+              <option value="Onboarding In Progress">Onboarding In Progress</option>
+              <option value="Onboarded">Onboarded</option>
+              <option value="Offboard Requested">Offboard Requested</option>
+              <option value="Offboard Approved">Offboard Approved</option>
+              <option value="Offboard Scheduled">Offboard Scheduled</option>
+              <option value="Offboarded">Offboarded</option>
+            </select>
+            <p class="form-help">Changes here affect automation state and downstream provisioning/offboarding tasks.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-date-onboarded">Onboard date</label>
+            <input class="form-input" id="edit-date-onboarded" type="date" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
+            <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_admin %}readonly{% endif %} />
+            <p class="form-help">Set when offboarding should be executed; leave blank until a confirmed exit date.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-m365-last-sign-in">O365 Last Sign In</label>
+            <input class="form-input" id="edit-m365-last-sign-in" readonly />
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section">
         <legend>Address</legend>
-        <div class="form-grid">
+        <div class="form-grid staff-modal-grid">
           <div class="form-field">
             <label class="form-label" for="edit-street">Street</label>
             <input class="form-input" id="edit-street" {% if not is_super_admin %}readonly{% endif %} />
@@ -508,38 +550,25 @@
           </div>
         </div>
       </fieldset>
-      <fieldset class="fieldset">
-        <legend>Organisation</legend>
-        <div class="form-grid">
-          <div class="form-field">
-            <label class="form-label" for="edit-department">Department</label>
-            <input class="form-input" id="edit-department" {% if not is_super_admin %}readonly{% endif %} />
+      <fieldset class="fieldset staff-modal__section" id="edit-custom-fields-section">
+        <legend>Custom fields</legend>
+        <div class="form-grid staff-modal-grid" id="edit-custom-fields-grid"></div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section" id="edit-actions-section">
+        <legend>Secondary actions</legend>
+        <p class="form-help form-field--full">Use these controls for invite, approvals, or workflow interventions. Add context notes for audit history.</p>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field form-field--full">
+            <label class="form-label" for="edit-action-note">Action note / reason</label>
+            <textarea class="form-input" id="edit-action-note" rows="2" maxlength="1000" placeholder="Optional for invite/retry; required for deny."></textarea>
           </div>
           <div class="form-field">
-            <label class="form-label" for="edit-job-title">Job title</label>
-            <input class="form-input" id="edit-job-title" {% if not is_super_admin %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-company">Company</label>
-            <input class="form-input" id="edit-company" {% if not is_super_admin %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-manager-name">Manager</label>
-            <input class="form-input" id="edit-manager-name" {% if not is_super_admin %}readonly{% endif %} />
+            <label class="form-label" for="edit-action-step">Workflow step (force-complete)</label>
+            <input class="form-input" id="edit-action-step" placeholder="Current step name" />
           </div>
         </div>
-      </fieldset>
-      <div class="form-field">
-        <label class="form-label" for="edit-m365-last-sign-in">O365 Last Sign In</label>
-        <input class="form-input" id="edit-m365-last-sign-in" readonly />
-      </div>
-      <fieldset class="fieldset" id="edit-custom-fields-section">
-        <legend>Custom fields</legend>
-        <div class="form-grid" id="edit-custom-fields-grid"></div>
-      </fieldset>
-      <fieldset class="fieldset" id="edit-actions-section">
-        <legend>Actions</legend>
-        <div class="form-actions" style="justify-content: flex-start; flex-wrap: wrap;">
+        <p class="form-help form-help--error form-field--full" id="edit-action-error" hidden role="alert" aria-live="polite"></p>
+        <div class="form-actions form-actions--inline staff-actions">
           <button type="button" class="button button--ghost" id="edit-action-invite" data-edit-action="invite">Invite</button>
           <button type="button" class="button button--ghost" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request Offboarding</button>
           <button type="button" class="button button--ghost" id="edit-action-approve" data-edit-action="approve">Approve</button>
@@ -548,10 +577,21 @@
           <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Workflow force-complete</button>
+        </div>
+        <div class="staff-danger-panel">
+          <h3 class="staff-danger-panel__title">Danger zone</h3>
+          <p class="form-help">Delete permanently removes the staff record and cannot be undone.</p>
+          <label class="checkbox" for="edit-delete-confirm">
+            <input type="checkbox" id="edit-delete-confirm" />
+            <span>I understand this action is permanent.</span>
+          </label>
+          <div class="form-actions form-actions--inline">
           <button type="button" class="button button--danger" id="edit-action-delete" data-edit-action="delete">Delete</button>
+          </div>
         </div>
       </fieldset>
-      <div class="form-actions">
+      <p class="form-help form-help--error form-field--full" id="edit-form-error" hidden role="alert" aria-live="polite"></p>
+      <div class="form-actions staff-modal__footer">
         <button type="submit" class="button">Save changes</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
       </div>
