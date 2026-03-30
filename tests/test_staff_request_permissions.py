@@ -187,3 +187,71 @@ async def test_create_staff_request_blocks_group_mapped_custom_fields_for_non_ad
     )
 
     assert set_fields_mock.await_args.kwargs["values"] == {"location": "NYC"}
+
+
+@pytest.mark.anyio
+async def test_create_staff_request_allows_group_mapped_custom_fields_for_department_manager(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffRequestCreate
+
+    monkeypatch.setattr(staff, "_ensure_company_exists", AsyncMock())
+    monkeypatch.setattr(staff, "_require_staff_request_access", AsyncMock())
+    monkeypatch.setattr(
+        staff.membership_repo,
+        "get_membership_by_company_user",
+        AsyncMock(
+            return_value={
+                "status": "active",
+                "combined_permissions": [staff.STAFF_REQUEST_PERMISSION],
+                "staff_permission": 2,
+            }
+        ),
+    )
+    set_fields_mock = AsyncMock()
+    monkeypatch.setattr(staff.staff_custom_fields_repo, "set_staff_field_values_by_name", set_fields_mock)
+    monkeypatch.setattr(staff.staff_repo, "get_staff_by_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        staff.staff_onboarding_workflow_service,
+        "get_staff_workflow_status",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        staff.staff_onboarding_workflow_service,
+        "notify_staff_approval_requested",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(staff.audit_service, "log_action", AsyncMock())
+    monkeypatch.setattr(
+        staff.staff_repo,
+        "create_staff",
+        AsyncMock(
+            return_value={
+                "id": 100,
+                "company_id": 4,
+                "first_name": "Casey",
+                "last_name": "Jones",
+                "email": "casey@example.com",
+                "enabled": True,
+                "is_ex_staff": False,
+                "onboarding_status": "requested",
+                "onboarding_complete": False,
+                "approval_status": "pending",
+            }
+        ),
+    )
+
+    payload = StaffRequestCreate(
+        firstName="Casey",
+        lastName="Jones",
+        email="casey@example.com",
+        customFields={"entra_admin": True, "location": "NYC"},
+    )
+
+    await staff.create_staff_request(
+        company_id=4,
+        payload=payload,
+        _=None,
+        current_user={"id": 7, "is_super_admin": False},
+    )
+
+    assert set_fields_mock.await_args.kwargs["values"] == {"entra_admin": True, "location": "NYC"}
