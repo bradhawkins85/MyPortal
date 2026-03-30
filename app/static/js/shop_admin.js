@@ -581,19 +581,32 @@
 
     function sanitizeDescriptionHtml(value) {
       const rawHtml = String(value || '');
-      const withoutBlockedTags = rawHtml.replace(
-        /<\s*\/?\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi,
-        ''
-      );
 
-      return withoutBlockedTags
-        .replace(/\son[a-z]+\s*=\s*(["'])[\s\S]*?\1/gi, '')
-        .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
-        .replace(
-          /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:)[\s\S]*?\2/gi,
+      let sanitized = rawHtml;
+      let previous;
+
+      do {
+        previous = sanitized;
+
+        const withoutBlockedTags = previous.replace(
+          /<\s*\/?\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi,
           ''
-        )
-        .replace(/\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi, '');
+        );
+
+        sanitized = withoutBlockedTags
+          .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
+          .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+          .replace(
+            /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
+            ''
+          )
+          .replace(
+            /\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi,
+            ''
+          );
+      } while (sanitized !== previous);
+
+      return sanitized;
     }
 
     function getOrCreateDescriptionEditor() {
