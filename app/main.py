@@ -9087,6 +9087,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     payload = await request.json()
     reason = str(payload.get("reason") or "").strip()
     requested_at = _parse_input_datetime(payload.get("requestedAt", payload.get("requested_at")))
+    requested_timezone = str(payload.get("requestedTimezone") or payload.get("requested_timezone") or "").strip() or None
     notes = str(payload.get("notes") or "").strip() or None
 
     if not reason:
@@ -9145,6 +9146,21 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             "reason": reason,
             "notes": notes,
         },
+    )
+
+    policy = await staff_workflow_repo.get_company_workflow_policy(int(updated["company_id"]))
+    scheduled_for_utc, normalized_timezone = staff_onboarding_workflow_service._compute_scheduled_execution(
+        staff=updated,
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+        requested_timezone=requested_timezone,
+    )
+    await staff_workflow_repo.create_or_reset_execution(
+        company_id=int(updated["company_id"]),
+        staff_id=staff_id,
+        workflow_key=str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_WORKFLOW_KEY),
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+        scheduled_for_utc=scheduled_for_utc,
+        requested_timezone=normalized_timezone,
     )
 
     return JSONResponse({"success": True, "staff": updated})
