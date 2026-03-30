@@ -257,3 +257,49 @@ def test_compute_scheduled_execution_offboarding_preserves_requested_datetime():
     assert requested_timezone == "America/New_York"
     assert scheduled_for_utc is not None
     assert scheduled_for_utc.isoformat() == "2026-04-10T19:45:00"
+
+
+@pytest.mark.anyio
+async def test_enqueue_workflow_creates_approved_execution(monkeypatch):
+    staff_record = {"id": 333, "date_onboarded": None}
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_company_workflow_policy",
+        AsyncMock(return_value={"workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY}),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "create_or_reset_execution",
+        AsyncMock(return_value={"id": 77}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+
+    await workflows.enqueue_staff_onboarding_workflow(
+        company_id=9,
+        staff_id=333,
+        initiated_by_user_id=10,
+        direction=workflows.DIRECTION_ONBOARDING,
+    )
+
+    workflows.workflow_repo.create_or_reset_execution.assert_awaited_once()
+    workflows.workflow_repo.update_execution_state.assert_awaited_once()
+    assert workflows.workflow_repo.update_execution_state.await_args.kwargs["state"] == workflows.STATE_APPROVED
+
+
+@pytest.mark.anyio
+async def test_process_due_approved_executions_runs_claimed_rows(monkeypatch):
+    claim_mock = AsyncMock(
+        side_effect=[
+            {"id": 1, "company_id": 7, "staff_id": 101, "direction": workflows.DIRECTION_ONBOARDING},
+            None,
+        ]
+    )
+    run_mock = AsyncMock(return_value={"state": workflows.STATE_COMPLETED})
+    monkeypatch.setattr(workflows.workflow_repo, "claim_next_due_approved_execution", claim_mock)
+    monkeypatch.setattr(workflows, "run_staff_onboarding_workflow", run_mock)
+
+    result = await workflows.process_due_approved_executions(limit=5)
+
+    assert result == {"processed": 1, "skipped": 0}
+    run_mock.assert_awaited_once()
