@@ -8690,6 +8690,31 @@ async def staff_page(
         for member in staff_members:
             execution = workflow_map.get(int(member["id"])) if member.get("id") is not None else None
             member["workflow_status"] = execution
+            member["workflow_next_run_at"] = (execution or {}).get("scheduled_for_utc")
+            member["workflow_requested_timezone"] = (execution or {}).get("requested_timezone")
+            member["workflow_is_overdue"] = False
+            raw_next_run = (execution or {}).get("scheduled_for_utc")
+            next_run_at: datetime | None = None
+            if isinstance(raw_next_run, datetime):
+                next_run_at = (
+                    raw_next_run.astimezone(timezone.utc).replace(tzinfo=None)
+                    if raw_next_run.tzinfo is not None
+                    else raw_next_run
+                )
+            elif isinstance(raw_next_run, str) and raw_next_run.strip():
+                try:
+                    parsed_next_run = datetime.fromisoformat(raw_next_run.strip().replace("Z", "+00:00"))
+                except ValueError:
+                    parsed_next_run = None
+                if parsed_next_run is not None:
+                    next_run_at = (
+                        parsed_next_run.astimezone(timezone.utc).replace(tzinfo=None)
+                        if parsed_next_run.tzinfo is not None
+                        else parsed_next_run
+                    )
+            workflow_state = str((execution or {}).get("state") or member.get("onboarding_status") or "requested").strip().lower()
+            if next_run_at is not None and workflow_state in {"approved", "offboarding_approved"}:
+                member["workflow_is_overdue"] = next_run_at <= datetime.now(timezone.utc).replace(tzinfo=None)
             staff_id = member.get("id")
             audit_logs: list[dict[str, Any]] = []
             if staff_id is not None:
@@ -8758,7 +8783,6 @@ async def staff_page(
                     )
             timeline = sorted(timeline, key=lambda entry: entry.get("timestamp") or datetime.min)
             member["onboarding_timeline"] = timeline
-            workflow_state = str((execution or {}).get("state") or member.get("onboarding_status") or "requested").strip().lower()
             if workflow_state == "waiting_external":
                 current_step = str((execution or {}).get("current_step") or "await_external_confirmation")
                 member["onboarding_pending_details"] = (

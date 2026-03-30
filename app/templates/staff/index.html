@@ -255,6 +255,17 @@
                 {% if workflow.get('current_step') %}
                   <div class="text-muted text-small">Step: {{ workflow.get('current_step')|replace('_', ' ')|title }}</div>
                 {% endif %}
+                {% if member.workflow_next_run_at %}
+                  <div class="text-muted text-small">
+                    Next run: {{ member.workflow_next_run_at }}
+                    {% if member.workflow_requested_timezone %}
+                      ({{ member.workflow_requested_timezone }})
+                    {% endif %}
+                  </div>
+                  {% if member.workflow_is_overdue %}
+                    <div class="text-danger text-small">Overdue</div>
+                  {% endif %}
+                {% endif %}
                 {% if member.account_action == 'Offboard Requested' %}
                   <span class="status-pill status-pill--pending">Offboarding Pending</span>
                   {% if member.date_offboarded %}

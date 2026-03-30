@@ -130,6 +130,9 @@ async def list_staff(
     updated_after: datetime | None = Query(default=None, alias="updatedAfter"),
     offboarding_requested_after: datetime | None = Query(default=None, alias="offboardingRequestedAfter"),
     offboarding_updated_after: datetime | None = Query(default=None, alias="offboardingUpdatedAfter"),
+    scheduled_from: datetime | None = Query(default=None),
+    scheduled_to: datetime | None = Query(default=None),
+    due_only: bool = Query(default=False),
     cursor: str | None = Query(default=None, alias="cursor"),
     page_size: int | None = Query(default=200, alias="pageSize", ge=1, le=500),
     _: None = Depends(require_database),
@@ -167,6 +170,9 @@ async def list_staff(
             updated_after=updated_after,
             offboarding_requested_after=offboarding_requested_after,
             offboarding_updated_after=offboarding_updated_after,
+            scheduled_from=scheduled_from,
+            scheduled_to=scheduled_to,
+            due_only=due_only,
             cursor=cursor,
             page_size=safe_page_size + 1,
         )
@@ -190,6 +196,9 @@ async def list_staff(
         records = await staff_repo.list_all_staff(
             account_action=account_action,
             email=email,
+            scheduled_from=scheduled_from,
+            scheduled_to=scheduled_to,
+            due_only=due_only,
         )
     workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
         [int(record["id"]) for record in records if record.get("id") is not None]
