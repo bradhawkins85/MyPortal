@@ -568,8 +568,8 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert record_call[1]["response_status"] == 200
         assert record_call[1]["response_body"] == '{"Invoices": [{"InvoiceID": "invoice-123", "InvoiceNumber": "XERO-1001", "Status": "DRAFT"}]}'
         mock_patch_invoice.assert_awaited_once()
-        mock_rename_billed.assert_awaited_once_with("INV-LOCAL-001", "XERO-1001")
-        mock_rename_tickets.assert_awaited_once_with("INV-LOCAL-001", "XERO-1001")
+        mock_rename_billed.assert_awaited_once_with(123, "INV-LOCAL-001", "XERO-1001")
+        mock_rename_tickets.assert_awaited_once_with(123, "INV-LOCAL-001", "XERO-1001")
 
 
 @pytest.mark.anyio("asyncio")

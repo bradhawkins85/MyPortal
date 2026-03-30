@@ -33,6 +33,20 @@ async def get_company_by_id(company_id: int) -> Optional[dict[str, Any]]:
     return company
 
 
+async def get_company_csp_tenant_id(company_id: int) -> str | None:
+    row = await db.fetch_one(
+        "SELECT csp_tenant_id FROM companies WHERE id = %s",
+        (company_id,),
+    )
+    if not row:
+        return None
+    value = row.get("csp_tenant_id")
+    if not value:
+        return None
+    tenant_id = str(value).strip()
+    return tenant_id or None
+
+
 async def get_company_by_syncro_id(syncro_company_id: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM companies WHERE syncro_company_id = %s",
