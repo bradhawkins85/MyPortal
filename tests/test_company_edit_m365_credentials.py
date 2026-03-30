@@ -165,3 +165,58 @@ async def test_m365_credentials_none_when_not_configured(monkeypatch):
     assert extra.get("m365_has_credentials") is False
     assert extra.get("m365_credential") is None
 
+
+@pytest.mark.anyio("asyncio")
+async def test_m365_credentials_update_without_new_secret_preserves_encrypted_tokens(monkeypatch):
+    """When no new secret is provided, encrypted values are preserved at rest."""
+    company_id = 1
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=({"id": 9, "is_super_admin": True}, None)),
+    )
+    monkeypatch.setattr(
+        main.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": company_id, "name": "Test Company"}),
+    )
+
+    class _FormRequest:
+        async def form(self):
+            return {
+                "tenantId": "updated-tenant",
+                "clientId": "updated-client",
+                "clientSecret": "",
+            }
+
+    request = _FormRequest()
+
+    monkeypatch.setattr(
+        main.m365_repo,
+        "get_credentials",
+        AsyncMock(
+            return_value={
+                "client_secret": "enc-secret",
+                "refresh_token": "enc-refresh",
+                "access_token": "enc-access",
+                "token_expires_at": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(main.m365_service, "upsert_credentials", AsyncMock())
+    upsert_mock = AsyncMock()
+    monkeypatch.setattr(main.m365_repo, "upsert_credentials", upsert_mock)
+
+    response = await main.admin_save_company_m365_credentials(company_id, request)
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    upsert_mock.assert_awaited_once_with(
+        company_id=company_id,
+        tenant_id="updated-tenant",
+        client_id="updated-client",
+        client_secret="enc-secret",
+        refresh_token="enc-refresh",
+        access_token="enc-access",
+        token_expires_at=None,
+    )
+    main.m365_service.upsert_credentials.assert_not_awaited()

@@ -8968,7 +8968,7 @@ async def admin_save_company_m365_credentials(company_id: int, request: Request)
             company_id=company_id,
             error="Tenant ID and Client ID are required.",
         )
-    existing_creds = await m365_service.get_credentials(company_id)
+    existing_creds = await m365_repo.get_credentials(company_id)
     if not client_secret and not existing_creds:
         return _company_edit_redirect(
             company_id=company_id,
