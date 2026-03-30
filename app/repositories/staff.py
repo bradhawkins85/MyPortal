@@ -114,8 +114,15 @@ async def list_staff(
     exclude_ex_staff: bool = False,
     onboarding_complete: bool | None = None,
     onboarding_status: str | None = None,
+    offboarding_complete: bool | None = None,
+    offboarding_status: str | None = None,
     created_after: datetime | None = None,
     updated_after: datetime | None = None,
+    offboarding_requested_after: datetime | None = None,
+    offboarding_updated_after: datetime | None = None,
+    scheduled_from: datetime | None = None,
+    scheduled_to: datetime | None = None,
+    due_only: bool = False,
     cursor: str | None = None,
     page_size: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -132,12 +139,44 @@ async def list_staff(
     if onboarding_status:
         conditions.append("LOWER(s.onboarding_status) = LOWER(%s)")
         params.append(str(onboarding_status).strip())
+    if offboarding_complete is not None:
+        if offboarding_complete:
+            conditions.append("LOWER(s.onboarding_status) = 'offboarding_completed'")
+        else:
+            conditions.append("LOWER(s.onboarding_status) LIKE 'offboarding_%'")
+            conditions.append("LOWER(s.onboarding_status) <> 'offboarding_completed'")
+    if offboarding_status:
+        clean_offboarding_status = str(offboarding_status).strip().lower()
+        if clean_offboarding_status.startswith("offboarding_"):
+            conditions.append("LOWER(s.onboarding_status) = %s")
+            params.append(clean_offboarding_status)
+        else:
+            conditions.append("LOWER(s.onboarding_status) = %s")
+            params.append(f"offboarding_{clean_offboarding_status}")
     if created_after is not None:
         conditions.append("s.created_at > %s")
         params.append(_coerce_datetime(created_after))
     if updated_after is not None:
         conditions.append("s.updated_at > %s")
         params.append(_coerce_datetime(updated_after))
+    if offboarding_requested_after is not None:
+        conditions.append("s.date_offboarded > %s")
+        params.append(_coerce_datetime(offboarding_requested_after))
+    if offboarding_updated_after is not None:
+        conditions.append("s.updated_at > %s")
+        params.append(_coerce_datetime(offboarding_updated_after))
+        conditions.append("LOWER(s.onboarding_status) LIKE 'offboarding_%'")
+    if scheduled_from is not None:
+        conditions.append("e.scheduled_for_utc >= %s")
+        params.append(_coerce_datetime(scheduled_from))
+    if scheduled_to is not None:
+        conditions.append("e.scheduled_for_utc <= %s")
+        params.append(_coerce_datetime(scheduled_to))
+    if due_only:
+        conditions.append("e.scheduled_for_utc IS NOT NULL")
+        conditions.append("e.scheduled_for_utc <= %s")
+        conditions.append("LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')")
+        params.append(datetime.now(timezone.utc).replace(tzinfo=None))
     decoded_cursor = _decode_staff_cursor(cursor)
     if decoded_cursor is not None:
         cursor_updated_at, cursor_staff_id = decoded_cursor
@@ -154,6 +193,7 @@ async def list_staff(
         SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        LEFT JOIN staff_onboarding_workflow_executions AS e ON e.staff_id = s.id
         WHERE {where}
         ORDER BY s.updated_at ASC, s.id ASC
         LIMIT %s
@@ -234,7 +274,12 @@ async def list_staff_with_users(company_id: int) -> list[dict[str, Any]]:
 
 
 async def list_all_staff(
-    *, account_action: str | None = None, email: str | None = None
+    *,
+    account_action: str | None = None,
+    email: str | None = None,
+    scheduled_from: datetime | None = None,
+    scheduled_to: datetime | None = None,
+    due_only: bool = False,
 ) -> list[dict[str, Any]]:
     conditions: list[str] = []
     params: list[Any] = []
@@ -244,11 +289,23 @@ async def list_all_staff(
     if email:
         conditions.append("LOWER(s.email) LIKE %s")
         params.append(f"%{email.lower()}%")
+    if scheduled_from is not None:
+        conditions.append("e.scheduled_for_utc >= %s")
+        params.append(_coerce_datetime(scheduled_from))
+    if scheduled_to is not None:
+        conditions.append("e.scheduled_for_utc <= %s")
+        params.append(_coerce_datetime(scheduled_to))
+    if due_only:
+        conditions.append("e.scheduled_for_utc IS NOT NULL")
+        conditions.append("e.scheduled_for_utc <= %s")
+        conditions.append("LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')")
+        params.append(datetime.now(timezone.utc).replace(tzinfo=None))
     where_clause = " AND ".join(conditions)
     sql = """
         SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        LEFT JOIN staff_onboarding_workflow_executions AS e ON e.staff_id = s.id
     """
     if where_clause:
         sql += f" WHERE {where_clause}"

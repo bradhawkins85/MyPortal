@@ -290,6 +290,33 @@ async def test_resume_offboarding_failure_creates_ticket_with_step_payload(monke
         "is_ex_staff": False,
         "onboarding_status": workflows.STATE_OFFBOARDING_APPROVED,
     }
+def test_compute_scheduled_execution_onboarding_uses_local_midnight_minus_three_days():
+    scheduled_for_utc, requested_timezone = workflows._compute_scheduled_execution(
+        staff={"date_onboarded": "2026-04-10T09:30:00"},
+        direction=workflows.DIRECTION_ONBOARDING,
+        requested_timezone="Australia/Sydney",
+    )
+
+    assert requested_timezone == "Australia/Sydney"
+    assert scheduled_for_utc is not None
+    assert scheduled_for_utc.isoformat() == "2026-04-06T14:00:00"
+
+
+def test_compute_scheduled_execution_offboarding_preserves_requested_datetime():
+    scheduled_for_utc, requested_timezone = workflows._compute_scheduled_execution(
+        staff={"date_offboarded": "2026-04-10T15:45:00"},
+        direction=workflows.DIRECTION_OFFBOARDING,
+        requested_timezone="America/New_York",
+    )
+
+    assert requested_timezone == "America/New_York"
+    assert scheduled_for_utc is not None
+    assert scheduled_for_utc.isoformat() == "2026-04-10T19:45:00"
+
+
+@pytest.mark.anyio
+async def test_enqueue_workflow_creates_approved_execution(monkeypatch):
+    staff_record = {"id": 333, "date_onboarded": None}
     monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
     monkeypatch.setattr(
         workflows.workflow_repo,
@@ -329,3 +356,40 @@ async def test_resume_offboarding_failure_creates_ticket_with_step_payload(monke
     context = ticket_mock.await_args.kwargs["error_context"]
     assert context["step"] == "remove_groups"
     assert context["payload"] == {"group_id": "abc"}
+        AsyncMock(return_value={"workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY}),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "create_or_reset_execution",
+        AsyncMock(return_value={"id": 77}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+
+    await workflows.enqueue_staff_onboarding_workflow(
+        company_id=9,
+        staff_id=333,
+        initiated_by_user_id=10,
+        direction=workflows.DIRECTION_ONBOARDING,
+    )
+
+    workflows.workflow_repo.create_or_reset_execution.assert_awaited_once()
+    workflows.workflow_repo.update_execution_state.assert_awaited_once()
+    assert workflows.workflow_repo.update_execution_state.await_args.kwargs["state"] == workflows.STATE_APPROVED
+
+
+@pytest.mark.anyio
+async def test_process_due_approved_executions_runs_claimed_rows(monkeypatch):
+    claim_mock = AsyncMock(
+        side_effect=[
+            {"id": 1, "company_id": 7, "staff_id": 101, "direction": workflows.DIRECTION_ONBOARDING},
+            None,
+        ]
+    )
+    run_mock = AsyncMock(return_value={"state": workflows.STATE_COMPLETED})
+    monkeypatch.setattr(workflows.workflow_repo, "claim_next_due_approved_execution", claim_mock)
+    monkeypatch.setattr(workflows, "run_staff_onboarding_workflow", run_mock)
+
+    result = await workflows.process_due_approved_executions(limit=5)
+
+    assert result == {"processed": 1, "skipped": 0}
+    run_mock.assert_awaited_once()
