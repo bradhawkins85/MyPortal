@@ -119,6 +119,7 @@ async def _create_failure_ticket(
     company_id: int,
     staff: dict[str, Any],
     error_text: str,
+    error_context: dict[str, Any] | None = None,
 ) -> int | None:
     company = await company_repo.get_company_by_id(company_id)
     company_name = (company or {}).get("name") or f"Company #{company_id}"
@@ -132,6 +133,14 @@ async def _create_failure_ticket(
         f"Email: {staff.get('email') or 'n/a'}\n"
         f"Error: {error_text}\n"
     )
+    if error_context:
+        context_lines = [
+            f"- {key}: {value}"
+            for key, value in sorted(error_context.items())
+            if value not in (None, "")
+        ]
+        if context_lines:
+            description += "\nContext:\n" + "\n".join(context_lines) + "\n"
     status_value = await tickets_service.resolve_status_or_default(None)
     ticket = await tickets_service.create_ticket(
         subject=f"Staff onboarding workflow failed for {staff_name}",
@@ -150,6 +159,143 @@ async def _create_failure_ticket(
         return int(ticket_id) if ticket_id is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _parse_timeout_hours(value: Any, *, default_hours: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default_hours
+    return max(1, parsed)
+
+
+async def _escalate_stale_non_actionable_state(
+    *,
+    company_id: int,
+    staff: dict[str, Any],
+    onboarding_status: str,
+    initiated_by_user_id: int | None,
+) -> dict[str, Any]:
+    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+    timeout_by_state = {
+        STATE_AWAITING_APPROVAL: _parse_timeout_hours(
+            policy_config.get("awaiting_approval_timeout_hours"),
+            default_hours=48,
+        ),
+        STATE_WAITING_EXTERNAL: _parse_timeout_hours(
+            policy_config.get("waiting_external_timeout_hours"),
+            default_hours=24,
+        ),
+    }
+    timeout_hours = timeout_by_state.get(onboarding_status)
+    if timeout_hours is None:
+        return {
+            "state": "ignored",
+            "reason": "not_actionable",
+            "required_state": f"{STATE_APPROVED}|{STATE_PROVISIONING}",
+            "current_state": onboarding_status or None,
+        }
+
+    now = _utc_now_naive()
+    candidate_timestamps = [
+        staff.get("updated_at"),
+        staff.get("requested_at"),
+        staff.get("created_at"),
+    ]
+    stale_anchor: datetime | None = None
+    for timestamp in candidate_timestamps:
+        if isinstance(timestamp, datetime):
+            stale_anchor = timestamp.replace(tzinfo=None)
+            break
+        if isinstance(timestamp, str) and timestamp.strip():
+            try:
+                stale_anchor = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00")).replace(tzinfo=None)
+                break
+            except ValueError:
+                continue
+    if stale_anchor is None:
+        return {
+            "state": "ignored",
+            "reason": "missing_stale_anchor",
+            "required_state": f"{STATE_APPROVED}|{STATE_PROVISIONING}",
+            "current_state": onboarding_status or None,
+        }
+
+    stale_age_hours = max(0.0, (now - stale_anchor).total_seconds() / 3600)
+    if stale_age_hours < timeout_hours:
+        return {
+            "state": "ignored",
+            "reason": "within_timeout_window",
+            "required_state": f"{STATE_APPROVED}|{STATE_PROVISIONING}",
+            "current_state": onboarding_status or None,
+            "stale_age_hours": round(stale_age_hours, 2),
+            "timeout_hours": timeout_hours,
+        }
+
+    execution = await workflow_repo.get_execution_by_staff_id(int(staff["id"]))
+    if execution and execution.get("helpdesk_ticket_id"):
+        return {
+            "state": "ignored",
+            "reason": "already_escalated",
+            "required_state": f"{STATE_APPROVED}|{STATE_PROVISIONING}",
+            "current_state": onboarding_status or None,
+            "helpdesk_ticket_id": execution.get("helpdesk_ticket_id"),
+        }
+
+    error_text = (
+        f"Onboarding request is stale in state '{onboarding_status}' "
+        f"for {round(stale_age_hours, 2)} hours (timeout: {timeout_hours} hours)."
+    )
+    ticket_id = await _create_failure_ticket(
+        company_id=company_id,
+        staff=staff,
+        error_text=error_text,
+        error_context={
+            "escalation_reason": "stale_non_actionable_state",
+            "current_state": onboarding_status,
+            "stale_age_hours": round(stale_age_hours, 2),
+            "timeout_hours": timeout_hours,
+        },
+    )
+    if execution:
+        await workflow_repo.update_execution_state(
+            int(execution["id"]),
+            state=onboarding_status,
+            current_step=f"escalated_{onboarding_status}",
+            last_error=error_text,
+            helpdesk_ticket_id=ticket_id,
+        )
+    await audit_service.log_action(
+        user_id=initiated_by_user_id,
+        action="staff.onboarding.workflow.escalated",
+        entity_type="staff",
+        entity_id=int(staff["id"]),
+        metadata={
+            "company_id": company_id,
+            "current_state": onboarding_status,
+            "stale_age_hours": round(stale_age_hours, 2),
+            "timeout_hours": timeout_hours,
+            "helpdesk_ticket_id": ticket_id,
+        },
+    )
+    log_warning(
+        "Escalated stale staff onboarding workflow state",
+        company_id=company_id,
+        staff_id=staff.get("id"),
+        current_state=onboarding_status,
+        stale_age_hours=round(stale_age_hours, 2),
+        timeout_hours=timeout_hours,
+        helpdesk_ticket_id=ticket_id,
+    )
+    return {
+        "state": "escalated",
+        "reason": "stale_non_actionable_state",
+        "current_state": onboarding_status,
+        "helpdesk_ticket_id": ticket_id,
+        "stale_age_hours": round(stale_age_hours, 2),
+        "timeout_hours": timeout_hours,
+    }
 
 
 async def _attempt_step(
@@ -252,11 +398,18 @@ async def run_staff_onboarding_workflow(
     if not staff:
         raise ValueError("Staff not found")
     onboarding_status = str(staff.get("onboarding_status") or "").strip().lower()
-    if onboarding_status not in {STATE_APPROVED, STATE_WAITING_EXTERNAL}:
+    if onboarding_status not in {STATE_APPROVED, STATE_PROVISIONING}:
+        if onboarding_status in {STATE_AWAITING_APPROVAL, STATE_WAITING_EXTERNAL}:
+            return await _escalate_stale_non_actionable_state(
+                company_id=company_id,
+                staff=staff,
+                onboarding_status=onboarding_status,
+                initiated_by_user_id=initiated_by_user_id,
+            )
         return {
             "state": "ignored",
-            "reason": "not_approved",
-            "required_state": f"{STATE_APPROVED}|{STATE_WAITING_EXTERNAL}",
+            "reason": "not_actionable",
+            "required_state": f"{STATE_APPROVED}|{STATE_PROVISIONING}",
             "current_state": onboarding_status or None,
         }
 
@@ -483,6 +636,12 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 company_id=company_id,
                 staff=staff,
                 error_text=error_text,
+                error_context={
+                    "execution_id": execution_id,
+                    "workflow_key": workflow_key,
+                    "current_state": STATE_PROVISIONING,
+                    "step": "provisioning_pipeline",
+                },
             )
         except Exception as ticket_exc:  # noqa: BLE001
             log_error(
