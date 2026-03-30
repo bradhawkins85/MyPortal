@@ -84,6 +84,7 @@ class StaffApprovalDecision(BaseModel):
 
 
 class StaffWorkflowStatus(BaseModel):
+    direction: Optional[str] = None
     state: Optional[str] = None
     current_step: Optional[str] = None
     retries_used: Optional[int] = None
