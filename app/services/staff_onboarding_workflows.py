@@ -29,6 +29,7 @@ STATE_APPROVED = "approved"
 STATE_DENIED = "denied"
 STATE_WAITING_EXTERNAL = "waiting_external"
 STATE_PROVISIONING = "provisioning"
+STATE_PAUSED_LICENSE_UNAVAILABLE = "paused_license_unavailable"
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
 STATE_OFFBOARDING_AWAITING_APPROVAL = "offboarding_awaiting_approval"
@@ -60,6 +61,28 @@ class WorkflowStepError(RuntimeError):
 
 class LicenseExhaustionError(WorkflowStepError):
     pass
+
+
+def _build_license_retry_metadata(
+    *,
+    workflow_key: str,
+    execution_id: int,
+    step_name: str | None,
+    error_text: str,
+) -> dict[str, Any]:
+    return {
+        "reason": "license_unavailable",
+        "workflow_key": workflow_key,
+        "execution_id": execution_id,
+        "step": step_name or "assign_license",
+        "paused_at": _utc_now_naive().isoformat(),
+        "retry_trigger": "license_capacity_change",
+        "error": error_text,
+    }
+
+
+def _should_create_license_exhaustion_ticket(policy_config: dict[str, Any]) -> bool:
+    return bool(policy_config.get("create_ticket_on_license_unavailable"))
 
 
 def _utc_now_naive() -> datetime:
@@ -1117,6 +1140,96 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
             },
         )
         return {"state": completed_state, "execution_id": execution_id}
+    except LicenseExhaustionError as exc:
+        error_text = str(exc)
+        failed_step = exc.step_name if isinstance(exc, WorkflowStepError) else None
+        retry_metadata = _build_license_retry_metadata(
+            workflow_key=workflow_key,
+            execution_id=execution_id,
+            step_name=failed_step,
+            error_text=error_text,
+        )
+
+        ticket_id: int | None = None
+        if _should_create_license_exhaustion_ticket(policy_config):
+            try:
+                ticket_id = await _create_failure_ticket(
+                    company_id=company_id,
+                    staff=staff,
+                    error_text=error_text,
+                    error_context={
+                        "execution_id": execution_id,
+                        "workflow_key": workflow_key,
+                        "current_state": in_progress_state,
+                        "step": failed_step or "assign_license",
+                        "pause_reason": "license_unavailable",
+                    },
+                )
+            except Exception as ticket_exc:  # noqa: BLE001
+                log_error(
+                    "Failed to create ticket for paused workflow due to license exhaustion",
+                    company_id=company_id,
+                    staff_id=staff_id,
+                    execution_id=execution_id,
+                    error=str(ticket_exc),
+                )
+
+        await workflow_repo.append_step_log(
+            execution_id=execution_id,
+            step_name=failed_step or "assign_license",
+            status="paused",
+            attempt=1,
+            request_payload={"pause_reason": "license_unavailable"},
+            response_payload={"retry_metadata": retry_metadata},
+            error_message=error_text,
+        )
+        await workflow_repo.update_execution_state(
+            execution_id,
+            state=STATE_PAUSED_LICENSE_UNAVAILABLE,
+            current_step=f"paused_{failed_step or 'assign_license'}",
+            last_error=json.dumps(retry_metadata, ensure_ascii=False),
+            helpdesk_ticket_id=ticket_id,
+        )
+        await staff_repo.update_staff(
+            staff_id,
+            company_id=company_id,
+            first_name=staff.get("first_name") or "",
+            last_name=staff.get("last_name") or "",
+            email=staff.get("email") or "",
+            mobile_phone=staff.get("mobile_phone"),
+            date_onboarded=staff.get("date_onboarded"),
+            date_offboarded=staff.get("date_offboarded"),
+            enabled=bool(staff.get("enabled", True)),
+            is_ex_staff=bool(staff.get("is_ex_staff", False)),
+            street=staff.get("street"),
+            city=staff.get("city"),
+            state=staff.get("state"),
+            postcode=staff.get("postcode"),
+            country=staff.get("country"),
+            department=staff.get("department"),
+            job_title=staff.get("job_title"),
+            org_company=staff.get("org_company"),
+            manager_name=staff.get("manager_name"),
+            account_action=staff.get("account_action"),
+            syncro_contact_id=staff.get("syncro_contact_id"),
+            onboarding_status=STATE_PAUSED_LICENSE_UNAVAILABLE,
+            onboarding_complete=False,
+            onboarding_completed_at=None,
+        )
+        log_warning(
+            "Staff onboarding workflow paused due to license exhaustion",
+            company_id=company_id,
+            staff_id=staff_id,
+            execution_id=execution_id,
+            step=failed_step,
+            helpdesk_ticket_id=ticket_id,
+        )
+        return {
+            "state": STATE_PAUSED_LICENSE_UNAVAILABLE,
+            "execution_id": execution_id,
+            "retry_metadata": retry_metadata,
+            "helpdesk_ticket_id": ticket_id,
+        }
     except Exception as exc:  # noqa: BLE001
         error_text = str(exc)
         failed_step = exc.step_name if isinstance(exc, WorkflowStepError) else None
@@ -1274,6 +1387,39 @@ async def process_due_approved_executions(*, limit: int = 20) -> dict[str, int]:
                 error=str(exc),
             )
     return {"processed": processed, "skipped": skipped}
+
+
+async def process_paused_license_executions(*, limit: int = 20, company_id: int | None = None) -> dict[str, int]:
+    resumed = 0
+    skipped = 0
+    while resumed < max(1, int(limit)):
+        execution = await workflow_repo.claim_next_paused_license_execution(
+            now_utc=_utc_now_naive(),
+            company_id=company_id,
+        )
+        if not execution:
+            break
+        try:
+            result = await resume_staff_onboarding_workflow_after_external_confirmation(
+                company_id=int(execution["company_id"]),
+                staff_id=int(execution["staff_id"]),
+                execution_id=int(execution["id"]),
+                initiated_by_user_id=None,
+            )
+            if result.get("state") == STATE_PAUSED_LICENSE_UNAVAILABLE:
+                skipped += 1
+            else:
+                resumed += 1
+        except Exception as exc:  # noqa: BLE001
+            skipped += 1
+            log_error(
+                "Failed resuming paused license-exhausted workflow execution",
+                execution_id=execution.get("id"),
+                company_id=execution.get("company_id"),
+                staff_id=execution.get("staff_id"),
+                error=str(exc),
+            )
+    return {"resumed": resumed, "skipped": skipped}
 
 
 async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
