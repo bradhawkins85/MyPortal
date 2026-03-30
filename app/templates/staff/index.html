@@ -308,7 +308,7 @@
                   {% if is_admin or is_super_admin %}
                     <button type="button" class="button button--ghost" data-staff-invite="{{ member.id }}">Invite</button>
                   {% endif %}
-                  {% if can_approve_onboarding and (member.approval_status == 'pending' or member.onboarding_status == 'awaiting_approval') %}
+                  {% if can_approve_onboarding and not member.onboarding_complete and member.onboarding_status != 'onboarded' and (member.approval_status == 'pending' or member.onboarding_status == 'awaiting_approval') %}
                     <button type="button" class="button button--ghost" data-staff-approve="{{ member.id }}">Approve</button>
                     <button type="button" class="button button--danger" data-staff-deny="{{ member.id }}">Deny</button>
                   {% endif %}
