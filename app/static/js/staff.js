@@ -143,8 +143,19 @@
 
   function evaluateCondition(input, operator, expectedValue) {
     const normalizedOperator = normalizeValue(operator);
-    if (!input || !normalizedOperator) {
-      return true;
+    if (!input) {
+      return false;
+    }
+    if (!normalizedOperator) {
+      if (input.type === 'checkbox') {
+        return Boolean(input.checked);
+      }
+      const actualFallback = normalizeValue(getInputCurrentValue(input));
+      const expectedFallback = normalizeValue(expectedValue);
+      if (expectedFallback) {
+        return actualFallback === expectedFallback;
+      }
+      return Boolean(actualFallback);
     }
     if (normalizedOperator === 'is_checked') {
       return Boolean(input.checked);
