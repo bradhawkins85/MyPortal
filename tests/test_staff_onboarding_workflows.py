@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -20,6 +21,7 @@ async def test_http_post_step_supports_query_headers_and_json_string(monkeypatch
     class DummyResponse:
         status_code = 200
         headers = {"content-type": "application/json"}
+        text = '{"ok":true,"id":"123"}'
 
         def json(self):
             return {"ok": True, "id": "123"}
@@ -57,10 +59,40 @@ async def test_http_post_step_supports_query_headers_and_json_string(monkeypatch
     )
 
     assert result["status_code"] == 200
+    assert result["body"] == '{"ok":true,"id":"123"}'
     assert captured_request["method"] == "POST"
     assert captured_request["params"] == {"staffId": "88"}
     assert captured_request["headers"] == {"Authorization": "Bearer abc123"}
     assert captured_request["json"] == {"email": "new.user@example.com"}
+
+
+@pytest.mark.anyio
+async def test_curl_text_step_returns_plain_text_and_escapes_html(monkeypatch):
+    class DummyProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"<script>alert(1)</script>SELECT * FROM staff;", b"")
+
+    async def fake_subprocess_exec(*args, **kwargs):
+        return DummyProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subprocess_exec)
+
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "curl_text",
+            "url": "https://example.test/source.txt",
+            "timeout_seconds": 8,
+        },
+        company_id=7,
+        staff={"id": 88, "email": "new.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["status_code"] == 0
+    assert result["body"] == "&lt;script&gt;alert(1)&lt;/script&gt;SELECT * FROM staff;"
 
 
 def test_coerce_step_json_fields_parses_store_and_http_payload_fields():
