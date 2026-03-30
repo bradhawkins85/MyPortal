@@ -19,6 +19,16 @@ def _mock_staff_custom_fields(monkeypatch):
         "get_all_staff_field_values",
         AsyncMock(return_value={}),
     )
+    monkeypatch.setattr(
+        workflows.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 9, "name": "Test Company"}),
+    )
+    monkeypatch.setattr(
+        workflows.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value=None),
+    )
 
 
 def test_normalise_workflow_steps_uses_step_type_from_config():
@@ -234,3 +244,48 @@ async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(m
         "custom_field_group:entra_sales:group-sales",
         "custom_field_group:entra_sales:group-announce",
     ]
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_adds_user_to_teams_groups(monkeypatch):
+    monkeypatch.setattr(workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"}))
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    graph_post = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", graph_post)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_add_teams_group_member", "group_ids_csv": "group-a,group-b"},
+        company_id=9,
+        staff={"id": 703, "email": "new.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["operation"] == "add"
+    assert result["group_ids"] == ["group-a", "group-b"]
+    assert graph_post.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatch):
+    monkeypatch.setattr(workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"}))
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get",
+        AsyncMock(return_value={"value": [{"id": "perm-1", "grantedToIdentitiesV2": [{"user": {"id": "user-2"}}]}]}),
+    )
+    graph_delete = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_sharepoint_site_member", "site_ids_csv": "site-a"},
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["operation"] == "remove"
+    assert result["site_ids"] == ["site-a"]
+    graph_delete.assert_awaited_once()
