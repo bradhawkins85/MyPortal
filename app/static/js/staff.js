@@ -73,6 +73,10 @@
     }
     modal.hidden = false;
     modal.classList.add('is-visible');
+    const focusTarget = modal.querySelector('[autofocus], input, select, textarea, button');
+    if (focusTarget && typeof focusTarget.focus === 'function') {
+      focusTarget.focus();
+    }
   }
 
   function closeModal(modal) {
@@ -217,7 +221,14 @@
     const offboardingTimezoneField = getField('offboarding-timezone');
     const offboardingReasonNotesField = getField('offboarding-reason-notes');
     const offboardingImmediateButton = getField('offboarding-immediate');
+    const offboardingFormError = getField('offboarding-form-error');
     const addForm = container.querySelector('form.staff-form');
+    const editModalStaffName = getField('edit-modal-staff-name');
+    const editActionNoteField = getField('edit-action-note');
+    const editActionStepField = getField('edit-action-step');
+    const editActionError = getField('edit-action-error');
+    const editFormError = getField('edit-form-error');
+    const editDeleteConfirm = getField('edit-delete-confirm');
 
     const editFields = {
       first_name: getField('edit-first-name'),
@@ -332,17 +343,25 @@
       });
     }
 
-    if (flags && flags.isAdmin && !flags.isSuperAdmin) {
-      const offboardField = editFields.date_offboarded;
-      if (offboardField) {
-        offboardField.addEventListener('change', () => {
-          if (offboardField.value) {
-            alert(
-              'The offboard will be scheduled immediately for the requested date and time. Contact IT to make changes after saving.'
-            );
-          }
-        });
+    function setInlineError(element, message) {
+      if (!element) {
+        return;
       }
+      element.textContent = message || '';
+      element.hidden = !message;
+    }
+
+    function getActionNote({ required = false } = {}) {
+      const note = editActionNoteField ? editActionNoteField.value.trim() : '';
+      if (required && !note) {
+        throw new Error('Please enter an action note before continuing.');
+      }
+      return note || null;
+    }
+
+    function getActionStep(defaultStep) {
+      const explicitStep = editActionStepField ? editActionStepField.value.trim() : '';
+      return explicitStep || (defaultStep || '').trim();
     }
 
     function setDefaultOffboardingDateTime() {
@@ -439,6 +458,9 @@
       editIdField.value = String(id);
       setValue(editFields.first_name, member.first_name);
       setValue(editFields.last_name, member.last_name);
+      if (editModalStaffName) {
+        editModalStaffName.textContent = `${member.first_name || ''} ${member.last_name || ''}`.trim() || member.email || '';
+      }
       setValue(editFields.email, member.email);
       setValue(editFields.mobile_phone, member.mobile_phone);
       setValue(editFields.date_onboarded, member.date_onboarded ? member.date_onboarded.slice(0, 10) : '');
@@ -471,40 +493,45 @@
           entry.input.value = value ?? '';
         }
       });
+      if (editActionNoteField) {
+        editActionNoteField.value = '';
+      }
+      if (editActionStepField) {
+        editActionStepField.value = '';
+      }
+      if (editDeleteConfirm) {
+        editDeleteConfirm.checked = false;
+      }
+      setInlineError(editActionError, '');
+      setInlineError(editFormError, '');
       updateEditActionButtons(member);
       openModal(editModal);
     }
 
     async function sendInvite(staffId) {
-      if (!confirm('Send an invitation to this staff member?')) {
-        return;
-      }
       await requestJson(`/staff/${staffId}/invite`, { method: 'POST' });
-      alert('Invitation sent successfully.');
+      window.location.reload();
     }
 
-    async function deleteStaff(staffId) {
-      if (!confirm('Delete this staff record? This action cannot be undone.')) {
-        return;
+    async function deleteStaff(staffId, isConfirmed) {
+      if (!isConfirmed) {
+        throw new Error('Confirm deletion in the danger zone before deleting.');
       }
       await requestJson(`/staff/${staffId}`, { method: 'DELETE' });
       window.location.reload();
     }
 
-    async function approveOnboarding(staffId) {
-      const comment = prompt('Optional approval comment:', '') || '';
+    async function approveOnboarding(staffId, comment) {
       await requestJson(`/api/staff/${staffId}/onboarding/approve`, {
         method: 'POST',
-        body: JSON.stringify({ comment }),
+        body: JSON.stringify({ comment: comment || '' }),
       });
       window.location.reload();
     }
 
-    async function denyOnboarding(staffId) {
-      const reason = prompt('Deny reason (required):', '');
+    async function denyOnboarding(staffId, reason) {
       if (!reason || !reason.trim()) {
-        alert('A deny reason is required.');
-        return;
+        throw new Error('A deny reason is required.');
       }
       await requestJson(`/api/staff/${staffId}/onboarding/deny`, {
         method: 'POST',
@@ -513,8 +540,7 @@
       window.location.reload();
     }
 
-    async function rerunWorkflow(staffId) {
-      const reason = prompt('Optional reason for rerunning this workflow:', '') || '';
+    async function rerunWorkflow(staffId, reason) {
       await requestJson(`/api/staff/${staffId}/workflow/rerun`, {
         method: 'POST',
         headers: {
@@ -525,8 +551,7 @@
       window.location.reload();
     }
 
-    async function retryWorkflow(staffId) {
-      const reason = prompt('Optional reason for retrying the failed step:', '') || '';
+    async function retryWorkflow(staffId, reason) {
       await requestJson(`/api/staff/${staffId}/workflow/retry-failed-step`, {
         method: 'POST',
         headers: {
@@ -537,8 +562,7 @@
       window.location.reload();
     }
 
-    async function resumeWorkflow(staffId) {
-      const reason = prompt('Optional reason for resuming this workflow:', '') || '';
+    async function resumeWorkflow(staffId, reason) {
       await requestJson(`/api/staff/${staffId}/workflow/resume`, {
         method: 'POST',
         headers: {
@@ -549,21 +573,19 @@
       window.location.reload();
     }
 
-    async function forceCompleteWorkflow(staffId, context) {
+    async function forceCompleteWorkflow(staffId, context, stepName, reason) {
       const currentStep = (context && context.currentStep) || '';
-      const promptedStep = prompt('Step name to force-complete:', currentStep || '');
-      const stepName = (promptedStep || '').trim();
-      if (!stepName) {
-        return;
+      const requestedStepName = (stepName || currentStep || '').trim();
+      if (!requestedStepName) {
+        throw new Error('Provide the workflow step to force-complete.');
       }
-      const reason = prompt('Reason for force-completing this step (recommended):', '') || '';
       await requestJson(`/api/staff/${staffId}/workflow/force-complete-step`, {
         method: 'POST',
         headers: {
           'Idempotency-Key': makeIdempotencyKey('force-complete', staffId),
         },
         body: JSON.stringify({
-          stepName,
+          stepName: requestedStepName,
           reason: reason.trim() || null,
         }),
       });
@@ -600,10 +622,11 @@
         const timezone = offboardingTimezoneField ? offboardingTimezoneField.value.trim() : '';
         const requestedAt = date && time ? `${date}T${time}` : '';
         if (!staffId || !date || !time || !timezone || !reasonNotes) {
-          alert('Offboarding date, time, timezone, and reason/notes are required.');
+          setInlineError(offboardingFormError, 'Offboarding date, time, timezone, and reason/notes are required.');
           return;
         }
         try {
+          setInlineError(offboardingFormError, '');
           await requestJson(`/api/staff/${staffId}/offboarding/request`, {
             method: 'POST',
             body: JSON.stringify({
@@ -615,7 +638,7 @@
           });
           window.location.reload();
         } catch (error) {
-          alert(`Failed to submit offboarding request: ${error.message}`);
+          setInlineError(offboardingFormError, `Failed to submit offboarding request: ${error.message}`);
         }
       });
     }
@@ -661,13 +684,14 @@
           }
         });
         try {
+          setInlineError(editFormError, '');
           await requestJson(`/staff/${staffId}`, {
             method: 'PUT',
             body: JSON.stringify(payload),
           });
           window.location.reload();
         } catch (error) {
-          alert(`Unable to update staff member: ${error.message}`);
+          setInlineError(editFormError, `Unable to update staff member: ${error.message}`);
         }
       });
     }
@@ -814,9 +838,10 @@
           return;
         }
         try {
-          await sendInvite(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await sendInvite(currentEditStaffId, getActionNote());
         } catch (error) {
-          alert(`Failed to send invitation: ${error.message}`);
+          setInlineError(editActionError, `Failed to send invitation: ${error.message}`);
         }
       });
     }
@@ -834,9 +859,10 @@
           return;
         }
         try {
-          await approveOnboarding(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await approveOnboarding(currentEditStaffId, getActionNote());
         } catch (error) {
-          alert(`Failed to approve onboarding request: ${error.message}`);
+          setInlineError(editActionError, `Failed to approve onboarding request: ${error.message}`);
         }
       });
     }
@@ -846,9 +872,10 @@
           return;
         }
         try {
-          await denyOnboarding(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await denyOnboarding(currentEditStaffId, getActionNote({ required: true }) || '');
         } catch (error) {
-          alert(`Failed to deny onboarding request: ${error.message}`);
+          setInlineError(editActionError, `Failed to deny onboarding request: ${error.message}`);
         }
       });
     }
@@ -858,9 +885,10 @@
           return;
         }
         try {
-          await rerunWorkflow(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await rerunWorkflow(currentEditStaffId, getActionNote() || '');
         } catch (error) {
-          alert(`Failed to rerun workflow: ${error.message}`);
+          setInlineError(editActionError, `Failed to rerun workflow: ${error.message}`);
         }
       });
     }
@@ -870,9 +898,10 @@
           return;
         }
         try {
-          await retryWorkflow(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await retryWorkflow(currentEditStaffId, getActionNote() || '');
         } catch (error) {
-          alert(`Failed to retry failed step: ${error.message}`);
+          setInlineError(editActionError, `Failed to retry failed step: ${error.message}`);
         }
       });
     }
@@ -882,9 +911,10 @@
           return;
         }
         try {
-          await resumeWorkflow(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await resumeWorkflow(currentEditStaffId, getActionNote() || '');
         } catch (error) {
-          alert(`Failed to resume workflow: ${error.message}`);
+          setInlineError(editActionError, `Failed to resume workflow: ${error.message}`);
         }
       });
     }
@@ -894,11 +924,12 @@
           return;
         }
         try {
+          setInlineError(editActionError, '');
           await forceCompleteWorkflow(currentEditStaffId, {
             currentStep: (editActionButtons.workflowForceComplete.dataset.currentStep || '').trim(),
-          });
+          }, getActionStep((editActionButtons.workflowForceComplete.dataset.currentStep || '').trim()), getActionNote() || '');
         } catch (error) {
-          alert(`Failed to force-complete workflow step: ${error.message}`);
+          setInlineError(editActionError, `Failed to force-complete workflow step: ${error.message}`);
         }
       });
     }
@@ -908,9 +939,10 @@
           return;
         }
         try {
-          await deleteStaff(currentEditStaffId);
+          setInlineError(editActionError, '');
+          await deleteStaff(currentEditStaffId, Boolean(editDeleteConfirm && editDeleteConfirm.checked));
         } catch (error) {
-          alert(`Failed to delete staff record: ${error.message}`);
+          setInlineError(editActionError, `Failed to delete staff record: ${error.message}`);
         }
       });
     }
