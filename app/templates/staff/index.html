@@ -354,6 +354,8 @@
               </td>
               <td class="table__actions">
                 <div class="table__action-buttons">
+                  {% set workflow = member.workflow_status or {} %}
+                  {% set workflow_state = workflow.get('state') or member.onboarding_status or '' %}
                   {% if is_super_admin %}
                     <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
                   {% endif %}
@@ -366,6 +368,18 @@
                   {% if can_approve_onboarding and not member.onboarding_complete and member.onboarding_status != 'onboarded' and (member.approval_status == 'pending' or member.onboarding_status == 'awaiting_approval') %}
                     <button type="button" class="button button--ghost" data-staff-approve="{{ member.id }}">Approve</button>
                     <button type="button" class="button button--danger" data-staff-deny="{{ member.id }}">Deny</button>
+                  {% endif %}
+                  {% if can_approve_onboarding or is_super_admin %}
+                    <button type="button" class="button button--ghost" data-staff-workflow-rerun="{{ member.id }}">Rerun workflow</button>
+                    {% if workflow_state in ['failed', 'offboarding_failed'] %}
+                      <button type="button" class="button button--ghost" data-staff-workflow-retry="{{ member.id }}">Retry failed step</button>
+                    {% endif %}
+                    {% if workflow_state in ['waiting_external', 'offboarding_waiting_external', 'provisioning', 'offboarding_in_progress'] %}
+                      <button type="button" class="button button--ghost" data-staff-workflow-resume="{{ member.id }}">Resume workflow</button>
+                    {% endif %}
+                    {% if is_super_admin and workflow.get('current_step') and workflow_state not in ['completed', 'offboarding_completed'] %}
+                      <button type="button" class="button button--danger" data-staff-workflow-force-complete="{{ member.id }}" data-current-step="{{ workflow.get('current_step') }}">Force-complete step</button>
+                    {% endif %}
                   {% endif %}
                   <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
                   {% if is_super_admin %}

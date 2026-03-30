@@ -19,6 +19,8 @@ from app.schemas.staff import (
     StaffCreate,
     StaffExternalCheckpointCallback,
     StaffExternalCheckpointResponse,
+    StaffWorkflowManualActionRequest,
+    StaffWorkflowManualActionResponse,
     StaffRequestCreate,
     StaffResponse,
     StaffUpdate,
@@ -114,6 +116,11 @@ def _encode_staff_cursor(updated_at: datetime | str | None, staff_id: int | None
     if not timestamp:
         return None
     return f"{timestamp}|{int(staff_id)}"
+
+
+def _execution_action_replay_key(staff_id: int, execution_id: int, action_name: str, idempotency_key: str | None) -> str:
+    safe_key = (idempotency_key or "").strip().lower()
+    return f"{staff_id}:{execution_id}:{action_name}:{safe_key}"
 
 
 @router.get("", response_model=list[StaffResponse])
@@ -688,6 +695,252 @@ async def confirm_external_checkpoint(
         idempotency_key=idempotency_key,
         api_key_record=api_key_record,
         _=_,
+    )
+
+
+async def _get_staff_execution_or_404(staff_id: int) -> tuple[dict, dict]:
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    execution = await staff_workflow_repo.get_execution_by_staff_id(staff_id)
+    if not execution:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow execution not found")
+    return staff, execution
+
+
+@router.post(
+    "/{staff_id}/workflow/rerun",
+    response_model=StaffWorkflowManualActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def rerun_staff_workflow_execution(
+    staff_id: int,
+    payload: StaffWorkflowManualActionRequest | None = None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=255),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    staff, execution = await _get_staff_execution_or_404(staff_id)
+    await _require_staff_approval_access(current_user, int(staff["company_id"]))
+    direction = str(execution.get("direction") or staff_onboarding_workflow_service.DIRECTION_ONBOARDING).strip().lower()
+    result = await staff_onboarding_workflow_service.run_staff_onboarding_workflow(
+        company_id=int(staff["company_id"]),
+        staff_id=staff_id,
+        initiated_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        direction=direction,
+        scheduled_for_utc=execution.get("scheduled_for_utc"),
+        requested_timezone=execution.get("requested_timezone"),
+    )
+    refreshed = await staff_workflow_repo.get_execution_by_staff_id(staff_id) or execution
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.workflow.operator.rerun",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(staff["company_id"]),
+            "execution_id": int(refreshed["id"]),
+            "direction": direction,
+            "reason": (payload.reason if payload else None),
+            "idempotency_key": (idempotency_key or "").strip() or None,
+            "replay_key": _execution_action_replay_key(staff_id, int(refreshed["id"]), "rerun", idempotency_key),
+            "result_state": result.get("state"),
+        },
+    )
+    return StaffWorkflowManualActionResponse.model_validate(
+        {
+            "state": str(result.get("state") or refreshed.get("state") or "requested"),
+            "executionId": int(refreshed["id"]),
+            "staffId": staff_id,
+            "companyId": int(staff["company_id"]),
+            "idempotentReplay": False,
+            "detail": "Workflow rerun requested",
+        }
+    )
+
+
+@router.post(
+    "/{staff_id}/workflow/retry-failed-step",
+    response_model=StaffWorkflowManualActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_staff_workflow_failed_step(
+    staff_id: int,
+    payload: StaffWorkflowManualActionRequest | None = None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=255),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    staff, execution = await _get_staff_execution_or_404(staff_id)
+    await _require_staff_approval_access(current_user, int(staff["company_id"]))
+    execution_state = str(execution.get("state") or "").strip().lower()
+    failed_states = {
+        staff_onboarding_workflow_service.STATE_FAILED,
+        staff_onboarding_workflow_service.STATE_OFFBOARDING_FAILED,
+    }
+    if execution_state not in failed_states:
+        return StaffWorkflowManualActionResponse.model_validate(
+            {
+                "state": execution_state or "unknown",
+                "executionId": int(execution["id"]),
+                "staffId": staff_id,
+                "companyId": int(staff["company_id"]),
+                "idempotentReplay": True,
+                "detail": "Execution is not in a failed state",
+            }
+        )
+    result = await staff_onboarding_workflow_service.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=int(staff["company_id"]),
+        staff_id=staff_id,
+        execution_id=int(execution["id"]),
+        initiated_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.workflow.operator.retry_failed_step",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(staff["company_id"]),
+            "execution_id": int(execution["id"]),
+            "reason": (payload.reason if payload else None),
+            "idempotency_key": (idempotency_key or "").strip() or None,
+            "replay_key": _execution_action_replay_key(staff_id, int(execution["id"]), "retry_failed_step", idempotency_key),
+            "result_state": result.get("state"),
+        },
+    )
+    return StaffWorkflowManualActionResponse.model_validate(
+        {
+            "state": str(result.get("state") or "requested"),
+            "executionId": int(execution["id"]),
+            "staffId": staff_id,
+            "companyId": int(staff["company_id"]),
+            "idempotentReplay": False,
+            "detail": "Failed workflow step retry requested",
+        }
+    )
+
+
+@router.post(
+    "/{staff_id}/workflow/resume",
+    response_model=StaffWorkflowManualActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def resume_staff_workflow_execution(
+    staff_id: int,
+    payload: StaffWorkflowManualActionRequest | None = None,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=255),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    staff, execution = await _get_staff_execution_or_404(staff_id)
+    await _require_staff_approval_access(current_user, int(staff["company_id"]))
+    execution_state = str(execution.get("state") or "").strip().lower()
+    pausable_states = {
+        staff_onboarding_workflow_service.STATE_WAITING_EXTERNAL,
+        staff_onboarding_workflow_service.STATE_OFFBOARDING_WAITING_EXTERNAL,
+        staff_onboarding_workflow_service.STATE_PROVISIONING,
+        staff_onboarding_workflow_service.STATE_OFFBOARDING_IN_PROGRESS,
+    }
+    if execution_state not in pausable_states:
+        return StaffWorkflowManualActionResponse.model_validate(
+            {
+                "state": execution_state or "unknown",
+                "executionId": int(execution["id"]),
+                "staffId": staff_id,
+                "companyId": int(staff["company_id"]),
+                "idempotentReplay": True,
+                "detail": "Execution is not resumable",
+            }
+        )
+    result = await staff_onboarding_workflow_service.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=int(staff["company_id"]),
+        staff_id=staff_id,
+        execution_id=int(execution["id"]),
+        initiated_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.workflow.operator.resume",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(staff["company_id"]),
+            "execution_id": int(execution["id"]),
+            "reason": (payload.reason if payload else None),
+            "idempotency_key": (idempotency_key or "").strip() or None,
+            "replay_key": _execution_action_replay_key(staff_id, int(execution["id"]), "resume", idempotency_key),
+            "result_state": result.get("state"),
+        },
+    )
+    return StaffWorkflowManualActionResponse.model_validate(
+        {
+            "state": str(result.get("state") or "requested"),
+            "executionId": int(execution["id"]),
+            "staffId": staff_id,
+            "companyId": int(staff["company_id"]),
+            "idempotentReplay": False,
+            "detail": "Workflow resume requested",
+        }
+    )
+
+
+@router.post(
+    "/{staff_id}/workflow/force-complete-step",
+    response_model=StaffWorkflowManualActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def force_complete_staff_workflow_step(
+    staff_id: int,
+    payload: StaffWorkflowManualActionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=255),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(require_super_admin),
+):
+    staff, execution = await _get_staff_execution_or_404(staff_id)
+    step_name = str(payload.step_name or execution.get("current_step") or "").strip()
+    if ":" in step_name:
+        step_name = step_name.split(":", 1)[1].strip()
+    if not step_name or step_name in {"failed", "completed", "queued"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A valid stepName is required")
+    await staff_workflow_repo.append_step_log(
+        execution_id=int(execution["id"]),
+        step_name=step_name,
+        status="success",
+        attempt=1,
+        request_payload={"operator_forced": True, "reason": payload.reason},
+        response_payload={"forced_complete": True},
+    )
+    result = await staff_onboarding_workflow_service.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=int(staff["company_id"]),
+        staff_id=staff_id,
+        execution_id=int(execution["id"]),
+        initiated_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.workflow.operator.force_complete_step",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(staff["company_id"]),
+            "execution_id": int(execution["id"]),
+            "step_name": step_name,
+            "reason": payload.reason,
+            "idempotency_key": (idempotency_key or "").strip() or None,
+            "replay_key": _execution_action_replay_key(staff_id, int(execution["id"]), f"force_complete_step:{step_name}", idempotency_key),
+            "result_state": result.get("state"),
+        },
+    )
+    return StaffWorkflowManualActionResponse.model_validate(
+        {
+            "state": str(result.get("state") or "requested"),
+            "executionId": int(execution["id"]),
+            "staffId": staff_id,
+            "companyId": int(staff["company_id"]),
+            "idempotentReplay": False,
+            "detail": f"Step '{step_name}' force-completed",
+        }
     )
 
 
