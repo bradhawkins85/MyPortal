@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.api_keys import require_api_key
@@ -104,15 +104,32 @@ def _external_confirmation_fingerprint(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _encode_staff_cursor(updated_at: datetime | str | None, staff_id: int | None) -> str | None:
+    if updated_at is None or staff_id is None:
+        return None
+    if isinstance(updated_at, datetime):
+        timestamp = updated_at.isoformat()
+    else:
+        timestamp = str(updated_at).strip()
+    if not timestamp:
+        return None
+    return f"{timestamp}|{int(staff_id)}"
+
+
 @router.get("", response_model=list[StaffResponse])
 async def list_staff(
+    response: Response,
     company_id: int | None = Query(default=None, alias="companyId"),
     account_action: str | None = Query(default=None, alias="accountAction"),
     email: str | None = None,
     onboarding_complete: bool | None = Query(default=None, alias="onboardingComplete"),
     onboarding_status: str | None = Query(default=None, alias="onboardingStatus"),
+    offboarding_complete: bool | None = Query(default=None, alias="offboardingComplete"),
+    offboarding_status: str | None = Query(default=None, alias="offboardingStatus"),
     created_after: datetime | None = Query(default=None, alias="createdAfter"),
     updated_after: datetime | None = Query(default=None, alias="updatedAfter"),
+    offboarding_requested_after: datetime | None = Query(default=None, alias="offboardingRequestedAfter"),
+    offboarding_updated_after: datetime | None = Query(default=None, alias="offboardingUpdatedAfter"),
     cursor: str | None = Query(default=None, alias="cursor"),
     page_size: int | None = Query(default=200, alias="pageSize", ge=1, le=500),
     _: None = Depends(require_database),
@@ -138,16 +155,31 @@ async def list_staff(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient permissions to list staff"
                 )
+        safe_page_size = max(1, min(int(page_size or 200), 500))
         records = await staff_repo.list_staff(
             company_id,
             enabled=True,
             onboarding_complete=onboarding_complete,
             onboarding_status=onboarding_status,
+            offboarding_complete=offboarding_complete,
+            offboarding_status=offboarding_status,
             created_after=created_after,
             updated_after=updated_after,
+            offboarding_requested_after=offboarding_requested_after,
+            offboarding_updated_after=offboarding_updated_after,
             cursor=cursor,
-            page_size=page_size,
+            page_size=safe_page_size + 1,
         )
+        has_more = len(records) > safe_page_size
+        page_records = records[:safe_page_size]
+        next_cursor = None
+        if has_more and page_records:
+            last_record = page_records[-1]
+            next_cursor = _encode_staff_cursor(last_record.get("updated_at"), last_record.get("id"))
+        response.headers["X-Has-More"] = "true" if has_more else "false"
+        if next_cursor:
+            response.headers["X-Next-Cursor"] = next_cursor
+        records = page_records
     else:
         # Listing all staff requires super admin
         if not current_user.get("is_super_admin", False):

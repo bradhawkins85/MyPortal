@@ -114,8 +114,12 @@ async def list_staff(
     exclude_ex_staff: bool = False,
     onboarding_complete: bool | None = None,
     onboarding_status: str | None = None,
+    offboarding_complete: bool | None = None,
+    offboarding_status: str | None = None,
     created_after: datetime | None = None,
     updated_after: datetime | None = None,
+    offboarding_requested_after: datetime | None = None,
+    offboarding_updated_after: datetime | None = None,
     cursor: str | None = None,
     page_size: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -132,12 +136,33 @@ async def list_staff(
     if onboarding_status:
         conditions.append("LOWER(s.onboarding_status) = LOWER(%s)")
         params.append(str(onboarding_status).strip())
+    if offboarding_complete is not None:
+        if offboarding_complete:
+            conditions.append("LOWER(s.onboarding_status) = 'offboarding_completed'")
+        else:
+            conditions.append("LOWER(s.onboarding_status) LIKE 'offboarding_%'")
+            conditions.append("LOWER(s.onboarding_status) <> 'offboarding_completed'")
+    if offboarding_status:
+        clean_offboarding_status = str(offboarding_status).strip().lower()
+        if clean_offboarding_status.startswith("offboarding_"):
+            conditions.append("LOWER(s.onboarding_status) = %s")
+            params.append(clean_offboarding_status)
+        else:
+            conditions.append("LOWER(s.onboarding_status) = %s")
+            params.append(f"offboarding_{clean_offboarding_status}")
     if created_after is not None:
         conditions.append("s.created_at > %s")
         params.append(_coerce_datetime(created_after))
     if updated_after is not None:
         conditions.append("s.updated_at > %s")
         params.append(_coerce_datetime(updated_after))
+    if offboarding_requested_after is not None:
+        conditions.append("s.date_offboarded > %s")
+        params.append(_coerce_datetime(offboarding_requested_after))
+    if offboarding_updated_after is not None:
+        conditions.append("s.updated_at > %s")
+        params.append(_coerce_datetime(offboarding_updated_after))
+        conditions.append("LOWER(s.onboarding_status) LIKE 'offboarding_%'")
     decoded_cursor = _decode_staff_cursor(cursor)
     if decoded_cursor is not None:
         cursor_updated_at, cursor_staff_id = decoded_cursor
