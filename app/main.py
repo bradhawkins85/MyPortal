@@ -9039,11 +9039,15 @@ def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, A
     return validated.model_dump(mode="python")
 
 
-def _normalise_workflow_policy_response(policy: dict[str, Any]) -> dict[str, Any]:
+def _normalise_workflow_policy_response(
+    policy: dict[str, Any],
+    *,
+    default_workflow_key: str = staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+) -> dict[str, Any]:
     config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
     return {
         "company_id": int(policy.get("company_id") or 0),
-        "workflow_key": str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_WORKFLOW_KEY),
+        "workflow_key": str(policy.get("workflow_key") or default_workflow_key),
         "enabled": bool(policy.get("is_enabled", True)),
         "max_retries": max(0, int(policy.get("max_retries") or 0)),
         "config_json": _normalise_workflow_config(config),
@@ -9227,10 +9231,16 @@ async def staff_offboarding_workflow_policy(request: Request):
         return redirect
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
-    policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+    policy = await staff_workflow_repo.get_company_workflow_policy(
+        company_id,
+        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+    )
     return JSONResponse(
         {
-            "policy": _normalise_workflow_policy_response(policy),
+            "policy": _normalise_workflow_policy_response(
+                policy,
+                default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+            ),
             "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
             "step_catalog": _OFFBOARDING_STEP_CATALOG,
         }
@@ -9254,19 +9264,33 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
     policy_input = await _extract_workflow_policy_payload(request)
     updated = await staff_workflow_repo.upsert_company_workflow_policy(
         company_id=company_id,
-        workflow_key=policy_input.workflow_key or staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+        workflow_key=policy_input.workflow_key or "",
         is_enabled=bool(policy_input.enabled),
         max_retries=int(policy_input.max_retries),
         config=policy_input.config,
+        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
     )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
         action="staff.workflows.offboarding.policy.upserted",
         entity_type="company",
         entity_id=company_id,
-        metadata={"policy": _normalise_workflow_policy_response(updated)},
+        metadata={
+            "policy": _normalise_workflow_policy_response(
+                updated,
+                default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+            )
+        },
     )
-    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated)})
+    return JSONResponse(
+        {
+            "success": True,
+            "policy": _normalise_workflow_policy_response(
+                updated,
+                default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+            ),
+        }
+    )
 
 
 @app.post("/staff", response_class=HTMLResponse)
@@ -9632,7 +9656,10 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         },
     )
 
-    policy = await staff_workflow_repo.get_company_workflow_policy(int(updated["company_id"]))
+    policy = await staff_workflow_repo.get_company_workflow_policy(
+        int(updated["company_id"]),
+        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+    )
     scheduled_for_utc, normalized_timezone = staff_onboarding_workflow_service._compute_scheduled_execution(
         staff=updated,
         direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
@@ -9641,7 +9668,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     await staff_workflow_repo.create_or_reset_execution(
         company_id=int(updated["company_id"]),
         staff_id=staff_id,
-        workflow_key=str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_WORKFLOW_KEY),
+        workflow_key=str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY),
         direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
         scheduled_for_utc=scheduled_for_utc,
         requested_timezone=normalized_timezone,
