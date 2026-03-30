@@ -11172,7 +11172,10 @@ def _parse_staff_custom_field_condition(
     if operator in {"is_checked", "is_not_checked"}:
         normalized_condition_value = None
     if operator in {"equals", "not_equals"} and not normalized_condition_value:
-        return None, None, None
+        # Treat empty equals/not-equals conditions as checkbox-style toggles so
+        # parent-linked fields still behave predictably when no value is provided.
+        fallback_operator = "is_checked" if operator == "equals" else "is_not_checked"
+        return parent_name, fallback_operator, None
     return parent_name, operator, normalized_condition_value or None
 
 
