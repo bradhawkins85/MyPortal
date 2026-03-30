@@ -8941,6 +8941,16 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Applies reversible profile cleanup and can revoke sign-in sessions.",
     },
     {
+        "type": "m365_remove_teams_group_member",
+        "name": "Remove from Teams groups",
+        "description": "Removes the staff member from one or more Teams/M365 groups using object IDs.",
+    },
+    {
+        "type": "m365_remove_sharepoint_site_member",
+        "name": "Remove from SharePoint sites",
+        "description": "Removes the staff member from one or more SharePoint sites using Graph site IDs.",
+    },
+    {
         "type": "send_welcome_email",
         "name": "Send welcome email",
         "description": "Sends a templated email to configured destination(s). Supports ${vars.*} values from system and earlier steps.",
@@ -8987,6 +8997,16 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "add_to_groups",
         "name": "Add to groups",
         "description": "Adds the new staff member to required security and distribution groups.",
+    },
+    {
+        "type": "m365_add_teams_group_member",
+        "name": "Add to Teams groups",
+        "description": "Adds the new staff member to one or more Teams/M365 groups using object IDs.",
+    },
+    {
+        "type": "m365_add_sharepoint_site_member",
+        "name": "Add to SharePoint sites",
+        "description": "Adds the new staff member to one or more SharePoint sites using Graph site IDs.",
     },
     {
         "type": "set_manager",
@@ -9354,6 +9374,87 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "text",
                 "default": "",
                 "target": "hygiene_updates.mobilePhone",
+            },
+        ],
+    },
+    "m365_add_teams_group_member": {
+        "fields": [
+            {
+                "name": "group_ids_csv",
+                "label": "Teams group IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Microsoft 365 group object IDs backing Teams teams.",
+                "example": "11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222",
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+                "description": "Optional override. Defaults to the workflow staff member's M365 user ID.",
+            },
+        ],
+    },
+    "m365_remove_teams_group_member": {
+        "fields": [
+            {
+                "name": "group_ids_csv",
+                "label": "Teams group IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Microsoft 365 group object IDs to remove the user from.",
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "m365_add_sharepoint_site_member": {
+        "fields": [
+            {
+                "name": "site_ids_csv",
+                "label": "SharePoint site IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Graph site IDs to grant access to.",
+                "example": "contoso.sharepoint.com,12345678-aaaa-bbbb-cccc-1234567890ab,11111111-2222-3333-4444-555555555555",
+            },
+            {
+                "name": "site_role",
+                "label": "SharePoint role",
+                "type": "select",
+                "default": "write",
+                "options": [
+                    {"value": "write", "label": "Edit (write)"},
+                    {"value": "read", "label": "Read"},
+                ],
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "m365_remove_sharepoint_site_member": {
+        "fields": [
+            {
+                "name": "site_ids_csv",
+                "label": "SharePoint site IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Graph site IDs to remove access from.",
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
             },
         ],
     },
