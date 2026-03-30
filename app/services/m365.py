@@ -2400,10 +2400,24 @@ def _coerce_exo_string(value: Any) -> str:
     """Coerce an Exchange Online REST API value to a plain string.
 
     The InvokeCommand endpoint may serialize simple string properties as a
-    plain JSON string or as a nested object (``{"value": "..."}``).
+    plain JSON string or as a nested object (for example
+    ``{"value": "..."}``, ``{"RawIdentity": "..."}``, or principal-like
+    objects that expose ``UserPrincipalName``/``PrimarySmtpAddress``).
     """
     if isinstance(value, dict):
-        value = value.get("value") or value.get("RawIdentity") or ""
+        value = (
+            value.get("value")
+            or value.get("RawIdentity")
+            or value.get("UserPrincipalName")
+            or value.get("userPrincipalName")
+            or value.get("PrimarySmtpAddress")
+            or value.get("primarySmtpAddress")
+            or value.get("WindowsLiveID")
+            or value.get("windowsLiveID")
+            or value.get("Name")
+            or value.get("name")
+            or ""
+        )
     return str(value or "").strip()
 
 
