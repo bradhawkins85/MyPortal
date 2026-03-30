@@ -378,6 +378,132 @@ async def deny_staff_request(
     return StaffResponse.model_validate(updated)
 
 
+@router.post("/{staff_id}/offboarding/approve", response_model=StaffResponse)
+async def approve_staff_offboarding(
+    staff_id: int,
+    payload: StaffApprovalDecision,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(require_super_admin),
+):
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+
+    if str(staff.get("account_action") or "").strip().lower() != "offboard requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending offboarding request for this staff member",
+        )
+
+    decision_notes = str(payload.comment or payload.reason or "").strip() or None
+    updated = await staff_repo.update_staff(
+        staff_id,
+        company_id=staff["company_id"],
+        first_name=staff["first_name"],
+        last_name=staff["last_name"],
+        email=staff["email"],
+        mobile_phone=staff.get("mobile_phone"),
+        date_onboarded=staff.get("date_onboarded"),
+        date_offboarded=staff.get("date_offboarded"),
+        enabled=False,
+        is_ex_staff=True,
+        street=staff.get("street"),
+        city=staff.get("city"),
+        state=staff.get("state"),
+        postcode=staff.get("postcode"),
+        country=staff.get("country"),
+        department=staff.get("department"),
+        job_title=staff.get("job_title"),
+        org_company=staff.get("org_company"),
+        manager_name=staff.get("manager_name"),
+        account_action="Offboarded",
+        syncro_contact_id=staff.get("syncro_contact_id"),
+        onboarding_status=staff.get("onboarding_status"),
+        onboarding_complete=bool(staff.get("onboarding_complete", False)),
+        onboarding_completed_at=staff.get("onboarding_completed_at"),
+        approval_status="approved",
+        approved_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        approved_at=datetime.now(tz=timezone.utc),
+        approval_notes=decision_notes,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.offboarding.approved",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(updated["company_id"]),
+            "decision_notes": decision_notes,
+        },
+    )
+    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    return StaffResponse.model_validate(updated)
+
+
+@router.post("/{staff_id}/offboarding/deny", response_model=StaffResponse)
+async def deny_staff_offboarding(
+    staff_id: int,
+    payload: StaffApprovalDecision,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(require_super_admin),
+):
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+
+    if str(staff.get("account_action") or "").strip().lower() != "offboard requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending offboarding request for this staff member",
+        )
+
+    decision_notes = str(payload.reason or payload.comment or "").strip()
+    if not decision_notes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deny reason is required")
+    updated = await staff_repo.update_staff(
+        staff_id,
+        company_id=staff["company_id"],
+        first_name=staff["first_name"],
+        last_name=staff["last_name"],
+        email=staff["email"],
+        mobile_phone=staff.get("mobile_phone"),
+        date_onboarded=staff.get("date_onboarded"),
+        date_offboarded=None,
+        enabled=bool(staff.get("enabled", True)),
+        is_ex_staff=bool(staff.get("is_ex_staff", False)),
+        street=staff.get("street"),
+        city=staff.get("city"),
+        state=staff.get("state"),
+        postcode=staff.get("postcode"),
+        country=staff.get("country"),
+        department=staff.get("department"),
+        job_title=staff.get("job_title"),
+        org_company=staff.get("org_company"),
+        manager_name=staff.get("manager_name"),
+        account_action=None,
+        syncro_contact_id=staff.get("syncro_contact_id"),
+        onboarding_status=staff.get("onboarding_status"),
+        onboarding_complete=bool(staff.get("onboarding_complete", False)),
+        onboarding_completed_at=staff.get("onboarding_completed_at"),
+        approval_status="denied",
+        approved_by_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        approved_at=datetime.now(tz=timezone.utc),
+        approval_notes=decision_notes,
+    )
+    await audit_service.log_action(
+        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        action="staff.offboarding.denied",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(updated["company_id"]),
+            "decision_notes": decision_notes,
+        },
+    )
+    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    return StaffResponse.model_validate(updated)
+
+
 async def _confirm_external_checkpoint(
     staff_id: int,
     payload: StaffExternalCheckpointCallback,
