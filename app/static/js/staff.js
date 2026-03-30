@@ -171,9 +171,107 @@
     return actual === expected;
   }
 
+  function parseConditionalSelectOptions(rawValue) {
+    const rawText = String(rawValue || '').trim();
+    if (!rawText) {
+      return null;
+    }
+    const separatorNormalized = rawText.replace(/\r?\n/g, ';');
+    const chunks = separatorNormalized.split(';').map((entry) => entry.trim()).filter(Boolean);
+    if (!chunks.length) {
+      return null;
+    }
+
+    const matchToOptions = new Map();
+    let fallbackOptions = null;
+
+    chunks.forEach((chunk) => {
+      const arrowIndex = chunk.indexOf('=>');
+      if (arrowIndex < 0) {
+        return;
+      }
+      const rawMatch = normalizeValue(chunk.slice(0, arrowIndex));
+      const rawOptions = chunk.slice(arrowIndex + 2).trim();
+      if (!rawOptions) {
+        return;
+      }
+      const parsedOptions = rawOptions
+        .split('|')
+        .map((option) => option.trim())
+        .filter(Boolean);
+      if (!parsedOptions.length) {
+        return;
+      }
+
+      if (rawMatch === '*' || rawMatch === 'fallback') {
+        if (!fallbackOptions) {
+          fallbackOptions = parsedOptions;
+        }
+        return;
+      }
+
+      if (!rawMatch || matchToOptions.has(rawMatch)) {
+        return;
+      }
+      matchToOptions.set(rawMatch, parsedOptions);
+    });
+
+    if (!matchToOptions.size && !fallbackOptions) {
+      return null;
+    }
+
+    return {
+      matchToOptions,
+      fallbackOptions,
+    };
+  }
+
+  function updateMappedSelectOptions({
+    selectInput,
+    expectedMatch,
+    optionMap,
+    fallbackOptions,
+    allOptions,
+    fieldLabel,
+  }) {
+    if (!selectInput) {
+      return false;
+    }
+    const normalizedParentValue = normalizeValue(expectedMatch);
+    const desiredValues = optionMap.get(normalizedParentValue) || fallbackOptions || [];
+    const availableValues = new Set(desiredValues.map((value) => normalizeValue(value)));
+    const matchingOptions = allOptions.filter((option) => availableValues.has(normalizeValue(option.value)));
+    const currentValue = normalizeValue(selectInput.value);
+
+    while (selectInput.firstChild) {
+      selectInput.removeChild(selectInput.firstChild);
+    }
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = `Select ${String(fieldLabel || '').toLowerCase() || 'an option'}`;
+    selectInput.appendChild(placeholder);
+
+    matchingOptions.forEach((option) => {
+      const optionElement = document.createElement('option');
+      optionElement.value = option.value;
+      optionElement.textContent = option.label || option.value;
+      selectInput.appendChild(optionElement);
+    });
+
+    if (matchingOptions.some((option) => normalizeValue(option.value) === currentValue)) {
+      selectInput.value = currentValue;
+    } else {
+      selectInput.value = '';
+    }
+
+    return matchingOptions.length > 0;
+  }
+
   function initCustomFieldConditionals({
     wrappers,
     getInputByName,
+    getFieldDefinitionByName,
   }) {
     if (!Array.isArray(wrappers) || wrappers.length === 0) {
       return;
@@ -185,9 +283,27 @@
         const operator = wrapper.dataset.conditionOperator || '';
         const expected = wrapper.dataset.conditionValue || '';
         const parentInput = parentName ? getInputByName(parentName) : null;
-        const shouldShow = !parentName
+        const selectInput = wrapper.querySelector('select');
+        const fieldName = wrapper.dataset.customFieldName || '';
+        const fieldDefinition = fieldName ? getFieldDefinitionByName(fieldName) : null;
+        const mappedOptions = operator === 'select_map'
+          ? parseConditionalSelectOptions(expected)
+          : null;
+        let shouldShow = !parentName
           ? true
           : (parentInput ? evaluateCondition(parentInput, operator, expected) : false);
+        if (mappedOptions && selectInput && parentInput && fieldDefinition) {
+          const fieldLabel = fieldDefinition.display_name || fieldDefinition.name || fieldName;
+          const hasVisibleOptions = updateMappedSelectOptions({
+            selectInput,
+            expectedMatch: getInputCurrentValue(parentInput),
+            optionMap: mappedOptions.matchToOptions,
+            fallbackOptions: mappedOptions.fallbackOptions,
+            allOptions: Array.isArray(fieldDefinition.options) ? fieldDefinition.options : [],
+            fieldLabel,
+          });
+          shouldShow = hasVisibleOptions;
+        }
         wrapper.hidden = !shouldShow;
         wrapper.querySelectorAll('input, select, textarea').forEach((input) => {
           input.disabled = !shouldShow;
@@ -370,6 +486,9 @@
       initCustomFieldConditionals({
         wrappers: addWrappers,
         getInputByName: (name) => addForm.querySelector(`[name="${name}"]`),
+        getFieldDefinitionByName: (name) => (
+          customFieldDefinitions.find((field) => field && field.name === name) || null
+        ),
       });
     }
 
@@ -381,6 +500,9 @@
           const entry = editCustomFieldInputs.get(name);
           return entry && entry.input ? entry.input : null;
         },
+        getFieldDefinitionByName: (name) => (
+          customFieldDefinitions.find((field) => field && field.name === name) || null
+        ),
       });
     }
 
