@@ -1,4 +1,5 @@
 (function () {
+  const actionPayloadEditor = window.MyPortalActionPayloadEditor || null;
   let taskModal = null;
   let logsModal = null;
   let activeTaskContext = { id: '', name: '' };
@@ -1869,64 +1870,33 @@
         }
         let payload = {};
         if (payloadMode === 'schema') {
-          const schemaFields = Array.from(row.querySelectorAll('[data-action-schema-field]'));
-          const parsedPayload = {};
-          for (const field of schemaFields) {
-            const fieldName = field.dataset.fieldName || '';
-            const fieldType = (field.dataset.fieldType || 'string').toLowerCase();
-            const required = field.dataset.required === 'true';
-            const rawValue = fieldType === 'boolean' ? String(field.checked) : field.value.trim();
-            if (required && !rawValue) {
-              errorMessage = `Trigger action ${index + 1} requires '${fieldName}'.`;
-              firstErrorRow = row;
-              return;
-            }
-            if (!rawValue && fieldType !== 'boolean') {
-              continue;
-            }
-            if (fieldType === 'integer') {
-              const parsed = parseInt(rawValue, 10);
-              if (Number.isNaN(parsed)) {
-                errorMessage = `Trigger action ${index + 1} field '${fieldName}' must be an integer.`;
-                firstErrorRow = row;
-                return;
-              }
-              parsedPayload[fieldName] = parsed;
-            } else if (fieldType === 'number') {
-              const parsed = Number(rawValue);
-              if (Number.isNaN(parsed)) {
-                errorMessage = `Trigger action ${index + 1} field '${fieldName}' must be a number.`;
-                firstErrorRow = row;
-                return;
-              }
-              parsedPayload[fieldName] = parsed;
-            } else if (fieldType === 'boolean') {
-              parsedPayload[fieldName] = !!field.checked;
-            } else if (fieldType === 'json') {
-              try {
-                parsedPayload[fieldName] = JSON.parse(rawValue);
-              } catch (error) {
-                errorMessage = `Trigger action ${index + 1} field '${fieldName}' must be valid JSON.`;
-                firstErrorRow = row;
-                return;
-              }
-            } else {
-              parsedPayload[fieldName] = rawValue;
-            }
-          }
-          payload = parsedPayload;
-        } else if (payloadText) {
-          try {
-            const parsed = JSON.parse(payloadText);
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-              throw new Error('Invalid payload');
-            }
-            payload = parsed;
-          } catch (error) {
-            errorMessage = `Trigger action ${index + 1} payload must be valid JSON.`;
+          const parsedPayload = actionPayloadEditor
+            ? actionPayloadEditor.parseSchemaFields({
+              container: row,
+              rowIndex: index,
+              errorPrefix: 'Trigger action',
+            })
+            : { ok: true, payload: {} };
+          if (!parsedPayload.ok) {
+            errorMessage = parsedPayload.error;
             firstErrorRow = row;
             return;
           }
+          payload = parsedPayload.payload;
+        } else {
+          const parsedPayload = actionPayloadEditor
+            ? actionPayloadEditor.parseRawPayload({
+              text: payloadText,
+              rowIndex: index,
+              errorPrefix: 'Trigger action',
+            })
+            : { ok: true, payload: {} };
+          if (!parsedPayload.ok) {
+            errorMessage = parsedPayload.error;
+            firstErrorRow = row;
+            return;
+          }
+          payload = parsedPayload.payload;
         }
         if (validateNotes) {
           const isNew = row.dataset.actionLoaded !== 'true';
@@ -2194,88 +2164,28 @@
         rawContainer.appendChild(payloadInput);
 
         const buildSchemaFields = (moduleSlug, existingPayload) => {
-          schemaContainer.textContent = '';
           const moduleMeta = moduleBySlug.get(moduleSlug);
           const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
-          const fields = schema && Array.isArray(schema.fields) ? schema.fields : [];
-          if (!fields.length) {
+          if (!actionPayloadEditor) {
+            schemaContainer.textContent = '';
             return false;
           }
-          fields.forEach((fieldDef) => {
-            const fieldName = String(fieldDef.name || '').trim();
-            if (!fieldName) {
-              return;
-            }
-            const fieldType = String(fieldDef.type || 'string').toLowerCase();
-            const wrapper = document.createElement('div');
-            wrapper.className = 'form-field';
-            const label = document.createElement('label');
-            label.className = 'form-label';
-            label.textContent = String(fieldDef.label || fieldName);
-            const inputId = `automation-action-${rowId}-${fieldName}`;
-            label.setAttribute('for', inputId);
-            let input;
-            if (fieldType === 'boolean') {
-              input = document.createElement('input');
-              input.type = 'checkbox';
-              input.className = 'form-checkbox';
-              const value = existingPayload && Object.prototype.hasOwnProperty.call(existingPayload, fieldName)
-                ? !!existingPayload[fieldName]
-                : false;
-              input.checked = value;
-            } else if (fieldType === 'json') {
-              input = document.createElement('textarea');
-              input.rows = 3;
-              input.className = 'form-input';
-              const value = existingPayload ? existingPayload[fieldName] : undefined;
-              input.value = value !== undefined ? JSON.stringify(value, null, 2) : '';
-              input.placeholder = String(fieldDef.placeholder || '{}');
-            } else if (fieldDef.enum && Array.isArray(fieldDef.enum)) {
-              input = document.createElement('select');
-              input.className = 'form-input';
-              const empty = document.createElement('option');
-              empty.value = '';
-              empty.textContent = 'Select value';
-              input.appendChild(empty);
-              fieldDef.enum.forEach((enumValue) => {
-                const opt = document.createElement('option');
-                opt.value = String(enumValue);
-                opt.textContent = String(enumValue);
-                input.appendChild(opt);
-              });
-              const value = existingPayload ? existingPayload[fieldName] : undefined;
-              if (value !== undefined && value !== null) {
-                input.value = String(value);
-              }
-            } else {
-              input = document.createElement('input');
-              input.type = fieldType === 'integer' || fieldType === 'number' ? 'number' : 'text';
-              input.className = 'form-input';
-              const value = existingPayload ? existingPayload[fieldName] : undefined;
-              input.value = value !== undefined && value !== null ? String(value) : '';
-              if (fieldDef.placeholder) {
-                input.placeholder = String(fieldDef.placeholder);
-              }
-            }
-            input.id = inputId;
-            input.dataset.actionSchemaField = 'true';
-            input.dataset.fieldName = fieldName;
-            input.dataset.fieldType = fieldType;
-            input.dataset.required = fieldDef.required ? 'true' : 'false';
-            input.addEventListener(fieldType === 'boolean' ? 'change' : 'input', updateState);
-            wrapper.appendChild(label);
-            wrapper.appendChild(input);
-            schemaContainer.appendChild(wrapper);
+          const result = actionPayloadEditor.buildSchemaFields({
+            container: schemaContainer,
+            schema,
+            existingPayload,
+            idPrefix: `automation-action-${rowId}`,
+            onValueChange: updateState,
           });
-          return true;
+          return result.hasSchema;
         };
 
         const applyPayloadMode = () => {
           const moduleSlug = moduleSelect.value;
           const moduleMeta = moduleBySlug.get(moduleSlug);
           const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
-          const schemaFields = schema && Array.isArray(schema.fields) ? schema.fields : [];
-          const schemaFieldNames = new Set(schemaFields.map((field) => String(field.name || '').trim()).filter(Boolean));
+          const schemaFields = actionPayloadEditor ? actionPayloadEditor.getSchemaFields(schema) : [];
+          const schemaFieldNames = new Set(schemaFields.map((field) => field.name));
           let existingPayload = {};
           try {
             existingPayload = payloadInput.value.trim() ? JSON.parse(payloadInput.value) : {};
@@ -2294,7 +2204,9 @@
           }
           payloadModeSelect.disabled = false;
           modeSchema.disabled = false;
-          const hasUnknownKeys = Object.keys(existingPayload).some((key) => !schemaFieldNames.has(key));
+          const hasUnknownKeys = actionPayloadEditor
+            ? actionPayloadEditor.hasUnknownKeys(existingPayload, schemaFieldNames)
+            : false;
           const preferredMode =
             row.dataset.actionPayloadMode === 'raw' || hasUnknownKeys ? 'raw' : 'schema';
           payloadModeSelect.value = preferredMode;
