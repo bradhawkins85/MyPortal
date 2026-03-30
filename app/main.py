@@ -8614,9 +8614,8 @@ async def staff_page(
     membership_permissions = set((membership or {}).get("combined_permissions") or (membership or {}).get("permissions") or [])
     can_approve_onboarding = bool(
         is_super_admin
-        or is_admin
-        or "company.admin" in membership_permissions
-        or "staff.approve" in membership_permissions
+        or "staff.manage" in membership_permissions
+        or bool(membership and membership.get("can_manage_staff"))
     )
 
     enabled_value = enabled.strip()
