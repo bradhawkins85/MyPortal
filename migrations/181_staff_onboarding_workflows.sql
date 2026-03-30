@@ -1,7 +1,7 @@
 -- Migration 181: Company-scoped staff onboarding workflow policies and execution tracking
 
 ALTER TABLE companies
-    ADD COLUMN IF NOT EXISTS company_onboarding_workflow_id VARCHAR(128) NULL AFTER onboarding_fields;
+    ADD COLUMN IF NOT EXISTS company_onboarding_workflow_id VARCHAR(128) NULL;
 
 CREATE TABLE IF NOT EXISTS company_onboarding_workflow_policies (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
