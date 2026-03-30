@@ -1,10 +1,10 @@
 -- Migration 189: External confirmation checkpoints for staff onboarding workflows
 
 CREATE TABLE IF NOT EXISTS staff_onboarding_external_checkpoints (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    execution_id BIGINT UNSIGNED NOT NULL,
-    company_id BIGINT UNSIGNED NOT NULL,
-    staff_id BIGINT UNSIGNED NOT NULL,
+    id INT NOT NULL AUTO_INCREMENT,
+    execution_id INT NOT NULL,
+    company_id INT NOT NULL,
+    staff_id INT NOT NULL,
     confirmation_token_hash CHAR(64) NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'pending',
     source VARCHAR(128) NULL,
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS staff_onboarding_external_checkpoints (
     proof_reference_id VARCHAR(255) NULL,
     payload_hash VARCHAR(128) NULL,
     callback_payload_json LONGTEXT NULL,
-    confirmed_by_api_key_id BIGINT UNSIGNED NULL,
+    confirmed_by_api_key_id INT NULL,
     confirmed_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
