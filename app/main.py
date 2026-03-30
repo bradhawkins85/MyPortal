@@ -14,6 +14,7 @@ from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urlencode
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiomysql
 import httpx
@@ -1181,6 +1182,40 @@ def _parse_input_datetime(value: str | None, *, assume_midnight: bool = False) -
     else:
         parsed = parsed.astimezone(timezone.utc)
     return parsed
+
+
+def _resolve_timezone(value: str | None) -> tuple[ZoneInfo | None, str | None]:
+    zone_name = str(value or "").strip()
+    if not zone_name:
+        return None, None
+    try:
+        return ZoneInfo(zone_name), zone_name
+    except ZoneInfoNotFoundError:
+        return None, None
+
+
+def _raw_value_includes_time(value: str | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(re.search(r"\d{1,2}:\d{2}", text))
+
+
+def _parse_local_datetime_to_utc(
+    value: str | None,
+    *,
+    timezone_name: str | None = None,
+    assume_midnight: bool = False,
+) -> datetime | None:
+    parsed = _parse_input_datetime(value, assume_midnight=assume_midnight)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc)
+    local_zone, _normalized_timezone = _resolve_timezone(timezone_name)
+    if local_zone is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.replace(tzinfo=local_zone).astimezone(timezone.utc)
 
 
 def _parse_bool(value: Any, *, default: bool = False) -> bool:
@@ -8850,7 +8885,18 @@ async def create_staff_member(request: Request):
         )
 
     mobile_phone = str(values.get("mobile_phone") or "").strip() or None
-    date_onboarded = values.get("date_onboarded")
+    raw_date_onboarded = str(submitted.get("date_onboarded") or "").strip()
+    submitted_timezone = str(
+        submitted.get("browser_timezone")
+        or submitted.get("onboarding_timezone")
+        or submitted.get("date_onboarded_timezone")
+        or ""
+    ).strip() or None
+    date_onboarded = _parse_local_datetime_to_utc(
+        raw_date_onboarded,
+        timezone_name=submitted_timezone,
+        assume_midnight=True,
+    )
     enabled = bool(values.get("enabled", True))
     department = str(values.get("department") or "").strip() or None
 
@@ -8914,6 +8960,10 @@ async def create_staff_member(request: Request):
             "onboarding_status": created.get("onboarding_status"),
             "approval_status": created.get("approval_status"),
             "approver_user_ids": approver_user_ids,
+            "onboarding_input": {
+                "date_onboarded_local": raw_date_onboarded or None,
+                "timezone": submitted_timezone,
+            },
         },
     )
 
@@ -9086,12 +9136,21 @@ async def request_staff_offboarding(staff_id: int, request: Request):
 
     payload = await request.json()
     reason = str(payload.get("reason") or "").strip()
-    requested_at = _parse_input_datetime(payload.get("requestedAt", payload.get("requested_at")))
+    requested_at_raw = str(payload.get("requestedAt", payload.get("requested_at")) or "").strip()
     requested_timezone = str(payload.get("requestedTimezone") or payload.get("requested_timezone") or "").strip() or None
+    requested_at = _parse_local_datetime_to_utc(
+        requested_at_raw,
+        timezone_name=requested_timezone,
+    )
     notes = str(payload.get("notes") or "").strip() or None
 
     if not reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reason is required")
+    if not requested_at_raw or not _raw_value_includes_time(requested_at_raw):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Requested offboarding date and time are both required",
+        )
     if requested_at is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -9145,6 +9204,10 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             "requested_offboarding_at": updated.get("date_offboarded"),
             "reason": reason,
             "notes": notes,
+            "requested_offboarding_input": {
+                "requested_at_local": requested_at_raw,
+                "timezone": requested_timezone,
+            },
         },
     )
 

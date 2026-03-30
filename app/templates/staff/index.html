@@ -16,6 +16,7 @@
       <div class="card-collapsible__content">
         <form action="/staff" method="post" class="staff-form">
           {% include "partials/csrf.html" %}
+          <input type="hidden" name="browser_timezone" value="" />
           {% for field in staff_field_config %}
             {% if field.visible %}
               {% if field.type == 'checkbox' %}
