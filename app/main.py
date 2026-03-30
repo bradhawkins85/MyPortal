@@ -8942,6 +8942,10 @@ async def update_staff_member(staff_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
 
     def get_value(*keys: str) -> Any:
         for key in keys:
@@ -9036,6 +9040,105 @@ async def update_staff_member(staff_id: int, request: Request):
         )
 
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    return JSONResponse({"success": True, "staff": updated})
+
+
+@app.post("/api/staff/{staff_id}/offboarding/request")
+async def request_staff_offboarding(staff_id: int, request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    existing = await staff_repo.get_staff_by_id(staff_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    if not is_super_admin and existing.get("company_id") != company_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    if not bool(existing.get("enabled", False)) or bool(existing.get("is_ex_staff", False)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active staff members can be offboarding requested",
+        )
+
+    if str(existing.get("account_action") or "").strip().lower() == "offboard requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An offboarding request is already pending for this staff member",
+        )
+
+    payload = await request.json()
+    reason = str(payload.get("reason") or "").strip()
+    requested_at = _parse_input_datetime(payload.get("requestedAt", payload.get("requested_at")))
+    notes = str(payload.get("notes") or "").strip() or None
+
+    if not reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reason is required")
+    if requested_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid requested offboarding date/time is required",
+        )
+
+    request_notes = reason if not notes else f"Reason: {reason}\n\nNotes: {notes}"
+
+    updated = await staff_repo.update_staff(
+        staff_id,
+        company_id=int(existing.get("company_id") or company_id or 0),
+        first_name=existing.get("first_name") or "",
+        last_name=existing.get("last_name") or "",
+        email=existing.get("email") or "",
+        mobile_phone=existing.get("mobile_phone"),
+        date_onboarded=_parse_input_datetime(existing.get("date_onboarded")),
+        date_offboarded=requested_at,
+        enabled=bool(existing.get("enabled", True)),
+        is_ex_staff=bool(existing.get("is_ex_staff", False)),
+        street=existing.get("street"),
+        city=existing.get("city"),
+        state=existing.get("state"),
+        postcode=existing.get("postcode"),
+        country=existing.get("country"),
+        department=existing.get("department"),
+        job_title=existing.get("job_title"),
+        org_company=existing.get("org_company"),
+        manager_name=existing.get("manager_name"),
+        account_action="Offboard Requested",
+        syncro_contact_id=existing.get("syncro_contact_id"),
+        onboarding_status=existing.get("onboarding_status"),
+        onboarding_complete=bool(existing.get("onboarding_complete", False)),
+        onboarding_completed_at=existing.get("onboarding_completed_at"),
+        approval_status="pending",
+        requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_at=datetime.now(tz=timezone.utc),
+        approved_by_user_id=None,
+        approved_at=None,
+        request_notes=request_notes,
+        approval_notes=None,
+        m365_last_sign_in=_parse_input_datetime(existing.get("m365_last_sign_in")),
+    )
+
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.offboarding.requested",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(existing.get("company_id") or company_id or 0),
+            "requested_offboarding_at": updated.get("date_offboarded"),
+            "reason": reason,
+            "notes": notes,
+        },
+    )
+
     return JSONResponse({"success": True, "staff": updated})
 
 
