@@ -297,6 +297,10 @@
               <label class="form-label" for="new-custom-display-name">Label</label>
               <input class="form-input" id="new-custom-display-name" name="display_name" placeholder="Shirt size" />
             </div>
+            <div class="form-field admin-grid__full">
+              <label class="form-label" for="new-custom-help-text">Help text</label>
+              <input class="form-input" id="new-custom-help-text" name="help_text" maxlength="500" placeholder="Optional text shown below the field label on staff forms" />
+            </div>
             <div class="form-field">
               <label class="form-label" for="new-custom-field-type">Type</label>
               <select class="form-input" id="new-custom-field-type" name="field_type">
@@ -347,6 +351,7 @@
                 <tr>
                   <th>Key</th>
                   <th>Label</th>
+                  <th>Help text</th>
                   <th>Type</th>
                   <th>Group</th>
                   <th>Sort</th>
@@ -363,6 +368,7 @@
                       {% include "partials/csrf.html" %}
                       <td><code>{{ field.name }}</code></td>
                       <td><input class="form-input" name="display_name" value="{{ field.display_name or '' }}" /></td>
+                      <td><input class="form-input" name="help_text" value="{{ field.help_text or '' }}" maxlength="500" placeholder="Optional help text" /></td>
                       <td>
                         <select class="form-input" name="field_type">
                           {% for value in ['text', 'select', 'checkbox', 'date'] %}
@@ -399,7 +405,7 @@
                       </td>
                   </tr>
                 {% else %}
-                  <tr><td colspan="9" class="table__empty">No custom fields defined.</td></tr>
+                  <tr><td colspan="10" class="table__empty">No custom fields defined.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
