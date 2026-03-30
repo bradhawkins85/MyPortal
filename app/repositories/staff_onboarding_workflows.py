@@ -131,13 +131,15 @@ async def create_or_reset_execution(
     staff_id: int,
     workflow_key: str,
     direction: str = "onboarding",
+    scheduled_for_utc: datetime | None = None,
+    requested_timezone: str | None = None,
 ) -> dict[str, Any]:
     now = _utc_now_naive()
     await db.execute(
         """
         INSERT INTO staff_onboarding_workflow_executions
-            (company_id, staff_id, workflow_key, direction, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, started_at, completed_at)
-        VALUES (%s, %s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, NULL, NULL)
+            (company_id, staff_id, workflow_key, direction, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, scheduled_for_utc, requested_timezone, started_at, completed_at)
+        VALUES (%s, %s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, %s, %s, NULL, NULL)
         ON DUPLICATE KEY UPDATE
             company_id = VALUES(company_id),
             workflow_key = VALUES(workflow_key),
@@ -148,10 +150,20 @@ async def create_or_reset_execution(
             last_error = NULL,
             helpdesk_ticket_id = NULL,
             requested_at = VALUES(requested_at),
+            scheduled_for_utc = COALESCE(VALUES(scheduled_for_utc), scheduled_for_utc),
+            requested_timezone = COALESCE(VALUES(requested_timezone), requested_timezone),
             started_at = NULL,
             completed_at = NULL
         """,
-        (company_id, staff_id, workflow_key, direction, now),
+        (
+            company_id,
+            staff_id,
+            workflow_key,
+            direction,
+            now,
+            scheduled_for_utc,
+            requested_timezone,
+        ),
     )
     execution = await get_execution_by_staff_id(staff_id)
     if not execution:
@@ -231,6 +243,76 @@ async def update_execution_state(
             execution_id,
         ),
     )
+
+
+async def claim_next_due_approved_execution(*, now_utc: datetime | None = None) -> dict[str, Any] | None:
+    due_at = now_utc or _utc_now_naive()
+    due_states = ("approved", "offboarding_approved")
+    if db.is_sqlite():
+        row = await db.fetch_one(
+            """
+            SELECT *
+            FROM staff_onboarding_workflow_executions
+            WHERE state IN (?, ?)
+              AND (scheduled_for_utc IS NULL OR scheduled_for_utc <= ?)
+            ORDER BY COALESCE(scheduled_for_utc, requested_at) ASC, id ASC
+            LIMIT 1
+            """,
+            (due_states[0], due_states[1], due_at),
+        )
+        if not row:
+            return None
+        await db.execute(
+            """
+            UPDATE staff_onboarding_workflow_executions
+            SET state = 'requested', current_step = 'queued'
+            WHERE id = ?
+              AND state IN (?, ?)
+            """,
+            (row["id"], due_states[0], due_states[1]),
+        )
+        refreshed = await db.fetch_one(
+            "SELECT * FROM staff_onboarding_workflow_executions WHERE id = ?",
+            (row["id"],),
+        )
+        return _normalise_execution(refreshed)
+
+    async with db.acquire() as conn:
+        await conn.begin()
+        try:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT *
+                    FROM staff_onboarding_workflow_executions
+                    WHERE state IN (%s, %s)
+                      AND (scheduled_for_utc IS NULL OR scheduled_for_utc <= %s)
+                    ORDER BY COALESCE(scheduled_for_utc, requested_at) ASC, id ASC
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    (due_states[0], due_states[1], due_at),
+                )
+                row = await cursor.fetchone()
+                if not row:
+                    await conn.commit()
+                    return None
+                await cursor.execute(
+                    """
+                    UPDATE staff_onboarding_workflow_executions
+                    SET state = 'requested', current_step = 'queued'
+                    WHERE id = %s
+                    """,
+                    (row["id"],),
+                )
+            await conn.commit()
+            claimed = dict(row)
+            claimed["state"] = "requested"
+            claimed["current_step"] = "queued"
+            return _normalise_execution(claimed)
+        except Exception:
+            await conn.rollback()
+            raise
 
 
 async def append_step_log(

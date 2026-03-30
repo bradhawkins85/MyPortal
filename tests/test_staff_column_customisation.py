@@ -99,3 +99,16 @@ def test_first_name_column_always_visible_in_js():
     """The JS should enforce that the first-name column is always visible."""
     js_content = JS_PATH.read_text(encoding="utf-8")
     assert "'first-name'" in js_content
+
+
+def test_custom_field_column_toggle_loop_in_panel():
+    """The column panel must contain a Jinja loop for custom field toggles.
+
+    Custom fields are rendered with a ``custom-`` prefix so that their toggle
+    data-column values match the corresponding table th/td data-column values.
+    """
+    html = _template_html()
+    # The template iterates over staff_custom_field_definitions for the panel
+    assert 'staff_custom_field_definitions' in html
+    # The loop generates custom-prefixed column toggles matching the table cells
+    assert 'data-column="custom-' in html or 'data-column="custom-{{ field.name }}"' in html

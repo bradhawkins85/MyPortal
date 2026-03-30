@@ -16,6 +16,7 @@
       <div class="card-collapsible__content">
         <form action="/staff" method="post" class="staff-form">
           {% include "partials/csrf.html" %}
+          <input type="hidden" name="browser_timezone" value="" />
           {% for field in staff_field_config %}
             {% if field.visible %}
               {% if field.type == 'checkbox' %}
@@ -192,6 +193,12 @@
                 <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
                 Enabled
               </label>
+              {% for field in staff_custom_field_definitions %}
+                <label class="ticket-columns__option">
+                  <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
+                  {{ field.display_name or field.name }}
+                </label>
+              {% endfor %}
             </div>
           </div>
         </div>
@@ -250,6 +257,17 @@
                 {% endif %}
                 {% if workflow.get('current_step') %}
                   <div class="text-muted text-small">Step: {{ workflow.get('current_step')|replace('_', ' ')|title }}</div>
+                {% endif %}
+                {% if member.workflow_next_run_at %}
+                  <div class="text-muted text-small">
+                    Next run: {{ member.workflow_next_run_at }}
+                    {% if member.workflow_requested_timezone %}
+                      ({{ member.workflow_requested_timezone }})
+                    {% endif %}
+                  </div>
+                  {% if member.workflow_is_overdue %}
+                    <div class="text-danger text-small">Overdue</div>
+                  {% endif %}
                 {% endif %}
                 {% if member.account_action == 'Offboard Requested' %}
                   <span class="status-pill status-pill--pending">Offboarding Pending</span>
@@ -372,16 +390,23 @@
     <form id="staff-offboarding-form" class="form-grid">
       <input type="hidden" id="offboarding-staff-id" />
       <div class="form-field">
-        <label class="form-label" for="offboarding-reason">Reason</label>
-        <input class="form-input" id="offboarding-reason" maxlength="255" required />
+        <label class="form-label" for="offboarding-date">Offboarding date</label>
+        <input class="form-input" id="offboarding-date" type="date" required />
       </div>
       <div class="form-field">
-        <label class="form-label" for="offboarding-requested-at">Requested offboarding date &amp; time</label>
-        <input class="form-input" id="offboarding-requested-at" type="datetime-local" required />
+        <label class="form-label" for="offboarding-time">Offboarding time</label>
+        <input class="form-input" id="offboarding-time" type="time" required />
       </div>
       <div class="form-field form-field--full">
-        <label class="form-label" for="offboarding-notes">Notes (optional)</label>
-        <textarea class="form-input" id="offboarding-notes" rows="4" maxlength="2000"></textarea>
+        <button type="button" class="button button--ghost" id="offboarding-immediate">Immediate</button>
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-timezone">Timezone</label>
+        <input class="form-input" id="offboarding-timezone" maxlength="120" required />
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-reason-notes">Reason / notes</label>
+        <textarea class="form-input" id="offboarding-reason-notes" rows="4" maxlength="2000" required></textarea>
       </div>
       <div class="form-actions">
         <button type="submit" class="button">Submit request</button>

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -59,6 +60,65 @@ class LicenseExhaustionError(WorkflowStepError):
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_timezone(value: str | None) -> tuple[ZoneInfo | None, str | None]:
+    zone_name = str(value or "").strip()
+    if not zone_name:
+        return None, None
+    try:
+        return ZoneInfo(zone_name), zone_name
+    except ZoneInfoNotFoundError:
+        return None, None
+
+
+def _to_utc_naive(value: datetime, *, requested_zone: ZoneInfo | None) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    if requested_zone is not None:
+        return value.replace(tzinfo=requested_zone).astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _compute_scheduled_execution(
+    *,
+    staff: dict[str, Any],
+    direction: str,
+    requested_timezone: str | None,
+) -> tuple[datetime | None, str | None]:
+    requested_zone, requested_zone_name = _resolve_timezone(requested_timezone)
+    if direction == DIRECTION_OFFBOARDING:
+        offboard_local = _parse_datetime(staff.get("date_offboarded"))
+        if offboard_local is None:
+            return None, requested_zone_name
+        scheduled_for_utc = _to_utc_naive(offboard_local, requested_zone=requested_zone)
+        return scheduled_for_utc, requested_zone_name
+
+    onboard_local = _parse_datetime(staff.get("date_onboarded"))
+    if onboard_local is None:
+        return None, requested_zone_name
+
+    if onboard_local.tzinfo is not None:
+        local_zone = requested_zone or onboard_local.tzinfo
+        onboard_local = onboard_local.astimezone(local_zone)
+    else:
+        local_zone = requested_zone or timezone.utc
+        onboard_local = onboard_local.replace(tzinfo=local_zone)
+
+    run_date_local = (onboard_local - timedelta(days=3)).date()
+    scheduled_local = datetime.combine(run_date_local, time.min, tzinfo=local_zone)
+    return scheduled_local.astimezone(timezone.utc).replace(tzinfo=None), requested_zone_name
 
 
 async def resolve_approver_user_ids(
@@ -531,6 +591,8 @@ async def run_staff_onboarding_workflow(
     staff_id: int,
     initiated_by_user_id: int | None,
     direction: str = DIRECTION_ONBOARDING,
+    scheduled_for_utc: datetime | None = None,
+    requested_timezone: str | None = None,
 ) -> dict[str, Any]:
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
@@ -574,6 +636,8 @@ async def run_staff_onboarding_workflow(
         staff_id=staff_id,
         workflow_key=workflow_key,
         direction=direction,
+        scheduled_for_utc=scheduled_for_utc,
+        requested_timezone=requested_timezone,
     )
     execution_id = int(execution["id"])
 
@@ -887,22 +951,72 @@ async def enqueue_staff_onboarding_workflow(
     staff_id: int,
     initiated_by_user_id: int | None,
     direction: str = DIRECTION_ONBOARDING,
+    requested_timezone: str | None = None,
 ) -> None:
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    scheduled_for_utc, normalized_timezone = _compute_scheduled_execution(
+        staff=staff or {},
+        direction=direction,
+        requested_timezone=requested_timezone,
+    )
+    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    execution = await workflow_repo.create_or_reset_execution(
+        company_id=company_id,
+        staff_id=staff_id,
+        workflow_key=str(policy.get("workflow_key") or workflow_repo.DEFAULT_WORKFLOW_KEY),
+        direction=direction,
+        scheduled_for_utc=scheduled_for_utc,
+        requested_timezone=normalized_timezone,
+    )
+    queued_state = STATE_OFFBOARDING_APPROVED if direction == DIRECTION_OFFBOARDING else STATE_APPROVED
+    await workflow_repo.update_execution_state(
+        int(execution["id"]),
+        state=queued_state,
+        current_step="queued",
+        retries_used=0,
+        last_error=None,
+        completed_at=None,
+    )
     log_info(
-        "Queueing staff onboarding workflow",
+        "Queued staff onboarding workflow execution",
         company_id=company_id,
         staff_id=staff_id,
         initiated_by_user_id=initiated_by_user_id,
         direction=direction,
+        execution_id=int(execution["id"]),
+        state=queued_state,
+        scheduled_for_utc=scheduled_for_utc.isoformat() if isinstance(scheduled_for_utc, datetime) else None,
+        requested_timezone=normalized_timezone,
     )
-    asyncio.create_task(
-        run_staff_onboarding_workflow(
-            company_id=company_id,
-            staff_id=staff_id,
-            initiated_by_user_id=initiated_by_user_id,
-            direction=direction,
-        )
-    )
+
+
+async def process_due_approved_executions(*, limit: int = 20) -> dict[str, int]:
+    processed = 0
+    skipped = 0
+    while processed < max(1, int(limit)):
+        execution = await workflow_repo.claim_next_due_approved_execution(now_utc=_utc_now_naive())
+        if not execution:
+            break
+        try:
+            await run_staff_onboarding_workflow(
+                company_id=int(execution["company_id"]),
+                staff_id=int(execution["staff_id"]),
+                initiated_by_user_id=None,
+                direction=str(execution.get("direction") or DIRECTION_ONBOARDING),
+                scheduled_for_utc=execution.get("scheduled_for_utc"),
+                requested_timezone=execution.get("requested_timezone"),
+            )
+            processed += 1
+        except Exception as exc:  # noqa: BLE001
+            skipped += 1
+            log_error(
+                "Failed processing due approved staff workflow execution",
+                execution_id=execution.get("id"),
+                company_id=execution.get("company_id"),
+                staff_id=execution.get("staff_id"),
+                error=str(exc),
+            )
+    return {"processed": processed, "skipped": skipped}
 
 
 async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
@@ -919,6 +1033,8 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
         "started_at": execution.get("started_at"),
         "completed_at": execution.get("completed_at"),
         "requested_at": execution.get("requested_at"),
+        "scheduled_for_utc": execution.get("scheduled_for_utc"),
+        "requested_timezone": execution.get("requested_timezone"),
     }
 
 
