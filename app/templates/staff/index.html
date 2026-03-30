@@ -241,6 +241,9 @@
               <td data-label="Onboarding Workflow" data-column="onboarding-workflow">
                 {% set workflow = member.workflow_status or {} %}
                 {% set workflow_state = workflow.get('state') or member.onboarding_status or 'requested' %}
+                {% if workflow.get('direction') %}
+                  <span class="status-pill status-pill--{{ workflow.get('direction')|replace('_', '-') }}">{{ workflow.get('direction')|replace('_', ' ')|title }}</span>
+                {% endif %}
                 <span class="status-pill status-pill--{{ workflow_state|replace('_', '-') }}">{{ workflow_state|replace('_', ' ')|title }}</span>
                 {% if member.approval_status %}
                   <span class="status-pill status-pill--{{ member.approval_status|replace('_', '-') }}">{{ member.approval_status|replace('_', ' ')|title }}</span>
@@ -250,8 +253,8 @@
                 {% endif %}
                 {% if member.account_action == 'Offboard Requested' %}
                   <span class="status-pill status-pill--pending">Offboarding Pending</span>
-                  {% if member.date_offboarded %}
-                    <div class="text-muted text-small">Requested for {{ member.date_offboarded }}</div>
+                  {% if member.requested_at %}
+                    <div class="text-muted text-small">Requested for {{ member.requested_at }}</div>
                   {% endif %}
                 {% endif %}
                 {% if member.onboarding_pending_details %}

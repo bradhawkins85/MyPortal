@@ -168,8 +168,9 @@ async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
     assert kwargs["approved_by_user_id"] == 99
     assert kwargs["approved_at"] is not None
     assert kwargs["approval_notes"] == "HR validated"
-    assert kwargs["enabled"] is False
-    assert kwargs["is_ex_staff"] is True
+    assert kwargs["enabled"] is True
+    assert kwargs["is_ex_staff"] is False
+    assert kwargs["date_offboarded"] is None
     assert kwargs["onboarding_status"] == staff.staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
     audit_mock.assert_awaited_once()
     assert audit_mock.await_args.kwargs["action"] == "staff.offboarding.approved"
