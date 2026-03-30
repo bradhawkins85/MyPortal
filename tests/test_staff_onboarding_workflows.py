@@ -233,3 +233,27 @@ async def test_run_workflow_allows_offboarding_approved_state(monkeypatch):
 
     assert result["state"] == workflows.STATE_OFFBOARDING_COMPLETED
     assert create_execution_mock.await_args.kwargs["direction"] == workflows.DIRECTION_OFFBOARDING
+
+
+def test_compute_scheduled_execution_onboarding_uses_local_midnight_minus_three_days():
+    scheduled_for_utc, requested_timezone = workflows._compute_scheduled_execution(
+        staff={"date_onboarded": "2026-04-10T09:30:00"},
+        direction=workflows.DIRECTION_ONBOARDING,
+        requested_timezone="Australia/Sydney",
+    )
+
+    assert requested_timezone == "Australia/Sydney"
+    assert scheduled_for_utc is not None
+    assert scheduled_for_utc.isoformat() == "2026-04-06T14:00:00"
+
+
+def test_compute_scheduled_execution_offboarding_preserves_requested_datetime():
+    scheduled_for_utc, requested_timezone = workflows._compute_scheduled_execution(
+        staff={"date_offboarded": "2026-04-10T15:45:00"},
+        direction=workflows.DIRECTION_OFFBOARDING,
+        requested_timezone="America/New_York",
+    )
+
+    assert requested_timezone == "America/New_York"
+    assert scheduled_for_utc is not None
+    assert scheduled_for_utc.isoformat() == "2026-04-10T19:45:00"
