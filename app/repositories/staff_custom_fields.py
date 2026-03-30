@@ -20,6 +20,7 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
             base.id AS base_definition_id,
             COALESCE(ovr.name, base.name) AS name,
             COALESCE(ovr.display_name, base.display_name) AS display_name,
+            COALESCE(ovr.help_text, base.help_text) AS help_text,
             COALESCE(ovr.field_type, base.field_type) AS field_type,
             COALESCE(ovr.field_group, base.field_group) AS field_group,
             COALESCE(ovr.display_order, base.display_order) AS display_order,
@@ -82,6 +83,7 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
             company_id,
             name,
             display_name,
+            help_text,
             field_type,
             field_group,
             display_order,
@@ -134,6 +136,7 @@ async def create_company_definition(
     company_id: int,
     name: str,
     display_name: str | None,
+    help_text: str | None,
     field_type: str,
     field_group: str | None = None,
     display_order: int = 0,
@@ -149,6 +152,7 @@ async def create_company_definition(
             base_definition_id,
             name,
             display_name,
+            help_text,
             field_type,
             field_group,
             display_order,
@@ -156,12 +160,13 @@ async def create_company_definition(
             condition_parent_name,
             condition_operator,
             condition_value
-        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, 1, %s, %s, %s)
+        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
         """,
         (
             company_id,
             name,
             display_name or None,
+            help_text or None,
             field_type,
             field_group or None,
             display_order,
@@ -181,6 +186,7 @@ async def update_company_definition(
     *,
     company_id: int,
     display_name: str | None,
+    help_text: str | None,
     field_type: str,
     field_group: str | None,
     display_order: int,
@@ -194,6 +200,7 @@ async def update_company_definition(
         """
         UPDATE staff_custom_field_definitions
         SET display_name = %s,
+            help_text = %s,
             field_type = %s,
             field_group = %s,
             display_order = %s,
@@ -205,6 +212,7 @@ async def update_company_definition(
         """,
         (
             display_name or None,
+            help_text or None,
             field_type,
             field_group or None,
             display_order,

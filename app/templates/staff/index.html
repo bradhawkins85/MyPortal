@@ -368,6 +368,9 @@
                 <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
                 <span>{{ field.display_name or field.name }}</span>
               </label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
             </div>
           {% elif field.field_type == 'select' %}
             <div
@@ -380,6 +383,9 @@
               data-condition-value="{{ field.condition_value or '' }}"
             >
               <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
               <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
                 <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
                 {% for option in field.options %}
@@ -398,6 +404,9 @@
               data-condition-value="{{ field.condition_value or '' }}"
             >
               <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
               <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
             </div>
           {% endif %}
