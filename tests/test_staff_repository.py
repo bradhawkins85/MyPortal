@@ -91,6 +91,9 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
         updated_after="2026-01-02T00:00:00",
         offboarding_requested_after="2026-01-04T00:00:00",
         offboarding_updated_after="2026-01-05T00:00:00",
+        scheduled_from="2026-01-06T00:00:00",
+        scheduled_to="2026-01-07T00:00:00",
+        due_only=True,
         cursor="2026-01-03T00:00:00|15",
         page_size=100,
     )
@@ -103,6 +106,9 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
     assert "s.created_at > %s" in (dummy_db.last_sql or "")
     assert "s.updated_at > %s" in (dummy_db.last_sql or "")
     assert "s.date_offboarded > %s" in (dummy_db.last_sql or "")
+    assert "e.scheduled_for_utc >= %s" in (dummy_db.last_sql or "")
+    assert "e.scheduled_for_utc <= %s" in (dummy_db.last_sql or "")
+    assert "LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')" in (dummy_db.last_sql or "")
     assert "(s.updated_at > %s OR (s.updated_at = %s AND s.id > %s))" in (dummy_db.last_sql or "")
     assert "ORDER BY s.updated_at ASC, s.id ASC" in (dummy_db.last_sql or "")
     assert "LIMIT %s" in (dummy_db.last_sql or "")
