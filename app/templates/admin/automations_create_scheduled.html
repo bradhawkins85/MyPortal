@@ -194,5 +194,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
 {% endblock %}
