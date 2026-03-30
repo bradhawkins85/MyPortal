@@ -205,6 +205,7 @@
     submitOnChange(container);
 
     const editModal = document.getElementById('staff-edit-modal');
+    const addModal = document.getElementById('staff-add-modal');
     const editForm = document.getElementById('staff-edit-form');
     const editIdField = getField('edit-staff-id');
     const editCustomFieldsGrid = getField('edit-custom-fields-grid');
@@ -240,7 +241,14 @@
     };
 
     bindModalDismissal(editModal);
+    bindModalDismissal(addModal);
     bindModalDismissal(offboardingModal);
+
+    container.querySelectorAll('[data-open-add-staff-modal]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openModal(addModal);
+      });
+    });
 
     const editCustomFieldInputs = new Map();
     if (editCustomFieldsGrid && Array.isArray(customFieldDefinitions)) {
