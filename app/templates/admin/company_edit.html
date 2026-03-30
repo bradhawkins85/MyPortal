@@ -307,6 +307,10 @@
               </select>
             </div>
             <div class="form-field">
+              <label class="form-label" for="new-custom-field-group">Group</label>
+              <input class="form-input" id="new-custom-field-group" name="field_group" placeholder="e.g. Uniform" />
+            </div>
+            <div class="form-field">
               <label class="form-label" for="new-custom-display-order">Sort</label>
               <input class="form-input" id="new-custom-display-order" name="display_order" type="number" value="0" />
             </div>
@@ -343,6 +347,7 @@
                   <th>Key</th>
                   <th>Label</th>
                   <th>Type</th>
+                  <th>Group</th>
                   <th>Sort</th>
                   <th>Active</th>
                   <th>Conditional logic</th>
@@ -364,6 +369,7 @@
                           {% endfor %}
                         </select>
                       </td>
+                      <td><input class="form-input" name="field_group" value="{{ field.field_group or '' }}" placeholder="Optional group" /></td>
                       <td><input class="form-input" type="number" name="display_order" value="{{ field.display_order }}" /></td>
                       <td><input type="checkbox" name="is_active" value="1" {% if field.is_active %}checked{% endif %} /></td>
                       <td>
@@ -392,7 +398,7 @@
                       </td>
                   </tr>
                 {% else %}
-                  <tr><td colspan="8" class="table__empty">No custom fields defined.</td></tr>
+                  <tr><td colspan="9" class="table__empty">No custom fields defined.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
