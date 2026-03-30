@@ -34,6 +34,7 @@ from app.services import xero as xero_service
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
+_SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
 
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
@@ -701,45 +702,88 @@ class SchedulerService:
         return await self._run_system_update(force_restart=force_restart)
 
     async def _run_system_update(self, *, force_restart: bool = False) -> str | None:
-        script_path = _PROJECT_ROOT / "scripts" / "upgrade.sh"
-        if not script_path.exists():
-            raise FileNotFoundError("System update script not found")
-        if not os.access(script_path, os.X_OK):
-            raise PermissionError("System update script is not executable")
-
         async with _SYSTEM_UPDATE_LOCK:
-            log_info("Starting system update", script=str(script_path))
-            if force_restart:
-                log_info("System update run requested from UI; forcing restart helper execution")
-            env = os.environ.copy()
-            if force_restart:
-                env["FORCE_RESTART"] = "1"
-            else:
-                env["FORCE_RESTART"] = "0"
-            process = await asyncio.create_subprocess_exec(
-                str(script_path),
-                stdout=PIPE,
-                stderr=PIPE,
-                cwd=str(_PROJECT_ROOT),
-                env=env,
-            )
-            stdout, stderr = await process.communicate()
-            stdout_preview = _truncate_output(stdout)
-            stderr_preview = _truncate_output(stderr)
+            local_head = await self._get_git_ref("HEAD")
+            remote_head = await self._get_remote_main_ref()
+            if not local_head or not remote_head:
+                raise RuntimeError("Unable to determine local and remote Git refs for system update")
 
-            if stdout_preview:
-                log_info("System update output", preview=stdout_preview)
-            if stderr_preview:
-                log_info("System update stderr", preview=stderr_preview)
-
-            if process.returncode != 0:
-                message = stderr_preview or stdout_preview or "Unknown error"
-                raise RuntimeError(
-                    f"System update script exited with code {process.returncode}: {message}"
+            if local_head == remote_head:
+                message = "No GitHub update available; upgrade was not scheduled."
+                log_info(
+                    "System update skipped",
+                    reason="already_up_to_date",
+                    local_head=local_head,
+                    remote_head=remote_head,
+                    requested_from_ui=force_restart,
                 )
+                return message
 
-            log_info("System update completed", exit_code=process.returncode)
-            return stdout_preview
+            self._ensure_update_flag_directory()
+            timestamp = datetime.now(timezone.utc).isoformat()
+            flag_payload = (
+                f"requested_at={timestamp}\n"
+                f"requested_from_ui={str(force_restart).lower()}\n"
+                f"local_head={local_head}\n"
+                f"remote_head={remote_head}\n"
+            )
+            _SYSTEM_UPDATE_FLAG_PATH.write_text(flag_payload, encoding="utf-8")
+            os.chmod(_SYSTEM_UPDATE_FLAG_PATH, 0o640)
+
+            log_info(
+                "System update scheduled",
+                flag=str(_SYSTEM_UPDATE_FLAG_PATH),
+                local_head=local_head,
+                remote_head=remote_head,
+                requested_from_ui=force_restart,
+            )
+            return f"Update scheduled via {_SYSTEM_UPDATE_FLAG_PATH.name}."
+
+    def _ensure_update_flag_directory(self) -> None:
+        _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o750)
+        except OSError:
+            # Best-effort permission hardening; failures are non-fatal for scheduling.
+            pass
+
+    async def _get_git_ref(self, ref: str) -> str | None:
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            "rev-parse",
+            ref,
+            stdout=PIPE,
+            stderr=PIPE,
+            cwd=str(_PROJECT_ROOT),
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            stderr_preview = _truncate_output(stderr)
+            log_error("Failed to resolve Git ref", ref=ref, error=stderr_preview)
+            return None
+        return _truncate_output(stdout)
+
+    async def _get_remote_main_ref(self) -> str | None:
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            "ls-remote",
+            "--heads",
+            "origin",
+            "main",
+            stdout=PIPE,
+            stderr=PIPE,
+            cwd=str(_PROJECT_ROOT),
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            stderr_preview = _truncate_output(stderr)
+            log_error("Failed to query GitHub for latest main ref", error=stderr_preview)
+            return None
+        response = _truncate_output(stdout)
+        if not response:
+            return None
+        first_line = response.splitlines()[0]
+        return first_line.split()[0] if first_line.split() else None
 
 
 scheduler_service = SchedulerService()
