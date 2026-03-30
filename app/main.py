@@ -146,6 +146,10 @@ from app.repositories import issues as issues_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
+from app.schemas.staff_onboarding_workflows import (
+    CompanyWorkflowPolicyUpsertSchema,
+    WorkflowConfigSchema,
+)
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
@@ -8872,6 +8876,176 @@ async def staff_page(
     return await _render_template("staff/index.html", request, user, extra=extra)
 
 
+_WORKFLOW_POLICY_FORM_SCHEMA: dict[str, Any] = {
+    "fields": [
+        {
+            "name": "workflow_key",
+            "label": "Workflow key/name",
+            "type": "text",
+            "required": True,
+            "description": "Unique workflow identifier. Letters, numbers, _, -, and . are normalized.",
+        },
+        {
+            "name": "enabled",
+            "label": "Enabled",
+            "type": "boolean",
+            "required": True,
+            "default": True,
+        },
+        {
+            "name": "max_retries",
+            "label": "Max retries",
+            "type": "number",
+            "required": True,
+            "min": 0,
+            "max": 20,
+            "default": 2,
+        },
+        {
+            "name": "config_json",
+            "label": "Config JSON",
+            "type": "json",
+            "required": False,
+            "description": (
+                "Workflow config object with `steps` and `failure_policy`, "
+                "or send `steps` + `failure_policy` as structured fields."
+            ),
+        },
+    ],
+}
+
+
+def _collect_validation_errors(exc: ValidationError) -> list[str]:
+    errors: list[str] = []
+    for item in exc.errors():
+        loc = ".".join(str(part) for part in item.get("loc") or [])
+        message = str(item.get("msg") or "Invalid value")
+        errors.append(f"{loc}: {message}" if loc else message)
+    return errors or ["Invalid workflow policy payload."]
+
+
+def _parse_json_object(value: Any, *, field_name: str) -> tuple[dict[str, Any] | None, str | None]:
+    if value is None or value == "":
+        return {}, None
+    if isinstance(value, dict):
+        return dict(value), None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}, None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return None, f"{field_name} must be valid JSON: {exc.msg}."
+        if not isinstance(parsed, dict):
+            return None, f"{field_name} must decode to an object."
+        return parsed, None
+    return None, f"{field_name} must be a JSON object."
+
+
+def _parse_json_list(value: Any, *, field_name: str) -> tuple[list[Any] | None, str | None]:
+    if value is None or value == "":
+        return None, None
+    if isinstance(value, list):
+        return list(value), None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None, None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return None, f"{field_name} must be valid JSON: {exc.msg}."
+        if not isinstance(parsed, list):
+            return None, f"{field_name} must decode to an array."
+        return parsed, None
+    return None, f"{field_name} must be a JSON array."
+
+
+def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, Any]:
+    try:
+        validated = WorkflowConfigSchema.model_validate(raw_config or {})
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": _collect_validation_errors(exc)},
+        ) from exc
+    normalized = validated.model_dump(mode="python")
+    normalized["steps"] = sorted(
+        normalized.get("steps") or [],
+        key=lambda step: str(step.get("key") or ""),
+    )
+    return normalized
+
+
+def _normalise_workflow_policy_response(policy: dict[str, Any]) -> dict[str, Any]:
+    config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+    return {
+        "company_id": int(policy.get("company_id") or 0),
+        "workflow_key": str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_WORKFLOW_KEY),
+        "enabled": bool(policy.get("is_enabled", True)),
+        "max_retries": max(0, int(policy.get("max_retries") or 0)),
+        "config_json": _normalise_workflow_config(config),
+    }
+
+
+async def _extract_workflow_policy_payload(request: Request) -> CompanyWorkflowPolicyUpsertSchema:
+    if _request_prefers_json(request):
+        payload: dict[str, Any] = await request.json()
+    else:
+        form = await request.form()
+        payload = {str(key): form.get(key) for key in form.keys()}
+        if "enabled" in payload:
+            payload["enabled"] = str(payload.get("enabled")).strip().lower() in {"1", "true", "on", "yes"}
+        elif "is_enabled" in payload:
+            payload["enabled"] = str(payload.get("is_enabled")).strip().lower() in {"1", "true", "on", "yes"}
+        elif "enabled_present" in payload or "is_enabled_present" in payload:
+            payload["enabled"] = False
+
+    config_obj, config_error = _parse_json_object(
+        payload.get("config") or payload.get("config_json") or payload.get("configJson"),
+        field_name="config_json",
+    )
+    if config_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": [config_error]},
+        )
+
+    steps_list, steps_error = _parse_json_list(
+        payload.get("steps") or payload.get("step_definitions") or payload.get("stepDefinitions"),
+        field_name="steps",
+    )
+    if steps_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": [steps_error]},
+        )
+    if steps_list is not None:
+        config_obj["steps"] = steps_list
+
+    failure_obj, failure_error = _parse_json_object(
+        payload.get("failure_policy") or payload.get("failurePolicy"),
+        field_name="failure_policy",
+    )
+    if failure_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": [failure_error]},
+        )
+    if failure_obj:
+        config_obj["failure_policy"] = failure_obj
+
+    payload["config"] = _normalise_workflow_config(config_obj)
+    try:
+        return CompanyWorkflowPolicyUpsertSchema.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow policy fields.", "errors": _collect_validation_errors(exc)},
+        ) from exc
+
+
 @app.get("/staff/workflows/onboarding", response_class=HTMLResponse)
 async def staff_onboarding_workflow_page(request: Request):
     (
@@ -8895,6 +9069,61 @@ async def staff_onboarding_workflow_page(request: Request):
         "company": company,
     }
     return await _render_template("staff/workflows_onboarding.html", request, user, extra=extra)
+
+
+@app.get("/staff/workflows/onboarding/policy")
+async def staff_onboarding_workflow_policy(request: Request):
+    (
+        _user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+    return JSONResponse(
+        {
+            "policy": _normalise_workflow_policy_response(policy),
+            "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
+        }
+    )
+
+
+@app.post("/staff/workflows/onboarding/policy")
+async def upsert_staff_onboarding_workflow_policy(request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy_input = await _extract_workflow_policy_payload(request)
+    updated = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=company_id,
+        workflow_key=policy_input.workflow_key or staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+        is_enabled=bool(policy_input.enabled),
+        max_retries=int(policy_input.max_retries),
+        config=policy_input.config,
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.workflows.onboarding.policy.upserted",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"policy": _normalise_workflow_policy_response(updated)},
+    )
+    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated)})
 
 
 @app.get("/staff/workflows/offboarding", response_class=HTMLResponse)
