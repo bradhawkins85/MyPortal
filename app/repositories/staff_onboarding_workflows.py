@@ -315,6 +315,99 @@ async def claim_next_due_approved_execution(*, now_utc: datetime | None = None) 
             raise
 
 
+async def claim_next_paused_license_execution(
+    *,
+    now_utc: datetime | None = None,
+    company_id: int | None = None,
+) -> dict[str, Any] | None:
+    paused_state = "paused_license_unavailable"
+    resumed_at = now_utc or _utc_now_naive()
+    if db.is_sqlite():
+        where_company = "AND company_id = ?" if company_id is not None else ""
+        query_params: list[Any] = [paused_state]
+        if company_id is not None:
+            query_params.append(int(company_id))
+        row = await db.fetch_one(
+            f"""
+            SELECT *
+            FROM staff_onboarding_workflow_executions
+            WHERE state = ?
+              {where_company}
+            ORDER BY requested_at ASC, id ASC
+            LIMIT 1
+            """,
+            tuple(query_params),
+        )
+        if not row:
+            return None
+        await db.execute(
+            """
+            UPDATE staff_onboarding_workflow_executions
+            SET state = 'requested', current_step = 'resuming_after_capacity_change', last_error = NULL, started_at = ?
+            WHERE id = ?
+              AND state = ?
+            """,
+            (resumed_at, row["id"], paused_state),
+        )
+        refreshed = await db.fetch_one(
+            "SELECT * FROM staff_onboarding_workflow_executions WHERE id = ?",
+            (row["id"],),
+        )
+        return _normalise_execution(refreshed)
+
+    async with db.acquire() as conn:
+        await conn.begin()
+        try:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                if company_id is not None:
+                    await cursor.execute(
+                        """
+                        SELECT *
+                        FROM staff_onboarding_workflow_executions
+                        WHERE state = %s
+                          AND company_id = %s
+                        ORDER BY requested_at ASC, id ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                        """,
+                        (paused_state, int(company_id)),
+                    )
+                else:
+                    await cursor.execute(
+                        """
+                        SELECT *
+                        FROM staff_onboarding_workflow_executions
+                        WHERE state = %s
+                        ORDER BY requested_at ASC, id ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                        """,
+                        (paused_state,),
+                    )
+                row = await cursor.fetchone()
+                if not row:
+                    await conn.commit()
+                    return None
+                await cursor.execute(
+                    """
+                    UPDATE staff_onboarding_workflow_executions
+                    SET state = 'requested', current_step = 'resuming_after_capacity_change', last_error = NULL, started_at = %s
+                    WHERE id = %s
+                    """,
+                    (resumed_at, row["id"]),
+                )
+            await conn.commit()
+            claimed = dict(row)
+            claimed["state"] = "requested"
+            claimed["current_step"] = "resuming_after_capacity_change"
+            claimed["last_error"] = None
+            claimed["started_at"] = resumed_at
+            return _normalise_execution(claimed)
+        except Exception:
+            await conn.rollback()
+            raise
+
+
 async def append_step_log(
     *,
     execution_id: int,
