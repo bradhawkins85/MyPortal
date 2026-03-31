@@ -1,0 +1,7 @@
+{
+  "guid": "64f49a54-66c1-4c17-a7fa-98fb205a6f44",
+  "occurred_at": "2026-03-15T13:42:19Z",
+  "change_type": "Fix",
+  "summary": "Fix Microsoft Graph delegated provisioning scopes by using fully qualified Graph scope URIs to prevent 403 responses caused by incorrect audience/scopes.",
+  "content_hash": "b3ad5173cf503581aef9455a7eb0bc06aa920f28d7f131050d31d6e9e39d8960"
+}

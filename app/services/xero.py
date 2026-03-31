@@ -10,8 +10,11 @@ import httpx
 from loguru import logger
 
 from app.repositories import assets as assets_repo
+from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
+from app.repositories import invoice_lines as invoice_lines_repo
+from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 from app.services import modules as modules_service
@@ -149,6 +152,61 @@ def _coerce_minutes(value: Any) -> int:
         return max(0, int(str(value)))
     except (TypeError, ValueError):
         return 0
+
+
+def _build_xero_contact_payload(company: Mapping[str, Any], company_id: int) -> dict[str, Any]:
+    xero_id = company.get("xero_id")
+    if xero_id:
+        return {"ContactID": str(xero_id)}
+    company_name = company.get("name") or f"Company #{company_id}"
+    return {"Name": str(company_name).strip()}
+
+
+def _build_xero_line_items_from_local_invoice(
+    invoice_lines: Sequence[Mapping[str, Any]],
+    *,
+    account_code: str,
+    tax_type: str | None,
+) -> list[dict[str, Any]]:
+    line_items: list[dict[str, Any]] = []
+    for stored_line in invoice_lines:
+        quantity = _to_decimal(stored_line.get("quantity")) or Decimal("1")
+        unit_amount = _to_decimal(stored_line.get("unit_amount")) or Decimal("0")
+        description = str(stored_line.get("description") or "").strip() or "MyPortal invoice line"
+        product_code = str(stored_line.get("product_code") or "").strip()
+        line_item: dict[str, Any] = {
+            "Description": description,
+            "Quantity": float(_quantize(quantity, "0.0001")),
+            "UnitAmount": float(_quantize(unit_amount)),
+            "AccountCode": account_code,
+        }
+        if product_code:
+            line_item["ItemCode"] = product_code
+        if tax_type:
+            line_item["TaxType"] = tax_type
+        line_items.append(line_item)
+    return line_items
+
+
+async def _rename_local_invoice_references(
+    company_id: int,
+    original_invoice_number: str,
+    synced_invoice_number: str,
+) -> None:
+    if not original_invoice_number or not synced_invoice_number:
+        return
+    if original_invoice_number == synced_invoice_number:
+        return
+    await billed_time_repo.rename_invoice_number(
+        company_id,
+        original_invoice_number,
+        synced_invoice_number,
+    )
+    await tickets_repo.rename_xero_invoice_number(
+        company_id,
+        original_invoice_number,
+        synced_invoice_number,
+    )
 
 
 async def fetch_xero_item_rates(
@@ -672,7 +730,11 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
         company_id: The company ID to build context for
     
     Returns:
-        Dictionary of available variables including device counts
+        Dictionary of available variables including device counts and custom field counts.
+        Custom field checkbox counts are available as:
+          {cf_total_FIELDNAME}  - total assets with the field set to true
+          {cf_active_FIELDNAME} - assets synced within the last 30 days with the field set to true
+        where FIELDNAME is the field name with hyphens replaced by underscores.
     """
     # Calculate date for "last month" - assets synced in the last 30 days
     since_date = datetime.now(timezone.utc) - timedelta(days=30)
@@ -706,7 +768,7 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
     company = await company_repo.get_company_by_id(company_id)
     company_name = company.get("name") if company else f"Company {company_id}"
     
-    return {
+    context: dict[str, Any] = {
         "company_id": company_id,
         "company_name": company_name,
         "active_agents": total_assets,
@@ -715,6 +777,34 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
         "active_users": user_count,
         "total_assets": total_assets,
     }
+
+    # Add custom field checkbox counts for all defined checkbox fields.
+    # Variables are exposed as {cf_total_FIELDNAME} and {cf_active_FIELDNAME}
+    # where spaces, hyphens and any other non-alphanumeric characters in the
+    # field name are replaced with underscores.
+    field_definitions = await asset_custom_fields_repo.list_field_definitions()
+    for field_def in field_definitions:
+        if field_def.get("field_type") != "checkbox":
+            continue
+        raw_name: str = str(field_def.get("name") or "")
+        if not raw_name:
+            continue
+        safe_name = re.sub(r"[^a-zA-Z0-9]+", "_", raw_name).strip("_")
+        total_count = await asset_custom_fields_repo.count_assets_by_custom_field(
+            company_id=company_id,
+            field_name=raw_name,
+            field_value=True,
+        )
+        active_count = await asset_custom_fields_repo.count_assets_by_custom_field(
+            company_id=company_id,
+            field_name=raw_name,
+            field_value=True,
+            since=since_date,
+        )
+        context[f"cf_total_{safe_name}"] = total_count
+        context[f"cf_active_{safe_name}"] = active_count
+
+    return context
 
 
 async def build_recurring_invoice_items(
@@ -1253,15 +1343,7 @@ async def sync_billable_tickets(
 
 
 async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, Any]:
-    """Trigger a Xero synchronisation for the given company.
-
-    This implementation makes HTTP calls to Xero API and records them
-    in the webhook monitor for tracking and debugging.
-    
-    Args:
-        company_id: The company to sync
-        auto_send: If True, invoice will be set to AUTHORISED status and sent to contact
-    """
+    """Upload unsynchronised MyPortal invoices for the given company to Xero."""
 
     module = await modules_service.get_module("xero", redact=False)
     if not module or not module.get("enabled"):
@@ -1290,7 +1372,15 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "company_id": company_id,
         }
 
-    # Get tenant_id for API calls
+    unsynced_invoices = await invoice_repo.list_unsynced_company_invoices(company_id)
+    if not unsynced_invoices:
+        return {
+            "status": "skipped",
+            "reason": "No unsynchronised MyPortal invoices",
+            "company_id": company_id,
+            "invoice_count": 0,
+        }
+
     tenant_id = str(settings.get("tenant_id", "")).strip()
     if not tenant_id:
         return {
@@ -1299,7 +1389,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "company_id": company_id,
         }
 
-    # Get or refresh access token (needed for both tickets and recurring items)
     try:
         access_token = await modules_service.acquire_xero_access_token()
     except Exception as exc:
@@ -1311,334 +1400,111 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "company_id": company_id,
         }
 
-    # Fetch recurring invoice items for this company
-    recurring_items = await recurring_items_repo.list_company_recurring_invoice_items(company_id)
-    recurring_items_info = []
-    for item in recurring_items:
-        if item.get("active"):
-            recurring_items_info.append({
-                "product_code": item.get("product_code"),
-                "description_template": item.get("description_template"),
-                "qty_expression": item.get("qty_expression"),
-                "price_override": item.get("price_override"),
-            })
-
-    # Build context for invoice line item template substitution
-    context = await build_invoice_context(company_id)
-    
-    # Build line items from recurring invoice items
+    account_code = str(settings.get("account_code", "")).strip() or "400"
     tax_type = str(settings.get("tax_type", "")).strip() or None
-    line_items = await build_recurring_invoice_items(
-        company_id,
-        tax_type=tax_type,
-        context=context,
-        tenant_id=tenant_id,
-        access_token=access_token,
-    )
-    
-    # Build ticket line items if billable tickets are configured
-    billable_statuses_raw = settings.get("billable_statuses")
-    ticket_line_items: list[dict[str, Any]] = []
-    tickets_context: list[dict[str, Any]] = []
-    ticket_numbers: list[str] = []
-    billable_tickets_found = 0
-    tickets_skipped_reason: str | None = None
-    
-    if billable_statuses_raw:
-        try:
-            hourly_rate_str = str(settings.get("default_hourly_rate", "")).strip()
-            hourly_rate = Decimal(hourly_rate_str) if hourly_rate_str else Decimal("0")
-        except (InvalidOperation, ValueError):
-            hourly_rate = Decimal("0")
-        
-        account_code = str(settings.get("account_code", "")).strip() or "400"
-        description_template = str(settings.get("line_item_description_template", "")).strip()
-        
-        # Normalize billable statuses
-        status_filter = _normalise_status_filter(billable_statuses_raw)
-        if not status_filter:
-            logger.warning(
-                "Billable statuses configured but could not be parsed",
-                company_id=company_id,
-                billable_statuses_raw=billable_statuses_raw,
-            )
-            tickets_skipped_reason = "Invalid billable statuses configuration"
-        elif status_filter:
-            # Find tickets for this company matching billable statuses
-            tickets = await tickets_repo.list_tickets(
-                company_id=company_id,
-                limit=1000,
-            )
-            
-            # Filter to only billable status tickets with unbilled time
-            billable_tickets: list[dict[str, Any]] = []
-            for ticket in tickets:
-                ticket_status = str(ticket.get("status") or "").strip().lower()
-                if ticket_status not in status_filter:
-                    continue
-                
-                # Check if ticket has any unbilled time entries
-                ticket_id = ticket.get("id")
-                if not ticket_id:
-                    continue
-                    
-                unbilled_reply_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-                if unbilled_reply_ids:
-                    billable_tickets.append(ticket)
-            
-            billable_tickets_found = len(billable_tickets)
-            
-            if not billable_tickets:
-                logger.info(
-                    "No billable tickets with unbilled time found for company",
-                    company_id=company_id,
-                    billable_statuses=list(status_filter),
-                    total_tickets_checked=len(tickets),
-                )
-                tickets_skipped_reason = "No tickets with unbilled time in billable status"
-            elif billable_tickets:
-                # No longer fetching Xero item rates - using local labour type rates only
-                
-                # Build line items for billable tickets
-                for ticket in billable_tickets:
-                    ticket_id = ticket.get("id")
-                    if not ticket_id:
-                        continue
-                    
-                    # Get unbilled replies for this ticket
-                    unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-                    all_replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
-                    unbilled_replies = [r for r in all_replies if r.get("id") in unbilled_ids]
-                    
-                    # Group by labour type
-                    labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
-                    billable_minutes = 0
-                    
-                    for reply in unbilled_replies:
-                        minutes = _coerce_minutes(reply.get("minutes_spent"))
-                        if minutes <= 0:
-                            continue
-                        is_billable = reply.get("is_billable")
-                        if not is_billable:
-                            continue
-                        billable_minutes += minutes
-                        labour_code = str(reply.get("labour_type_code") or "").strip() or None
-                        labour_name = str(reply.get("labour_type_name") or "").strip() or None
-                        labour_rate = reply.get("labour_type_rate")
-                        key = (labour_code, labour_name)
-                        bucket = labour_map.get(key)
-                        if not bucket:
-                            bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
-                            labour_map[key] = bucket
-                        bucket["minutes"] += minutes
-                    
-                    if billable_minutes <= 0:
-                        logger.debug(
-                            "Ticket has unbilled replies but no billable minutes",
-                            ticket_id=ticket_id,
-                            company_id=company_id,
-                            unbilled_reply_count=len(unbilled_replies),
-                        )
-                        continue
-                    
-                    # Create line items for this ticket
-                    labour_groups = list(labour_map.values())
-                    if labour_groups:
-                        for group in labour_groups:
-                            group_minutes = int(group.get("minutes") or 0)
-                            if group_minutes <= 0:
-                                continue
-                            hours_decimal = _minutes_to_hours(group_minutes)
-                            description = _format_line_description(
-                                description_template,
-                                ticket,
-                                group,
-                                group_minutes,
-                            )
-                            
-                            # Determine rate to use: Local labour type rate, otherwise default hourly rate
-                            labour_code = str(group.get("code") or "").strip()
-                            local_rate = group.get("rate")
-                            
-                            # Use local rate if set, otherwise use default
-                            if local_rate is not None:
-                                try:
-                                    rate_to_use = _to_decimal(local_rate) or hourly_rate
-                                except (ValueError, TypeError, InvalidOperation):
-                                    rate_to_use = hourly_rate
-                            else:
-                                rate_to_use = hourly_rate
-                            
-                            line_item: dict[str, Any] = {
-                                "Description": description,
-                                "Quantity": float(hours_decimal),
-                                "UnitAmount": float(_quantize(rate_to_use)),
-                                "AccountCode": str(account_code or "").strip(),
-                            }
-                            if labour_code:
-                                line_item["ItemCode"] = labour_code
-                            if tax_type:
-                                line_item["TaxType"] = str(tax_type).strip()
-                            ticket_line_items.append(line_item)
-                    else:
-                        hours_decimal = _minutes_to_hours(billable_minutes)
-                        description = _format_line_description(
-                            description_template,
-                            ticket,
-                            None,
-                            billable_minutes,
-                        )
-                        line_item = {
-                            "Description": description,
-                            "Quantity": float(hours_decimal),
-                            "UnitAmount": float(_quantize(hourly_rate)),
-                            "AccountCode": str(account_code or "").strip(),
-                        }
-                        if tax_type:
-                            line_item["TaxType"] = str(tax_type).strip()
-                        ticket_line_items.append(line_item)
-                    
-                    # Track ticket context for post-processing
-                    tickets_context.append({
-                        "id": ticket_id,
-                        "subject": ticket.get("subject"),
-                        "status": ticket.get("status"),
-                        "billable_minutes": billable_minutes,
-                        "labour_groups": labour_groups,
-                    })
-                    
-                    # Collect ticket numbers for reference
-                    ticket_num = str(ticket_id)
-                    if ticket_num not in ticket_numbers:
-                        ticket_numbers.append(ticket_num)
-
-    # Combine recurring and ticket line items
-    combined_line_items = line_items + ticket_line_items
-    
-    # If no line items at all, skip
-    if not combined_line_items:
-        logger.info(
-            "No active recurring invoice items or billable tickets for company",
-            company_id=company_id,
-            recurring_items_count=len(recurring_items_info),
-            billable_tickets_found=billable_tickets_found,
-            ticket_line_items_created=len(ticket_line_items),
-            tickets_skipped_reason=tickets_skipped_reason,
-        )
-        result = {
-            "status": "skipped",
-            "reason": "No active recurring invoice items or billable tickets",
-            "company_id": company_id,
-            "recurring_items_count": len(recurring_items_info),
-            "billable_tickets_found": billable_tickets_found,
-            "ticket_line_items_created": len(ticket_line_items),
-        }
-        if tickets_skipped_reason:
-            result["tickets_skipped_reason"] = tickets_skipped_reason
-        return result
-
-    # Build invoice payload for Xero API
-    xero_id = company.get("xero_id")
-    contact_payload: dict[str, Any] = {}
-    if xero_id:
-        contact_payload["ContactID"] = str(xero_id)
-    else:
-        company_name = company.get("name") or f"Company #{company_id}"
-        contact_payload["Name"] = str(company_name).strip()
-
     line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
-    reference_prefix = str(settings.get("reference_prefix", "")).strip() or "Support"
-    
-    # Build reference including ticket numbers if any
-    reference = _build_reference(reference_prefix, ticket_numbers)
-    
-    invoice_payload = {
-        "Type": "ACCREC",
-        "Contact": contact_payload,
-        "LineItems": combined_line_items,
-        "LineAmountTypes": line_amount_type,
-        "Reference": reference,
-        "Date": date.today().isoformat(),
-        "Status": "AUTHORISED" if auto_send else "DRAFT",
-    }
-    
-    if auto_send:
-        invoice_payload["SentToContact"] = True
-
-    # Prepare for API call
-    api_url = f"https://api.xero.com/api.xro/2.0/Invoices"
-
+    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
     request_headers = {
         "Authorization": f"Bearer {access_token}",
         "xero-tenant-id": tenant_id,
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+    contact_payload = _build_xero_contact_payload(company, company_id)
 
-    # Store the exact request payload so that manual retries resubmit a valid body.
-    webhook_payload = {"Invoices": [invoice_payload]}
+    synced_results: list[dict[str, Any]] = []
+    failed_results: list[dict[str, Any]] = []
+    skipped_results: list[dict[str, Any]] = []
 
-    try:
-        event = await webhook_monitor.create_manual_event(
-            name="xero.sync.company",
-            target_url=api_url,
-            payload=webhook_payload,
-            headers=request_headers,
-            max_attempts=1,
-            backoff_seconds=0,
-        )
-    except Exception as exc:
-        logger.error("Failed to create webhook monitor event", error=str(exc))
-        event = None
-
-    event_id: int | None = None
-    if event and event.get("id") is not None:
-        try:
-            event_id = int(event["id"])
-        except (TypeError, ValueError):
-            event_id = None
-
-    # Make the HTTP request to Xero
-    response_status: int | None = None
-    response_body: str | None = None
-    response_headers: dict[str, Any] | None = None
-    
-    xero_request_payload = {"Invoices": [invoice_payload]}
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                api_url,
-                json=xero_request_payload,
-                headers=request_headers,
+    for invoice in unsynced_invoices:
+        invoice_id = int(invoice["id"])
+        original_invoice_number = str(invoice.get("invoice_number") or "").strip()
+        invoice_lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
+        if not invoice_lines:
+            skipped_results.append(
+                {
+                    "invoice_id": invoice_id,
+                    "invoice_number": original_invoice_number,
+                    "reason": "Invoice has no line items",
+                }
             )
+            continue
+
+        xero_line_items = _build_xero_line_items_from_local_invoice(
+            invoice_lines,
+            account_code=account_code,
+            tax_type=tax_type,
+        )
+        invoice_payload: dict[str, Any] = {
+            "Type": "ACCREC",
+            "Contact": dict(contact_payload),
+            "LineItems": xero_line_items,
+            "LineAmountTypes": line_amount_type,
+            "Reference": f"MyPortal {original_invoice_number}" if original_invoice_number else "MyPortal Invoice",
+            "Date": date.today().isoformat(),
+            "Status": "AUTHORISED" if auto_send else "DRAFT",
+        }
+        due_date_value = invoice.get("due_date")
+        if isinstance(due_date_value, date):
+            invoice_payload["DueDate"] = due_date_value.isoformat()
+        if auto_send:
+            invoice_payload["SentToContact"] = True
+
+        webhook_payload = {"Invoices": [invoice_payload]}
+
+        try:
+            event = await webhook_monitor.create_manual_event(
+                name="xero.sync.company",
+                target_url=api_url,
+                payload=webhook_payload,
+                headers=request_headers,
+                max_attempts=1,
+                backoff_seconds=0,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to create webhook monitor event",
+                company_id=company_id,
+                invoice_id=invoice_id,
+                error=str(exc),
+            )
+            event = None
+
+        event_id: int | None = None
+        if event and event.get("id") is not None:
+            try:
+                event_id = int(event["id"])
+            except (TypeError, ValueError):
+                event_id = None
+
+        response_status: int | None = None
+        response_body: str | None = None
+        response_headers: dict[str, Any] | None = None
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    api_url,
+                    json=webhook_payload,
+                    headers=request_headers,
+                )
             response_status = response.status_code
             response_body = response.text
             response_headers = dict(response.headers)
-        
-        # Check if request was successful
-        success = 200 <= response_status < 300
-        
-        if event_id is not None:
-            if success:
-                try:
+            success = 200 <= response_status < 300
+
+            if event_id is not None:
+                if success:
                     await webhook_monitor.record_manual_success(
                         event_id,
                         attempt_number=1,
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=xero_request_payload,
+                        request_body=webhook_payload,
                         response_headers=response_headers,
                     )
-                except Exception as record_exc:
-                    logger.error(
-                        "Failed to record webhook success",
-                        event_id=event_id,
-                        error=str(record_exc),
-                    )
-            else:
-                try:
+                else:
                     await webhook_monitor.record_manual_failure(
                         event_id,
                         attempt_number=1,
@@ -1647,136 +1513,55 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
-                        request_body=xero_request_payload,
+                        request_body=webhook_payload,
                         response_headers=response_headers,
                     )
-                except Exception as record_exc:
-                    logger.error(
-                        "Failed to record webhook failure",
-                        event_id=event_id,
-                        error=str(record_exc),
-                    )
-        
-        if success:
-            # Parse invoice number from response
-            xero_invoice_number: str | None = None
-            if response_body:
-                try:
-                    response_data = json.loads(response_body)
-                    invoices_list = response_data.get("Invoices", [])
-                    if invoices_list:
-                        xero_invoice_number = invoices_list[0].get("InvoiceNumber")
-                except Exception as parse_exc:
-                    logger.warning(
-                        "Failed to parse Xero invoice number from response",
-                        error=str(parse_exc),
-                    )
-            
-            # Record billed time entries and update ticket statuses if we billed tickets
-            billed_count = 0
-            if tickets_context and xero_invoice_number:
-                now = datetime.now(timezone.utc)
-                
-                for ticket_ctx in tickets_context:
-                    ticket_id = ticket_ctx.get("id")
-                    if not ticket_id:
-                        continue
-                    
-                    # Get all replies for this ticket that were in the invoice
-                    unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-                    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
-                    
-                    for reply in replies:
-                        reply_id = reply.get("id")
-                        if reply_id not in unbilled_ids:
-                            continue
-                        
-                        # Ensure entry is billable
-                        is_billable = reply.get("is_billable")
-                        if not is_billable:
-                            continue
-                        
-                        minutes = reply.get("minutes_spent")
-                        if not minutes or minutes <= 0:
-                            continue
-                        
-                        labour_type_id = reply.get("labour_type_id")
-                        
-                        try:
-                            await billed_time_repo.create_billed_time_entry(
-                                ticket_id=ticket_id,
-                                reply_id=reply_id,
-                                xero_invoice_number=xero_invoice_number,
-                                minutes_billed=minutes,
-                                labour_type_id=labour_type_id,
-                            )
-                            billed_count += 1
-                        except Exception as entry_exc:
-                            logger.error(
-                                "Failed to record billed time entry",
-                                ticket_id=ticket_id,
-                                reply_id=reply_id,
-                                error=str(entry_exc),
-                            )
-                    
-                    # Update ticket: mark as billed and move to Closed status
-                    try:
-                        await tickets_repo.update_ticket(
-                            ticket_id,
-                            xero_invoice_number=xero_invoice_number,
-                            billed_at=now,
-                            status="closed",
-                            closed_at=now,
-                        )
-                    except Exception as update_exc:
-                        logger.error(
-                            "Failed to update ticket billing status",
-                            ticket_id=ticket_id,
-                            error=str(update_exc),
-                        )
-            
-            logger.info(
-                "Successfully synced company to Xero",
-                company_id=company_id,
-                tenant_id=tenant_id,
-                response_status=response_status,
-                event_id=event_id,
+
+            if not success:
+                failed_results.append(
+                    {
+                        "invoice_id": invoice_id,
+                        "invoice_number": original_invoice_number,
+                        "response_status": response_status,
+                        "error": f"HTTP {response_status}",
+                        "event_id": event_id,
+                    }
+                )
+                continue
+
+            response_data = json.loads(response_body or "{}")
+            synced_invoice = (response_data.get("Invoices") or [{}])[0]
+            xero_invoice_id = str(synced_invoice.get("InvoiceID") or "").strip() or None
+            xero_invoice_number = str(synced_invoice.get("InvoiceNumber") or "").strip() or original_invoice_number
+            xero_status = str(synced_invoice.get("Status") or "").strip() or ("AUTHORISED" if auto_send else "DRAFT")
+
+            await invoice_repo.patch_invoice(
+                invoice_id,
                 invoice_number=xero_invoice_number,
-                tickets_billed=len(tickets_context),
-                time_entries_recorded=billed_count,
+                status=xero_status.lower(),
+                xero_invoice_id=xero_invoice_id,
+                synced_to_xero_at=datetime.now(timezone.utc),
             )
-            result = {
-                "status": "succeeded",
-                "company_id": company_id,
-                "tenant_id": tenant_id,
-                "response_status": response_status,
-                "event_id": event_id,
-                "recurring_items_count": len(recurring_items_info),
-                "invoice_number": xero_invoice_number,
-                "tickets_billed": len(tickets_context),
-                "time_entries_recorded": billed_count,
-            }
-            
-            return result
-        else:
+            await _rename_local_invoice_references(company_id, original_invoice_number, xero_invoice_number)
+
+            synced_results.append(
+                {
+                    "invoice_id": invoice_id,
+                    "previous_invoice_number": original_invoice_number,
+                    "invoice_number": xero_invoice_number,
+                    "xero_invoice_id": xero_invoice_id,
+                    "response_status": response_status,
+                    "event_id": event_id,
+                }
+            )
+        except httpx.HTTPError as exc:
             logger.error(
-                "Xero API returned error status",
+                "Xero API request failed",
                 company_id=company_id,
-                response_status=response_status,
-                response_body=response_body,
+                invoice_id=invoice_id,
+                error=str(exc),
             )
-            return {
-                "status": "failed",
-                "company_id": company_id,
-                "response_status": response_status,
-                "error": f"HTTP {response_status}",
-                "event_id": event_id,
-            }
-    
-    except httpx.HTTPError as exc:
-        logger.error("Xero API request failed", company_id=company_id, error=str(exc))
-        if event_id is not None:
-            try:
+            if event_id is not None:
                 await webhook_monitor.record_manual_failure(
                     event_id,
                     attempt_number=1,
@@ -1785,48 +1570,67 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     response_status=response_status,
                     response_body=response_body,
                     request_headers=request_headers,
-                    request_body=invoice_payload,
+                    request_body=webhook_payload,
                     response_headers=response_headers,
                 )
-            except Exception as record_exc:
-                logger.error(
-                    "Failed to record webhook error",
-                    event_id=event_id,
-                    error=str(record_exc),
-                )
-        return {
-            "status": "error",
-            "company_id": company_id,
-            "error": str(exc),
-            "event_id": event_id,
-        }
-    except Exception as exc:
-        logger.error("Unexpected error during Xero sync", company_id=company_id, error=str(exc))
-        if event_id is not None:
-            try:
+            failed_results.append(
+                {
+                    "invoice_id": invoice_id,
+                    "invoice_number": original_invoice_number,
+                    "error": str(exc),
+                    "event_id": event_id,
+                }
+            )
+        except Exception as exc:
+            logger.error(
+                "Unexpected error during Xero sync",
+                company_id=company_id,
+                invoice_id=invoice_id,
+                error=str(exc),
+            )
+            if event_id is not None:
                 await webhook_monitor.record_manual_failure(
                     event_id,
                     attempt_number=1,
                     status="error",
                     error_message=str(exc),
-                    response_status=None,
-                    response_body=None,
+                    response_status=response_status,
+                    response_body=response_body,
                     request_headers=request_headers,
-                    request_body=invoice_payload,
-                    response_headers=None,
+                    request_body=webhook_payload,
+                    response_headers=response_headers,
                 )
-            except Exception as record_exc:
-                logger.error(
-                    "Failed to record webhook error",
-                    event_id=event_id,
-                    error=str(record_exc),
-                )
-        return {
-            "status": "error",
-            "company_id": company_id,
-            "error": str(exc),
-            "event_id": event_id,
-        }
+            failed_results.append(
+                {
+                    "invoice_id": invoice_id,
+                    "invoice_number": original_invoice_number,
+                    "error": str(exc),
+                    "event_id": event_id,
+                }
+            )
+
+    if synced_results and not failed_results:
+        status = "succeeded"
+    elif synced_results:
+        status = "partial"
+    elif failed_results:
+        status = "failed"
+    else:
+        status = "skipped"
+
+    return {
+        "status": status,
+        "company_id": company_id,
+        "tenant_id": tenant_id,
+        "invoice_count": len(unsynced_invoices),
+        "synced_count": len(synced_results),
+        "failed_count": len(failed_results),
+        "skipped_count": len(skipped_results),
+        "synced_invoices": synced_results,
+        "failed_invoices": failed_results,
+        "skipped_invoices": skipped_results,
+        "auto_send": auto_send,
+    }
 
 
 

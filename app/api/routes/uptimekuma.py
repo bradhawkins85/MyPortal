@@ -83,7 +83,7 @@ async def receive_alert(
             await webhook_monitor.log_incoming_webhook(
                 name="Uptime Kuma Webhook - Invalid JSON",
                 source_url=source_url,
-                payload=decoded_body,
+                payload="[invalid-json-body-redacted]",
                 headers=request_headers,
                 response_status=status.HTTP_400_BAD_REQUEST,
                 response_body="Invalid JSON payload",
@@ -99,10 +99,15 @@ async def receive_alert(
     try:
         payload = UptimeKumaAlertPayload.model_validate(raw_payload)
     except ValidationError as exc:
+        payload_for_log = (
+            _redact_payload_secrets(raw_payload)
+            if isinstance(raw_payload, dict)
+            else raw_payload or decoded_body
+        )
         await webhook_monitor.log_incoming_webhook(
             name="Uptime Kuma Webhook - Validation Failed",
             source_url=source_url,
-            payload=raw_payload or decoded_body,
+            payload=payload_for_log,
             headers=request_headers,
             response_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             response_body="Validation failed",

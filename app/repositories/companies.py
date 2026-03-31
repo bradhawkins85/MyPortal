@@ -33,6 +33,20 @@ async def get_company_by_id(company_id: int) -> Optional[dict[str, Any]]:
     return company
 
 
+async def get_company_csp_tenant_id(company_id: int) -> str | None:
+    row = await db.fetch_one(
+        "SELECT csp_tenant_id FROM companies WHERE id = %s",
+        (company_id,),
+    )
+    if not row:
+        return None
+    value = row.get("csp_tenant_id")
+    if not value:
+        return None
+    tenant_id = str(value).strip()
+    return tenant_id or None
+
+
 async def get_company_by_syncro_id(syncro_company_id: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM companies WHERE syncro_company_id = %s",
@@ -145,15 +159,17 @@ async def create_company(**data: Any) -> dict[str, Any]:
     email_domains = normalise_email_domains(email_domains)
     columns = ", ".join(data.keys())
     placeholders = ", ".join(["%s"] * len(data))
-    await db.execute(
+    company_id = await db.execute_returning_lastrowid(
         f"INSERT INTO companies ({columns}) VALUES ({placeholders})",
         tuple(data.values()),
     )
+    if not company_id:
+        raise RuntimeError("Failed to create company")
     row = await db.fetch_one(
-        "SELECT * FROM companies WHERE id = LAST_INSERT_ID()"
+        "SELECT * FROM companies WHERE id = %s", (company_id,)
     )
     if not row:
-        raise RuntimeError("Failed to create company")
+        raise RuntimeError("Failed to retrieve created company")
     company = _normalise_company(row)
     log_info("Company created successfully", company_id=company["id"], name=company.get("name"))
     if email_domains:
@@ -213,26 +229,6 @@ async def unarchive_company(company_id: int) -> dict[str, Any]:
     if not updated:
         raise ValueError("Company not found after unarchiving")
     return updated
-
-
-async def set_company_csp_tenant_id(company_id: int, csp_tenant_id: str | None) -> None:
-    """Set or clear the CSP tenant ID for a company."""
-    await db.execute(
-        "UPDATE companies SET csp_tenant_id = %s WHERE id = %s",
-        (csp_tenant_id, company_id),
-    )
-
-
-async def get_company_by_csp_tenant_id(csp_tenant_id: str) -> Optional[dict[str, Any]]:
-    row = await db.fetch_one(
-        "SELECT * FROM companies WHERE csp_tenant_id = %s LIMIT 1",
-        (csp_tenant_id,),
-    )
-    if not row:
-        return None
-    company = _normalise_company(row)
-    company["email_domains"] = await get_email_domains_for_company(company["id"])
-    return company
 
 
 async def replace_company_email_domains(company_id: int, domains: Iterable[str]) -> None:

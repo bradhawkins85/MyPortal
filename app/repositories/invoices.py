@@ -21,6 +21,9 @@ def _normalise_invoice(row: dict[str, Any]) -> dict[str, Any]:
         invoice["due_date"] = due_date.date()
     elif due_date is None or isinstance(due_date, date):
         invoice["due_date"] = due_date
+    synced_at = invoice.get("synced_to_xero_at")
+    if synced_at is not None and not isinstance(synced_at, datetime):
+        invoice["synced_to_xero_at"] = datetime.fromisoformat(str(synced_at))
     return invoice
 
 
@@ -37,6 +40,20 @@ async def get_invoice_by_id(invoice_id: int) -> Optional[dict[str, Any]]:
     return _normalise_invoice(row) if row else None
 
 
+async def list_unsynced_company_invoices(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM invoices
+        WHERE company_id = %s
+          AND COALESCE(TRIM(xero_invoice_id), '') = ''
+        ORDER BY due_date ASC, invoice_number ASC, id ASC
+        """,
+        (company_id,),
+    )
+    return [_normalise_invoice(row) for row in rows]
+
+
 async def create_invoice(
     *,
     company_id: int,
@@ -45,16 +62,18 @@ async def create_invoice(
     due_date: date | None,
     status: str | None,
 ) -> dict[str, Any]:
-    await db.execute(
+    invoice_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO invoices (company_id, invoice_number, amount, due_date, status)
         VALUES (%s, %s, %s, %s, %s)
         """,
         (company_id, invoice_number, amount, due_date, status),
     )
-    row = await db.fetch_one("SELECT * FROM invoices WHERE id = LAST_INSERT_ID()")
-    if not row:
+    if not invoice_id:
         raise RuntimeError("Failed to create invoice")
+    row = await db.fetch_one("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
+    if not row:
+        raise RuntimeError("Failed to retrieve created invoice")
     return _normalise_invoice(row)
 
 
@@ -101,3 +120,28 @@ async def patch_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
 
 async def delete_invoice(invoice_id: int) -> None:
     await db.execute("DELETE FROM invoices WHERE id = %s", (invoice_id,))
+
+
+async def get_max_invoice_seq(prefix: str) -> int:
+    """Return the highest sequence number used for invoice numbers starting with *prefix*.
+
+    Invoice numbers follow the pattern ``{prefix}NNNN`` (e.g. ``INV-202603-0012``).
+    Returns 0 when no matching invoice exists yet.
+    """
+    row = await db.fetch_one(
+        """
+        SELECT MAX(CAST(SUBSTRING(invoice_number, %s) AS UNSIGNED)) AS max_seq
+        FROM invoices
+        WHERE invoice_number LIKE %s
+        """,
+        (len(prefix) + 1, f"{prefix}%"),
+    )
+    if not row:
+        return 0
+    val = row.get("max_seq")
+    if val is None:
+        return 0
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return 0
