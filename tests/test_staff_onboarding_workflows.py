@@ -357,6 +357,22 @@ async def test_resume_offboarding_marks_staff_disabled_only_after_success(monkey
         AsyncMock(return_value={"id": 71, "direction": workflows.DIRECTION_OFFBOARDING}),
     )
     monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_step_logs_for_execution_ids",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        workflows.staff_custom_fields_repo,
+        "get_all_staff_field_values",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        workflows.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 8, "name": "Test Company"}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "append_step_log", AsyncMock())
     update_mock = AsyncMock(return_value=staff_record)
     monkeypatch.setattr(workflows.staff_repo, "update_staff", update_mock)
     monkeypatch.setattr(workflows, "_attempt_step", AsyncMock(return_value={"offboarded": True}))

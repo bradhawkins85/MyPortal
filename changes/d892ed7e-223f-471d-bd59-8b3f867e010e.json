@@ -1,7 +1,7 @@
 {
   "guid": "d892ed7e-223f-471d-bd59-8b3f867e010e",
-  "occurred_at": "2026-03-17T11:41:44Z",
+  "occurred_at": "2026-03-17T11:41Z",
   "change_type": "Fix",
   "summary": "Fix M365 mailbox report CSV parsing for UTF-16 downloads so mailbox sizes and shared mailbox names populate correctly.",
-  "content_hash": "1e67a48717d0f2aceb46297fe9b5275152398397a13e2887ef1048c5bf6d52c9"
+  "content_hash": "a617d137e14ccdf1f546a12d7f5eac6748a4f8265cb79524966324d48fca42f0"
 }

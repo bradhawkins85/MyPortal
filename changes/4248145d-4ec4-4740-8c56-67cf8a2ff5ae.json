@@ -1,7 +1,7 @@
 {
   "guid": "4248145d-4ec4-4740-8c56-67cf8a2ff5ae",
-  "occurred_at": "2026-03-15T13:31:40.593307+00:00",
+  "occurred_at": "2026-03-15T13:31Z",
   "change_type": "Feature",
   "summary": "Add Microsoft 365 connectivity test action on the Office 365 integration page to validate token acquisition and Graph access.",
-  "content_hash": "e51cf36bff8fbefbce4f219574dd0047ca6ec798ed274c1093181708b91a27ec"
+  "content_hash": "06be4f283039b58373298e3948f37214a2b11240fd7773ab29d5ac1c6133ecb7"
 }

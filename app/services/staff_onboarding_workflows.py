@@ -94,6 +94,18 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _serialise_dt(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+        return value.isoformat()
+    if isinstance(value, str):
+        return value or None
+    return str(value)
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value
@@ -2105,10 +2117,10 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
         "retries_used": execution.get("retries_used"),
         "last_error": execution.get("last_error"),
         "helpdesk_ticket_id": execution.get("helpdesk_ticket_id"),
-        "started_at": execution.get("started_at"),
-        "completed_at": execution.get("completed_at"),
-        "requested_at": execution.get("requested_at"),
-        "scheduled_for_utc": execution.get("scheduled_for_utc"),
+        "started_at": _serialise_dt(execution.get("started_at")),
+        "completed_at": _serialise_dt(execution.get("completed_at")),
+        "requested_at": _serialise_dt(execution.get("requested_at")),
+        "scheduled_for_utc": _serialise_dt(execution.get("scheduled_for_utc")),
         "requested_timezone": execution.get("requested_timezone"),
     }
 
