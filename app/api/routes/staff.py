@@ -974,6 +974,75 @@ async def force_complete_staff_workflow_step(
     )
 
 
+@router.get("/{staff_id}/workflow/history")
+async def get_staff_workflow_history(
+    staff_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(require_super_admin),
+):
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    executions = await staff_workflow_repo.list_execution_history_for_staff(staff_id, limit=limit)
+    execution_ids = [int(ex["id"]) for ex in executions if ex.get("id")]
+    step_logs_map = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
+    items = []
+    for ex in executions:
+        ex_id = int(ex["id"])
+        raw_logs = step_logs_map.get(ex_id, [])
+        steps = []
+        for log in raw_logs:
+            request_payload = log.get("request_payload")
+            response_payload = log.get("response_payload")
+            if isinstance(request_payload, str):
+                try:
+                    request_payload = json.loads(request_payload)
+                except Exception:
+                    request_payload = {}
+            if isinstance(response_payload, str):
+                try:
+                    response_payload = json.loads(response_payload)
+                except Exception:
+                    response_payload = {}
+            started_at_log = log.get("started_at")
+            completed_at_log = log.get("completed_at")
+            steps.append({
+                "id": int(log.get("id") or 0),
+                "stepName": str(log.get("step_name") or ""),
+                "status": str(log.get("status") or ""),
+                "attempt": int(log.get("attempt") or 1),
+                "requestPayload": request_payload or {},
+                "responsePayload": response_payload or {},
+                "errorMessage": log.get("error_message"),
+                "startedAt": started_at_log.isoformat() if isinstance(started_at_log, datetime) else (str(started_at_log) if started_at_log else None),
+                "completedAt": completed_at_log.isoformat() if isinstance(completed_at_log, datetime) else (str(completed_at_log) if completed_at_log else None),
+            })
+        requested_at = ex.get("requested_at")
+        started_at = ex.get("started_at")
+        completed_at = ex.get("completed_at")
+        items.append({
+            "executionId": ex_id,
+            "staffId": int(ex.get("staff_id") or staff_id),
+            "direction": str(ex.get("direction") or "onboarding"),
+            "state": str(ex.get("state") or ""),
+            "workflowKey": str(ex.get("workflow_key") or ""),
+            "currentStep": ex.get("current_step"),
+            "retriesUsed": int(ex.get("retries_used") or 0),
+            "lastError": ex.get("last_error"),
+            "helpdeskTicketId": ex.get("helpdesk_ticket_id"),
+            "requestedAt": requested_at.isoformat() if isinstance(requested_at, datetime) else (str(requested_at) if requested_at else None),
+            "startedAt": started_at.isoformat() if isinstance(started_at, datetime) else (str(started_at) if started_at else None),
+            "completedAt": completed_at.isoformat() if isinstance(completed_at, datetime) else (str(completed_at) if completed_at else None),
+            "steps": steps,
+        })
+    return {
+        "staffId": staff_id,
+        "staffName": f"{staff.get('first_name', '')} {staff.get('last_name', '')}".strip(),
+        "executions": items,
+    }
+
+
 @router.get("/{staff_id}", response_model=StaffResponse)
 async def get_staff(
     staff_id: int,
