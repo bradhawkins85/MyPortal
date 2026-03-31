@@ -9038,8 +9038,8 @@ async def staff_page(
         external_checkpoint_logs = await staff_workflow_repo.list_external_checkpoints_for_execution_ids(execution_ids)
         for member in staff_members:
             execution = workflow_map.get(int(member["id"])) if member.get("id") is not None else None
-            member["workflow_status"] = execution
-            member["workflow_next_run_at"] = (execution or {}).get("scheduled_for_utc")
+            member["workflow_status"] = _serialise_for_json(execution)
+            member["workflow_next_run_at"] = _serialise_for_json((execution or {}).get("scheduled_for_utc"))
             member["workflow_requested_timezone"] = (execution or {}).get("requested_timezone")
             member["workflow_is_overdue"] = False
             raw_next_run = (execution or {}).get("scheduled_for_utc")
@@ -9131,6 +9131,7 @@ async def staff_page(
                         }
                     )
             timeline = sorted(timeline, key=lambda entry: entry.get("timestamp") or datetime.min)
+            timeline = cast(list[dict[str, Any]], _serialise_for_json(timeline))
             member["onboarding_timeline"] = timeline
             if workflow_state == "waiting_external":
                 current_step = str((execution or {}).get("current_step") or "await_external_confirmation")
