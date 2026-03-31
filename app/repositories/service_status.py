@@ -33,6 +33,30 @@ async def _load_company_assignments(service_ids: Sequence[int]) -> dict[int, lis
     return assignments
 
 
+_AI_LOOKUP_INT_FIELDS = {
+    "ai_lookup_frequency_operational",
+    "ai_lookup_frequency_degraded",
+    "ai_lookup_frequency_partial_outage",
+    "ai_lookup_frequency_outage",
+    "ai_lookup_frequency_maintenance",
+}
+
+_AI_LOOKUP_DEFAULTS = {
+    "ai_lookup_enabled": 0,
+    "ai_lookup_url": None,
+    "ai_lookup_prompt": None,
+    "ai_lookup_model_override": None,
+    "ai_lookup_frequency_operational": 60,
+    "ai_lookup_frequency_degraded": 15,
+    "ai_lookup_frequency_partial_outage": 10,
+    "ai_lookup_frequency_outage": 5,
+    "ai_lookup_frequency_maintenance": 60,
+    "ai_lookup_last_checked_at": None,
+    "ai_lookup_last_status": None,
+    "ai_lookup_last_message": None,
+}
+
+
 def _normalise_service(row: dict[str, Any], assignments: dict[int, list[int]]) -> dict[str, Any]:
     normalised = dict(row)
     service_id = normalised.get("id")
@@ -61,7 +85,32 @@ def _normalise_service(row: dict[str, Any], assignments: dict[int, list[int]]) -
         normalised["tags"] = [tag.strip() for tag in tags_value.split(",") if tag.strip()]
     else:
         normalised["tags"] = []
+    # Normalise AI lookup fields - use defaults for any missing columns (pre-migration)
+    if "ai_lookup_enabled" in normalised:
+        normalised["ai_lookup_enabled"] = bool(int(normalised["ai_lookup_enabled"] or 0))
+    else:
+        normalised["ai_lookup_enabled"] = False
+    for field, default in _AI_LOOKUP_DEFAULTS.items():
+        if field not in normalised:
+            normalised[field] = default
+    for field in _AI_LOOKUP_INT_FIELDS:
+        if normalised.get(field) is not None:
+            try:
+                normalised[field] = int(normalised[field])
+            except (TypeError, ValueError):
+                normalised[field] = _AI_LOOKUP_DEFAULTS[field]
     return normalised
+
+
+_SELECT_COLUMNS = (
+    "id, name, description, status, status_message, display_order, is_active, "
+    "tags, created_at, updated_at, updated_by, "
+    "ai_lookup_enabled, ai_lookup_url, ai_lookup_prompt, ai_lookup_model_override, "
+    "ai_lookup_frequency_operational, ai_lookup_frequency_degraded, "
+    "ai_lookup_frequency_partial_outage, ai_lookup_frequency_outage, "
+    "ai_lookup_frequency_maintenance, "
+    "ai_lookup_last_checked_at, ai_lookup_last_status, ai_lookup_last_message"
+)
 
 
 async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any]]:
@@ -72,8 +121,7 @@ async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     rows = await db.fetch_all(
         f"""
-        SELECT id, name, description, status, status_message, display_order, is_active,
-               tags, created_at, updated_at, updated_by
+        SELECT {_SELECT_COLUMNS}
         FROM service_status_services
         {where_clause}
         ORDER BY display_order ASC, name ASC
@@ -87,9 +135,8 @@ async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any
 
 async def get_service(service_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        """
-        SELECT id, name, description, status, status_message, display_order, is_active,
-               tags, created_at, updated_at, updated_by
+        f"""
+        SELECT {_SELECT_COLUMNS}
         FROM service_status_services
         WHERE id = %s
         """,
@@ -138,9 +185,8 @@ async def update_service(
 
 async def find_service_by_name(name: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        """
-        SELECT id, name, description, status, status_message, display_order, is_active,
-               tags, created_at, updated_at, updated_by
+        f"""
+        SELECT {_SELECT_COLUMNS}
         FROM service_status_services
         WHERE LOWER(name) = LOWER(%s) AND is_active = 1
         LIMIT 1
@@ -155,6 +201,22 @@ async def find_service_by_name(name: str) -> dict[str, Any] | None:
 
 async def delete_service(service_id: int) -> None:
     await db.execute("DELETE FROM service_status_services WHERE id = %s", (service_id,))
+
+
+async def list_services_due_for_ai_lookup() -> list[dict[str, Any]]:
+    """Return active services with AI lookup enabled that are due for a check."""
+    rows = await db.fetch_all(
+        f"""
+        SELECT {_SELECT_COLUMNS}
+        FROM service_status_services
+        WHERE is_active = 1 AND ai_lookup_enabled = 1
+        ORDER BY ai_lookup_last_checked_at ASC, id ASC
+        """,
+        (),
+    )
+    service_ids = [row.get("id") for row in rows if row.get("id") is not None]
+    assignments = await _load_company_assignments([int(sid) for sid in service_ids])
+    return [_normalise_service(row, assignments) for row in rows]
 
 
 async def replace_service_companies(service_id: int, company_ids: Sequence[int]) -> None:
