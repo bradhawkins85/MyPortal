@@ -18,6 +18,7 @@ def test_staff_onboarding_routes_include_new_paths():
     assert "/api/staff/{staff_id}/offboarding/approve" in paths
     assert "/api/staff/{staff_id}/offboarding/deny" in paths
     assert "/api/staff/{staff_id}/onboarding/external-confirm" in paths
+    assert "/api/staff/{staff_id}/workflow/history" in paths
 
 
 @pytest.mark.anyio

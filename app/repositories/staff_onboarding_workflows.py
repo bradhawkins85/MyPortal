@@ -160,20 +160,6 @@ async def create_or_reset_execution(
         INSERT INTO staff_onboarding_workflow_executions
             (company_id, staff_id, workflow_key, direction, state, current_step, retries_used, last_error, helpdesk_ticket_id, requested_at, scheduled_for_utc, requested_timezone, started_at, completed_at)
         VALUES (%s, %s, %s, %s, 'requested', NULL, 0, NULL, NULL, %s, %s, %s, NULL, NULL)
-        ON DUPLICATE KEY UPDATE
-            company_id = VALUES(company_id),
-            workflow_key = VALUES(workflow_key),
-            direction = VALUES(direction),
-            state = 'requested',
-            current_step = NULL,
-            retries_used = 0,
-            last_error = NULL,
-            helpdesk_ticket_id = NULL,
-            requested_at = VALUES(requested_at),
-            scheduled_for_utc = COALESCE(VALUES(scheduled_for_utc), scheduled_for_utc),
-            requested_timezone = COALESCE(VALUES(requested_timezone), requested_timezone),
-            started_at = NULL,
-            completed_at = NULL
         """,
         (
             company_id,
@@ -188,10 +174,6 @@ async def create_or_reset_execution(
     execution = await get_execution_by_staff_id(staff_id)
     if not execution:
         raise RuntimeError("Failed to create workflow execution")
-    await db.execute(
-        "DELETE FROM staff_onboarding_workflow_step_logs WHERE execution_id = %s",
-        (execution["id"],),
-    )
     return execution
 
 
@@ -201,6 +183,8 @@ async def get_execution_by_staff_id(staff_id: int) -> dict[str, Any] | None:
         SELECT *
         FROM staff_onboarding_workflow_executions
         WHERE staff_id = %s
+        ORDER BY requested_at DESC, id DESC
+        LIMIT 1
         """,
         (staff_id,),
     )
@@ -217,6 +201,7 @@ async def list_executions_for_staff_ids(staff_ids: Iterable[int]) -> dict[int, d
         SELECT *
         FROM staff_onboarding_workflow_executions
         WHERE FIND_IN_SET(staff_id, %s) > 0
+        ORDER BY requested_at DESC, id DESC
         """,
         (ids_csv,),
     )
@@ -224,8 +209,61 @@ async def list_executions_for_staff_ids(staff_ids: Iterable[int]) -> dict[int, d
     for row in rows:
         item = _normalise_execution(row)
         if item:
-            mapped[int(item["staff_id"])] = item
+            sid = int(item["staff_id"])
+            if sid not in mapped:
+                mapped[sid] = item
     return mapped
+
+
+async def list_execution_history_for_staff(
+    staff_id: int,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return all historical executions for a staff member, newest first."""
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM staff_onboarding_workflow_executions
+        WHERE staff_id = %s
+        ORDER BY requested_at DESC, id DESC
+        LIMIT %s
+        """,
+        (staff_id, int(limit)),
+    )
+    return [_normalise_execution(row) for row in rows if row]  # type: ignore[misc]
+
+
+async def list_recent_executions_for_company(
+    company_id: int,
+    *,
+    limit: int = 100,
+    direction: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return recent workflow executions for all staff in a company, newest first."""
+    if direction:
+        rows = await db.fetch_all(
+            """
+            SELECT *
+            FROM staff_onboarding_workflow_executions
+            WHERE company_id = %s AND direction = %s
+            ORDER BY requested_at DESC, id DESC
+            LIMIT %s
+            """,
+            (company_id, direction, int(limit)),
+        )
+    else:
+        rows = await db.fetch_all(
+            """
+            SELECT *
+            FROM staff_onboarding_workflow_executions
+            WHERE company_id = %s
+            ORDER BY requested_at DESC, id DESC
+            LIMIT %s
+            """,
+            (company_id, int(limit)),
+        )
+    return [_normalise_execution(row) for row in rows if row]  # type: ignore[misc]
 
 
 async def update_execution_state(
