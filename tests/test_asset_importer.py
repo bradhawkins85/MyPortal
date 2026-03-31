@@ -113,3 +113,43 @@ async def test_import_all_tactical_assets_summarises(monkeypatch):
     assert summary["processed"] == 5
     assert summary["companies"] == {1: {"processed": 5}}
     assert {item["company_id"] for item in summary["skipped"]} == {2, 3}
+
+
+@pytest.mark.anyio
+async def test_import_all_tactical_assets_auto_matches_missing_mapping(monkeypatch):
+    companies = [
+        {"id": 3, "name": "Acme Co", "tacticalrmm_client_id": None},
+    ]
+    updates: list[tuple[int, str]] = []
+
+    async def fake_list_companies():
+        return companies
+
+    async def fake_lookup(company_name: str):
+        assert company_name == "Acme Co"
+        return "client-300"
+
+    async def fake_update_company(company_id: int, **kwargs):
+        updates.append((company_id, kwargs["tacticalrmm_client_id"]))
+        return {"id": company_id, **kwargs}
+
+    async def fake_import(company_id, *, tactical_client_id=None):
+        assert company_id == 3
+        assert tactical_client_id == "client-300"
+        return 2
+
+    monkeypatch.setattr(asset_importer.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(
+        asset_importer.company_id_lookup,
+        "_lookup_tactical_client_id",
+        fake_lookup,
+    )
+    monkeypatch.setattr(asset_importer.company_repo, "update_company", fake_update_company)
+    monkeypatch.setattr(asset_importer, "import_tactical_assets_for_company", fake_import)
+
+    summary = await asset_importer.import_all_tactical_assets()
+
+    assert updates == [(3, "client-300")]
+    assert summary["processed"] == 2
+    assert summary["companies"] == {3: {"processed": 2}}
+    assert summary["skipped"] == []

@@ -141,4 +141,5 @@ async def list_available_permissions(
         "portal.access",
         "shop.access",
         "staff.manage",
+        "staff.request",
     ])

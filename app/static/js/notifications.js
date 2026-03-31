@@ -232,6 +232,16 @@
     return wasUnread && !isUnread;
   }
 
+
+  function buildErrorMessage(payload, fallbackMessage) {
+    const detail = payload && payload.detail ? payload.detail : fallbackMessage;
+    const reference = payload && (payload.error_reference || payload.request_id);
+    if (reference) {
+      return `${detail} (Reference: ${reference})`;
+    }
+    return detail;
+  }
+
   async function markNotification(notificationId) {
     const response = await fetch(`/api/notifications/${notificationId}/read`, {
       method: 'POST',
@@ -243,7 +253,7 @@
     });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.detail || 'Failed to update notification');
+      throw new Error(buildErrorMessage(detail, 'Failed to update notification'));
     }
     return response.json();
   }
@@ -260,7 +270,7 @@
     });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.detail || 'Failed to acknowledge notifications');
+      throw new Error(buildErrorMessage(detail, 'Failed to acknowledge notifications'));
     }
     return response.json();
   }
@@ -274,7 +284,7 @@
     });
     if (!response.ok) {
       const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.detail || 'Failed to delete notification');
+      throw new Error(buildErrorMessage(detail, 'Failed to delete notification'));
     }
   }
 

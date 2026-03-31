@@ -87,6 +87,11 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
         "list_ticket_call_recordings",
         AsyncMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        main.attachments_repo,
+        "list_attachments",
+        AsyncMock(return_value=[]),
+    )
 
 
 @pytest.mark.anyio("asyncio")

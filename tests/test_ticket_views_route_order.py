@@ -169,7 +169,7 @@ def test_ticket_id_route_still_works_for_numeric_ids(monkeypatch):
     async def mock_list_watchers(ticket_id):
         return []
     
-    async def mock_list_attachments(ticket_id):
+    async def mock_list_attachments(ticket_id, *, access_levels=None):
         return []
     
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)

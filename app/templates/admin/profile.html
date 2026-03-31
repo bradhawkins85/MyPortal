@@ -282,7 +282,7 @@
                 </div>
                 <div class="form-field">
                   <label class="form-label" for="totp-code">Authenticator code</label>
-                  <input class="form-input" id="totp-code" name="totpCode" inputmode="numeric" pattern="[0-9]*" required />
+                  <input class="form-input" id="totp-code" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autocorrect="off" autocapitalize="none" required />
                 </div>
                 <div class="form-actions">
                   <button type="submit" class="button">Verify and enable</button>

@@ -65,7 +65,8 @@ def test_build_m365_redirect_uri_uses_portal_url(monkeypatch):
 
 
 def test_build_m365_redirect_uri_falls_back_to_request(monkeypatch):
-    """_build_m365_redirect_uri falls back to request.url_for when PORTAL_URL is not set."""
+    """_build_m365_redirect_uri falls back to request.url_for when PORTAL_URL is not set,
+    and forces the scheme to HTTPS."""
     monkeypatch.setattr(main_module.settings, "portal_url", None)
 
     calls = []
@@ -77,8 +78,35 @@ def test_build_m365_redirect_uri_falls_back_to_request(monkeypatch):
 
     result = main_module._build_m365_redirect_uri(FakeRequest())
 
-    assert result == "http://localhost/m365/callback"
+    assert result == "https://localhost/m365/callback"
     assert calls == ["m365_callback"]
+
+
+def test_build_m365_redirect_uri_forces_https_on_http_fallback(monkeypatch):
+    """_build_m365_redirect_uri upgrades http:// to https:// in the fallback path."""
+    monkeypatch.setattr(main_module.settings, "portal_url", None)
+
+    class FakeRequest:
+        def url_for(self, name: str) -> str:
+            return "http://portal.example.com/m365/callback"
+
+    result = main_module._build_m365_redirect_uri(FakeRequest())
+
+    assert result.startswith("https://"), "Redirect URI must use HTTPS"
+    assert result == "https://portal.example.com/m365/callback"
+
+
+def test_build_m365_redirect_uri_preserves_https_fallback(monkeypatch):
+    """_build_m365_redirect_uri keeps https:// unchanged when the fallback already uses HTTPS."""
+    monkeypatch.setattr(main_module.settings, "portal_url", None)
+
+    class FakeRequest:
+        def url_for(self, name: str) -> str:
+            return "https://portal.example.com/m365/callback"
+
+    result = main_module._build_m365_redirect_uri(FakeRequest())
+
+    assert result == "https://portal.example.com/m365/callback"
 
 
 def _make_session() -> SessionData:
@@ -252,3 +280,52 @@ def test_admin_company_m365_provision_uses_consent_prompt(monkeypatch):
     assert parsed.netloc == "login.microsoftonline.com"
     prompt = _extract_prompt(location)
     assert prompt == "consent", f"Expected prompt=consent, got prompt={prompt!r}"
+
+
+
+def test_m365_test_connectivity_redirects_with_success(monkeypatch):
+    """POST /m365/test redirects with a success message when Graph access succeeds."""
+
+    async def fake_load_license_context(request, **kwargs):
+        user = {"id": 1, "is_super_admin": True, "company_id": 1}
+        return user, None, None, 1, None
+
+    async def fake_test_connectivity(company_id: int):
+        return {"graph_access": True, "organization_name": "Contoso"}
+
+    monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module.m365_service, "test_connectivity", fake_test_connectivity)
+
+    with TestClient(app) as client:
+        response = client.post("/m365/test", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/m365?")
+    query_params = parse_qs(urlparse(location).query)
+    assert "success" in query_params
+    assert "Contoso" in query_params["success"][0]
+
+
+def test_m365_test_connectivity_redirects_with_error(monkeypatch):
+    """POST /m365/test redirects with an error message when Graph access fails."""
+
+    async def fake_load_license_context(request, **kwargs):
+        user = {"id": 1, "is_super_admin": True, "company_id": 1}
+        return user, None, None, 1, None
+
+    async def fake_test_connectivity(company_id: int):
+        raise main_module.m365_service.M365Error("invalid credentials")
+
+    monkeypatch.setattr(main_module, "_load_license_context", fake_load_license_context)
+    monkeypatch.setattr(main_module.m365_service, "test_connectivity", fake_test_connectivity)
+
+    with TestClient(app) as client:
+        response = client.post("/m365/test", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/m365?")
+    query_params = parse_qs(urlparse(location).query)
+    assert "error" in query_params
+    assert "invalid credentials" in query_params["error"][0]

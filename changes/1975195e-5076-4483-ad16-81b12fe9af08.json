@@ -1,0 +1,7 @@
+{
+  "guid": "1975195e-5076-4483-ad16-81b12fe9af08",
+  "occurred_at": "2026-03-17T11:19:24Z",
+  "change_type": "Fix",
+  "summary": "Fix M365 mailbox sync mapping and CSV parsing to prevent zero sizes and numeric mailbox names.",
+  "content_hash": "51bd3cce98e1050545af147d2069d2e9560b4d28b0023fb986e7899e6df0eb7a"
+}

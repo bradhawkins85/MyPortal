@@ -83,11 +83,17 @@ def _strip_quoted_email_headers(value: str) -> str:
             return "\n".join(lines[:idx]).rstrip()
         if _EMAIL_HEADER_PATTERN.match(normalised):
             header_hits = 0
+            header_prefixes: set[str] = set()
             for candidate in lines[idx : idx + 6]:
                 candidate_text = re.sub(r"<[^>]+>", "", candidate).strip()
                 if _EMAIL_HEADER_PATTERN.match(candidate_text):
                     header_hits += 1
-            if header_hits >= 2:
+                    header_prefixes.add(candidate_text.split(":", 1)[0].strip().lower())
+            # Only strip clearly quoted header blocks that include typical message
+            # metadata such as Subject, Sent, or Date. This avoids trimming legitimate
+            # content (e.g. voicemail summaries) that happen to include simple From/To
+            # lines within the body.
+            if header_hits >= 2 and header_prefixes.intersection({"subject", "sent", "date"}):
                 return "\n".join(lines[:idx]).rstrip()
     return value
 

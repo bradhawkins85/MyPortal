@@ -20,6 +20,25 @@ from app.repositories import cis_benchmarks as benchmark_repo
 from app.services.m365 import M365Error, _graph_get, acquire_access_token
 
 
+async def _graph_get_all(token: str, url: str) -> list[dict[str, Any]]:
+    """GET a Microsoft Graph collection endpoint, following ``@odata.nextLink`` pagination.
+
+    Many Graph list endpoints (e.g. conditionalAccessPolicies,
+    deviceCompliancePolicies) return a single page of results with an
+    ``@odata.nextLink`` property pointing to the next page.  This helper
+    transparently fetches all pages and returns the combined ``value`` list.
+
+    Defined locally so that test patches of ``_graph_get`` in this module apply
+    to both direct and paginated calls.
+    """
+    items: list[dict[str, Any]] = []
+    while url:
+        data = await _graph_get(token, url)
+        items.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+    return items
+
+
 # ---------------------------------------------------------------------------
 # Check status constants
 # ---------------------------------------------------------------------------
@@ -244,12 +263,11 @@ async def _check_legacy_auth_blocked(token: str) -> dict[str, Any]:
     check_id = "m365_legacy_auth_blocked"
     check_name = "Legacy authentication is blocked"
     try:
-        data = await _graph_get(
+        policies = await _graph_get_all(
             token,
             "https://graph.microsoft.com/v1.0/policies/conditionalAccessPolicies"
             "?$select=id,displayName,state,conditions,grantControls",
         )
-        policies = data.get("value", [])
         legacy_auth_clients = {
             "exchangeActiveSync",
             "other",
@@ -274,12 +292,11 @@ async def _check_mfa_conditional_access(token: str) -> dict[str, Any]:
     check_id = "m365_mfa_conditional_access"
     check_name = "MFA required for all users via Conditional Access"
     try:
-        data = await _graph_get(
+        policies = await _graph_get_all(
             token,
             "https://graph.microsoft.com/v1.0/policies/conditionalAccessPolicies"
             "?$select=id,displayName,state,conditions,grantControls",
         )
-        policies = data.get("value", [])
         for policy in policies:
             if policy.get("state") != "enabled":
                 continue
@@ -344,7 +361,11 @@ async def _check_audit_log_enabled(token: str) -> dict[str, Any]:
     except M365Error as exc:
         err = str(exc)
         if "403" in err or "Forbidden" in err or "Authorization" in err:
-            return _fail(check_id, check_name, "Audit log endpoint returned Forbidden – auditing may be disabled or the app lacks AuditLog.Read.All permission.")
+            return _unknown(
+                check_id,
+                check_name,
+                "Unable to verify audit log status – the app may lack AuditLog.Read.All permission.",
+            )
         return _unknown(check_id, check_name, f"Unable to verify audit log status: {exc}")
 
 
@@ -431,12 +452,11 @@ async def _check_admin_mfa(token: str) -> dict[str, Any]:
     check_id = "m365_admin_mfa"
     check_name = "MFA required for administrative roles"
     try:
-        data = await _graph_get(
+        policies = await _graph_get_all(
             token,
             "https://graph.microsoft.com/v1.0/policies/conditionalAccessPolicies"
             "?$select=id,displayName,state,conditions,grantControls",
         )
-        policies = data.get("value", [])
         admin_role_ids = {
             "62e90394-69f5-4237-9190-012177145e10",  # Global Administrator
             "194ae4cb-b126-40b2-bd5b-6091b380977d",  # Security Administrator
@@ -529,11 +549,10 @@ def _windows_compliance_check(
 async def run_intune_windows_benchmarks(token: str) -> list[dict[str, Any]]:
     """Run all Intune Windows benchmark checks."""
     try:
-        data = await _graph_get(
+        all_policies = await _graph_get_all(
             token,
             "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies",
         )
-        all_policies = data.get("value", [])
     except M365Error as exc:
         msg = f"Unable to retrieve device compliance policies: {exc}"
         return [
@@ -651,11 +670,10 @@ async def run_intune_windows_benchmarks(token: str) -> list[dict[str, Any]]:
 async def run_intune_ios_benchmarks(token: str) -> list[dict[str, Any]]:
     """Run all Intune iOS/iPadOS benchmark checks."""
     try:
-        data = await _graph_get(
+        all_policies = await _graph_get_all(
             token,
             "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies",
         )
-        all_policies = data.get("value", [])
     except M365Error as exc:
         msg = f"Unable to retrieve device compliance policies: {exc}"
         return [
@@ -740,11 +758,10 @@ async def run_intune_ios_benchmarks(token: str) -> list[dict[str, Any]]:
 async def run_intune_macos_benchmarks(token: str) -> list[dict[str, Any]]:
     """Run all Intune macOS benchmark checks."""
     try:
-        data = await _graph_get(
+        all_policies = await _graph_get_all(
             token,
             "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies",
         )
-        all_policies = data.get("value", [])
     except M365Error as exc:
         msg = f"Unable to retrieve device compliance policies: {exc}"
         return [

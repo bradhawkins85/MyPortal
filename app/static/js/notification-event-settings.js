@@ -1,4 +1,5 @@
 (function () {
+  const actionPayloadEditor = window.MyPortalActionPayloadEditor || null;
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1')}=([^;]*)`;
     const matches = document.cookie.match(new RegExp(pattern));
@@ -59,8 +60,10 @@
     .map((entry) => ({
       value: String(entry.slug || '').trim(),
       label: String(entry.name || entry.slug || '').trim() || 'Module',
+      payloadSchema: entry && entry.payload_schema ? entry.payload_schema : null,
     }))
     .filter((option) => option.value);
+  const moduleBySlug = new Map(moduleOptions.map((option) => [option.value, option]));
 
   const settingsRaw = form.getAttribute('data-settings') || '[]';
   const settingsList = parseJsonAttribute(settingsRaw, []);
@@ -177,13 +180,19 @@
   function addActionRow(action) {
     const clone = actionTemplate.content.firstElementChild.cloneNode(true);
     const moduleSelectContainer = clone.querySelector('[data-action-module]');
+    const payloadModeSelect = clone.querySelector('[data-action-payload-mode]');
     const payloadTextarea = clone.querySelector('[data-action-payload]');
+    const schemaContainer = clone.querySelector('[data-action-schema-container]');
+    const rawContainer = clone.querySelector('[data-action-raw-container]');
     const removeButton = clone.querySelector('[data-action-remove]');
+    const rowId = `notification-action-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
+    let moduleSelect = null;
     if (moduleSelectContainer) {
       const select = buildModuleSelect(action && action.module ? action.module : '');
       moduleSelectContainer.replaceWith(select);
       select.setAttribute('data-action-module', '');
+      moduleSelect = select;
     }
 
     if (payloadTextarea) {
@@ -198,6 +207,46 @@
       }
     }
 
+    const applyPayloadMode = () => {
+      if (!moduleSelect || !payloadModeSelect || !schemaContainer || !rawContainer || !payloadTextarea || !actionPayloadEditor) {
+        return;
+      }
+      const moduleMeta = moduleBySlug.get(moduleSelect.value);
+      const schema = moduleMeta && moduleMeta.payloadSchema ? moduleMeta.payloadSchema : null;
+      let existingPayload = {};
+      try {
+        existingPayload = payloadTextarea.value.trim() ? JSON.parse(payloadTextarea.value) : {};
+      } catch (error) {
+        existingPayload = {};
+      }
+      const buildResult = actionPayloadEditor.buildSchemaFields({
+        container: schemaContainer,
+        schema,
+        existingPayload,
+        idPrefix: rowId,
+      });
+      if (!buildResult.hasSchema) {
+        payloadModeSelect.value = 'raw';
+        payloadModeSelect.disabled = true;
+        rawContainer.hidden = false;
+        schemaContainer.hidden = true;
+        return;
+      }
+      payloadModeSelect.disabled = false;
+      const hasUnknownKeys = actionPayloadEditor.hasUnknownKeys(existingPayload, buildResult.fieldNames);
+      const preferredMode = hasUnknownKeys ? 'raw' : payloadModeSelect.value || 'schema';
+      payloadModeSelect.value = preferredMode;
+      rawContainer.hidden = preferredMode !== 'raw';
+      schemaContainer.hidden = preferredMode !== 'schema';
+    };
+
+    if (moduleSelect) {
+      moduleSelect.addEventListener('change', applyPayloadMode);
+    }
+    if (payloadModeSelect) {
+      payloadModeSelect.addEventListener('change', applyPayloadMode);
+    }
+
     if (removeButton) {
       removeButton.addEventListener('click', (event) => {
         event.preventDefault();
@@ -207,6 +256,7 @@
     }
 
     actionList.appendChild(clone);
+    applyPayloadMode();
   }
 
   addActionButton.addEventListener('click', (event) => {
@@ -279,26 +329,45 @@
   }
 
   function parseActionRows() {
+    if (!actionPayloadEditor) {
+      showError('Payload editor failed to load.');
+      return null;
+    }
     const rows = Array.from(actionList.querySelectorAll('[data-action-row]'));
     const actions = [];
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
       const moduleSelect = row.querySelector('[data-action-module]');
       const payloadTextarea = row.querySelector('[data-action-payload]');
+      const payloadModeInput = row.querySelector('[data-action-payload-mode]');
+      const schemaContainer = row.querySelector('[data-action-schema-container]');
       const moduleValue = moduleSelect ? moduleSelect.value.trim() : '';
       if (!moduleValue) {
         showError(`Select a module for action ${index + 1}.`);
         return null;
       }
       let payload = {};
-      const payloadText = payloadTextarea ? payloadTextarea.value.trim() : '';
-      if (payloadText) {
-        try {
-          payload = JSON.parse(payloadText);
-        } catch (error) {
-          showError(`Action ${index + 1} payload must be valid JSON.`);
+      const payloadMode = payloadModeInput ? payloadModeInput.value : 'raw';
+      if (payloadMode === 'schema') {
+        const parsedSchema = actionPayloadEditor.parseSchemaFields({
+          container: schemaContainer,
+          rowIndex: index,
+        });
+        if (!parsedSchema.ok) {
+          showError(parsedSchema.error);
           return null;
         }
+        payload = parsedSchema.payload;
+      } else {
+        const parsedRaw = actionPayloadEditor.parseRawPayload({
+          text: payloadTextarea ? payloadTextarea.value : '',
+          rowIndex: index,
+        });
+        if (!parsedRaw.ok) {
+          showError(parsedRaw.error);
+          return null;
+        }
+        payload = parsedRaw.payload;
       }
       actions.push({ module: moduleValue, payload });
     }

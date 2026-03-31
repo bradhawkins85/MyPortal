@@ -150,6 +150,21 @@
             </div>
             <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
           </div>
+          <div class="form-field">
+            <label class="form-label">Purchase order options</label>
+            <div class="form-checkbox-group">
+              <label class="form-checkbox__label">
+                <input
+                  type="checkbox"
+                  name="requirePo"
+                  value="1"
+                  {% if form_data.require_po %}checked{% endif %}
+                />
+                <span>Require PO</span>
+              </label>
+            </div>
+            <p class="form-help">When enabled, customers must provide a purchase order number before placing an order.</p>
+          </div>
           <div class="form-actions">
             <button type="submit" class="button">Save changes</button>
           </div>
@@ -157,6 +172,248 @@
       </div>
     </section>
     {% if is_super_admin %}
+      <details class="card card--panel card-collapsible admin-grid__full" data-staff-field-config-panel>
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Staff intake fields</h2>
+            <p class="card__subtitle">Control which staff onboarding fields are visible, required, and their display order.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <form action="/admin/companies/{{ company.id }}/staff-fields" method="post" class="form">
+            {% include "partials/csrf.html" %}
+            <div class="table-wrapper">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Field</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Visible</th>
+                    <th scope="col">Required</th>
+                    <th scope="col">Sort</th>
+                    <th scope="col">Options (select only)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for field in staff_field_config %}
+                    <tr>
+                      <td>{{ field.label }}</td>
+                      <td>
+                        <select
+                          class="form-input"
+                          name="field_{{ field.key }}_type"
+                          {% if field.key in ['first_name', 'last_name', 'email'] %}disabled{% endif %}
+                        >
+                          {% for value in ['text', 'select', 'checkbox', 'date'] %}
+                            <option value="{{ value }}" {% if field.type == value %}selected{% endif %}>{{ value }}</option>
+                          {% endfor %}
+                        </select>
+                        {% if field.key in ['first_name', 'last_name', 'email'] %}
+                          <input type="hidden" name="field_{{ field.key }}_type" value="{{ field.type }}" />
+                        {% endif %}
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          name="field_{{ field.key }}_visible"
+                          value="1"
+                          {% if field.visible %}checked{% endif %}
+                          {% if field.key in ['first_name', 'last_name'] %}disabled{% endif %}
+                        />
+                        {% if field.key in ['first_name', 'last_name'] %}
+                          <input type="hidden" name="field_{{ field.key }}_visible" value="1" />
+                        {% endif %}
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          name="field_{{ field.key }}_required"
+                          value="1"
+                          {% if field.required %}checked{% endif %}
+                          {% if field.key in ['first_name', 'last_name'] %}disabled{% endif %}
+                        />
+                        {% if field.key in ['first_name', 'last_name'] %}
+                          <input type="hidden" name="field_{{ field.key }}_required" value="1" />
+                        {% endif %}
+                      </td>
+                      <td>
+                        <input
+                          class="form-input"
+                          type="number"
+                          name="field_{{ field.key }}_sort_order"
+                          value="{{ field.sort_order }}"
+                        />
+                      </td>
+                      <td>
+                        {% if field.type == 'select' %}
+                          <input
+                            class="form-input"
+                            type="text"
+                            name="field_{{ field.key }}_options"
+                            value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}"
+                            placeholder="value:Label, value2:Label 2"
+                          />
+                        {% else %}
+                          <span class="text-muted">—</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% else %}
+                    <tr>
+                      <td colspan="6" class="table__empty">No staff field configuration found.</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="button">Save staff field settings</button>
+            </div>
+          </form>
+        </div>
+      </details>
+
+      <details class="card card--panel card-collapsible admin-grid__full">
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Staff custom fields</h2>
+            <p class="card__subtitle">Manage company-specific custom fields captured on staff records.</p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          <form action="/admin/companies/{{ company.id }}/staff-custom-fields" method="post" class="form-grid">
+            {% include "partials/csrf.html" %}
+            <div class="form-field">
+              <label class="form-label" for="new-custom-name">Key</label>
+              <input class="form-input" id="new-custom-name" name="name" placeholder="e.g. shirt_size" required />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-display-name">Label</label>
+              <input class="form-input" id="new-custom-display-name" name="display_name" placeholder="Shirt size" />
+            </div>
+            <div class="form-field admin-grid__full">
+              <label class="form-label" for="new-custom-help-text">Help text</label>
+              <input class="form-input" id="new-custom-help-text" name="help_text" maxlength="500" placeholder="Optional text shown below the field label on staff forms" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-field-type">Type</label>
+              <select class="form-input" id="new-custom-field-type" name="field_type">
+                <option value="text">text</option>
+                <option value="select">select</option>
+                <option value="checkbox">checkbox</option>
+                <option value="date">date</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-field-group">Group</label>
+              <input class="form-input" id="new-custom-field-group" name="field_group" placeholder="e.g. Uniform" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-display-order">Sort</label>
+              <input class="form-input" id="new-custom-display-order" name="display_order" type="number" value="0" />
+            </div>
+            <div class="form-field admin-grid__full">
+              <label class="form-label" for="new-custom-options">Options (select only)</label>
+              <input class="form-input" id="new-custom-options" name="options" placeholder="small:Small, medium:Medium" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-condition-parent">Conditional parent field key</label>
+              <input class="form-input" id="new-custom-condition-parent" name="condition_parent_name" placeholder="e.g. needs_uniform" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-condition-operator">Condition</label>
+              <select class="form-input" id="new-custom-condition-operator" name="condition_operator">
+                <option value="is_checked">Checkbox is checked</option>
+                <option value="is_not_checked">Checkbox is not checked</option>
+                <option value="equals">Equals value</option>
+                <option value="not_equals">Not equal to value</option>
+                <option value="one_of">One Of (comma separated)</option>
+                <option value="select_map">Select option map</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-condition-value">Condition value</label>
+              <textarea class="form-input" id="new-custom-condition-value" name="condition_value" rows="6" placeholder='equals/not_equals example: sales&#10;one_of example: sales, support, hr&#10;select_map JSON example: {&#10;  &quot;sales&quot;: &quot;a,b,c&quot;,&#10;  &quot;support&quot;: &quot;d,e,f&quot;,&#10;  &quot;fallback&quot;: &quot;other&quot;&#10;}'></textarea>
+            </div>
+            <div class="form-actions admin-grid__full">
+              <button type="submit" class="button">Add custom field</button>
+            </div>
+          </form>
+
+          <div class="table-wrapper">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Label</th>
+                  <th>Help text</th>
+                  <th>Type</th>
+                  <th>Group</th>
+                  <th>Sort</th>
+                  <th>Active</th>
+                  <th>Conditional logic</th>
+                  <th>Options</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for field in staff_custom_field_definitions %}
+                  <tr>
+                    <form action="/admin/companies/{{ company.id }}/staff-custom-fields/{{ field.id }}" method="post">
+                      {% include "partials/csrf.html" %}
+                      <td><code>{{ field.name }}</code></td>
+                      <td><input class="form-input" name="display_name" value="{{ field.display_name or '' }}" /></td>
+                      <td><input class="form-input" name="help_text" value="{{ field.help_text or '' }}" maxlength="500" placeholder="Optional help text" /></td>
+                      <td>
+                        <select class="form-input" name="field_type">
+                          {% for value in ['text', 'select', 'checkbox', 'date'] %}
+                            <option value="{{ value }}" {% if field.field_type == value %}selected{% endif %}>{{ value }}</option>
+                          {% endfor %}
+                        </select>
+                      </td>
+                      <td><input class="form-input" name="field_group" value="{{ field.field_group or '' }}" placeholder="Optional group" /></td>
+                      <td><input class="form-input" type="number" name="display_order" value="{{ field.display_order }}" /></td>
+                      <td><input type="checkbox" name="is_active" value="1" {% if field.is_active %}checked{% endif %} /></td>
+                      <td>
+                        <div class="form-field">
+                          <input class="form-input" name="condition_parent_name" value="{{ field.condition_parent_name or '' }}" placeholder="Parent key" />
+                        </div>
+                        <div class="form-field">
+                          <select class="form-input" name="condition_operator">
+                            {% for condition in ['equals', 'not_equals', 'one_of', 'is_checked', 'is_not_checked', 'select_map'] %}
+                              <option value="{{ condition }}" {% if (field.condition_operator or 'is_checked') == condition %}selected{% endif %}>{{ condition }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                        <div class="form-field">
+                          <textarea class="form-input" name="condition_value" rows="6" placeholder='one_of: sales, support, hr&#10;Use JSON for select_map, e.g. {&quot;sales&quot;:&quot;a,b,c&quot;,&quot;fallback&quot;:&quot;other&quot;}'>{{ field.condition_value or '' }}</textarea>
+                        </div>
+                      </td>
+                      <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
+                      <td class="table__actions">
+                        <button type="submit" class="button button--ghost">Save</button>
+                    </form>
+                    <form action="/admin/companies/{{ company.id }}/staff-custom-fields/{{ field.id }}/delete" method="post" class="inline-form">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--danger">Delete</button>
+                    </form>
+                      </td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="10" class="table__empty">No custom fields defined.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+
       <details class="card card--panel card-collapsible admin-grid__full" data-billing-contacts-panel open>
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
@@ -236,14 +493,6 @@
           {% else %}
           <p class="text-muted">No Microsoft 365 credentials linked to this company.</p>
           {% endif %}
-          {% if company.csp_tenant_id %}
-          <dl class="definition-list" style="margin-top: 0.75rem;">
-            <div class="definition-list__item">
-              <dt>CSP tenant ID</dt>
-              <dd><code>{{ company.csp_tenant_id }}</code></dd>
-            </div>
-          </dl>
-          {% endif %}
           <form action="/admin/companies/{{ company.id }}/m365-credentials" method="post" class="form" autocomplete="off">
             {% include "partials/csrf.html" %}
             <div class="form-field">
@@ -294,7 +543,7 @@
             >Remove credentials</button>
           </form>
           {% endif %}
-          {% if m365_admin_credentials_configured %}
+          {% if true %}
           <hr class="divider" style="margin: 1.5rem 0;" />
           <div>
             <p class="form-help">Auto-provision creates a dedicated enterprise app registration in the tenant and configures the required permissions automatically.</p>
@@ -1107,6 +1356,11 @@
                   <span class="permission-card__description">Manage company staff members</span>
                 </label>
                 <label class="form-checkbox permission-card">
+                  <input type="checkbox" name="user_permission" value="staff.request" data-user-permission-checkbox />
+                  <span class="permission-card__title">Request New User</span>
+                  <span class="permission-card__description">Submit new staff onboarding requests for approval</span>
+                </label>
+                <label class="form-checkbox permission-card">
                   <input type="checkbox" name="user_permission" value="shop.access" data-user-permission-checkbox />
                   <span class="permission-card__title">Shop Access</span>
                   <span class="permission-card__description">Access the company shop</span>
@@ -1181,6 +1435,7 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   {% if is_super_admin %}
+    <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
     <script>
       // Billing contacts management

@@ -16,6 +16,7 @@ class ImportSummary:
     created: int
     updated: int
     skipped: int
+    removed: int = 0
 
     @property
     def total(self) -> int:
@@ -24,6 +25,10 @@ class ImportSummary:
 
 def _normalise(value: str | None) -> str:
     return value.strip() if value else ""
+
+
+def _default_account_action(*, account_enabled: bool) -> str:
+    return "Onboarded" if account_enabled else "Offboarded"
 
 
 def _find_existing_staff(
@@ -169,6 +174,7 @@ async def _import_from_syncro(company_id: int, syncro_id: str) -> ImportSummary:
                 manager_name=None,
                 account_action=None,
                 syncro_contact_id=str(contact.get("id")) if contact.get("id") else None,
+                source="syncro",
             )
             existing_staff.append(created_staff)
             created += 1
@@ -191,6 +197,7 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
     created = 0
     updated = 0
     skipped = 0
+    seen_emails: set[str] = set()
 
     for user in users:
         first_name = _normalise(user.get("givenName")) or None
@@ -215,6 +222,12 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
         country = _normalise(user.get("country")) or None
         department = _normalise(user.get("department")) or None
         job_title = _normalise(user.get("jobTitle")) or None
+        sign_in_activity = user.get("signInActivity") or {}
+        m365_last_sign_in = m365_service.parse_graph_datetime(
+            sign_in_activity.get("lastSignInDateTime")
+        )
+        account_enabled = bool(user.get("accountEnabled", True))
+        is_ex_staff = not account_enabled
 
         existing = _find_existing_staff(
             existing_staff,
@@ -222,6 +235,9 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
             last_name=last_name or "",
             email=email,
         )
+
+        if email:
+            seen_emails.add(email.lower())
 
         if existing:
             await staff_repo.update_staff(
@@ -233,7 +249,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 mobile_phone=phone or existing.get("mobile_phone"),
                 date_onboarded=existing.get("date_onboarded"),
                 date_offboarded=existing.get("date_offboarded"),
-                enabled=bool(existing.get("enabled", True)),
+                enabled=account_enabled,
+                is_ex_staff=is_ex_staff,
                 street=street or existing.get("street"),
                 city=city or existing.get("city"),
                 state=state or existing.get("state"),
@@ -243,8 +260,10 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 job_title=job_title or existing.get("job_title"),
                 org_company=existing.get("org_company"),
                 manager_name=existing.get("manager_name"),
-                account_action=existing.get("account_action"),
+                account_action=existing.get("account_action")
+                or _default_account_action(account_enabled=account_enabled),
                 syncro_contact_id=existing.get("syncro_contact_id"),
+                m365_last_sign_in=m365_last_sign_in,
             )
             updated += 1
         else:
@@ -256,7 +275,8 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 mobile_phone=phone,
                 date_onboarded=None,
                 date_offboarded=None,
-                enabled=True,
+                enabled=account_enabled,
+                is_ex_staff=is_ex_staff,
                 street=street,
                 city=city,
                 state=state,
@@ -266,11 +286,15 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
                 job_title=job_title,
                 org_company=None,
                 manager_name=None,
-                account_action=None,
+                account_action=_default_account_action(account_enabled=account_enabled),
                 syncro_contact_id=None,
+                source="m365",
+                m365_last_sign_in=m365_last_sign_in,
             )
             existing_staff.append(created_staff)
             created += 1
+
+    removed = await staff_repo.delete_m365_staff_not_in(company_id, seen_emails)
 
     log_info(
         "Completed M365 directory staff import",
@@ -278,8 +302,18 @@ async def _import_from_m365(company_id: int) -> ImportSummary:
         created=created,
         updated=updated,
         skipped=skipped,
+        removed=removed,
     )
-    return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped)
+    return ImportSummary(company_id=company_id, created=created, updated=updated, skipped=skipped, removed=removed)
+
+
+async def import_m365_contacts_for_company(company_id: int) -> ImportSummary:
+    """Import staff from Microsoft 365 only, ignoring any Syncro mapping."""
+    m365_creds = await m365_service.get_credentials(company_id)
+    if not m365_creds:
+        log_info("Skipping M365 staff import: no M365 credentials configured", company_id=company_id)
+        return ImportSummary(company_id=company_id, created=0, updated=0, skipped=0)
+    return await _import_from_m365(company_id)
 
 
 async def import_contacts_for_syncro_id(syncro_company_id: str) -> ImportSummary:
