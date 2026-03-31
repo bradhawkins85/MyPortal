@@ -1,6 +1,6 @@
 {
   "guid": "b4676bc1-b6aa-46cb-a25f-79675fdfcb33",
-  "occurred_at": "2026-03-15T12:39:00Z",
+  "occurred_at": "2026-03-15T12:39Z",
   "change_type": "Fix",
   "summary": "Document Entra ID enterprise app bootstrap options to resolve AADSTS700016 during initial tenant onboarding.",
   "content_hash": "cd318abd5626d7a59efcb1252cd15b519512577976a05794e7657b7ceaeff003"

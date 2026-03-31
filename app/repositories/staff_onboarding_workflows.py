@@ -18,6 +18,11 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable in workflow payload")
+
 def _deserialise_json(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
@@ -131,7 +136,7 @@ async def upsert_company_workflow_policy(
             clean_key,
             1 if is_enabled else 0,
             max(0, int(max_retries)),
-            json.dumps(config or {}, ensure_ascii=False),
+            json.dumps(config or {}, default=_json_default, ensure_ascii=False),
         ),
     )
     return await get_company_workflow_policy(
@@ -444,8 +449,8 @@ async def append_step_log(
             step_name,
             status,
             attempt,
-            json.dumps(request_payload or {}, ensure_ascii=False),
-            json.dumps(response_payload or {}, ensure_ascii=False),
+            json.dumps(request_payload or {}, default=_json_default, ensure_ascii=False),
+            json.dumps(response_payload or {}, default=_json_default, ensure_ascii=False),
             error_message,
             _utc_now_naive(),
             _utc_now_naive(),
@@ -592,7 +597,7 @@ async def confirm_external_checkpoint(
             callback_timestamp,
             proof_reference_id,
             payload_hash,
-            json.dumps(callback_payload or {}, ensure_ascii=False),
+            json.dumps(callback_payload or {}, default=_json_default, ensure_ascii=False),
             confirmed_by_api_key_id,
             _utc_now_naive(),
             _utc_now_naive(),
@@ -668,7 +673,7 @@ async def finalize_external_confirmation_idempotency(
         """,
         (
             int(response_status),
-            json.dumps(response_payload or {}, ensure_ascii=False),
+            json.dumps(response_payload or {}, default=_json_default, ensure_ascii=False),
             _utc_now_naive(),
             api_key_id,
             idempotency_key,
