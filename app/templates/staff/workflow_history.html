@@ -1,0 +1,344 @@
+{% extends "base.html" %}
+
+{% block header_title %}
+  <div class="header-title-menu">
+    <span class="header-title-menu__label">Staff workflows</span>
+    <details class="header-title-menu__dropdown" data-header-menu>
+      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+        Workflow pages
+        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+        </svg>
+        <span class="visually-hidden">Toggle staff workflow pages</span>
+      </summary>
+      <ul class="header-title-menu__list" role="menu">
+        <li class="header-title-menu__item" role="none">
+          <a href="/staff/workflows/onboarding" class="header-title-menu__link" role="menuitem">Onboarding workflow</a>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <a href="/staff/workflows/offboarding" class="header-title-menu__link" role="menuitem">Offboarding workflow</a>
+        </li>
+        <li class="header-title-menu__item" role="none">
+          <a href="/staff/workflows/history" class="header-title-menu__link" role="menuitem">Execution history</a>
+        </li>
+      </ul>
+    </details>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <style>
+    .history-state {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .history-state--completed,
+    .history-state--offboarding_completed { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
+    .history-state--failed,
+    .history-state--offboarding_failed { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+    .history-state--provisioning,
+    .history-state--offboarding_in_progress { background: rgba(59, 130, 246, 0.15); color: #2563eb; }
+    .history-state--requested,
+    .history-state--approved,
+    .history-state--offboarding_approved { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+    .history-state--paused_license_unavailable { background: rgba(156, 163, 175, 0.15); color: #6b7280; }
+
+    .step-status {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 0.2rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .step-status--success { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
+    .step-status--failed { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+    .step-status--skipped { background: rgba(156, 163, 175, 0.15); color: #6b7280; }
+
+    .history-payload {
+      font-family: var(--font-mono, monospace);
+      font-size: 0.72rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: var(--bg-alt, rgba(0,0,0,0.2));
+      border-radius: 0.25rem;
+      padding: 0.5rem;
+      max-height: 16rem;
+      overflow-y: auto;
+      margin: 0;
+    }
+
+    .history-steps-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .history-steps-table th,
+    .history-steps-table td {
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.1));
+      text-align: left;
+      vertical-align: top;
+    }
+    .history-steps-table th { font-weight: 600; }
+
+    .history-filter-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+  </style>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Workflow execution history</h2>
+        <p class="card__subtitle">View past workflow executions and step-level results including 3rd party service responses for {{ company.name if company else 'the active company' }}.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      <div class="history-filter-row">
+        <div class="form-field">
+          <label class="form-label" for="direction-filter">Direction</label>
+          <select id="direction-filter" class="form-input">
+            <option value="">All</option>
+            <option value="onboarding">Onboarding</option>
+            <option value="offboarding">Offboarding</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="limit-input">Show last</label>
+          <select id="limit-input" class="form-input">
+            <option value="50">50 executions</option>
+            <option value="100" selected>100 executions</option>
+            <option value="200">200 executions</option>
+            <option value="500">500 executions</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="search-filter">Filter by staff name or ID</label>
+          <input id="search-filter" class="form-input" type="search" placeholder="Type to filter…" autocomplete="off" />
+        </div>
+        <button id="load-history-btn" type="button" class="btn btn-primary">Load history</button>
+      </div>
+
+      <div id="history-status" class="text-muted" role="status" aria-live="polite"></div>
+
+      <div id="history-results" class="stack-sm"></div>
+    </div>
+  </section>
+
+  <template id="execution-card-template">
+    <section class="card card--panel execution-card">
+      <details>
+        <summary class="card__header" style="cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:center; padding:0.6rem 1rem; gap:1rem; user-select:none;">
+          <div class="execution-summary-left" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; min-width:0;">
+            <span class="execution-staff-name" style="font-weight:600;"></span>
+            <span class="history-state execution-state-badge"></span>
+            <span class="execution-direction text-muted text-small"></span>
+            <span class="execution-requested-at text-muted text-small"></span>
+          </div>
+          <div class="execution-summary-right text-muted text-small" style="white-space:nowrap; flex-shrink:0;">
+            <span class="execution-step-count"></span>
+          </div>
+        </summary>
+        <div class="card__body stack-xs execution-body">
+          <div class="execution-meta text-small" style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+            <span><strong>Execution ID:</strong> <span class="meta-execution-id"></span></span>
+            <span><strong>Staff ID:</strong> <span class="meta-staff-id"></span></span>
+            <span><strong>Workflow:</strong> <span class="meta-workflow-key"></span></span>
+            <span><strong>Retries used:</strong> <span class="meta-retries"></span></span>
+            <span><strong>Started:</strong> <span class="meta-started-at"></span></span>
+            <span><strong>Completed:</strong> <span class="meta-completed-at"></span></span>
+            <span class="meta-ticket-wrap" hidden><strong>Ticket:</strong> #<span class="meta-ticket-id"></span></span>
+          </div>
+          <div class="meta-error text-danger text-small" hidden></div>
+          <div class="execution-steps-container"></div>
+        </div>
+      </details>
+    </section>
+  </template>
+
+  <script>
+    (() => {
+      const directionFilter = document.getElementById('direction-filter');
+      const limitInput = document.getElementById('limit-input');
+      const searchFilter = document.getElementById('search-filter');
+      const loadBtn = document.getElementById('load-history-btn');
+      const statusEl = document.getElementById('history-status');
+      const resultsEl = document.getElementById('history-results');
+      const cardTemplate = document.getElementById('execution-card-template');
+
+      let allExecutions = [];
+
+      const formatDt = (iso) => {
+        if (!iso) return '\u2014';
+        try {
+          const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+          return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' });
+        } catch {
+          return iso;
+        }
+      };
+
+      const escHtml = (s) => String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+      const stateCssClass = (state) => {
+        const slug = (state || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        return 'history-state--' + slug;
+      };
+
+      const stepStatusClass = (s) => {
+        if (s === 'success') return 'step-status--success';
+        if (s === 'failed') return 'step-status--failed';
+        return 'step-status--skipped';
+      };
+
+      const renderStepsTable = (steps, container) => {
+        if (!steps || !steps.length) {
+          const msg = document.createElement('p');
+          msg.className = 'text-muted text-small';
+          msg.textContent = 'No step logs recorded for this execution.';
+          container.appendChild(msg);
+          return;
+        }
+        const table = document.createElement('table');
+        table.className = 'history-steps-table';
+        table.innerHTML = '<thead><tr><th>#</th><th>Step</th><th>Status</th><th>Attempt</th><th>Started</th><th>Details</th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        steps.forEach((step, idx) => {
+          const row = document.createElement('tr');
+          const statusBadge = '<span class="step-status ' + stepStatusClass(step.status) + '">' + escHtml(step.status || '?') + '</span>';
+          const hasRequest = step.requestPayload && Object.keys(step.requestPayload).length > 0;
+          const hasResponse = step.responsePayload && Object.keys(step.responsePayload).length > 0;
+          const hasError = Boolean(step.errorMessage);
+          const detailsParts = [];
+          if (hasError) {
+            detailsParts.push('<div class="text-danger text-small">' + escHtml(step.errorMessage) + '</div>');
+          }
+          if (hasRequest) {
+            detailsParts.push(
+              '<details><summary class="text-small text-muted" style="cursor:pointer;">Request payload</summary>' +
+              '<pre class="history-payload">' + escHtml(JSON.stringify(step.requestPayload, null, 2)) + '</pre></details>'
+            );
+          }
+          if (hasResponse) {
+            detailsParts.push(
+              '<details><summary class="text-small text-muted" style="cursor:pointer;">Response payload</summary>' +
+              '<pre class="history-payload">' + escHtml(JSON.stringify(step.responsePayload, null, 2)) + '</pre></details>'
+            );
+          }
+          row.innerHTML =
+            '<td>' + (idx + 1) + '</td>' +
+            '<td style="word-break:break-all;">' + escHtml(step.stepName) + '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td>' + (step.attempt || 1) + '</td>' +
+            '<td style="white-space:nowrap;">' + formatDt(step.startedAt) + '</td>' +
+            '<td>' + (detailsParts.join('') || '<span class="text-muted">\u2014</span>') + '</td>';
+          tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+      };
+
+      const renderExecution = (execution) => {
+        const clone = cardTemplate.content.cloneNode(true);
+        const card = clone.querySelector('.execution-card');
+
+        card.querySelector('.execution-staff-name').textContent = execution.staffName || ('Staff #' + execution.staffId);
+        const badge = card.querySelector('.execution-state-badge');
+        badge.textContent = (execution.state || '').replace(/_/g, ' ');
+        badge.classList.add(stateCssClass(execution.state));
+        card.querySelector('.execution-direction').textContent = execution.direction || '';
+        card.querySelector('.execution-requested-at').textContent = formatDt(execution.requestedAt);
+        card.querySelector('.execution-step-count').textContent = ((execution.steps || []).length) + ' step log(s)';
+
+        card.querySelector('.meta-execution-id').textContent = execution.executionId;
+        card.querySelector('.meta-staff-id').textContent = execution.staffId;
+        card.querySelector('.meta-workflow-key').textContent = execution.workflowKey || '\u2014';
+        card.querySelector('.meta-retries').textContent = execution.retriesUsed != null ? execution.retriesUsed : 0;
+        card.querySelector('.meta-started-at').textContent = formatDt(execution.startedAt);
+        card.querySelector('.meta-completed-at').textContent = formatDt(execution.completedAt);
+
+        if (execution.helpdeskTicketId) {
+          const ticketWrap = card.querySelector('.meta-ticket-wrap');
+          ticketWrap.hidden = false;
+          ticketWrap.querySelector('.meta-ticket-id').textContent = execution.helpdeskTicketId;
+        }
+        if (execution.lastError) {
+          const errEl = card.querySelector('.meta-error');
+          errEl.hidden = false;
+          errEl.textContent = execution.lastError;
+        }
+
+        renderStepsTable(execution.steps || [], card.querySelector('.execution-steps-container'));
+        return card;
+      };
+
+      const applyClientFilter = (executions, searchText) => {
+        if (!searchText) return executions;
+        const q = searchText.toLowerCase();
+        return executions.filter((ex) => {
+          const name = (ex.staffName || '').toLowerCase();
+          const sid = String(ex.staffId || '');
+          return name.includes(q) || sid.includes(q);
+        });
+      };
+
+      const renderResults = () => {
+        const searchText = searchFilter.value.trim();
+        const filtered = applyClientFilter(allExecutions, searchText);
+        resultsEl.innerHTML = '';
+        if (!filtered.length) {
+          statusEl.textContent = allExecutions.length
+            ? 'No executions match the current filter.'
+            : 'No execution history found for this company.';
+          return;
+        }
+        statusEl.textContent = 'Showing ' + filtered.length + ' of ' + allExecutions.length + ' execution(s).';
+        filtered.forEach((ex) => resultsEl.appendChild(renderExecution(ex)));
+      };
+
+      const loadHistory = async () => {
+        const direction = directionFilter.value;
+        const limit = parseInt(limitInput.value || '100', 10);
+        resultsEl.innerHTML = '';
+        allExecutions = [];
+        statusEl.textContent = 'Loading\u2026';
+        loadBtn.disabled = true;
+
+        try {
+          const params = new URLSearchParams({ limit: String(limit) });
+          if (direction) params.set('direction', direction);
+          const resp = await fetch('/staff/workflows/history/recent?' + params.toString(), {
+            headers: { Accept: 'application/json' },
+          });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const data = await resp.json();
+          allExecutions = Array.isArray(data.executions) ? data.executions : [];
+          renderResults();
+        } catch (err) {
+          statusEl.textContent = 'Failed to load history: ' + err.message;
+        } finally {
+          loadBtn.disabled = false;
+        }
+      };
+
+      loadBtn.addEventListener('click', loadHistory);
+      searchFilter.addEventListener('input', () => {
+        if (allExecutions.length) renderResults();
+      });
+
+      loadHistory();
+    })();
+  </script>
+{% endblock %}

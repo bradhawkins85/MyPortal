@@ -586,3 +586,82 @@ async def test_process_paused_license_executions_resumes_eligible_execution(monk
 
     assert result == {"resumed": 1, "skipped": 0}
     resume_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_get_staff_workflow_history_returns_executions_with_steps(monkeypatch):
+    """GET /api/staff/{staff_id}/workflow/history returns executions with step logs."""
+    from app.api.routes import staff as staff_routes
+    from app.repositories import staff_onboarding_workflows as workflow_repo
+
+    execution = {
+        "id": 42,
+        "company_id": 5,
+        "staff_id": 99,
+        "workflow_key": "staff_onboarding_m365",
+        "direction": "onboarding",
+        "state": "completed",
+        "current_step": None,
+        "retries_used": 0,
+        "last_error": None,
+        "helpdesk_ticket_id": None,
+        "requested_at": datetime(2025, 1, 1, 10, 0, 0),
+        "started_at": datetime(2025, 1, 1, 10, 0, 1),
+        "completed_at": datetime(2025, 1, 1, 10, 5, 0),
+    }
+    step_log = {
+        "id": 7,
+        "execution_id": 42,
+        "step_name": "provision_account",
+        "status": "success",
+        "attempt": 1,
+        "request_payload": '{"user":"test@example.com"}',
+        "response_payload": '{"created":true,"userId":"u-123"}',
+        "error_message": None,
+        "started_at": datetime(2025, 1, 1, 10, 0, 2),
+        "completed_at": datetime(2025, 1, 1, 10, 0, 5),
+    }
+
+    monkeypatch.setattr(
+        staff_routes.staff_workflow_repo,
+        "list_execution_history_for_staff",
+        AsyncMock(return_value=[execution]),
+    )
+    monkeypatch.setattr(
+        staff_routes.staff_workflow_repo,
+        "list_step_logs_for_execution_ids",
+        AsyncMock(return_value={42: [step_log]}),
+    )
+    monkeypatch.setattr(
+        staff_routes.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(return_value={
+            "id": 99,
+            "company_id": 5,
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@example.com",
+        }),
+    )
+    super_admin_user = {"id": 1, "is_super_admin": True}
+
+    result = await staff_routes.get_staff_workflow_history(
+        staff_id=99,
+        limit=50,
+        _=None,
+        current_user=super_admin_user,
+    )
+
+    assert result["staffId"] == 99
+    assert result["staffName"] == "Alice Smith"
+    assert len(result["executions"]) == 1
+    ex = result["executions"][0]
+    assert ex["executionId"] == 42
+    assert ex["state"] == "completed"
+    assert ex["direction"] == "onboarding"
+    assert len(ex["steps"]) == 1
+    step = ex["steps"][0]
+    assert step["stepName"] == "provision_account"
+    assert step["status"] == "success"
+    assert step["requestPayload"] == {"user": "test@example.com"}
+    assert step["responsePayload"] == {"created": True, "userId": "u-123"}
