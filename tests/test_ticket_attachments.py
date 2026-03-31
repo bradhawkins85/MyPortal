@@ -33,6 +33,9 @@ class _DummyDB:
         self.execute_sql = sql.strip()
         self.execute_params = params
         return self._last_id
+
+    async def execute_returning_lastrowid(self, sql, params):
+        return await self.execute(sql, params)
     
     async def fetch_one(self, sql, params):
         self.fetch_sql = sql.strip()
