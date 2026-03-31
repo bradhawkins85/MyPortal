@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import ipaddress
+import json
+import socket
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
+
+import httpx
 
 from app.repositories import service_status as service_status_repo
 from app.services import tag_generator
+
+_AI_LOOKUP_MAX_URL_CONTENT = 8000
+_AI_LOOKUP_OLLAMA_TIMEOUT = 60.0
+_SSRF_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
 
 DEFAULT_STATUS = "operational"
 
@@ -119,6 +138,51 @@ def _serialize_tags(tags: list[str]) -> str:
     return ", ".join(str(tag).strip() for tag in tags if tag and str(tag).strip())
 
 
+_AI_LOOKUP_FREQUENCY_FIELDS = (
+    "ai_lookup_frequency_operational",
+    "ai_lookup_frequency_degraded",
+    "ai_lookup_frequency_partial_outage",
+    "ai_lookup_frequency_outage",
+    "ai_lookup_frequency_maintenance",
+)
+
+_AI_LOOKUP_FREQUENCY_DEFAULTS: dict[str, int] = {
+    "ai_lookup_frequency_operational": 60,
+    "ai_lookup_frequency_degraded": 15,
+    "ai_lookup_frequency_partial_outage": 10,
+    "ai_lookup_frequency_outage": 5,
+    "ai_lookup_frequency_maintenance": 60,
+}
+
+
+def _parse_ai_lookup_frequency(value: Any, *, default: int) -> int:
+    try:
+        result = int(value)
+        return result if result > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _extract_ai_lookup_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Extract and normalise AI lookup fields from a payload mapping."""
+    fields: dict[str, Any] = {}
+    if "ai_lookup_enabled" in payload:
+        fields["ai_lookup_enabled"] = 1 if bool(payload.get("ai_lookup_enabled")) else 0
+    if "ai_lookup_url" in payload:
+        fields["ai_lookup_url"] = _clean_text(payload.get("ai_lookup_url"))
+    if "ai_lookup_prompt" in payload:
+        fields["ai_lookup_prompt"] = _clean_text(payload.get("ai_lookup_prompt"))
+    if "ai_lookup_model_override" in payload:
+        fields["ai_lookup_model_override"] = _clean_text(payload.get("ai_lookup_model_override"))
+    for freq_field in _AI_LOOKUP_FREQUENCY_FIELDS:
+        if freq_field in payload:
+            fields[freq_field] = _parse_ai_lookup_frequency(
+                payload.get(freq_field),
+                default=_AI_LOOKUP_FREQUENCY_DEFAULTS[freq_field],
+            )
+    return fields
+
+
 async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any]]:
     return await service_status_repo.list_services(include_inactive=include_inactive)
 
@@ -181,6 +245,9 @@ async def create_service(
     }
     if updated_by:
         repo_payload["updated_by"] = updated_by
+    # Include AI lookup fields
+    ai_lookup_fields = _extract_ai_lookup_fields(payload or {})
+    repo_payload.update(ai_lookup_fields)
     return await service_status_repo.create_service(
         repo_payload,
         company_ids=normalise_company_ids(company_ids),
@@ -218,6 +285,8 @@ async def update_service(
     if "tags" in payload:
         tags = _parse_tags(payload.get("tags"))
         updates["tags"] = _serialize_tags(tags)
+    # AI lookup fields
+    updates.update(_extract_ai_lookup_fields(payload))
     if updated_by:
         updates["updated_by"] = updated_by
     return await service_status_repo.update_service(
@@ -332,3 +401,255 @@ async def find_relevant_services_for_ticket(
     relevant_services.sort(key=lambda s: (-s["matching_tags_count"], str(s.get("name", "")).lower()))
     
     return relevant_services
+
+
+def _frequency_for_status(service: Mapping[str, Any]) -> int:
+    """Return the AI lookup frequency (in minutes) based on the current service status."""
+    status = str(service.get("status") or DEFAULT_STATUS)
+    freq_map = {
+        "operational": service.get("ai_lookup_frequency_operational"),
+        "degraded": service.get("ai_lookup_frequency_degraded"),
+        "partial_outage": service.get("ai_lookup_frequency_partial_outage"),
+        "outage": service.get("ai_lookup_frequency_outage"),
+        "maintenance": service.get("ai_lookup_frequency_maintenance"),
+    }
+    raw = freq_map.get(status)
+    try:
+        minutes = int(raw)
+        return minutes if minutes > 0 else _AI_LOOKUP_FREQUENCY_DEFAULTS.get(status, 60)
+    except (TypeError, ValueError):
+        return _AI_LOOKUP_FREQUENCY_DEFAULTS.get(status, 60)
+
+
+def _is_lookup_due(service: Mapping[str, Any]) -> bool:
+    """Return True if the service AI lookup is due based on frequency and last checked time."""
+    last_checked = service.get("ai_lookup_last_checked_at")
+    if last_checked is None:
+        return True
+    frequency_minutes = _frequency_for_status(service)
+    now = datetime.now(timezone.utc)
+    if isinstance(last_checked, datetime):
+        if last_checked.tzinfo is None:
+            last_checked = last_checked.replace(tzinfo=timezone.utc)
+        elapsed_minutes = (now - last_checked).total_seconds() / 60
+    else:
+        # Fallback: treat as due
+        return True
+    return elapsed_minutes >= frequency_minutes
+
+
+def _parse_ai_status_response(text: str) -> tuple[str | None, str | None]:
+    """
+    Parse an Ollama response into (status, message).
+
+    The model is expected to return a JSON object like:
+    {"status": "operational", "message": "All systems normal"}
+
+    Falls back to keyword scanning if JSON is not found.
+    """
+    if not text:
+        return None, None
+
+    # Try JSON parsing first
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            status_raw = str(data.get("status") or "").strip().lower()
+            message_raw = str(data.get("message") or "").strip() or None
+            if status_raw in _STATUS_LOOKUP:
+                return status_raw, message_raw
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Keyword scan fallback (order matters – most specific first)
+    lower_text = text.lower()
+    for candidate in ("partial_outage", "outage", "degraded", "maintenance", "operational"):
+        if candidate.replace("_", " ") in lower_text or candidate in lower_text:
+            return candidate, None
+
+    return None, None
+
+
+def _validate_lookup_url(url: str) -> str:
+    """
+    Validate the AI lookup URL to prevent SSRF attacks.
+
+    Raises ValueError if the URL resolves to a private/loopback address or uses a
+    non-HTTP(S) scheme.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Lookup URL must use http or https scheme")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("Lookup URL must include a hostname")
+    try:
+        addr = socket.getaddrinfo(hostname, None, flags=socket.AI_NUMERICSERV)
+    except socket.gaierror:
+        raise ValueError(f"Unable to resolve hostname: {hostname}")
+    for _family, _type, _proto, _canonname, sockaddr in addr:
+        ip_str = sockaddr[0]
+        try:
+            ip_obj = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        for blocked in _SSRF_BLOCKED_NETWORKS:
+            if ip_obj in blocked:
+                raise ValueError(f"Lookup URL resolves to a private/internal address ({ip_obj})")
+    return url
+
+
+def _sanitize_url_content(content: str) -> str:
+    """Strip content to a safe size and remove control characters that could cause prompt injection."""
+    safe = content[:_AI_LOOKUP_MAX_URL_CONTENT]
+    # Remove null bytes and ASCII control characters except whitespace
+    safe = "".join(ch for ch in safe if ch >= " " or ch in "\t\n\r")
+    return safe
+
+
+async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
+    """
+    Perform an AI lookup for a single service.
+
+    Fetches the configured URL, passes the content together with the prompt to
+    the configured Ollama server, and updates the service status from the response.
+
+    Returns a dict with keys: service_id, status, message, changed, error.
+    """
+    from app.repositories import modules as modules_repo  # local import to avoid circular
+
+    service = await get_service(service_id)
+    if not service:
+        return {"service_id": service_id, "error": "Service not found", "changed": False}
+    if not service.get("ai_lookup_enabled"):
+        return {"service_id": service_id, "error": "AI lookup not enabled", "changed": False}
+
+    lookup_url = _clean_text(service.get("ai_lookup_url"))
+    prompt_template = _clean_text(service.get("ai_lookup_prompt"))
+    model_override = _clean_text(service.get("ai_lookup_model_override"))
+
+    if not lookup_url:
+        return {"service_id": service_id, "error": "No lookup URL configured", "changed": False}
+    if not prompt_template:
+        return {"service_id": service_id, "error": "No AI prompt configured", "changed": False}
+
+    # Validate URL to prevent SSRF
+    try:
+        _validate_lookup_url(lookup_url)
+    except ValueError as exc:
+        return {"service_id": service_id, "error": f"Invalid lookup URL: {exc}", "changed": False}
+
+    # Fetch the URL content
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(lookup_url)
+        response.raise_for_status()
+        url_content = _sanitize_url_content(response.text)
+    except Exception as exc:
+        return {"service_id": service_id, "error": f"URL fetch failed: {exc}", "changed": False}
+
+    # Build the full prompt
+    full_prompt = (
+        f"{prompt_template}\n\n"
+        f"URL: {lookup_url}\n"
+        f"Content:\n{url_content}\n\n"
+        f"Respond with a JSON object containing exactly two keys: "
+        f'"status" (one of: operational, degraded, partial_outage, outage, maintenance) '
+        f'and "message" (a short human-readable description of the current state).'
+    )
+
+    # Get Ollama settings
+    module = await modules_repo.get_module("ollama")
+    ollama_enabled = bool(module and module.get("enabled"))
+    raw_settings = (module or {}).get("settings") or {}
+    if isinstance(raw_settings, str):
+        try:
+            raw_settings = json.loads(raw_settings)
+        except json.JSONDecodeError:
+            raw_settings = {}
+
+    base_url = str(raw_settings.get("base_url") or "http://127.0.0.1:11434").rstrip("/")
+    default_model = str(raw_settings.get("model") or "llama3")
+    model = model_override or default_model
+
+    now_utc = datetime.now(timezone.utc)
+    ai_response_text: str | None = None
+
+    if ollama_enabled:
+        endpoint = f"{base_url}/api/generate"
+        body = {"model": model, "prompt": full_prompt, "stream": False}
+        try:
+            async with httpx.AsyncClient(timeout=_AI_LOOKUP_OLLAMA_TIMEOUT) as client:
+                ai_response = await client.post(endpoint, json=body)
+            ai_response.raise_for_status()
+            ai_data = ai_response.json()
+            ai_response_text = str(ai_data.get("response") or "").strip()
+        except Exception as exc:
+            # Record the failed attempt time and return error
+            await service_status_repo.update_service(
+                service_id,
+                {"ai_lookup_last_checked_at": now_utc},
+            )
+            return {"service_id": service_id, "error": f"Ollama request failed: {exc}", "changed": False}
+    else:
+        return {"service_id": service_id, "error": "Ollama module not enabled", "changed": False}
+
+    derived_status, derived_message = _parse_ai_status_response(ai_response_text or "")
+
+    updates: dict[str, Any] = {
+        "ai_lookup_last_checked_at": now_utc,
+        "ai_lookup_last_status": derived_status,
+        "ai_lookup_last_message": derived_message,
+    }
+
+    changed = False
+    if derived_status and derived_status != service.get("status"):
+        updates["status"] = derived_status
+        updates["status_message"] = derived_message
+        changed = True
+    elif derived_message and derived_message != service.get("status_message"):
+        updates["status_message"] = derived_message
+        changed = True
+
+    await service_status_repo.update_service(service_id, updates)
+
+    return {
+        "service_id": service_id,
+        "status": derived_status,
+        "message": derived_message,
+        "changed": changed,
+        "error": None,
+    }
+
+
+async def run_ai_lookup_for_all_services() -> dict[str, Any]:
+    """
+    Check all AI-lookup-enabled services and run lookups for those that are due.
+
+    Returns a summary dict with keys: checked, changed, skipped, errors.
+    """
+    services = await service_status_repo.list_services_due_for_ai_lookup()
+    checked = 0
+    changed = 0
+    skipped = 0
+    errors = 0
+
+    for service in services:
+        if not _is_lookup_due(service):
+            skipped += 1
+            continue
+        service_id = service.get("id")
+        if service_id is None:
+            errors += 1
+            continue
+        try:
+            result = await run_ai_lookup_for_service(int(service_id))
+            checked += 1
+            if result.get("changed"):
+                changed += 1
+            if result.get("error"):
+                errors += 1
+        except Exception:
+            errors += 1
+
+    return {"checked": checked, "changed": changed, "skipped": skipped, "errors": errors}

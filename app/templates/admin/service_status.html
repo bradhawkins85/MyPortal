@@ -213,6 +213,172 @@
           {% endif %}
         </div>
       </form>
+
+      <details class="form-section-details" {% if service_status_editing and service_status_editing.ai_lookup_enabled %}open{% endif %}>
+        <summary class="form-section-details__summary">AI Lookup</summary>
+        <form
+          id="ai-lookup-form"
+          action="{{ '/admin/service-status/' ~ service_status_editing.id if service_status_editing else '/admin/service-status' }}"
+          method="post"
+          class="form"
+        >
+          {% include "partials/csrf.html" %}
+          {# Re-post the base fields so the whole record is preserved on submit #}
+          <input type="hidden" name="name" value="{{ service_status_editing.name if service_status_editing else '' }}" />
+          <input type="hidden" name="description" value="{{ service_status_editing.description if service_status_editing else '' }}" />
+          <input type="hidden" name="status" value="{{ service_status_editing.status if service_status_editing else service_status_default }}" />
+          <input type="hidden" name="status_message" value="{{ service_status_editing.status_message if service_status_editing else '' }}" />
+          <input type="hidden" name="tags" value="{% if service_status_editing and service_status_editing.tags %}{{ service_status_editing.tags|join(', ') }}{% endif %}" />
+          <input type="hidden" name="display_order" value="{{ service_status_editing.display_order if service_status_editing else 0 }}" />
+          {% if service_status_editing is none or service_status_editing.is_active %}
+            <input type="hidden" name="is_active" value="on" />
+          {% endif %}
+          {% if service_status_editing %}
+            {% for company_id in service_status_editing.company_ids %}
+              <input type="hidden" name="companyIds" value="{{ company_id }}" />
+            {% endfor %}
+          {% endif %}
+
+          <div class="form-field form-field--checkbox">
+            <label class="form-checkbox">
+              <input
+                type="checkbox"
+                name="ai_lookup_enabled"
+                id="ai-lookup-enabled"
+                {% if service_status_editing and service_status_editing.ai_lookup_enabled %}checked{% endif %}
+              />
+              <span>Enable AI lookup</span>
+            </label>
+            <p class="form-help">Periodically fetch a URL and use Ollama to determine service status.</p>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label" for="ai-lookup-url">Lookup URL</label>
+            <input
+              id="ai-lookup-url"
+              name="ai_lookup_url"
+              class="form-input"
+              type="url"
+              value="{{ service_status_editing.ai_lookup_url if service_status_editing else '' }}"
+              placeholder="https://status.example.com/api/status"
+            />
+            <p class="form-help">URL whose content is passed to the AI model for status analysis.</p>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label" for="ai-lookup-prompt">AI Prompt</label>
+            <textarea
+              id="ai-lookup-prompt"
+              name="ai_lookup_prompt"
+              class="form-input form-input--textarea"
+              rows="4"
+              placeholder="Analyse the following status page content and determine the current operational state of the service."
+            >{{ service_status_editing.ai_lookup_prompt if service_status_editing else '' }}</textarea>
+            <p class="form-help">Instructions sent to the AI model along with the URL content.</p>
+          </div>
+
+          <div class="form-field">
+            <label class="form-label" for="ai-lookup-model">Model override</label>
+            <input
+              id="ai-lookup-model"
+              name="ai_lookup_model_override"
+              class="form-input"
+              value="{{ service_status_editing.ai_lookup_model_override if service_status_editing else '' }}"
+              placeholder="Leave blank to use the default Ollama model"
+            />
+            <p class="form-help">Override the default Ollama model for this service.</p>
+          </div>
+
+          <fieldset class="form-fieldset">
+            <legend class="form-fieldset__legend">Lookup frequency (minutes by status)</legend>
+            <div class="form-grid form-grid--3">
+              <div class="form-field">
+                <label class="form-label" for="ai-freq-operational">Operational</label>
+                <input
+                  id="ai-freq-operational"
+                  name="ai_lookup_frequency_operational"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  class="form-input"
+                  value="{{ service_status_editing.ai_lookup_frequency_operational if service_status_editing else 60 }}"
+                />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ai-freq-degraded">Degraded</label>
+                <input
+                  id="ai-freq-degraded"
+                  name="ai_lookup_frequency_degraded"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  class="form-input"
+                  value="{{ service_status_editing.ai_lookup_frequency_degraded if service_status_editing else 15 }}"
+                />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ai-freq-partial">Partial outage</label>
+                <input
+                  id="ai-freq-partial"
+                  name="ai_lookup_frequency_partial_outage"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  class="form-input"
+                  value="{{ service_status_editing.ai_lookup_frequency_partial_outage if service_status_editing else 10 }}"
+                />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ai-freq-outage">Outage</label>
+                <input
+                  id="ai-freq-outage"
+                  name="ai_lookup_frequency_outage"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  class="form-input"
+                  value="{{ service_status_editing.ai_lookup_frequency_outage if service_status_editing else 5 }}"
+                />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ai-freq-maintenance">Maintenance</label>
+                <input
+                  id="ai-freq-maintenance"
+                  name="ai_lookup_frequency_maintenance"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  class="form-input"
+                  value="{{ service_status_editing.ai_lookup_frequency_maintenance if service_status_editing else 60 }}"
+                />
+              </div>
+            </div>
+          </fieldset>
+
+          {% if service_status_editing and service_status_editing.ai_lookup_last_checked_at %}
+            <div class="form-field">
+              <p class="form-help">
+                Last checked:
+                <strong>{{ service_status_editing.ai_lookup_last_checked_at.strftime('%d %b %Y %H:%M') if service_status_editing.ai_lookup_last_checked_at.__class__.__name__ == 'datetime' else service_status_editing.ai_lookup_last_checked_at }}</strong>
+                {% if service_status_editing.ai_lookup_last_status %}
+                  &mdash; AI status: <strong>{{ service_status_editing.ai_lookup_last_status }}</strong>
+                {% endif %}
+                {% if service_status_editing.ai_lookup_last_message %}
+                  &mdash; {{ service_status_editing.ai_lookup_last_message }}
+                {% endif %}
+              </p>
+            </div>
+          {% endif %}
+
+          <div class="form-actions">
+            <button type="submit" class="button button--primary">{{ 'Save AI lookup settings' if service_status_editing else 'Create service' }}</button>
+            {% if service_status_editing %}
+              <a class="button button--ghost" href="/admin/service-status">Cancel</a>
+            {% endif %}
+          </div>
+        </form>
+      </details>
+
       {% if service_status_editing %}
         <form id="refresh-tags-form" action="/admin/service-status/{{ service_status_editing.id }}/refresh-tags" method="post" class="inline-form">
           {% include "partials/csrf.html" %}

@@ -39,6 +39,18 @@ def _serialize_service(service: dict[str, Any]) -> ServiceStatusResponse:
         created_at=service.get("created_at"),
         updated_at=service.get("updated_at"),
         updated_by=service.get("updated_by"),
+        ai_lookup_enabled=bool(service.get("ai_lookup_enabled", False)),
+        ai_lookup_url=service.get("ai_lookup_url"),
+        ai_lookup_prompt=service.get("ai_lookup_prompt"),
+        ai_lookup_model_override=service.get("ai_lookup_model_override"),
+        ai_lookup_frequency_operational=int(service.get("ai_lookup_frequency_operational") or 60),
+        ai_lookup_frequency_degraded=int(service.get("ai_lookup_frequency_degraded") or 15),
+        ai_lookup_frequency_partial_outage=int(service.get("ai_lookup_frequency_partial_outage") or 10),
+        ai_lookup_frequency_outage=int(service.get("ai_lookup_frequency_outage") or 5),
+        ai_lookup_frequency_maintenance=int(service.get("ai_lookup_frequency_maintenance") or 60),
+        ai_lookup_last_checked_at=service.get("ai_lookup_last_checked_at"),
+        ai_lookup_last_status=service.get("ai_lookup_last_status"),
+        ai_lookup_last_message=service.get("ai_lookup_last_message"),
     )
 
 
