@@ -10237,6 +10237,126 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
     )
 
 
+@app.get("/staff/workflows/history", response_class=HTMLResponse)
+async def staff_workflow_history_page(request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        _company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    if not is_super_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    extra = {
+        "title": "Workflow execution history",
+        "is_super_admin": is_super_admin,
+        "is_admin": True,
+        "staff_permission": staff_permission,
+        "company": company,
+    }
+    return await _render_template("staff/workflow_history.html", request, user, extra=extra)
+
+
+@app.get("/staff/workflows/history/recent")
+async def staff_workflow_history_recent(request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+
+    direction_param = str(request.query_params.get("direction") or "").strip().lower() or None
+    limit_param = min(max(1, int(request.query_params.get("limit") or "100")), 500)
+    executions = await staff_workflow_repo.list_recent_executions_for_company(
+        company_id, limit=limit_param, direction=direction_param
+    )
+    execution_ids = [int(ex["id"]) for ex in executions if ex.get("id")]
+
+    # Fetch staff names for all staff IDs referenced
+    staff_ids = list({int(ex["staff_id"]) for ex in executions if ex.get("staff_id")})
+    staff_map: dict[int, dict] = {}
+    if staff_ids:
+        from app.repositories import staff as staff_repo_local
+        for sid in staff_ids:
+            member = await staff_repo_local.get_staff_by_id(sid)
+            if member:
+                staff_map[sid] = member
+
+    step_logs_map = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
+    import json as _json_mod
+
+    def _serialise_dt(val: Any) -> str | None:
+        from datetime import datetime as _dt
+        if isinstance(val, _dt):
+            return val.isoformat()
+        return str(val) if val else None
+
+    items = []
+    for ex in executions:
+        ex_id = int(ex["id"])
+        sid = int(ex.get("staff_id") or 0)
+        member = staff_map.get(sid, {})
+        raw_logs = step_logs_map.get(ex_id, [])
+        steps = []
+        for log in raw_logs:
+            req_p = log.get("request_payload")
+            res_p = log.get("response_payload")
+            if isinstance(req_p, str):
+                try:
+                    req_p = _json_mod.loads(req_p)
+                except Exception:
+                    req_p = {}
+            if isinstance(res_p, str):
+                try:
+                    res_p = _json_mod.loads(res_p)
+                except Exception:
+                    res_p = {}
+            steps.append({
+                "id": int(log.get("id") or 0),
+                "stepName": str(log.get("step_name") or ""),
+                "status": str(log.get("status") or ""),
+                "attempt": int(log.get("attempt") or 1),
+                "requestPayload": req_p or {},
+                "responsePayload": res_p or {},
+                "errorMessage": log.get("error_message"),
+                "startedAt": _serialise_dt(log.get("started_at")),
+                "completedAt": _serialise_dt(log.get("completed_at")),
+            })
+        items.append({
+            "executionId": ex_id,
+            "staffId": sid,
+            "staffName": f"{member.get('first_name', '')} {member.get('last_name', '')}".strip() or f"Staff #{sid}",
+            "direction": str(ex.get("direction") or "onboarding"),
+            "state": str(ex.get("state") or ""),
+            "workflowKey": str(ex.get("workflow_key") or ""),
+            "currentStep": ex.get("current_step"),
+            "retriesUsed": int(ex.get("retries_used") or 0),
+            "lastError": ex.get("last_error"),
+            "helpdeskTicketId": ex.get("helpdesk_ticket_id"),
+            "requestedAt": _serialise_dt(ex.get("requested_at")),
+            "startedAt": _serialise_dt(ex.get("started_at")),
+            "completedAt": _serialise_dt(ex.get("completed_at")),
+            "steps": steps,
+        })
+    return JSONResponse({"executions": items, "total": len(items)})
+
+
 @app.post("/staff", response_class=HTMLResponse)
 async def create_staff_member(request: Request):
     (

@@ -18,6 +18,11 @@
         <li class="header-title-menu__item" role="none">
           <a href="/staff/workflows/offboarding" class="header-title-menu__link" role="menuitem">Offboarding workflow</a>
         </li>
+        {% if is_super_admin %}
+        <li class="header-title-menu__item" role="none">
+          <a href="/staff/workflows/history" class="header-title-menu__link" role="menuitem">Execution history</a>
+        </li>
+        {% endif %}
       </ul>
     </details>
   </div>
