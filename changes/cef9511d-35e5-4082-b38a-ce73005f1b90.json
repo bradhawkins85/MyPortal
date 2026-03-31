@@ -1,7 +1,7 @@
 {
   "guid": "cef9511d-35e5-4082-b38a-ce73005f1b90",
-  "occurred_at": "2026-03-15T13:09:29.663459+00:00",
+  "occurred_at": "2026-03-15T13:09Z",
   "change_type": "Fix",
   "summary": "Remove the /admin/csp/customers page and related navigation links; route CSP OAuth redirects to /m365.",
-  "content_hash": "159eb496b6435b7b11fcd1e63bea472684a932239d700d2816edd75ab232e4de"
+  "content_hash": "97b17a8087801ade62aa6439ef152630c2228a408abcd44a5164e9ff35fdb726"
 }

@@ -1,7 +1,7 @@
 {
   "guid": "94708710-ed4c-404d-b864-ad166046c8b3",
-  "occurred_at": "2026-03-17T11:55:03Z",
+  "occurred_at": "2026-03-17T11:55Z",
   "change_type": "Fix",
   "summary": "Detect concealed Microsoft 365 mailbox identifiers and fail sync with remediation guidance.",
-  "content_hash": "283540f363034240db36379c4682748428143fa6dfe80cd073459b176684a25e"
+  "content_hash": "e949c7feafb8fe9f7c9428fc8106110500ef72906adb6a2477d2def51778be2b"
 }

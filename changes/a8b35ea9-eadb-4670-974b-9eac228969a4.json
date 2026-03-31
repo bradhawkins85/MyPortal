@@ -1,6 +1,6 @@
 {
   "guid": "a8b35ea9-eadb-4670-974b-9eac228969a4",
-  "occurred_at": "2026-03-15T12:45:00Z",
+  "occurred_at": "2026-03-15T12:45Z",
   "change_type": "Feature",
   "summary": "Add CSP/Lighthouse Option 3 button to bootstrap customer-tenant enterprise app creation via Microsoft Graph.",
   "content_hash": "93ea9d63d9b1ce5806df84314fafddf9114011a36242caeeb371c79cb2109c2f"
