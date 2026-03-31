@@ -1,59 +1,37 @@
 {% extends "base.html" %}
 
+{% block header_title %}
+  {% if is_admin %}
+    <div class="header-title-menu">
+      <span class="header-title-menu__label">Staff workspace</span>
+      <details class="header-title-menu__dropdown" data-header-menu>
+        <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+          Tools
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+            <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+          </svg>
+          <span class="visually-hidden">Toggle staff workflow menu</span>
+        </summary>
+        <ul class="header-title-menu__list" role="menu">
+          <li class="header-title-menu__item" role="none">
+            <button type="button" class="header-title-menu__link" role="menuitem" data-open-add-staff-modal>
+              Add Staff Member
+            </button>
+          </li>
+          <li class="header-title-menu__item" role="none">
+            <a href="/staff/workflows/onboarding" class="header-title-menu__link" role="menuitem">Onboarding workflow</a>
+          </li>
+          <li class="header-title-menu__item" role="none">
+            <a href="/staff/workflows/offboarding" class="header-title-menu__link" role="menuitem">Offboarding workflow</a>
+          </li>
+        </ul>
+      </details>
+    </div>
+  {% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="admin-grid">
-  {% if is_admin %}
-    <details class="card card--panel card-collapsible admin-grid__full staff-form-card" data-staff-form>
-      <summary class="card__header card__header--collapsible">
-        <div>
-          <h2 class="card__title">Add staff member</h2>
-          <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
-        </div>
-        <div class="card__collapsible-meta">
-          <span class="card__toggle-icon" aria-hidden="true"></span>
-        </div>
-      </summary>
-      <div class="card-collapsible__content">
-        <form action="/staff" method="post" class="staff-form">
-          {% include "partials/csrf.html" %}
-          <div class="form-field">
-            <label class="form-label" for="staff-first-name">First name</label>
-            <input class="form-input" id="staff-first-name" name="firstName" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-last-name">Last name</label>
-            <input class="form-input" id="staff-last-name" name="lastName" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-email">Email</label>
-            <input class="form-input" id="staff-email" name="email" type="email" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-mobile">Mobile phone</label>
-            <input class="form-input" id="staff-mobile" name="mobilePhone" type="tel" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-department">Department</label>
-            <input class="form-input" id="staff-department" name="department" />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="staff-date-onboarded">Onboard date</label>
-            <input class="form-input" id="staff-date-onboarded" name="dateOnboarded" type="date" />
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox">
-              <input type="checkbox" name="enabled" value="1" checked />
-              <span>Enabled</span>
-            </label>
-          </div>
-          <div class="form-actions staff-form__actions">
-            <button type="submit" class="button">Add staff</button>
-          </div>
-        </form>
-      </div>
-    </details>
-  {% endif %}
-
   <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div>
@@ -69,6 +47,12 @@
               <option value="1" {% if enabled_filter == '1' %}selected{% endif %}>Enabled</option>
               <option value="0" {% if enabled_filter == '0' %}selected{% endif %}>Disabled</option>
             </select>
+          </div>
+          <div class="filters__group filters__group--checkbox">
+            <label class="checkbox">
+              <input type="checkbox" name="show_ex_staff" value="1" data-submit-on-change {% if show_ex_staff %}checked{% endif %} />
+              <span>Show Ex-Staff</span>
+            </label>
           </div>
           {% if staff_permission == 3 and departments %}
             <div class="filters__group">
@@ -86,38 +70,170 @@
             <input class="form-input" id="staff-search" type="search" data-table-filter="staff-table" placeholder="Search staff" />
           </div>
         </form>
+        <div class="ticket-columns" data-staff-columns>
+          <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
+            <span>Columns</span>
+            <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="ticket-columns__panel" data-columns-panel hidden>
+            <p class="ticket-columns__title">Toggle columns</p>
+            <div class="ticket-columns__options">
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="first-name" checked disabled />
+                First name
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="last-name" checked />
+                Last name
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="email" checked />
+                Email
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="mobile" checked />
+                Mobile
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="code" checked />
+                Code
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="onboarded" checked />
+                Onboarded
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
+                O365 Last Sign In
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
+                Onboarding Workflow
+              </label>
+              <label class="ticket-columns__option">
+                <input type="checkbox" class="staff-column-toggle" data-column="enabled" checked />
+                Enabled
+              </label>
+              {% for field in staff_custom_field_definitions %}
+                <label class="ticket-columns__option">
+                  <input type="checkbox" class="staff-column-toggle" data-column="custom-{{ field.name }}" checked />
+                  {{ field.display_name or field.name }}
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
       </div>
     </header>
     <div class="table-wrapper">
       <table class="table" id="staff-table" data-table>
         <thead>
           <tr>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">First name</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Last name</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Email</th>
-            <th scope="col" data-sort="string" data-mobile-priority="supporting">Mobile</th>
-            <th scope="col" data-sort="string">Code</th>
-            <th scope="col" data-sort="date" data-mobile-priority="supporting">Onboarded</th>
-            <th scope="col" data-sort="string" data-mobile-priority="supporting">Enabled</th>
+            <th scope="col" data-sort="string" data-column="first-name" data-mobile-priority="essential">First name</th>
+            <th scope="col" data-sort="string" data-column="last-name" data-mobile-priority="essential">Last name</th>
+            <th scope="col" data-sort="string" data-column="email" data-mobile-priority="essential">Email</th>
+            <th scope="col" data-sort="string" data-column="mobile" data-mobile-priority="supporting">Mobile</th>
+            <th scope="col" data-sort="string" data-column="code">Code</th>
+            <th scope="col" data-sort="date" data-column="onboarded" data-mobile-priority="supporting">Onboarded</th>
+            <th scope="col" data-sort="date" data-column="m365-sign-in">O365 Last Sign In</th>
+            <th scope="col" data-sort="string" data-column="onboarding-workflow">Onboarding Workflow</th>
+            {% for field in staff_custom_field_definitions %}
+              <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
+            {% endfor %}
+            <th scope="col" data-sort="string" data-column="enabled" data-mobile-priority="supporting">Enabled</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for member in staff_members %}
             <tr data-staff-id="{{ member.id }}">
-              <td data-label="First name">{{ member.first_name }}</td>
-              <td data-label="Last name">{{ member.last_name }}</td>
-              <td data-label="Email">{{ member.email }}</td>
-              <td data-label="Mobile">{{ member.mobile_phone or '—' }}</td>
-              <td data-label="Verification code" class="verification-code">{{ member.verification_code or '—' }}</td>
-              <td data-label="Onboarded" data-value="{{ member.date_onboarded or '' }}" data-utc="{{ member.date_onboarded or '' }}">
+              <td data-label="First name" data-column="first-name">{{ member.first_name }}</td>
+              <td data-label="Last name" data-column="last-name">{{ member.last_name }}</td>
+              <td data-label="Email" data-column="email">{{ member.email }}</td>
+              <td data-label="Mobile" data-column="mobile">{{ member.mobile_phone or '—' }}</td>
+              <td data-label="Verification code" data-column="code" class="verification-code">{{ member.verification_code or '—' }}</td>
+              <td data-label="Onboarded" data-column="onboarded" data-value="{{ member.date_onboarded or '' }}" data-utc="{{ member.date_onboarded or '' }}">
                 {% if member.date_onboarded %}
                   {{ member.date_onboarded }}
                 {% else %}
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
-              <td data-label="Enabled">
+              <td data-label="O365 Last Sign In" data-column="m365-sign-in" data-value="{{ member.m365_last_sign_in or '' }}" data-utc="{{ member.m365_last_sign_in or '' }}">
+                {% if member.m365_last_sign_in %}
+                  {{ member.m365_last_sign_in }}
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Onboarding Workflow" data-column="onboarding-workflow">
+                {% set workflow = member.workflow_status or {} %}
+                {% set workflow_state = workflow.get('state') or member.onboarding_status or 'requested' %}
+                {% if workflow.get('direction') %}
+                  <span class="status-pill status-pill--{{ workflow.get('direction')|replace('_', '-') }}">{{ workflow.get('direction')|replace('_', ' ')|title }}</span>
+                {% endif %}
+                <span class="status-pill status-pill--{{ workflow_state|replace('_', '-') }}">{{ workflow_state|replace('_', ' ')|title }}</span>
+                {% if member.approval_status %}
+                  <span class="status-pill status-pill--{{ member.approval_status|replace('_', '-') }}">{{ member.approval_status|replace('_', ' ')|title }}</span>
+                {% endif %}
+                {% if workflow.get('current_step') %}
+                  <div class="text-muted text-small">Step: {{ workflow.get('current_step')|replace('_', ' ')|title }}</div>
+                {% endif %}
+                {% if member.workflow_next_run_at %}
+                  <div class="text-muted text-small">
+                    Next run: {{ member.workflow_next_run_at }}
+                    {% if member.workflow_requested_timezone %}
+                      ({{ member.workflow_requested_timezone }})
+                    {% endif %}
+                  </div>
+                  {% if member.workflow_is_overdue %}
+                    <div class="text-danger text-small">Overdue</div>
+                  {% endif %}
+                {% endif %}
+                {% if member.account_action == 'Offboard Requested' %}
+                  <span class="status-pill status-pill--pending">Offboarding Pending</span>
+                  {% if member.requested_at %}
+                    <div class="text-muted text-small">Requested for {{ member.requested_at }}</div>
+                  {% endif %}
+                {% endif %}
+                {% if member.onboarding_pending_details %}
+                  <div class="text-small">{{ member.onboarding_pending_details }}</div>
+                {% endif %}
+                {% if workflow.get('helpdesk_ticket_id') %}
+                  <div class="text-small">Ticket #{{ workflow.get('helpdesk_ticket_id') }}</div>
+                {% endif %}
+                {% if workflow.get('last_error') %}
+                  <div class="text-danger text-small">{{ workflow.get('last_error') }}</div>
+                {% endif %}
+                {% if member.onboarding_timeline %}
+                  <details class="text-small">
+                    <summary>Timeline ({{ member.onboarding_timeline|length }})</summary>
+                    <ol class="list-unstyled">
+                      {% for event in member.onboarding_timeline %}
+                        <li>
+                          <strong>{{ event.event|replace('_', ' ')|title }}</strong>
+                          {% if event.actor %}<span class="text-muted"> · {{ event.actor }}</span>{% endif %}
+                          {% if event.timestamp %}<span class="text-muted"> · {{ event.timestamp }}</span>{% endif %}
+                          {% if event.details %}
+                            <div class="text-muted">{{ event.details }}</div>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </details>
+                {% endif %}
+              </td>
+              {% for field in staff_custom_field_definitions %}
+                {% set custom_value = member.custom_fields.get(field.name) if member.custom_fields else None %}
+                <td data-label="{{ field.display_name or field.name }}" data-column="custom-{{ field.name }}">
+                  {% if field.field_type == 'checkbox' %}
+                    {{ 'Yes' if custom_value else 'No' }}
+                  {% else %}
+                    {{ custom_value or '—' }}
+                  {% endif %}
+                </td>
+              {% endfor %}
+              <td data-label="Enabled" data-column="enabled">
                 <form action="/staff/enabled" method="post" class="inline-form">
                   {% include "partials/csrf.html" %}
                   <input type="hidden" name="staffId" value="{{ member.id }}" />
@@ -134,22 +250,16 @@
               </td>
               <td class="table__actions">
                 <div class="table__action-buttons">
-                  {% if is_super_admin %}
-                    <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
-                  {% endif %}
-                  {% if is_admin or is_super_admin %}
-                    <button type="button" class="button button--ghost" data-staff-invite="{{ member.id }}">Invite</button>
-                  {% endif %}
                   <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
                   {% if is_super_admin %}
-                    <button type="button" class="button button--danger" data-staff-delete="{{ member.id }}">Delete</button>
+                    <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
                   {% endif %}
                 </div>
               </td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="8" class="table__empty">No staff records found.</td>
+              <td colspan="{{ 10 + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -178,61 +288,275 @@
   </section>
 </div>
 
+{% if is_admin %}
+  <div class="modal" id="staff-add-modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close>
+        <span class="visually-hidden">Close add staff member modal</span>
+        &times;
+      </button>
+      <h2 class="modal__title">Add staff member</h2>
+      <p class="card__subtitle">Capture onboarding details to provision accounts and workflows.</p>
+      <form action="/staff" method="post" class="staff-form form-grid">
+        {% include "partials/csrf.html" %}
+        <input type="hidden" name="browser_timezone" value="" />
+        {% for field in staff_field_config %}
+          {% if field.visible %}
+            {% if field.type == 'checkbox' %}
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox" for="{{ field.input_id }}">
+                  <input
+                    id="{{ field.input_id }}"
+                    type="checkbox"
+                    name="{{ field.input_name }}"
+                    value="1"
+                    {% if field.key == 'enabled' %}checked{% endif %}
+                    {% if field.required %}required{% endif %}
+                  />
+                  <span>{{ field.label }}</span>
+                </label>
+              </div>
+            {% elif field.type == 'select' %}
+              <div class="form-field">
+                <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
+                <select class="form-input" id="{{ field.input_id }}" name="{{ field.input_name }}" {% if field.required %}required{% endif %}>
+                  <option value="">Select {{ field.label|lower }}</option>
+                  {% for option in field.options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            {% else %}
+              <div class="form-field">
+                <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
+                <input
+                  class="form-input"
+                  id="{{ field.input_id }}"
+                  name="{{ field.input_name }}"
+                  type="{% if field.type == 'date' %}date{% else %}{% if field.validation_metadata.format == 'email' %}email{% else %}text{% endif %}{% endif %}"
+                  {% if field.required %}required{% endif %}
+                />
+              </div>
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {% set custom_sections = namespace(active='', open=False) %}
+        {% for field in staff_custom_field_definitions %}
+          {% set group_label = (field.field_group or 'Additional details') %}
+          {% if group_label != custom_sections.active %}
+            {% if custom_sections.open %}
+                </div>
+              </fieldset>
+            {% endif %}
+            <fieldset class="fieldset staff-form__section">
+              <legend>{{ group_label }}</legend>
+              <div class="form-grid staff-form__section-grid">
+            {% set custom_sections.active = group_label %}
+            {% set custom_sections.open = True %}
+          {% endif %}
+          {% if field.field_type == 'checkbox' %}
+            <div
+              class="form-field form-field--checkbox"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="checkbox" for="staff-custom-{{ field.name }}">
+                <input id="staff-custom-{{ field.name }}" type="checkbox" name="{{ field.name }}" value="1" />
+                <span>{{ field.display_name or field.name }}</span>
+              </label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
+            </div>
+          {% elif field.field_type == 'select' %}
+            <div
+              class="form-field"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
+              <select class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}">
+                <option value="">Select {{ (field.display_name or field.name)|lower }}</option>
+                {% for option in field.options %}
+                  <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% else %}
+            <div
+              class="form-field"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="form-label" for="staff-custom-{{ field.name }}">{{ field.display_name or field.name }}</label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
+              <input class="form-input" id="staff-custom-{{ field.name }}" name="{{ field.name }}" type="{% if field.field_type == 'date' %}date{% else %}text{% endif %}" />
+            </div>
+          {% endif %}
+        {% endfor %}
+        {% if custom_sections.open %}
+            </div>
+          </fieldset>
+        {% endif %}
+        <div class="form-actions staff-form__actions">
+          <button type="submit" class="button">Add staff</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{% endif %}
+
+<div class="modal" id="staff-offboarding-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content modal__content--staff" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close offboarding request modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Request offboarding</h2>
+    <form id="staff-offboarding-form" class="form-grid">
+      <input type="hidden" id="offboarding-staff-id" />
+      <p class="form-help form-field--full">Schedule when access should be removed. Use "Immediate" to use your current local time.</p>
+      <div class="form-field">
+        <label class="form-label" for="offboarding-date">Offboarding date</label>
+        <input class="form-input" id="offboarding-date" type="date" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="offboarding-time">Offboarding time</label>
+        <input class="form-input" id="offboarding-time" type="time" required />
+      </div>
+      <div class="form-field form-field--full">
+        <button type="button" class="button button--ghost" id="offboarding-immediate">Immediate</button>
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-timezone">Timezone</label>
+        <input class="form-input" id="offboarding-timezone" maxlength="120" required />
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-reason-notes">Reason / notes</label>
+        <textarea class="form-input" id="offboarding-reason-notes" rows="4" maxlength="2000" required></textarea>
+      </div>
+      <p class="form-help form-help--error form-field--full" id="offboarding-form-error" hidden role="alert" aria-live="polite"></p>
+      <div class="form-actions">
+        <button type="submit" class="button">Submit request</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="staff-edit-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
+  <div class="modal__content modal__content--staff" role="document">
     <button type="button" class="modal__close" data-modal-close>
       <span class="visually-hidden">Close edit staff modal</span>
       &times;
     </button>
-    <h2 class="modal__title">Edit staff member</h2>
-    <form id="staff-edit-form" class="form-grid">
+    <div class="staff-modal__header">
+      <h2 class="modal__title">Edit staff member</h2>
+      <p class="staff-modal__staff-name" id="edit-modal-staff-name"></p>
+    </div>
+    <form id="staff-edit-form" class="form-grid staff-modal-grid">
       <input type="hidden" id="edit-staff-id" />
-      <div class="form-field">
-        <label class="form-label" for="edit-first-name">First name</label>
-        <input class="form-input" id="edit-first-name" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-last-name">Last name</label>
-        <input class="form-input" id="edit-last-name" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-email">Email</label>
-        <input class="form-input" id="edit-email" type="email" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-mobile">Mobile phone</label>
-        <input class="form-input" id="edit-mobile" type="tel" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-date-onboarded">Onboard date</label>
-        <input class="form-input" id="edit-date-onboarded" type="date" {% if not is_super_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
-        <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_admin %}readonly{% endif %} />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-account-action">Account action</label>
-        <select class="form-input" id="edit-account-action" {% if not is_super_admin %}disabled{% endif %}>
-          <option value="Onboard Requested">Onboard Requested</option>
-          <option value="Onboard Approved">Onboard Approved</option>
-          <option value="Onboarding In Progress">Onboarding In Progress</option>
-          <option value="Onboarded">Onboarded</option>
-          <option value="Offboard Requested">Offboard Requested</option>
-          <option value="Offboard Approved">Offboard Approved</option>
-          <option value="Offboard Scheduled">Offboard Scheduled</option>
-          <option value="Offboarded">Offboarded</option>
-        </select>
-      </div>
-      <div class="form-field form-field--checkbox">
-        <label class="checkbox">
-          <input type="checkbox" id="edit-enabled" {% if not is_super_admin %}disabled{% endif %} />
-          <span>Enabled</span>
-        </label>
-      </div>
-      <fieldset class="fieldset">
+      <fieldset class="fieldset staff-modal__section">
+        <legend>Identity</legend>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-first-name">First name</label>
+            <input class="form-input" id="edit-first-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-last-name">Last name</label>
+            <input class="form-input" id="edit-last-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-email">Email</label>
+            <input class="form-input" id="edit-email" type="email" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-mobile">Mobile phone</label>
+            <input class="form-input" id="edit-mobile" type="tel" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field form-field--checkbox form-field--full">
+            <label class="checkbox">
+              <input type="checkbox" id="edit-enabled" {% if not is_super_admin %}disabled{% endif %} />
+              <span>Enabled</span>
+            </label>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section">
+        <legend>Employment / Organisation</legend>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-department">Department</label>
+            <input class="form-input" id="edit-department" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-job-title">Job title</label>
+            <input class="form-input" id="edit-job-title" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company">Company</label>
+            <input class="form-input" id="edit-company" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-manager-name">Manager</label>
+            <input class="form-input" id="edit-manager-name" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section">
+        <legend>Workflow &amp; lifecycle</legend>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field">
+            <label class="form-label" for="edit-account-action">Account action</label>
+            <select class="form-input" id="edit-account-action" {% if not is_super_admin %}disabled{% endif %}>
+              <option value="Onboard Requested">Onboard Requested</option>
+              <option value="Onboard Approved">Onboard Approved</option>
+              <option value="Onboarding In Progress">Onboarding In Progress</option>
+              <option value="Onboarded">Onboarded</option>
+              <option value="Offboard Requested">Offboard Requested</option>
+              <option value="Offboard Approved">Offboard Approved</option>
+              <option value="Offboard Scheduled">Offboard Scheduled</option>
+              <option value="Offboarded">Offboarded</option>
+            </select>
+            <p class="form-help">Changes here affect automation state and downstream provisioning/offboarding tasks.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-date-onboarded">Onboard date</label>
+            <input class="form-input" id="edit-date-onboarded" type="date" {% if not is_super_admin %}readonly{% endif %} />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
+            <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_admin %}readonly{% endif %} />
+            <p class="form-help">Set when offboarding should be executed; leave blank until a confirmed exit date.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-m365-last-sign-in">O365 Last Sign In</label>
+            <input class="form-input" id="edit-m365-last-sign-in" readonly />
+          </div>
+        </div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section">
         <legend>Address</legend>
-        <div class="form-grid">
+        <div class="form-grid staff-modal-grid">
           <div class="form-field">
             <label class="form-label" for="edit-street">Street</label>
             <input class="form-input" id="edit-street" {% if not is_super_admin %}readonly{% endif %} />
@@ -255,28 +579,48 @@
           </div>
         </div>
       </fieldset>
-      <fieldset class="fieldset">
-        <legend>Organisation</legend>
-        <div class="form-grid">
-          <div class="form-field">
-            <label class="form-label" for="edit-department">Department</label>
-            <input class="form-input" id="edit-department" {% if not is_super_admin %}readonly{% endif %} />
+      <fieldset class="fieldset staff-modal__section" id="edit-custom-fields-section">
+        <legend>Custom fields</legend>
+        <div class="staff-modal__group-stack" id="edit-custom-fields-grid"></div>
+      </fieldset>
+      <fieldset class="fieldset staff-modal__section" id="edit-actions-section">
+        <legend>Secondary actions</legend>
+        <p class="form-help form-field--full">Use these controls for invite, approvals, or workflow interventions. Add context notes for audit history.</p>
+        <div class="form-grid staff-modal-grid">
+          <div class="form-field form-field--full">
+            <label class="form-label" for="edit-action-note">Action note / reason</label>
+            <textarea class="form-input" id="edit-action-note" rows="2" maxlength="1000" placeholder="Optional for invite/retry; required for deny."></textarea>
           </div>
           <div class="form-field">
-            <label class="form-label" for="edit-job-title">Job title</label>
-            <input class="form-input" id="edit-job-title" {% if not is_super_admin %}readonly{% endif %} />
+            <label class="form-label" for="edit-action-step">Workflow step (force-complete)</label>
+            <input class="form-input" id="edit-action-step" placeholder="Current step name" />
           </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-company">Company</label>
-            <input class="form-input" id="edit-company" {% if not is_super_admin %}readonly{% endif %} />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-manager-name">Manager</label>
-            <input class="form-input" id="edit-manager-name" {% if not is_super_admin %}readonly{% endif %} />
+        </div>
+        <p class="form-help form-help--error form-field--full" id="edit-action-error" hidden role="alert" aria-live="polite"></p>
+        <div class="form-actions form-actions--inline staff-actions">
+          <button type="button" class="button button--ghost" id="edit-action-invite" data-edit-action="invite">Invite</button>
+          <button type="button" class="button button--ghost" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request Offboarding</button>
+          <button type="button" class="button button--ghost" id="edit-action-approve" data-edit-action="approve">Approve</button>
+          <button type="button" class="button button--ghost" id="edit-action-deny" data-edit-action="deny">Deny</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-rerun" data-edit-action="workflow-rerun">Workflow rerun</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
+          <button type="button" class="button button--ghost" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Workflow force-complete</button>
+        </div>
+        <div class="staff-danger-panel">
+          <h3 class="staff-danger-panel__title">Danger zone</h3>
+          <p class="form-help">Delete permanently removes the staff record and cannot be undone.</p>
+          <label class="checkbox" for="edit-delete-confirm">
+            <input type="checkbox" id="edit-delete-confirm" />
+            <span>I understand this action is permanent.</span>
+          </label>
+          <div class="form-actions form-actions--inline">
+          <button type="button" class="button button--danger" id="edit-action-delete" data-edit-action="delete">Delete</button>
           </div>
         </div>
       </fieldset>
-      <div class="form-actions">
+      <p class="form-help form-help--error form-field--full" id="edit-form-error" hidden role="alert" aria-live="polite"></p>
+      <div class="form-actions staff-modal__footer">
         <button type="submit" class="button">Save changes</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
       </div>
@@ -285,9 +629,11 @@
 </div>
 
 <script type="application/json" id="staff-data">{{ staff_members | tojson }}</script>
+<script type="application/json" id="staff-custom-field-definitions">{{ staff_custom_field_definitions | tojson }}</script>
 <script type="application/json" id="staff-flags">{{ {
   'isSuperAdmin': is_super_admin,
-  'isAdmin': is_admin
+  'isAdmin': is_admin,
+  'canApproveOnboarding': can_approve_onboarding
 } | tojson }}</script>
 {% endblock %}
 
@@ -295,4 +641,5 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/staff.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/staff_columns.js') }}" defer></script>
 {% endblock %}

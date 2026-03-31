@@ -77,7 +77,7 @@ async def test_company_automation_tasks_sorted_by_name(monkeypatch):
         {
             "id": 3,
             "name": "Zebra Task",
-            "command": "sync_o365",
+            "command": "sync_m365_data",
             "company_id": 4,
             "last_run_at": None,
         },

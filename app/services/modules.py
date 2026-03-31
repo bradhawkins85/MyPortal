@@ -26,6 +26,7 @@ if _env_path.exists():
 from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
+from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import call_recordings as call_recordings_service
@@ -482,6 +483,15 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "m365-mail",
+        "name": "Office 365 Mailbox Import",
+        "description": "Import support emails from Microsoft 365 mailboxes into the ticketing queue.",
+        "icon": "📬",
+        "settings": {
+            "manage_url": "/admin/modules/m365-mail",
+        },
+    },
+    {
         "slug": "tacticalrmm",
         "name": "Tactical RMM",
         "description": "Call Tactical RMM webhook endpoints for automation actions.",
@@ -547,8 +557,8 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     },
     {
         "slug": "m365-admin",
-        "name": "Microsoft 365 CSP / Lighthouse",
-        "description": "Configure Microsoft 365 CSP / Lighthouse partner credentials to enumerate and manage customer tenants.",
+        "name": "Microsoft 365 Admin",
+        "description": "Configure Microsoft 365 admin app credentials for enterprise app management.",
         "icon": "☁️",
         "settings": {
             "client_id": str(os.getenv("M365_ADMIN_CLIENT_ID", "")),
@@ -805,6 +815,9 @@ def _coerce_settings(
         )
     elif slug == "imap":
         manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
+        merged.update({"manage_url": manage_url})
+    elif slug == "m365-mail":
+        manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/m365-mail"
         merged.update({"manage_url": manage_url})
     elif slug == "chatgpt-mcp":
         overrides = payload or {}
@@ -1083,8 +1096,146 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "call-recordings", # Call Recordings - configuration only, not an action module
     "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
     "plausible",      # Plausible - email tracking config only
-    "m365-admin",     # M365 CSP/Lighthouse - configuration only, not an action module
+    "m365-admin",     # M365 Admin - configuration only, not an action module
 }
+
+_ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
+    "smtp": {
+        "fields": [
+            {"name": "recipients", "label": "Recipients", "type": "json", "required": True, "placeholder": '["support@example.com"]'},
+            {"name": "subject", "label": "Subject", "type": "string", "required": True},
+            {"name": "html", "label": "HTML body", "type": "string"},
+            {"name": "text", "label": "Text body", "type": "string"},
+            {"name": "sender", "label": "Sender", "type": "string"},
+        ],
+    },
+    "ntfy": {
+        "fields": [
+            {"name": "topic", "label": "Topic", "type": "string"},
+            {"name": "title", "label": "Title", "type": "string"},
+            {"name": "message", "label": "Message", "type": "string", "required": True},
+            {
+                "name": "priority",
+                "label": "Priority",
+                "type": "string",
+                "enum": ["min", "low", "default", "high", "urgent", "max"],
+            },
+        ],
+    },
+    "create-ticket": {
+        "fields": [
+            {"name": "subject", "label": "Subject", "type": "string", "required": True},
+            {"name": "description", "label": "Description", "type": "string", "required": True},
+            {"name": "status", "label": "Status", "type": "string"},
+            {"name": "priority", "label": "Priority", "type": "string"},
+            {"name": "company_id", "label": "Company ID", "type": "string"},
+            {"name": "requester_id", "label": "Requester ID", "type": "string"},
+            {"name": "assigned_user_id", "label": "Assigned user ID", "type": "string"},
+            {"name": "module_slug", "label": "Module slug", "type": "string"},
+        ],
+    },
+    "create-task": {
+        "fields": [
+            {"name": "task_name", "label": "Task name", "type": "string"},
+            {"name": "sort_order", "label": "Sort order", "type": "integer"},
+            {"name": "context", "label": "Context (JSON)", "type": "json"},
+            {"name": "tasks", "label": "Tasks (JSON array)", "type": "json"},
+        ],
+    },
+    "update-ticket": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+            {"name": "status", "label": "Status", "type": "string"},
+            {"name": "priority", "label": "Priority", "type": "string"},
+            {"name": "assigned_user_id", "label": "Assigned user ID", "type": "string"},
+            {"name": "requester_id", "label": "Requester ID", "type": "string"},
+            {"name": "category", "label": "Category", "type": "string"},
+        ],
+    },
+    "update-ticket-description": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {"name": "description", "label": "Description", "type": "string", "required": True},
+        ],
+    },
+    "reprocess-ai": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {"name": "refresh_summary", "label": "Refresh summary", "type": "boolean"},
+            {"name": "refresh_tags", "label": "Refresh tags", "type": "boolean"},
+        ],
+    },
+    "add-ticket-reply": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {"name": "body", "label": "Body", "type": "string", "required": True},
+            {"name": "is_internal", "label": "Internal note", "type": "boolean"},
+            {"name": "minutes_spent", "label": "Minutes spent", "type": "integer"},
+            {"name": "is_billable", "label": "Billable", "type": "boolean"},
+            {"name": "author_id", "label": "Author ID", "type": "string"},
+        ],
+    },
+    "whisperx": {
+        "fields": [
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+            {"name": "add_note", "label": "Add note", "type": "boolean"},
+            {"name": "language", "label": "Language", "type": "string"},
+        ],
+    },
+}
+
+
+def get_action_payload_schema(slug: str) -> dict[str, Any] | None:
+    return _ACTION_PAYLOAD_SCHEMAS.get(str(slug or "").strip())
+
+
+def validate_action_payload(module_slug: str, payload: Mapping[str, Any] | None) -> None:
+    schema = get_action_payload_schema(module_slug)
+    if not schema:
+        return
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, Mapping):
+        raise ValueError("Action payload must be an object.")
+
+    fields = schema.get("fields")
+    if not isinstance(fields, list):
+        return
+    for field in fields:
+        if not isinstance(field, Mapping):
+            continue
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        required = bool(field.get("required"))
+        value = payload.get(name)
+        if required and (value is None or (isinstance(value, str) and not value.strip())):
+            raise ValueError(f"Action payload field '{name}' is required for module '{module_slug}'.")
+        if value is None:
+            continue
+        field_type = str(field.get("type") or "string").strip().lower()
+        if field_type == "string":
+            if not isinstance(value, str):
+                raise ValueError(f"Action payload field '{name}' must be a string.")
+        elif field_type == "integer":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Action payload field '{name}' must be an integer.")
+        elif field_type == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Action payload field '{name}' must be a number.")
+        elif field_type == "boolean":
+            if not isinstance(value, bool):
+                raise ValueError(f"Action payload field '{name}' must be a boolean.")
+        elif field_type == "json":
+            # Any JSON-compatible value is allowed; type-specific validation should
+            # be implemented by module handlers for advanced cases.
+            pass
+
+        enum_values = field.get("enum")
+        if enum_values and isinstance(enum_values, list) and value not in enum_values:
+            raise ValueError(
+                f"Action payload field '{name}' must be one of: {', '.join(str(v) for v in enum_values)}."
+            )
 
 
 async def list_trigger_action_modules() -> list[dict[str, Any]]:
@@ -1098,12 +1249,13 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     in the trigger actions menu.
     """
     modules = await module_repo.list_modules()
-    actionable_modules = [
-        _redact_module_settings(module)
-        for module in modules
-        if module.get("slug") not in _NON_TRIGGERABLE_MODULE_SLUGS
-        and module.get("enabled", False)
-    ]
+    actionable_modules: list[dict[str, Any]] = []
+    for module in modules:
+        if module.get("slug") in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get("enabled", False):
+            continue
+        redacted = _redact_module_settings(module)
+        redacted["payload_schema"] = get_action_payload_schema(str(module.get("slug") or ""))
+        actionable_modules.append(redacted)
     return actionable_modules
 
 
@@ -1125,6 +1277,12 @@ async def update_module(
     coerced = _coerce_settings(slug, settings, existing) if settings is not None else None
     updated = await module_repo.update_module(slug, enabled=enabled, settings=coerced)
     if updated:
+        # When a module is disabled, deactivate any scheduled tasks that belong to it.
+        if enabled is False:
+            from app.services.scheduler import COMMANDS_BY_MODULE  # local import to avoid circular dependency
+            module_commands = COMMANDS_BY_MODULE.get(slug, set())
+            if module_commands:
+                await scheduled_tasks_repo.disable_tasks_for_commands(module_commands)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
     return _redact_module_settings(updated) if updated else None
@@ -1172,6 +1330,7 @@ async def trigger_module(
         "update-ticket-description": _invoke_update_ticket_description,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
+        "whisperx": _invoke_whisperx,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -1590,15 +1749,13 @@ async def _invoke_smtp2go(
     
     # Check if using template
     template_type = payload.get("template")
+    recipients: list[str] = []
     if template_type:
         # Template-based email
         try:
             variables = payload.get("variables", {})
             recipients = _ensure_list(payload.get("recipients"))
             sender = str(payload.get("sender") or "").strip() or None
-            
-            if not recipients:
-                raise ValueError("At least one recipient is required")
             
             # Format payload using template
             formatted_payload = smtp2go.format_template_payload(
@@ -1619,13 +1776,19 @@ async def _invoke_smtp2go(
         # Direct payload format
         # Support both 'to' (SMTP2Go API format) and 'recipients' (legacy format)
         recipients = _ensure_list(payload.get("to") or payload.get("recipients"))
-        if not recipients:
-            raise ValueError("At least one recipient is required")
 
         subject = str(payload.get("subject") or "Automation notification")
         html_body = str(payload.get("html") or payload.get("html_body") or payload.get("body") or "<p>Automation triggered.</p>")
         text_body = payload.get("text") or payload.get("text_body")
         sender = str(payload.get("sender") or "").strip() or None
+
+    if not recipients:
+        logger.warning(
+            "SMTP2Go module skipped because no recipients were provided after rendering",
+            module="smtp2go",
+            context_keys=list(payload.get("context", {}).keys()) if isinstance(payload.get("context"), Mapping) else None,
+        )
+        return {"status": "skipped", "reason": "no_recipients", "module": "smtp2go"}
     
     reply_to = str(payload.get("reply_to") or "").strip() or None
     
@@ -3454,6 +3617,101 @@ async def push_companies_to_tacticalrmm(
     return summary
 
 
+
+async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
+    """Pull clients from Tactical RMM and create or update matching companies in MyPortal."""
+    settings = await _load_tacticalrmm_settings()
+
+    clients_result = await _invoke_tacticalrmm(
+        settings,
+        {"endpoint": "/clients/", "method": "GET"},
+        event_future=None,
+    )
+
+    if clients_result.get("status") != "succeeded":
+        error = _summarise_event_error(clients_result)
+        raise RuntimeError(f"Failed to fetch Tactical RMM clients: {error}")
+
+    response = clients_result.get("response")
+    raw_clients: list[Mapping[str, Any]] = []
+    if isinstance(response, list):
+        raw_clients = [item for item in response if isinstance(item, Mapping)]
+    elif isinstance(response, Mapping):
+        results = response.get("results")
+        if isinstance(results, list):
+            raw_clients = [item for item in results if isinstance(item, Mapping)]
+
+    logger.info("Pulling Tactical RMM clients into MyPortal", count=len(raw_clients))
+
+    summary: dict[str, Any] = {
+        "fetched": len(raw_clients),
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    for client in raw_clients:
+        client_id = client.get("id")
+        name = str(client.get("name") or "").strip()
+
+        if not name:
+            summary["skipped"] += 1
+            continue
+
+        try:
+            tactical_id_str = str(client_id).strip() if client_id is not None and client_id != "" else None
+            if not tactical_id_str:
+                tactical_id_str = None
+
+            existing = None
+            if tactical_id_str:
+                existing = await company_repo.get_company_by_tactical_id(tactical_id_str)
+            if not existing:
+                if tactical_id_str:
+                    logger.info(
+                        "Tactical RMM client not matched by ID, falling back to name lookup",
+                        tactical_id=tactical_id_str,
+                        name=name,
+                    )
+                existing = await company_repo.get_company_by_name(name)
+
+            if existing:
+                updates: dict[str, Any] = {}
+                if tactical_id_str and str(existing.get("tacticalrmm_client_id") or "").strip() != tactical_id_str:
+                    updates["tacticalrmm_client_id"] = tactical_id_str
+                if str(existing.get("name") or "").strip() != name:
+                    updates["name"] = name
+                if updates:
+                    await company_repo.update_company(int(existing["id"]), **updates)
+                    summary["updated"] += 1
+                else:
+                    summary["skipped"] += 1
+            else:
+                payload: dict[str, Any] = {"name": name}
+                if tactical_id_str:
+                    payload["tacticalrmm_client_id"] = tactical_id_str
+                await company_repo.create_company(**payload)
+                summary["created"] += 1
+        except Exception as exc:
+            logger.error(
+                "Failed to import Tactical RMM client",
+                client_id=client_id,
+                name=name,
+                error=str(exc),
+            )
+            summary["errors"].append({"client_id": client_id, "name": name, "error": str(exc)})
+
+    logger.info(
+        "Tactical RMM client pull completed",
+        fetched=summary["fetched"],
+        created=summary["created"],
+        updated=summary["updated"],
+        skipped=summary["skipped"],
+        errors=len(summary["errors"]),
+    )
+    return summary
+
 async def _invoke_update_ticket(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -3969,5 +4227,259 @@ async def _invoke_add_ticket_reply(
             "ticket_id": ticket_id_int,
             "reply_id": reply_id,
             "is_internal": is_internal,
+        },
+    )
+
+
+# Audio MIME types accepted for WhisperX transcription
+_WHISPERX_AUDIO_MIME_TYPES = {
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/ogg",
+    "audio/flac",
+    "audio/x-flac",
+    "audio/webm",
+    "audio/mp4",
+    "audio/x-m4a",
+}
+
+# File extensions accepted when MIME type is missing or generic
+_WHISPERX_AUDIO_EXTENSIONS = {
+    ".wav", ".mp3", ".ogg", ".flac", ".webm", ".m4a", ".mp4", ".mpeg",
+}
+
+
+_WHISPERX_ATTACHMENT_POLL_ATTEMPTS = 3
+_WHISPERX_ATTACHMENT_POLL_DELAY_SECONDS = 1.5
+
+
+def _is_audio_attachment(attachment: Mapping[str, Any]) -> bool:
+    """Return True if the attachment is an audio file suitable for transcription."""
+    mime = (attachment.get("mime_type") or "").lower().strip()
+    if mime in _WHISPERX_AUDIO_MIME_TYPES:
+        return True
+    original = attachment.get("original_filename") or ""
+    ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
+    return f".{ext}" in _WHISPERX_AUDIO_EXTENSIONS
+
+
+async def _invoke_whisperx(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Transcribe audio attachments on a ticket using WhisperX.
+
+    Accepts a JSON payload with:
+    - ticket_id: Required (can come from context.ticket.id)
+    - add_note: Optional (default: true) – add an internal note with the transcription
+    - language: Optional – override the module-level language setting
+
+    The handler finds all audio attachments on the ticket, sends each to the
+    WhisperX ``/asr`` endpoint, and (when *add_note* is true) posts the
+    resulting transcription as an internal note on the ticket.
+    """
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import ticket_attachments as attachments_repo
+
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+
+    # -- resolve ticket_id ------------------------------------------------
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_ctx = context.get("ticket")
+        if isinstance(ticket_ctx, Mapping):
+            ticket_id = ticket_ctx.get("id")
+
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id must be a valid integer")
+
+    add_note = _ensure_bool(payload.get("add_note"), True)
+    language = payload.get("language") or settings.get("language") or ""
+
+    # -- validate WhisperX settings ---------------------------------------
+    base_url = (settings.get("base_url") or "").strip().rstrip("/")
+    api_key = settings.get("api_key") or ""
+    if not base_url:
+        raise ValueError("WhisperX base_url is not configured")
+
+    target_url = f"{base_url}/asr"
+
+    # -- create webhook event for tracking --------------------------------
+    event = await webhook_monitor.create_manual_event(
+        name="module.whisperx.transcribe",
+        target_url=target_url,
+        payload={
+            "ticket_id": ticket_id_int,
+            "add_note": add_note,
+            "language": language,
+        },
+        headers={"X-Module": "whisperx"},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for WhisperX transcription")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+
+    attempt_number = 1
+    try:
+        # -- verify ticket exists -----------------------------------------
+        existing = await tickets_repo.get_ticket(ticket_id_int)
+        if not existing:
+            raise ValueError(f"Ticket {ticket_id_int} not found")
+
+        upload_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
+
+        # -- list attachments and filter audio files (with short polling) --
+        audio_attachments: list[Mapping[str, Any]] = []
+        ready_attachments: list[Mapping[str, Any]] = []
+        for poll_attempt in range(_WHISPERX_ATTACHMENT_POLL_ATTEMPTS):
+            all_attachments = await attachments_repo.list_attachments(ticket_id_int)
+            audio_attachments = [a for a in all_attachments if _is_audio_attachment(a)]
+
+            ready_attachments = [
+                a for a in audio_attachments if (upload_dir / a["filename"]).exists()
+            ]
+
+            if ready_attachments:
+                break
+
+            if poll_attempt < _WHISPERX_ATTACHMENT_POLL_ATTEMPTS - 1:
+                # Give the ticket importer a moment to finish writing attachments
+                if audio_attachments:
+                    logger.info(
+                        "Audio attachments found but files not yet present; retrying",
+                        ticket_id=ticket_id_int,
+                        poll_attempt=poll_attempt + 1,
+                    )
+                await asyncio.sleep(_WHISPERX_ATTACHMENT_POLL_DELAY_SECONDS)
+
+        if not audio_attachments:
+            raise ValueError(f"No audio attachments found on ticket {ticket_id_int}")
+
+        if not ready_attachments:
+            raise ValueError(f"Audio attachments not yet available on disk for ticket {ticket_id_int}")
+
+        headers: dict[str, str] = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        transcriptions: list[dict[str, Any]] = []
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            for attachment in ready_attachments:
+                file_path = upload_dir / attachment["filename"]
+                original_name = attachment.get("original_filename") or attachment["filename"]
+                mime = (attachment.get("mime_type") or "audio/wav").strip()
+
+                with open(file_path, "rb") as audio_file:
+                    files = {"audio_file": (original_name, audio_file, mime)}
+                    data: dict[str, str] = {}
+                    if language:
+                        data["language"] = language
+
+                    response = await client.post(
+                        target_url,
+                        files=files,
+                        data=data if data else None,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+
+                # parse response – JSON with "text" key, or plain text
+                transcription = ""
+                try:
+                    result_json = response.json()
+                    transcription = result_json.get("text", "")
+                except ValueError:
+                    transcription = response.text.strip()
+
+                if transcription:
+                    transcriptions.append({
+                        "attachment_id": attachment["id"],
+                        "filename": original_name,
+                        "transcription": transcription,
+                    })
+
+        if not transcriptions:
+            raise ValueError("WhisperX returned empty transcriptions for all audio attachments")
+
+        # -- optionally post an internal note -----------------------------
+        reply_id = None
+        if add_note:
+            parts: list[str] = []
+            for t in transcriptions:
+                parts.append(
+                    f"**Transcription of {t['filename']}:**\n\n{t['transcription']}"
+                )
+            note_body = "\n\n---\n\n".join(parts)
+            reply = await tickets_repo.create_reply(
+                ticket_id=ticket_id_int,
+                author_id=None,
+                body=note_body,
+                is_internal=True,
+            )
+            reply_id = reply.get("id") if reply else None
+
+            await tickets_service.emit_ticket_updated_event(
+                ticket_id_int,
+                actor_type="automation",
+                trigger_automations=False,
+            )
+
+    except Exception as exc:
+        logger.error(
+            "WhisperX transcription failed",
+            error=str(exc),
+            ticket_id=ticket_id_int,
+        )
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(
+            updated_event,
+            extra={"ticket_id": ticket_id_int},
+        )
+
+    response_body = json.dumps({
+        "ticket_id": ticket_id_int,
+        "transcriptions": [
+            {"attachment_id": t["attachment_id"], "filename": t["filename"]}
+            for t in transcriptions
+        ],
+        "reply_id": reply_id,
+    })
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=200,
+        response_body=response_body,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={
+            "ticket_id": ticket_id_int,
+            "transcription_count": len(transcriptions),
+            "reply_id": reply_id,
         },
     )

@@ -103,6 +103,63 @@
             </div>
           </article>
 
+          <article class="card card--panel">
+            <header class="card__header">
+              <h2 class="card__title">Attachments</h2>
+            </header>
+            <div class="card__body">
+              <div
+                class="attachments-grid"
+                data-attachments-grid
+                data-ticket-id="{{ ticket.id }}"
+              >
+                {% for attachment in ticket_attachments %}
+                  <article class="attachment-card" data-attachment-id="{{ attachment.id }}">
+                    <div class="attachment-card__icon" aria-hidden="true">📎</div>
+                    <div class="attachment-card__content">
+                      <div class="attachment-card__header">
+                        <p class="attachment-card__name">
+                          <a
+                            href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
+                            title="{{ attachment.original_filename or attachment.filename }}"
+                          >
+                            {{ attachment.original_filename or attachment.filename }}
+                          </a>
+                        </p>
+                        {% if has_helpdesk_access %}
+                          <div class="attachment-card__actions">
+                            <button
+                              type="button"
+                              class="button button--ghost button--small attachment-card__action"
+                              data-remove-attachment
+                              data-attachment-id="{{ attachment.id }}"
+                              aria-label="Remove attachment"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        {% endif %}
+                      </div>
+                      <p class="attachment-card__meta">
+                        {{ attachment.file_size | filesizeformat }}
+                        {% if attachment.uploaded_iso %}
+                          · <span data-utc="{{ attachment.uploaded_iso }}"></span>
+                        {% endif %}
+                      </p>
+                    </div>
+                  </article>
+                {% endfor %}
+              </div>
+              <p
+                class="card__empty"
+                data-attachments-empty
+                {% if ticket_attachments %}hidden{% endif %}
+              >
+                No attachments have been added yet.
+              </p>
+            </div>
+          </article>
+
           {% if assigned_user and assigned_user.booking_link_url %}
             <article class="card card--panel">
               <header class="card__header">
@@ -359,15 +416,16 @@
                         data-placeholder="Write your reply..."
                       >{{ reply_body }}</div>
                     </div>
-                    <input
-                      type="hidden"
+                    <textarea
                       id="ticket-reply-body-hidden"
                       name="body"
+                      class="rich-text-editor__fallback"
                       data-rich-text-value
                       data-rich-text-fallback
-                      value="{{ reply_body | e }}"
+                      aria-labelledby="ticket-reply-label"
+                      placeholder="Write your reply..."
                       required
-                    />
+                    >{{ reply_body | e }}</textarea>
                   </div>
                   <div class="form-field">
                     <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>

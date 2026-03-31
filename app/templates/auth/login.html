@@ -71,7 +71,7 @@
         />
       </div>
     </div>
-    <div class="form-field" id="login-totp-field" data-totp-field hidden aria-hidden="true">
+    <div class="form-field" id="login-totp-field" data-totp-field>
       <label class="form-label" for="login-totp">Authenticator code</label>
       <div class="form-input-wrapper">
         <input
@@ -81,7 +81,10 @@
           name="totp_code"
           inputmode="numeric"
           pattern="[0-9]{6}"
+          maxlength="6"
           autocomplete="one-time-code"
+          autocorrect="off"
+          autocapitalize="none"
           placeholder="123456"
         />
       </div>

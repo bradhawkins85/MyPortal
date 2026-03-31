@@ -560,6 +560,7 @@
     const editModal = document.getElementById('product-edit-modal');
     const visibilityModal = document.getElementById('product-visibility-modal');
     const descriptionEditorModal = document.getElementById('description-editor-modal');
+    const priceHistoryModal = document.getElementById('price-history-modal');
     const editForm = document.getElementById('product-edit-form');
     const visibilityForm = document.getElementById('product-visibility-form');
     const visibilityLoadingStatus = document.getElementById('product-visibility-loading-status');
@@ -579,31 +580,31 @@
     let descriptionSunEditor = null;
 
     function sanitizeDescriptionHtml(value) {
-      const doc = new DOMParser().parseFromString(value || '', 'text/html');
-      doc.body
-        .querySelectorAll('script, iframe, object, embed, link, meta, base, form')
-        .forEach((node) => node.remove());
+      let current = String(value || '');
+      let previous;
+        previous = current;
+      do {
+        previous = current;
 
-      doc.body.querySelectorAll('*').forEach((node) => {
-        Array.from(node.attributes).forEach((attr) => {
-          const attrName = attr.name.toLowerCase();
-          const attrValue = String(attr.value || '').trim().toLowerCase();
-          if (attrName.startsWith('on')) {
-            node.removeAttribute(attr.name);
-            return;
-          }
-          if (
-            (attrName === 'href' || attrName === 'src') &&
-            (attrValue.startsWith('javascript:') ||
-              attrValue.startsWith('data:') ||
-              attrValue.startsWith('vbscript:'))
-          ) {
-            node.removeAttribute(attr.name);
-          }
-        });
-      });
+        const withoutBlockedTags = previous.replace(
+          /<\s*\/?\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi,
 
-      return doc.body ? doc.body.innerHTML : '';
+        );
+
+        current = withoutBlockedTags
+          .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
+          .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+          .replace(
+            /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
+            ''
+          )
+          .replace(
+            /\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi,
+            ''
+          );
+      } while (current !== previous);
+
+      return current;
     }
 
     function getOrCreateDescriptionEditor() {
@@ -859,6 +860,7 @@
     bindModalDismissal(importModal);
     bindModalDismissal(editModal);
     bindModalDismissal(visibilityModal);
+    bindModalDismissal(priceHistoryModal);
 
     // Edit form SKU list managers (modal)
     let currentEditProductId = null;
@@ -1033,6 +1035,71 @@
         });
         setLoadingStatus(visibilityLoadingStatus, '');
         setFormLoadingState(form, false);
+      });
+    });
+
+    container.querySelectorAll('[data-product-price-history]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!priceHistoryModal) {
+          return;
+        }
+        const id = Number(button.getAttribute('data-product-price-history'));
+        const sku = button.getAttribute('data-product-sku') || '';
+        const skuLabel = document.getElementById('price-history-sku-label');
+        const loadingStatus = document.getElementById('price-history-loading-status');
+        const tableWrapper = document.getElementById('price-history-table-wrapper');
+        const tbody = document.getElementById('price-history-tbody');
+        const emptyMessage = document.getElementById('price-history-empty');
+
+        if (skuLabel) skuLabel.textContent = `SKU: ${sku}`;
+        if (loadingStatus) loadingStatus.hidden = false;
+        if (tableWrapper) tableWrapper.hidden = true;
+        if (emptyMessage) emptyMessage.hidden = true;
+        if (tbody) tbody.innerHTML = '';
+        openModal(priceHistoryModal);
+
+        let history = [];
+        try {
+          const response = await fetch(`/api/admin/shop/products/${id}/price-history`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          history = await response.json();
+        } catch (error) {
+          console.error('Unable to load price history', error);
+          if (loadingStatus) {
+            loadingStatus.textContent = 'Unable to load price history. Please try again.';
+            loadingStatus.hidden = false;
+          }
+          return;
+        }
+
+        if (loadingStatus) loadingStatus.hidden = true;
+
+        if (!history || history.length === 0) {
+          if (emptyMessage) emptyMessage.hidden = false;
+          return;
+        }
+
+        if (tbody) {
+          history.forEach((entry) => {
+            const tr = document.createElement('tr');
+            const dateTd = document.createElement('td');
+            const dbpTd = document.createElement('td');
+            dateTd.textContent = entry.recorded_at
+              ? new Date(entry.recorded_at).toLocaleString()
+              : '—';
+            dbpTd.textContent = entry.dbp !== null && entry.dbp !== undefined
+              ? `$${parseFloat(entry.dbp).toFixed(2)}`
+              : '—';
+            tr.appendChild(dateTd);
+            tr.appendChild(dbpTd);
+            tbody.appendChild(tr);
+          });
+        }
+        if (tableWrapper) tableWrapper.hidden = false;
       });
     });
 

@@ -50,3 +50,21 @@ def test_sanitize_rich_text_strips_quoted_email_headers_and_styles():
     assert "Sent:" not in result.html
     assert "Subject:" not in result.html
     assert "margin-top" not in result.html
+
+
+def test_sanitize_rich_text_keeps_non_quoted_header_like_content():
+    content = """
+        You have received a new voice mail from "61419685556 - 61419685556 "
+
+        From: 61419685556
+        To: "17501" - "Brad" "Hawkins"
+        Received:"Tuesday, March 24, 2026 1:36:56 PM"
+        Duration:"00:00:37"
+        File:"vmail_61419685556_17501_20260324033656"
+    """
+
+    result = sanitize_rich_text(content)
+
+    assert "voice mail from" in result.html
+    assert "Duration" in result.html
+    assert "Received" in result.html
