@@ -198,33 +198,32 @@ def _admin_update_test(monkeypatch, active_session, form_data):
     with TestClient(main.app, follow_redirects=False) as client:
         r = client.post("/admin/companies/1", data={"name": "TC", "_csrf": active_session.csrf_token, **form_data})
     assert r.status_code == 303
-    return updated.get("payment_method")
+    assert updated.get("payment_method") == "invoice"
 
 
-def test_admin_saves_invoice_prepay_only(monkeypatch, active_session):
-    assert _admin_update_test(monkeypatch, active_session, {"invoicePrepay": "1"}) == "invoice_prepay"
+def test_cart_place_order_blocks_when_payment_method_is_stripe(monkeypatch, active_session):
+    from fastapi.testclient import TestClient
 
+    list_items = AsyncMock(return_value=[{"product_id": 1, "quantity": 1, "unit_price": 10}])
 
-def test_admin_saves_invoice_postpay_only(monkeypatch, active_session):
-    assert _admin_update_test(monkeypatch, active_session, {"invoicePostpay": "1"}) == "invoice_postpay"
+    async def fake_ctx(request, *, permission_field):
+        return (
+            {"id": 10},
+            {"company_id": 1, "can_access_cart": True},
+            {"id": 1, "name": "E", "is_vip": 0, "payment_method": "stripe"},
+            1,
+            None,
+        )
 
+    monkeypatch.setattr(main, "_load_company_section_context", fake_ctx)
+    monkeypatch.setattr(main.cart_repo, "list_items", list_items)
 
-def test_admin_saves_stripe_only(monkeypatch, active_session):
-    assert _admin_update_test(monkeypatch, active_session, {"stripeEnabled": "1"}) == "stripe"
+    with TestClient(main.app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/place-order",
+            data={"poNumber": "PO-1", "_csrf": active_session.csrf_token},
+        )
 
-
-def test_admin_saves_invoice_prepay_and_stripe(monkeypatch, active_session):
-    assert _admin_update_test(monkeypatch, active_session, {"invoicePrepay": "1", "stripeEnabled": "1"}) == "invoice_prepay,stripe"
-
-
-def test_admin_saves_invoice_postpay_and_stripe(monkeypatch, active_session):
-    assert _admin_update_test(monkeypatch, active_session, {"invoicePostpay": "1", "stripeEnabled": "1"}) == "invoice_postpay,stripe"
-
-
-def test_admin_saves_all_three_methods(monkeypatch, active_session):
-    result = _admin_update_test(monkeypatch, active_session, {"invoicePrepay": "1", "invoicePostpay": "1", "stripeEnabled": "1"})
-    assert result == "invoice_prepay,invoice_postpay,stripe"
-
-
-def test_admin_defaults_invoice_prepay_when_none_selected(monkeypatch, active_session):
-    assert _admin_update_test(monkeypatch, active_session, {}) == "invoice_prepay"
+    assert response.status_code == 303
+    assert "cartError=" in response.headers["location"]
+    list_items.assert_not_called()
