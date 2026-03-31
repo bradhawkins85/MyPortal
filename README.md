@@ -406,7 +406,7 @@ For a hardened systemd configuration that runs MyPortal as a managed Linux servi
 
 ## Updating from GitHub
 
-Use the Python-focused automation scripts to stay current. `scripts/upgrade.sh` pulls the latest code and drops a restart flag at `var/state/restart_required.flag`. Schedule `scripts/process_update_flag.sh` from cron (see `deploy/cron/process_update_flag.cron`) to check for the flag every minute, reinstall dependencies, and restart the ASGI service when required. If you prefer to run the steps manually, execute the following commands:
+Use the Python-focused automation scripts to stay current. The UI/scheduler checks GitHub for new commits on `origin/main` and, when one is available, writes `var/state/system_update.flag`. Schedule `scripts/process_update_flag.sh` from cron (see `deploy/cron/process_update_flag.cron`) to process that flag every minute: it runs `scripts/upgrade.sh`, which updates code, reinstalls dependencies, restarts the service, and then clears the flag file on success. If you prefer to run the steps manually, execute the following commands:
 
 ```bash
 git pull origin main

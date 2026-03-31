@@ -1,0 +1,1061 @@
+"""Tests for Exchange Online Get-MailboxPermission integration.
+
+Covers:
+- _parse_exo_mailbox_permission_records filters to FullAccess, non-deny, non-self
+- _fetch_exo_mailbox_permissions acquires EXO token and calls per-mailbox API
+- _fetch_exo_mailbox_permissions returns empty dict on token acquisition failure
+- _fetch_exo_mailbox_permissions skips mailboxes whose API call fails
+- _exo_get_mailbox_permission returns empty list on non-200 responses
+- _exo_get_mailbox_permission returns empty list on invalid JSON
+- _exo_get_mailbox_permission returns empty list on decompression errors
+- _exo_get_mailbox_permission falls back to PowerShell subprocess on REST 403
+- _pwsh_get_mailbox_permission runs Get-MailboxPermission via PowerShell subprocess
+- _pwsh_get_mailbox_permission passes -SettingsFile to suppress ScriptBlock Logging
+- _get_pwsh_settings_path creates and caches a PowerShell settings temp file
+- sync_mailboxes calls _fetch_exo_mailbox_permissions instead of UTCM snapshots
+- _exchange_token uses custom scope when provided
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
+
+from app.services import m365 as m365_service
+from app.services.m365 import (
+    M365Error,
+    _coerce_exo_bool,
+    _coerce_exo_string,
+    _get_pwsh_settings_path,
+    _parse_exo_mailbox_permission_records,
+)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+# ---------------------------------------------------------------------------
+# _parse_exo_mailbox_permission_records
+# ---------------------------------------------------------------------------
+
+
+def test_parse_exo_records_returns_fullaccess_members():
+    """Records with FullAccess are returned as member dicts."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+        {
+            "User": "reader@contoso.com",
+            "AccessRights": ["ReadPermission"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_handles_string_access_rights():
+    """AccessRights as a single string (not list) is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": "FullAccess",
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_handles_nested_object_access_rights():
+    """AccessRights as a nested object with 'value' array is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": {"value": ["FullAccess"]},
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_handles_nested_object_with_odata_type():
+    """AccessRights as a nested object with @odata.type and 'value' is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": {
+                "@odata.type": "#Collection(String)",
+                "value": ["FullAccess"],
+            },
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_handles_dict_without_value_key():
+    """AccessRights as a dict without 'value' key is treated as empty."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": {"@odata.type": "#Collection(String)"},  # no value key
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
+def test_parse_exo_records_skips_deny_entries():
+    """Deny=True entries are excluded."""
+    records = [
+        {
+            "User": "blocked@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": True,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
+def test_parse_exo_records_skips_nt_authority_self():
+    """NT AUTHORITY\\SELF entries are excluded."""
+    records = [
+        {
+            "User": "NT AUTHORITY\\SELF",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
+def test_parse_exo_records_deduplicates_by_upn():
+    """Duplicate user entries are de-duplicated by UPN."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+
+
+def test_parse_exo_records_sorted_alphabetically():
+    """Results are sorted alphabetically by display name."""
+    records = [
+        {
+            "User": "zoe@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+        {
+            "User": "alice@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result[0]["member_upn"] == "alice@contoso.com"
+    assert result[1]["member_upn"] == "zoe@contoso.com"
+
+
+def test_parse_exo_records_handles_case_insensitive_keys():
+    """Records with lowercase keys (accessRights, deny) are handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "accessRights": ["FullAccess"],
+            "deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_empty_user_skipped():
+    """Records with empty User field are skipped."""
+    records = [
+        {
+            "User": "",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
+def test_parse_exo_records_deny_string_false_not_filtered():
+    """Deny serialised as the string 'False' must not filter the record out."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": "False",
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_deny_string_true_filtered():
+    """Deny serialised as the string 'True' should filter the record out."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": "True",
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert result == []
+
+
+def test_parse_exo_records_deny_nested_object():
+    """Deny serialised as a nested OData object is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": {"@odata.type": "#Boolean", "value": False},
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_access_rights_nested_list_items():
+    """AccessRights list containing nested objects is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": [{"@odata.type": "#EnumValue", "value": "FullAccess"}],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_access_rights_curly_brace_wrapper():
+    """AccessRights value wrapped in curly braces (PowerShell format) is handled."""
+    records = [
+        {
+            "User": "admin@contoso.com",
+            "AccessRights": "{FullAccess}",
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object():
+    """User serialised as a nested OData object is handled."""
+    records = [
+        {
+            "User": {"@odata.type": "#UserPrincipal", "value": "admin@contoso.com"},
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object_raw_identity():
+    """User serialised with RawIdentity key is handled."""
+    records = [
+        {
+            "User": {"RawIdentity": "admin@contoso.com"},
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object_user_principal_name():
+    """User serialised with UserPrincipalName key is handled."""
+    records = [
+        {
+            "User": {
+                "@odata.type": "#UserPrincipal",
+                "UserPrincipalName": "admin@contoso.com",
+            },
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_user_nested_object_primary_smtp_address():
+    """User serialised with PrimarySmtpAddress key is handled."""
+    records = [
+        {
+            "User": {
+                "@odata.type": "#UserPrincipal",
+                "PrimarySmtpAddress": "admin@contoso.com",
+            },
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("shared@contoso.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "admin@contoso.com"
+
+
+def test_parse_exo_records_combined_rest_api_format():
+    """Full REST API record with string Deny and nested AccessRights is handled."""
+    records = [
+        {
+            "@odata.type": "#Microsoft.Exchange.Management.RecipientTasks.MailboxPermission",
+            "Identity": "alarms@company.com",
+            "User": "Brad Hawkins <brad@company.com>",
+            "AccessRights": {"@odata.type": "#Collection(String)", "value": ["FullAccess"]},
+            "Deny": "False",
+            "IsInherited": False,
+        },
+        {
+            "@odata.type": "#Microsoft.Exchange.Management.RecipientTasks.MailboxPermission",
+            "Identity": "alarms@company.com",
+            "User": "NT AUTHORITY\\SELF",
+            "AccessRights": {"@odata.type": "#Collection(String)", "value": ["FullAccess"]},
+            "Deny": "False",
+            "IsInherited": False,
+        },
+    ]
+    result = _parse_exo_mailbox_permission_records("alarms@company.com", records)
+    assert len(result) == 1
+    assert result[0]["member_upn"] == "brad@company.com"
+    assert result[0]["member_display_name"] == "Brad Hawkins"
+
+
+# ---------------------------------------------------------------------------
+# _exo_get_mailbox_permission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_value_on_success():
+    """Successful 200 response returns value list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "value": [
+            {"User": "admin@contoso.com", "AccessRights": ["FullAccess"], "Deny": False}
+        ]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert len(result) == 1
+    assert result[0]["User"] == "admin@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_on_non_200():
+    """Non-200, non-403 responses return an empty list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "Internal Server Error"
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_raises_on_403():
+    """403 responses raise M365Error with http_status=403 when PowerShell fallback also fails."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=[]),
+        ):
+            with pytest.raises(M365Error) as exc_info:
+                await m365_service._exo_get_mailbox_permission(
+                    "token", "tenant-id", "shared@contoso.com"
+                )
+
+    assert exc_info.value.http_status == 403
+    assert "Exchange.ManageAsApp" in str(exc_info.value)
+    assert "Exchange RBAC role" in str(exc_info.value)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_non_200_decompression_error():
+    """Non-200 responses with corrupt gzip body return an empty list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    # Simulate .text raising DecodingError when accessed
+    type(mock_response).text = property(
+        lambda self: (_ for _ in ()).throw(
+            httpx.DecodingError("Error -3 while decompressing data: incorrect header check")
+        )
+    )
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_on_request_decode_error():
+    """Request-time decoding errors return an empty list."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(
+        side_effect=httpx.DecodingError(
+            "Error -3 while decompressing data: incorrect header check"
+        )
+    )
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+    mock_client.post.assert_awaited_once()
+    _, kwargs = mock_client.post.await_args
+    assert kwargs["headers"]["Accept-Encoding"] == "identity"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_on_invalid_json():
+    """Invalid JSON responses return an empty list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.side_effect = ValueError("bad json")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_on_decompression_error():
+    """Decompression errors (e.g. corrupt gzip) return an empty list."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.side_effect = httpx.DecodingError(
+        "Error -3 while decompressing data: incorrect header check"
+    )
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        result = await m365_service._exo_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _fetch_exo_mailbox_permissions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_mailbox_permissions_returns_members():
+    """Fetches EXO token and returns parsed FullAccess members per mailbox."""
+    exo_records = [
+        {"User": "admin@contoso.com", "AccessRights": ["FullAccess"], "Deny": False},
+        {"User": "NT AUTHORITY\\SELF", "AccessRights": ["FullAccess"], "Deny": False},
+    ]
+
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-tok", "tid")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_mailbox_permission",
+            AsyncMock(return_value=exo_records),
+        ),
+    ):
+        result = await m365_service._fetch_exo_mailbox_permissions(
+            1, {"shared@contoso.com"}
+        )
+
+    assert "shared@contoso.com" in result
+    members = result["shared@contoso.com"]
+    assert len(members) == 1
+    assert members[0]["member_upn"] == "admin@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_mailbox_permissions_returns_empty_on_token_failure():
+    """Returns empty dict when EXO token acquisition fails."""
+    with patch.object(
+        m365_service,
+        "_acquire_exo_access_token",
+        AsyncMock(side_effect=M365Error("token failed")),
+    ):
+        result = await m365_service._fetch_exo_mailbox_permissions(
+            1, {"shared@contoso.com"}
+        )
+
+    assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_mailbox_permissions_empty_set():
+    """Empty mailbox set returns empty dict without any API calls."""
+    result = await m365_service._fetch_exo_mailbox_permissions(1, set())
+    assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_mailbox_permissions_skips_failed_mailboxes():
+    """Mailboxes whose EXO API call returns no records are excluded from results."""
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-tok", "tid")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_mailbox_permission",
+            AsyncMock(return_value=[]),
+        ),
+    ):
+        result = await m365_service._fetch_exo_mailbox_permissions(
+            1, {"shared@contoso.com"}
+        )
+
+    assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_mailbox_permissions_stops_on_403():
+    """When first mailbox returns 403, remaining mailboxes are skipped."""
+    mock_get = AsyncMock(side_effect=M365Error("forbidden", http_status=403))
+
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-tok", "tid")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_mailbox_permission",
+            mock_get,
+        ),
+    ):
+        result = await m365_service._fetch_exo_mailbox_permissions(
+            1, {"a@contoso.com", "b@contoso.com", "c@contoso.com"}
+        )
+
+    assert result == {}
+    # Should have called only once then stopped, not 3 times
+    assert mock_get.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# _exchange_token scope parameter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exchange_token_uses_custom_scope():
+    """When scope is provided, _exchange_token uses it instead of the default Graph scope."""
+    captured_data: list[dict[str, Any]] = []
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "access_token": "test-token",
+        "expires_in": 3600,
+    }
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    async def fake_post(url, **kwargs):
+        captured_data.append(kwargs.get("data", {}))
+        return mock_response
+
+    mock_client.post = fake_post
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        token, _, _ = await m365_service._exchange_token(
+            tenant_id="test-tenant",
+            client_id="test-client",
+            client_secret="test-secret",
+            refresh_token=None,
+            scope="https://outlook.office365.com/.default",
+        )
+
+    assert token == "test-token"
+    assert len(captured_data) == 1
+    assert captured_data[0]["scope"] == "https://outlook.office365.com/.default"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exchange_token_defaults_to_graph_scope():
+    """When scope is not provided, _exchange_token defaults to Graph scope."""
+    captured_data: list[dict[str, Any]] = []
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "access_token": "test-token",
+        "expires_in": 3600,
+    }
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    async def fake_post(url, **kwargs):
+        captured_data.append(kwargs.get("data", {}))
+        return mock_response
+
+    mock_client.post = fake_post
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        token, _, _ = await m365_service._exchange_token(
+            tenant_id="test-tenant",
+            client_id="test-client",
+            client_secret="test-secret",
+            refresh_token=None,
+        )
+
+    assert token == "test-token"
+    assert len(captured_data) == 1
+    assert captured_data[0]["scope"] == "https://graph.microsoft.com/.default"
+
+
+# ---------------------------------------------------------------------------
+# _get_pwsh_settings_path
+# ---------------------------------------------------------------------------
+
+
+def test_get_pwsh_settings_path_creates_json_file():
+    """_get_pwsh_settings_path creates a temp file with correct settings."""
+    # Reset the cached path so the function creates a new file.
+    original = m365_service._pwsh_settings_path
+    try:
+        m365_service._pwsh_settings_path = None
+        path = _get_pwsh_settings_path()
+        assert os.path.isfile(path)
+        with open(path) as fh:
+            data = json.load(fh)
+        assert data["LogLevel"] == "Error"
+        assert data["ScriptBlockLogging"]["EnableScriptBlockLogging"] is False
+        assert data["ModuleLogging"]["EnableModuleLogging"] is False
+    finally:
+        m365_service._pwsh_settings_path = original
+
+
+def test_get_pwsh_settings_path_returns_cached_path():
+    """Subsequent calls return the same cached file path."""
+    original = m365_service._pwsh_settings_path
+    try:
+        m365_service._pwsh_settings_path = None
+        path1 = _get_pwsh_settings_path()
+        path2 = _get_pwsh_settings_path()
+        assert path1 == path2
+    finally:
+        m365_service._pwsh_settings_path = original
+
+
+# ---------------------------------------------------------------------------
+# _pwsh_get_mailbox_permission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_passes_settings_file():
+    """PowerShell subprocess is invoked with -SettingsFile to suppress logging."""
+    pwsh_output = json.dumps([
+        {
+            "Identity": "shared@contoso.com",
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+            "IsInherited": False,
+        }
+    ])
+
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(pwsh_output.encode(), b"")
+    )
+    mock_process.returncode = 0
+
+    mock_exec = AsyncMock(return_value=mock_process)
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch("asyncio.create_subprocess_exec", mock_exec),
+    ):
+        await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    # Verify -SettingsFile was passed in the subprocess arguments.
+    call_args = mock_exec.call_args[0]
+    assert "-SettingsFile" in call_args
+    settings_idx = call_args.index("-SettingsFile")
+    settings_path = call_args[settings_idx + 1]
+    assert os.path.isfile(settings_path)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_records():
+    """PowerShell subprocess returns parsed mailbox permission records."""
+    pwsh_output = json.dumps([
+        {
+            "Identity": "shared@contoso.com",
+            "User": "admin@contoso.com",
+            "AccessRights": ["FullAccess"],
+            "Deny": False,
+            "IsInherited": False,
+        }
+    ])
+
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(pwsh_output.encode(), b"")
+    )
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert len(result) == 1
+    assert result[0]["User"] == "admin@contoso.com"
+    assert result[0]["AccessRights"] == ["FullAccess"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_none_when_no_pwsh():
+    """Returns None when PowerShell is not installed."""
+    with patch("shutil.which", return_value=None):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_subprocess_error():
+    """Non-zero exit code from PowerShell returns empty list."""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(b"", b"Connect-ExchangeOnline: Access denied")
+    )
+    mock_process.returncode = 1
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_timeout():
+    """Timeout during PowerShell execution returns empty list."""
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(side_effect=asyncio.TimeoutError()),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_invalid_json():
+    """Invalid JSON output from PowerShell returns empty list."""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(b"not valid json", b"")
+    )
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_wraps_single_object():
+    """Single dict result from PowerShell is wrapped in a list."""
+    pwsh_output = json.dumps({
+        "Identity": "shared@contoso.com",
+        "User": "admin@contoso.com",
+        "AccessRights": ["FullAccess"],
+        "Deny": False,
+        "IsInherited": False,
+    })
+
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(
+        return_value=(pwsh_output.encode(), b"")
+    )
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0]["User"] == "admin@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_os_error():
+    """OSError when spawning subprocess returns empty list."""
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(side_effect=OSError("No such file")),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_pwsh_get_mailbox_permission_returns_empty_on_empty_stdout():
+    """Empty stdout from PowerShell (no permissions) returns empty list."""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock(return_value=(b"", b""))
+    mock_process.returncode = 0
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/pwsh"),
+        patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=mock_process),
+        ),
+    ):
+        result = await m365_service._pwsh_get_mailbox_permission(
+            "token", "tenant-id", "shared@contoso.com"
+        )
+
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _exo_get_mailbox_permission PowerShell fallback on 403
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_fallback_to_pwsh_on_403():
+    """REST 403 triggers PowerShell fallback; records returned on success."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    pwsh_records = [
+        {"User": "admin@contoso.com", "AccessRights": ["FullAccess"], "Deny": False}
+    ]
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=pwsh_records),
+        ) as mock_pwsh:
+            result = await m365_service._exo_get_mailbox_permission(
+                "token", "tenant-id", "shared@contoso.com"
+            )
+
+    assert result == pwsh_records
+    mock_pwsh.assert_awaited_once_with("token", "tenant-id", "shared@contoso.com")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_raises_when_pwsh_also_fails():
+    """REST 403 followed by PowerShell failure raises M365Error."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=[]),
+        ):
+            with pytest.raises(M365Error) as exc_info:
+                await m365_service._exo_get_mailbox_permission(
+                    "token", "tenant-id", "shared@contoso.com"
+                )
+
+    assert exc_info.value.http_status == 403
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_mailbox_permission_returns_empty_when_pwsh_not_found():
+    """REST 403 with PowerShell not installed returns empty list without raising."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client):
+        with patch.object(
+            m365_service,
+            "_pwsh_get_mailbox_permission",
+            AsyncMock(return_value=None),
+        ):
+            result = await m365_service._exo_get_mailbox_permission(
+                "token", "tenant-id", "shared@contoso.com"
+            )
+
+    assert result == []

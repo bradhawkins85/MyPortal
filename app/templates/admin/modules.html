@@ -28,7 +28,7 @@
               </tr>
             </thead>
             <tbody>
-              {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai'] %}
+              {% set internal_slugs = ['create-ticket', 'create-task', 'update-ticket', 'update-ticket-description', 'add-ticket-reply', 'reprocess-ai', 'm365-admin'] %}
               {% for module in modules %}
                 {% set is_internal = module.slug in internal_slugs %}
                 {% if not is_internal %}
@@ -63,6 +63,8 @@
                         </form>
                         {% if module.slug == 'imap' %}
                           <a href="/admin/modules/imap" class="button button--ghost button--small">Manage</a>
+                        {% elif module.slug == 'm365-mail' %}
+                          <a href="/admin/modules/m365-mail" class="button button--ghost button--small">Manage</a>
                         {% else %}
                           <button
                             type="button"
@@ -93,7 +95,7 @@
 
   {% for module in modules %}
     {% set settings = module.settings or {} %}
-    {% if module.slug not in internal_slugs and module.slug != 'imap' %}
+    {% if module.slug not in internal_slugs and module.slug != 'imap' and module.slug != 'm365-mail' %}
       <div
         class="modal"
         id="module-settings-modal-{{ module.slug }}"
@@ -467,7 +469,7 @@
               <div class="form-field">
                 <label class="form-label" for="m365-admin-client-id">Application (client) ID</label>
                 <input id="m365-admin-client-id" name="settings.client_id" class="form-input" value="{{ settings.client_id or '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                <p class="form-help">The Azure AD application ID for the CSP / Lighthouse partner app registration.</p>
+                <p class="form-help">The Azure AD application ID for your tenant's enterprise app registration.</p>
               </div>
               <div class="form-field">
                 <label class="form-label" for="m365-admin-client-secret">Client secret</label>
@@ -476,8 +478,17 @@
               </div>
               <div class="form-field">
                 <p class="form-help">
-                  Once configured, use the Microsoft 365 page to sign in with your partner account and manage customer tenants.
+                  Once configured, use the Microsoft 365 page to manage enterprise app provisioning.
                 </p>
+              </div>
+              <div class="form-field">
+                <p class="form-label">PKCE app</p>
+                {% if settings.pkce_client_id %}
+                  <p class="form-help">Auto-provisioned PKCE app ID: <code>{{ settings.pkce_client_id }}</code></p>
+                {% else %}
+                  <p class="form-help form-help--error">No PKCE app is configured. Sign-in flows will fall back to the Azure CLI public client, which may fail with <strong>AADSTS700016</strong> if your tenant restricts third-party apps.</p>
+                  <p class="form-help form-help--error">Configure the <code>M365_PKCE_CLIENT_ID</code> environment variable to use your own PKCE app.</p>
+                {% endif %}
               </div>
             {% else %}
               {% for key, value in settings.items() %}
@@ -492,6 +503,28 @@
               <button type="submit" class="button">Save settings</button>
             </div>
           </form>
+
+          {% if module.slug == 'm365-admin' %}
+            <div class="card__form">
+              <details>
+                <summary class="form-label" style="cursor: pointer; user-select: none;">Manual PKCE app setup instructions</summary>
+                <div class="form-field" style="margin-top: 0.75rem;">
+                  <p class="form-help">Create the PKCE app registration manually in Azure AD:</p>
+                  <ol class="form-help" style="padding-left: 1.25rem; margin-top: 0.5rem;">
+                    <li>Sign in to the <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer">Azure portal</a> with your tenant Global Admin account.</li>
+                    <li>Go to <strong>Azure Active Directory → App registrations → New registration</strong>.</li>
+                    <li>Set a display name, e.g. <em>MyPortal Bootstrap</em>.</li>
+                    <li>Under <strong>Supported account types</strong>, choose <strong>Accounts in any organizational directory (Any Azure AD directory – Multitenant)</strong>.</li>
+                    <li>Under <strong>Redirect URI</strong>, choose <strong>Public client/native (mobile &amp; desktop)</strong> and enter: <code>{{ request.url_for('m365_callback') }}</code></li>
+                    <li>Click <strong>Register</strong>.</li>
+                    <li>On the app's <strong>Authentication</strong> blade, scroll to <strong>Advanced settings</strong> and set <strong>Allow public client flows</strong> to <strong>Yes</strong>. Save.</li>
+                    <li>Copy the <strong>Application (client) ID</strong> and set it as the <code>M365_PKCE_CLIENT_ID</code> environment variable.</li>
+                  </ol>
+                  <p class="form-help" style="margin-top: 0.5rem;">A PowerShell script for automated creation is available at <code>scripts/create-m365-pkce-app.ps1</code> in the MyPortal repository.</p>
+                </div>
+              </details>
+            </div>
+          {% endif %}
 
           {% if module.slug == 'syncro' %}
             <form action="/admin/syncro/import-companies" method="post" class="form card__form" data-syncro-company-import>

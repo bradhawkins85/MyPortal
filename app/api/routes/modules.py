@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
 from app.repositories import integration_modules as module_repo
@@ -43,6 +44,11 @@ async def update_module(
 async def test_module(slug: str, current_user: dict = Depends(require_super_admin)) -> dict[str, str | int | None]:
     result = await modules_service.test_module(slug)
     if result.get("status") == "error":
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=result)
+        # Log full error details on the server, but return a generic message to the client
+        logger.error("Integration module test failed for slug '{}': {}", slug, result)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Integration module test failed. Please check server logs for more details.",
+        )
     return result
 

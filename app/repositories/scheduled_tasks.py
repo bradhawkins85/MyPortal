@@ -54,6 +54,15 @@ async def get_commands_for_company(company_id: int) -> set[str]:
     )
     return {row["command"] for row in rows}
 
+async def get_task_for_company_by_command(company_id: int, command: str) -> dict[str, Any] | None:
+    """Return the first task matching *command* for *company_id*, or None."""
+    row = await db.fetch_one(
+        "SELECT * FROM scheduled_tasks WHERE company_id = %s AND command = %s LIMIT 1",
+        (company_id, command),
+    )
+    return _normalise_task(row) if row else None
+
+
 
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"

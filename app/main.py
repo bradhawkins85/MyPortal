@@ -14,6 +14,7 @@ from html import escape
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urlencode
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiomysql
 import httpx
@@ -76,6 +77,7 @@ from app.api.routes import (
     message_templates as message_templates_api,
     mcp as mcp_api,
     imap as imap_api,
+    m365_mail as m365_mail_api,
     modules as modules_api,
     notifications,
     orders as orders_api,
@@ -98,7 +100,7 @@ from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
-from app.core.logging import configure_logging, log_error, log_info
+from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
@@ -107,13 +109,14 @@ from app.repositories import assets as assets_repo
 from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import business_continuity_plans as bc_plans_repo
 from app.repositories import companies as company_repo
-from app.repositories import csp as csp_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import change_log as change_log_repo
 from app.repositories import assets as asset_repo
 from app.repositories import invoices as invoice_repo
+from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import licenses as license_repo
+from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import forms as forms_repo
 from app.repositories import knowledge_base as knowledge_base_repo
 from app.repositories import m365 as m365_repo
@@ -122,13 +125,16 @@ from app.repositories import notifications as notifications_repo
 from app.repositories import notification_preferences as notification_preferences_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
+from app.repositories import stock_feed as stock_feed_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import subscription_categories as subscription_categories_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
+from app.repositories import staff_onboarding_workflows as staff_workflow_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import automations as automation_repo
@@ -138,7 +144,12 @@ from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
+from app.schemas.staff_onboarding_workflows import (
+    CompanyWorkflowPolicyUpsertSchema,
+    WorkflowConfigSchema,
+)
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
@@ -164,6 +175,7 @@ from app.services import company_domains
 from app.services import company_access
 from app.services import email as email_service
 from app.services import imap as imap_service
+from app.services import m365_mail as m365_mail_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
@@ -175,6 +187,8 @@ from app.services import shop as shop_service
 from app.services import shop_packages as shop_packages_service
 from app.services import staff_importer
 from app.services import staff_access as staff_access_service
+from app.services import staff_field_config as staff_field_config_service
+from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 from app.services import company_importer
 from app.services import labour_types as labour_types_service
 from app.services import subscription_shop_integration
@@ -216,6 +230,65 @@ _ticket_dashboard_reference_cache: dict[str, Any] = {
     "user_lookup": {},
 }
 _ticket_dashboard_reference_lock = asyncio.Lock()
+_M365_PROVISION_PKCE_TTL_SECONDS = 600
+_m365_provision_pkce_cache: dict[str, tuple[str, datetime]] = {}
+_m365_provision_pkce_lock = asyncio.Lock()
+
+
+async def _store_m365_provision_code_verifier(verifier: str) -> str:
+    """Store a one-time PKCE code verifier for the M365 provision flow."""
+
+    verifier_id = secrets.token_urlsafe(24)
+    redis_client = get_redis_client()
+    if redis_client is not None:
+        await redis_client.setex(
+            f"m365:provision:pkce:{verifier_id}",
+            _M365_PROVISION_PKCE_TTL_SECONDS,
+            verifier,
+        )
+        return verifier_id
+
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=_M365_PROVISION_PKCE_TTL_SECONDS
+    )
+    async with _m365_provision_pkce_lock:
+        _m365_provision_pkce_cache[verifier_id] = (verifier, expires_at)
+    return verifier_id
+
+
+async def _pop_m365_provision_code_verifier(verifier_id: str | None) -> str | None:
+    """Return and remove a previously stored one-time PKCE code verifier."""
+
+    if not verifier_id:
+        return None
+
+    redis_client = get_redis_client()
+    if redis_client is not None:
+        key = f"m365:provision:pkce:{verifier_id}"
+        pipeline = redis_client.pipeline()
+        pipeline.get(key)
+        pipeline.delete(key)
+        value, _ = await pipeline.execute()
+        if not value:
+            return None
+        return str(value)
+
+    now = datetime.now(timezone.utc)
+    async with _m365_provision_pkce_lock:
+        stale_keys = [
+            key
+            for key, (_, expires_at) in _m365_provision_pkce_cache.items()
+            if expires_at <= now
+        ]
+        for key in stale_keys:
+            _m365_provision_pkce_cache.pop(key, None)
+        entry = _m365_provision_pkce_cache.pop(verifier_id, None)
+    if entry is None:
+        return None
+    verifier, expires_at = entry
+    if expires_at <= now:
+        return None
+    return verifier
 
 # Load app version for cache busting static files
 _APP_VERSION = ""
@@ -274,35 +347,35 @@ def _build_xero_redirect_uri() -> str:
     return "/xero/callback"
 
 
-def _build_m365_redirect_uri(request: Request) -> str:
-    """Build M365 OAuth redirect URI using PORTAL_URL setting.
+async def _store_pkce_verifier(code_verifier: str) -> str:
+    """Store a PKCE code_verifier server-side and return an opaque handle."""
 
-    This ensures the redirect_uri uses HTTPS when the app is behind a
-    reverse proxy, preventing Microsoft from rejecting the redirect_uri.
-    Falls back to the request-derived URL when PORTAL_URL is not set,
-    forcing the scheme to HTTPS so Microsoft accepts the reply address.
-    """
-    if settings.portal_url:
-        base = str(settings.portal_url).rstrip("/")
-        return f"{base}/m365/callback"
-    uri = str(request.url_for("m365_callback"))
-    # Microsoft requires HTTPS redirect URIs; force the scheme when the
-    # request arrives over HTTP (e.g. via a plain reverse proxy).
-    if uri.startswith("http://"):
-        uri = "https://" + uri[len("http://"):]
-    return uri
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=_PKCE_VERIFIER_TTL_SECONDS)
+    handle = secrets.token_urlsafe(32)
+    async with _pkce_verifier_store_lock:
+        # Opportunistically purge expired entries.
+        expired_handles = [
+            key for key, (_, expiry) in _pkce_verifier_store.items() if expiry <= now
+        ]
+        for key in expired_handles:
+            _pkce_verifier_store.pop(key, None)
+        _pkce_verifier_store[handle] = (code_verifier, expires_at)
+    return handle
 
 
-def _random_daily_cron() -> str:
-    """Return a randomised daily cron expression (``M H * * *``).
+async def _pop_pkce_verifier(handle: str) -> str | None:
+    """Consume a stored PKCE verifier handle and return the verifier once."""
 
-    Mirrors the ``randomDailyCron()`` helper in ``automation.js`` so that
-    automatically-provisioned tasks are spread across the day rather than
-    all firing at the same time.
-    """
-    minute = secrets.randbelow(60)
-    hour = secrets.randbelow(24)
-    return f"{minute} {hour} * * *"
+    now = datetime.now(timezone.utc)
+    async with _pkce_verifier_store_lock:
+        value = _pkce_verifier_store.pop(handle, None)
+    if not value:
+        return None
+    verifier, expires_at = value
+    if expires_at <= now:
+        return None
+    return verifier
 
 
 def _serialise_for_json(value: Any) -> Any:
@@ -885,6 +958,7 @@ app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 app.include_router(imap_api.router)
+app.include_router(m365_mail_api.router)
 app.include_router(mcp_api.router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
@@ -1173,6 +1247,40 @@ def _parse_input_datetime(value: str | None, *, assume_midnight: bool = False) -
     return parsed
 
 
+def _resolve_timezone(value: str | None) -> tuple[ZoneInfo | None, str | None]:
+    zone_name = str(value or "").strip()
+    if not zone_name:
+        return None, None
+    try:
+        return ZoneInfo(zone_name), zone_name
+    except ZoneInfoNotFoundError:
+        return None, None
+
+
+def _raw_value_includes_time(value: str | None) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(re.search(r"\d{1,2}:\d{2}", text))
+
+
+def _parse_local_datetime_to_utc(
+    value: str | None,
+    *,
+    timezone_name: str | None = None,
+    assume_midnight: bool = False,
+) -> datetime | None:
+    parsed = _parse_input_datetime(value, assume_midnight=assume_midnight)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc)
+    local_zone, _normalized_timezone = _resolve_timezone(timezone_name)
+    if local_zone is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.replace(tzinfo=local_zone).astimezone(timezone.utc)
+
+
 def _parse_bool(value: Any, *, default: bool = False) -> bool:
     if value is None:
         return default
@@ -1282,6 +1390,30 @@ def _get_status_phrase(status_code: int) -> str:
         return "Error"
 
 
+def _get_request_id(request: Request) -> str | None:
+    request_id = getattr(request.state, "request_id", None)
+    if isinstance(request_id, str) and request_id.strip():
+        return request_id
+    header_request_id = request.headers.get("x-request-id")
+    if header_request_id and header_request_id.strip():
+        return header_request_id.strip()
+    return None
+
+
+def _error_payload(*, detail: str, request_id: str | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"detail": detail}
+    if request_id:
+        payload["request_id"] = request_id
+        payload["error_reference"] = request_id
+    return payload
+
+
+def _apply_request_id_header(response: Response, request_id: str | None) -> Response:
+    if request_id:
+        response.headers["X-Request-ID"] = request_id
+    return response
+
+
 def _format_error_detail(detail: Any) -> str | None:
     if detail is None:
         return None
@@ -1293,6 +1425,23 @@ def _format_error_detail(detail: Any) -> str | None:
         return str(detail)
 
 
+def _generate_error_reference() -> str:
+    return uuid4().hex[:12]
+
+
+def _get_safe_error_path(request: Request) -> str:
+    path = request.url.path.strip()
+    return path or "/"
+
+
+def _should_show_error_detail(*, request: Request, user: dict[str, Any] | None) -> bool:
+    if bool(getattr(request.app, "debug", False)):
+        return True
+    if settings.environment.strip().lower() != "production":
+        return True
+    return bool(user and user.get("is_super_admin"))
+
+
 async def _render_error_page(
     request: Request,
     *,
@@ -1300,14 +1449,24 @@ async def _render_error_page(
     title: str | None = None,
     message: str,
     detail: str | None = None,
+    error_reference: str | None = None,
 ) -> HTMLResponse:
     status_message = _get_status_phrase(status_code)
     document_title = title or f"{status_code} {status_message}"
+    request_id = _get_request_id(request)
+    resolved_error_reference = error_reference or _generate_error_reference()
     try:
         user, _ = await _get_optional_user(request)
     except Exception as exc:  # pragma: no cover - defensive fallback
-        log_error("Failed to load user context for error page", error=str(exc))
+        log_error(
+            "Failed to load user context for error page",
+            error=str(exc),
+            request_id=request_id,
+            error_reference=resolved_error_reference,
+            request_path=_get_safe_error_path(request),
+        )
         user = None
+    show_error_detail = _should_show_error_detail(request=request, user=user)
     context = await _build_portal_context(
         request,
         user,
@@ -1317,8 +1476,11 @@ async def _render_error_page(
             "error_message": message,
             "error_status_code": status_code,
             "error_status_message": status_message,
-            "error_detail": detail,
-            "error_path": str(request.url),
+            "error_detail": detail if show_error_detail else None,
+            "show_error_detail": show_error_detail,
+            "error_path": _get_safe_error_path(request),
+            "request_id": request_id,
+            "error_reference": resolved_error_reference,
         },
     )
     return templates.TemplateResponse(
@@ -1331,24 +1493,39 @@ async def _render_error_page(
 @app.exception_handler(RequestValidationError)
 async def handle_request_validation_error(request: Request, exc: RequestValidationError):
     path = request.url.path
+    request_id = _get_request_id(request)
     if path.startswith("/api/integration-modules/"):
         logger.warning(
             "Webhook payload validation failed",
+            request_id=request_id,
             path=path,
             errors=exc.errors(),
             content_type=request.headers.get("content-type"),
             user_agent=request.headers.get("user-agent"),
         )
-    return JSONResponse(
+    response = JSONResponse(
         content=jsonable_encoder({"detail": exc.errors()}),
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
+    return _apply_request_id_header(response, request_id)
 
 
 @app.exception_handler(HTTPException)
 async def handle_http_exception(request: Request, exc: HTTPException):
+    request_id = _get_request_id(request)
+    error_reference = _generate_error_reference()
     if _request_prefers_json(request) or not _request_accepts_html(request):
-        return await http_exception_handler(request, exc)
+        if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+            response = JSONResponse(
+                _error_payload(detail="Internal server error", request_id=request_id),
+                status_code=exc.status_code,
+            )
+            if exc.headers:
+                for header, value in exc.headers.items():
+                    response.headers[header] = value
+            return _apply_request_id_header(response, request_id)
+        response = await http_exception_handler(request, exc)
+        return _apply_request_id_header(response, request_id)
     detail_text = _format_error_detail(exc.detail)
     friendly_titles = {
         status.HTTP_404_NOT_FOUND: "Page not found",
@@ -1364,35 +1541,57 @@ async def handle_http_exception(request: Request, exc: HTTPException):
     detail_for_template = None
     if detail_text and detail_text != message:
         detail_for_template = detail_text
+    log_info(
+        "Rendering HTTP error page",
+        status_code=exc.status_code,
+        request_id=request_id,
+        error_reference=error_reference,
+        request_path=_get_safe_error_path(request),
+    )
     response = await _render_error_page(
         request,
         status_code=exc.status_code,
         title=friendly_titles.get(exc.status_code),
         message=message,
         detail=detail_for_template,
+        error_reference=error_reference,
     )
     if exc.headers:
         for header, value in exc.headers.items():
             response.headers[header] = value
-    return response
+    return _apply_request_id_header(response, request_id)
 
 
 @app.exception_handler(Exception)
 async def handle_unexpected_exception(request: Request, exc: Exception):  # pragma: no cover - defensive
-    log_error("Unhandled application error", error=str(exc), request_path=str(request.url))
+    request_id = _get_request_id(request)
+    error_reference = _generate_error_reference()
+    log_error(
+        "Unhandled application error",
+        exc=exc,
+        event="app.unhandled_exception",
+        request_id=request_id,
+        error_reference=error_reference,
+        path=_get_safe_error_path(request),
+    )
     if _request_prefers_json(request):
-        return JSONResponse(
-            {"detail": "Internal server error"},
+        response = JSONResponse(
+            _error_payload(detail="Internal server error", request_id=request_id),
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+        return _apply_request_id_header(response, request_id)
     if not _request_accepts_html(request):
-        return PlainTextResponse("Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    return await _render_error_page(
+        response = PlainTextResponse("Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return _apply_request_id_header(response, request_id)
+    response = await _render_error_page(
         request,
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         title="Something went wrong",
         message="We ran into a problem while loading this page. Try again, or pick another destination from the menu.",
+        detail=_format_error_detail(exc),
+        error_reference=error_reference,
     )
+    return _apply_request_id_header(response, request_id)
 
 
 async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
@@ -1834,15 +2033,8 @@ async def _build_consolidated_overview(
             except (TypeError, ValueError):
                 return 0
 
-        def _is_countable(license_record: Mapping[str, Any]) -> bool:
-            return _safe_int(license_record.get("count")) < 10000
-
-        counted_licenses = [lic for lic in licenses if _is_countable(lic)]
-        excluded_licenses = [lic for lic in licenses if not _is_countable(lic)]
-
-        license_capacity = sum(_safe_int(lic.get("count")) for lic in counted_licenses)
-        license_allocated = sum(_safe_int(lic.get("allocated")) for lic in counted_licenses)
-        excluded_allocated = sum(_safe_int(lic.get("allocated")) for lic in excluded_licenses)
+        license_capacity = sum(_safe_int(lic.get("count")) for lic in licenses)
+        license_allocated = sum(_safe_int(lic.get("allocated")) for lic in licenses)
         license_available = max(license_capacity - license_allocated, 0)
         license_utilisation = (
             round((license_allocated / license_capacity) * 100)
@@ -1850,15 +2042,7 @@ async def _build_consolidated_overview(
             else 0
         )
 
-        license_meta_parts = [f"{_format_int(license_allocated)} allocated"]
-        if excluded_licenses:
-            excluded_count = len(excluded_licenses)
-            excluded_label = "license" if excluded_count == 1 else "licenses"
-            note = f"Excludes {excluded_count} high-capacity {excluded_label}"
-            if excluded_allocated:
-                note += f" ({_format_int(excluded_allocated)} assigned)"
-            license_meta_parts.append(note)
-        license_meta = "; ".join(license_meta_parts)
+        license_meta = f"{_format_int(license_allocated)} allocated"
 
         invoice_status_counts = Counter(
             (str(invoice.get("status") or "Unspecified").strip() or "Unspecified")
@@ -2738,6 +2922,26 @@ async def _load_staff_context(
     return user, membership, company, staff_permission, company_id, None
 
 
+def _staff_member_matches_company_email_domains(
+    staff_member: dict[str, Any], company_email_domains: list[str]
+) -> bool:
+    """Return whether a staff member should be visible for company domain filtering.
+
+    Staff without an email address are always visible. Staff with email addresses
+    are only visible when the email domain is present in the company's configured
+    email domain list.
+    """
+
+    email = str(staff_member.get("email") or "").strip().lower()
+    if not email:
+        return True
+    if "@" not in email:
+        return False
+    _, domain = email.rsplit("@", 1)
+    allowed_domains = {str(domain).strip().lower() for domain in company_email_domains if str(domain).strip()}
+    return domain in allowed_domains
+
+
 async def _load_company_section_context(
     request: Request,
     *,
@@ -2851,6 +3055,36 @@ def _sanitize_message(value: str | None) -> str | None:
     if not text:
         return None
     return text[:200]
+
+
+def _sanitize_local_redirect_target(
+    candidate: str | None,
+    *,
+    fallback: str,
+    allowed_prefixes: Sequence[str] | None = None,
+) -> str:
+    """Return a safe local redirect target, or fallback when invalid."""
+    if not isinstance(candidate, str):
+        return fallback
+
+    target = candidate.strip()
+    if not target:
+        return fallback
+
+    parsed = URL(target)
+    if parsed.is_absolute_url or parsed.netloc:
+        return fallback
+
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return fallback
+
+    if any(ord(char) < 32 for char in target):
+        return fallback
+
+    if allowed_prefixes and not any(target.startswith(prefix) for prefix in allowed_prefixes):
+        return fallback
+
+    return target
 
 
 async def _validate_recommendation_product_ids(
@@ -3471,6 +3705,7 @@ async def _render_company_edit_page(
             {"value": "sync_m365_data", "label": "Sync Microsoft 365 data"},
             {"value": "sync_to_xero", "label": "Sync to Xero"},
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
+            {"value": "generate_invoice", "label": "Generate Invoice"},
             {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
             {"value": "sync_recordings", "label": "Sync call recordings"},
             {
@@ -3582,6 +3817,16 @@ async def _render_company_edit_page(
             else:
                 raise
 
+    staff_field_config: list[dict[str, Any]] = []
+    staff_custom_field_definitions: list[dict[str, Any]] = []
+    if is_super_admin:
+        staff_field_config = (
+            await staff_field_config_service.load_effective_company_staff_fields(company_id)
+        )
+        staff_custom_field_definitions = (
+            await staff_custom_fields_repo.list_company_owned_definitions(company_id)
+        )
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -3617,7 +3862,9 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
-        "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
+        "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
+        "staff_field_config": staff_field_config,
+        "staff_custom_field_definitions": staff_custom_field_definitions,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -4131,10 +4378,58 @@ async def licenses_page(request: Request):
         "company": company,
         "can_order_licenses": can_order,
         "can_manage_licenses": can_manage,
+        "can_manage_sku_mappings": is_super_admin,
         "webhook_enabled": bool(settings.licenses_webhook_url and settings.licenses_webhook_api_key),
         "has_m365_credentials": bool(credentials),
     }
     return await _render_template("licenses/index.html", request, user, extra=extra)
+
+
+@app.get("/licenses/sku-mappings", response_class=JSONResponse)
+async def list_license_sku_mappings(request: Request):
+    user, _membership, _company, _company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    mappings = await sku_friendly_repo.list_mappings()
+    return JSONResponse({"items": mappings})
+
+
+@app.post("/licenses/sku-mappings", response_class=JSONResponse)
+async def upsert_license_sku_mapping(request: Request):
+    user, _membership, _company, _company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        payload = await request.json()
+    except Exception as exc:  # pragma: no cover - defensive parsing
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload") from exc
+    sku = str(payload.get("sku") or "").strip().upper()
+    friendly_name = str(payload.get("friendly_name") or "").strip()
+    hidden = bool(payload.get("hidden"))
+    if not sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU is required")
+    if not friendly_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Friendly name is required")
+    mapping = await sku_friendly_repo.upsert_mapping(sku, friendly_name, hidden=hidden)
+    return JSONResponse({"item": mapping, "success": True})
+
+
+@app.delete("/licenses/sku-mappings/{sku}", response_class=JSONResponse)
+async def delete_license_sku_mapping(request: Request, sku: str):
+    user, _membership, _company, _company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    cleaned_sku = sku.strip().upper()
+    if not cleaned_sku:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU is required")
+    await sku_friendly_repo.delete_mapping(cleaned_sku)
+    return JSONResponse({"success": True})
 
 
 @app.get("/compliance", response_class=HTMLResponse)
@@ -4274,6 +4569,87 @@ async def invoices_page(request: Request):
         "can_delete_invoices": bool(user.get("is_super_admin")),
     }
     return await _render_template("invoices/index.html", request, user, extra=extra)
+
+
+@app.head("/invoices/{invoice_id}", response_class=HTMLResponse)
+@app.get("/invoices/{invoice_id}", response_class=HTMLResponse)
+async def invoice_detail_page(request: Request, invoice_id: int):
+    user, membership, company, company_id, redirect = await _load_invoice_context(request)
+    if redirect:
+        return redirect
+    invoice = await invoice_repo.get_invoice_by_id(invoice_id)
+    if not invoice or int(invoice.get("company_id", 0)) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
+    amount_value = invoice.get("amount")
+    amount_decimal = (
+        amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value or "0"))
+    )
+    amount_decimal = amount_decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    status_text_raw = (invoice.get("status") or "").strip()
+    status_slug = status_text_raw.lower()
+    status_class_map = {
+        "paid": "status--active",
+        "sent": "status--invited",
+        "pending": "status--invited",
+        "issued": "status--invited",
+        "draft": "status--invited",
+        "overdue": "status--suspended",
+        "past due": "status--suspended",
+        "void": "status--invited",
+        "cancelled": "status--invited",
+    }
+    status_class = status_class_map.get(status_slug, "status--invited" if status_slug else "")
+    due_value = invoice.get("due_date")
+    if isinstance(due_value, datetime):
+        due_value = due_value.date()
+    due_display = due_value.strftime("%d %b %Y") if isinstance(due_value, date) else None
+    formatted_lines = []
+    for line in lines:
+        line_amount = line.get("amount")
+        if line_amount is None:
+            line_amount = Decimal("0.00")
+        elif not isinstance(line_amount, Decimal):
+            line_amount = Decimal(str(line_amount))
+        line_amount = line_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        unit_amt = line.get("unit_amount")
+        if unit_amt is None:
+            unit_amt = Decimal("0.00")
+        elif not isinstance(unit_amt, Decimal):
+            unit_amt = Decimal(str(unit_amt))
+        unit_amt = unit_amt.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        qty = line.get("quantity")
+        if qty is None:
+            qty = Decimal("1")
+        elif not isinstance(qty, Decimal):
+            qty = Decimal(str(qty))
+        formatted_lines.append(
+            dict(line)
+            | {
+                "amount": line_amount,
+                "amount_display": f"${line_amount:,.2f}",
+                "unit_amount": unit_amt,
+                "unit_amount_display": f"${unit_amt:,.2f}",
+                "quantity": qty,
+            }
+        )
+    extra = {
+        "title": f"Invoice {invoice['invoice_number']}",
+        "invoice": dict(invoice)
+        | {
+            "amount": amount_decimal,
+            "amount_display": f"${amount_decimal:,.2f}",
+            "due_display": due_display,
+            "status_display": status_text_raw.title() if status_text_raw else "—",
+            "status_class": status_class,
+            "status_slug": status_slug,
+        },
+        "lines": formatted_lines,
+        "company": company,
+        "has_lines": bool(formatted_lines),
+        "can_delete_invoices": bool(user.get("is_super_admin")),
+    }
+    return await _render_template("invoices/detail.html", request, user, extra=extra)
 
 
 @app.get("/licenses/{license_id}/allocated", response_class=JSONResponse)
@@ -4565,11 +4941,7 @@ async def switch_company(
         user["company_id"] = company_id
         request.state.active_company_id = company_id
 
-    destination = "/"
-    if return_url:
-        candidate = return_url.strip()
-        if candidate.startswith("/") and not candidate.startswith("//"):
-            destination = candidate
+    destination = _sanitize_local_redirect_target(return_url, fallback="/")
 
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -4594,15 +4966,36 @@ async def m365_page(request: Request, error: str | None = None, success: str | N
             "client_id": credentials.get("client_id"),
             "token_expires_at": expires_display,
         }
+
+    # Fetch per-company admin credentials for super admins
+    admin_credential_view = None
+    if user.get("is_super_admin"):
+        admin_creds = await m365_service.get_company_admin_credentials(company_id)
+        if admin_creds:
+            admin_expires = admin_creds.get("client_secret_expires_at")
+            if isinstance(admin_expires, datetime):
+                admin_expires_display = admin_expires.replace(tzinfo=timezone.utc).isoformat()
+            elif admin_expires:
+                admin_expires_display = str(admin_expires)
+            else:
+                admin_expires_display = None
+            admin_credential_view = {
+                "client_id": admin_creds.get("client_id"),
+                "tenant_id": admin_creds.get("tenant_id"),
+                "client_secret_expires_at": admin_expires_display,
+            }
+
     extra = {
         "title": "Office 365",
         "company": company,
         "credential": credential_view,
+        "admin_credential": admin_credential_view,
         "error": error,
         "success": success,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
-        "admin_credentials_configured": bool(all(await _get_m365_admin_credentials())),
+        "has_admin_credentials": bool(admin_credential_view),
+        "admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
 
@@ -4674,6 +5067,160 @@ async def remove_benchmark_exclusion(
     return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.get("/m365/mailboxes/users", response_class=HTMLResponse)
+async def m365_user_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    mailboxes = await m365_service.get_user_mailboxes(company_id)
+    synced_at = await m365_repo.get_mailbox_synced_at(company_id)
+    extra = {
+        "title": "User Mailboxes",
+        "company": company,
+        "mailboxes": mailboxes,
+        "synced_at": synced_at,
+        "has_credentials": bool(credentials),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/user_mailboxes.html", request, user, extra=extra)
+
+
+@app.get("/m365/mailboxes/shared", response_class=HTMLResponse)
+async def m365_shared_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    mailboxes = await m365_service.get_shared_mailboxes(company_id)
+    synced_at = await m365_repo.get_mailbox_synced_at(company_id)
+    extra = {
+        "title": "Shared Mailboxes",
+        "company": company,
+        "mailboxes": mailboxes,
+        "synced_at": synced_at,
+        "has_credentials": bool(credentials),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
+
+
+@app.post("/m365/mailboxes/sync", response_class=JSONResponse, tags=["Microsoft 365"])
+async def sync_m365_mailboxes(request: Request):
+    """Queue the sync_m365_data scheduled task for this company in the background.
+
+    Returns 202 Accepted immediately so the browser never waits for the long-running
+    sync and never hits a gateway timeout.
+    """
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_data")
+    if task is None:
+        task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_o365")
+    if task is not None:
+        asyncio.create_task(scheduler_service.run_now(task["id"]))
+    else:
+        asyncio.create_task(m365_service.sync_mailboxes(company_id))
+    log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"))
+    return JSONResponse({"queued": True}, status_code=202)
+
+
+@app.get("/m365/mailboxes/permissions", response_class=JSONResponse, tags=["Microsoft 365"])
+async def get_m365_mailbox_permissions(request: Request, upn: str):
+    """Return mailbox permission details for a given mailbox UPN.
+
+    Returns a JSON object with ``can_access`` (mailboxes this identity can access
+    via M365 group membership) and ``accessible_by`` (members of the M365 group
+    backing this mailbox).
+    """
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+
+    # Validate the UPN belongs to a known mailbox for this company to prevent
+    # arbitrary Graph API queries with user-supplied input.
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    known_upns = {mb["user_principal_name"] for mb in user_mbs + shared_mbs}
+    if upn not in known_upns:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
+
+    try:
+        permissions = await m365_service.get_mailbox_permissions(company_id, upn)
+        return JSONResponse(permissions)
+    except m365_service.M365Error as exc:
+        logger.exception("Failed to get mailbox permissions for UPN %s", upn)
+        return JSONResponse(
+            {"error": "Unable to retrieve mailbox permissions at this time."},
+            status_code=503,
+        )
+
+
+@app.post("/m365/checks/report-privacy", response_class=RedirectResponse)
+async def check_m365_report_privacy(request: Request):
+    """Check whether Microsoft 365 report privacy concealment is active for this tenant.
+
+    Detects the *Display concealed user, group, and site names in all reports*
+    setting.  When enabled, mailbox identifiers in reports are replaced with hex
+    hashes, breaking mailbox sync.  Redirects back to ``/m365`` with a success or
+    error message.
+    """
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        concealed = await m365_service.check_report_privacy(company_id)
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if concealed:
+        msg = (
+            "Mailbox sync failed because Microsoft 365 reports are concealing mailbox identifiers. "
+            "Disable the Microsoft 365 admin center privacy option "
+            "'Display concealed user, group, and site names in all reports', "
+            "then run mailbox sync again."
+        )
+        return RedirectResponse(
+            url=f"/m365?error={quote(msg)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url=f"/m365?success={quote('Mailbox report privacy check passed – identifiers are not concealed')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/m365/permissions/verify")
+async def verify_m365_permissions(request: Request):
+    """Check (and optionally auto-grant) missing Graph API permissions for this company.
+
+    Returns a JSON object with:
+    - ``all_ok``  – True if all required permissions are present
+    - ``missing`` – list of role IDs that are not yet granted
+    - ``present`` – list of role IDs that are currently granted
+    - ``updated`` – True if missing permissions were successfully auto-granted
+    - ``error``   – human-readable message when the check or update failed
+    """
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    try:
+        result = await m365_service.verify_tenant_permissions(company_id)
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JSONResponse(result)
+
 
 @app.post("/m365/credentials", response_class=RedirectResponse)
 async def save_m365_credentials(
@@ -4709,6 +5256,55 @@ async def delete_m365_credentials(request: Request):
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/m365/admin-credentials", response_class=RedirectResponse)
+async def save_m365_admin_credentials(
+    request: Request,
+    client_id: str = Form(..., alias="adminClientId"),
+    client_secret: str = Form("", alias="adminClientSecret"),
+    tenant_id: str = Form("", alias="adminTenantId"),
+):
+    """Save per-company M365 admin enterprise app credentials."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    # Only update if client_secret is provided (non-empty)
+    # If empty, we might be updating other fields only
+    existing = await m365_service.get_company_admin_credentials(company_id)
+    if existing and not client_secret.strip():
+        # Keep existing secret when none provided
+        client_secret = existing.get("client_secret", "")
+
+    if not client_id.strip() or not client_secret.strip():
+        encoded = urlencode({"error": "Admin Client ID and Client Secret are required."})
+        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+
+    await m365_service.upsert_company_admin_credentials(
+        company_id=company_id,
+        client_id=client_id.strip(),
+        client_secret=client_secret.strip(),
+        tenant_id=tenant_id.strip() if tenant_id.strip() else None,
+    )
+    log_info("M365 admin credentials updated", company_id=company_id, user_id=user.get("id"))
+    encoded = urlencode({"success": "Admin credentials saved successfully."})
+    return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/m365/admin-credentials/delete", response_class=RedirectResponse)
+async def delete_m365_admin_credentials(request: Request):
+    """Delete per-company M365 admin enterprise app credentials."""
+    user, membership, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    await m365_service.delete_company_admin_credentials(company_id)
+    log_info("M365 admin credentials deleted", company_id=company_id, user_id=user.get("id"))
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.post("/m365/test", response_class=RedirectResponse)
 async def test_m365_connectivity(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
@@ -4740,8 +5336,13 @@ async def sync_m365(request: Request):
         await m365_service.sync_company_licenses(company_id)
     except m365_service.M365Error as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    mailboxes_synced = 0
+    try:
+        mailboxes_synced = await m365_service.sync_mailboxes(company_id)
+    except Exception:
+        pass
     log_info("Microsoft 365 license sync triggered", company_id=company_id, user_id=user.get("id"))
-    return JSONResponse({"success": True})
+    return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
 
 @app.get("/m365/connect")
@@ -4762,7 +5363,7 @@ async def m365_connect(request: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": "offline_access https://graph.microsoft.com/.default",
+        "scope": m365_service.CONNECT_SCOPE,
         "state": state,
         "prompt": "consent",
     }
@@ -4790,17 +5391,21 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    verifier_id = await _store_m365_provision_code_verifier(code_verifier)
     state = oauth_state_serializer.dumps(
         {
             "company_id": company_id,
             "user_id": user.get("id"),
             "tenant_id": tenant_id,
             "flow": "provision",
-            "code_verifier": code_verifier,
+            "verifier_id": verifier_id,
         }
     )
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
+        company_id, redirect_uri=redirect_uri
+    )
     params = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": oauth_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4840,6 +5445,7 @@ async def admin_company_m365_provision(
         )
     redirect_uri = _build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    verifier_id = await _store_m365_provision_code_verifier(code_verifier)
     state = oauth_state_serializer.dumps(
         {
             "company_id": company_id,
@@ -4847,11 +5453,14 @@ async def admin_company_m365_provision(
             "tenant_id": tenant_id,
             "flow": "provision",
             "return_to": "company_edit",
-            "code_verifier": code_verifier,
+            "verifier_id": verifier_id,
         }
     )
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
+        company_id, redirect_uri=redirect_uri
+    )
     params = {
-        "client_id": m365_service.get_pkce_client_id(),
+        "client_id": oauth_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -4875,20 +5484,28 @@ async def admin_company_m365_provision(
 
 
 
-async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
-    """Return (client_id, client_secret) for the M365 admin / CSP / Lighthouse flow.
+async def _get_m365_admin_credentials(company_id: int | None = None) -> tuple[str | None, str | None]:
+    """Return (client_id, client_secret) for the M365 admin app flow.
 
-    Reads from the ``m365-admin`` integration module first so that admins can
-    configure the credentials through the UI or via auto-provisioning.  Falls
-    back to the environment variables ``M365_ADMIN_CLIENT_ID`` /
-    ``M365_ADMIN_CLIENT_SECRET`` for backwards-compatibility with existing
-    deployments.
+    Resolution order:
+    1. Per-company admin credentials from company_m365_credentials (if company_id provided).
+    2. Global ``m365-admin`` integration module settings.
+    3. Environment variables ``M365_ADMIN_CLIENT_ID`` / ``M365_ADMIN_CLIENT_SECRET``.
 
-    The ``client_secret`` is decrypted if it was stored as ciphertext by the
-    auto-provisioning flow; plaintext values (manually configured) are returned
-    unchanged because :func:`decrypt_secret` is a no-op for non-ciphertext
-    strings.
+    The ``client_secret`` is decrypted if it was stored as ciphertext;
+    plaintext values (manually configured) are returned unchanged because
+    :func:`decrypt_secret` is a no-op for non-ciphertext strings.
     """
+    # 1. Per-company admin credentials (when company_id is provided)
+    if company_id is not None:
+        company_admin_creds = await m365_service.get_company_admin_credentials(company_id)
+        if company_admin_creds:
+            client_id = company_admin_creds.get("client_id")
+            client_secret = company_admin_creds.get("client_secret")
+            if client_id and client_secret:
+                return client_id, client_secret
+
+    # 2. Global module credentials
     try:
         module = await modules_service.get_module("m365-admin", redact=False)
     except RuntimeError:
@@ -4900,7 +5517,8 @@ async def _get_m365_admin_credentials() -> tuple[str | None, str | None]:
         if client_id and raw_secret:
             client_secret = decrypt_secret(raw_secret)
             return client_id, client_secret
-    # Fall back to environment variables
+
+    # 3. Fall back to environment variables
     return settings.m365_admin_client_id or None, settings.m365_admin_client_secret or None
 
 
@@ -4915,23 +5533,26 @@ async def m365_discover(request: Request):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required",
         )
-    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
     redirect_uri = _build_m365_redirect_uri(request)
 
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
+    # Always use PKCE for the discover flow regardless of whether admin
+    # credentials are configured.  The discover step only needs to extract
+    # a tenant ID from the id_token - it requires no confidential-client
+    # capabilities.  Using PKCE avoids AADSTS700025 ("Client is public so
+    # neither client_assertion nor client_secret should be presented")
+    # which occurs when the configured admin client_id belongs to a public
+    # PKCE app rather than a confidential app.
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
+        company_id, redirect_uri=redirect_uri
+    )
 
     state_payload: dict = {
         "company_id": company_id,
         "user_id": user.get("id"),
         "flow": "discover",
+        "code_verifier": code_verifier,
     }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
 
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
@@ -4942,10 +5563,9 @@ async def m365_discover(request: Request):
         "scope": m365_service.DISCOVER_SCOPE,
         "state": state,
         "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
 
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
@@ -4960,78 +5580,14 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
     redirect_uri = _build_m365_redirect_uri(request)
 
-    code_verifier: str | None = None
-    if m365_admin_client_id and m365_admin_client_secret:
-        oauth_client_id = m365_admin_client_id
-    else:
-        code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        oauth_client_id = m365_service.get_pkce_client_id()
-
-    state_payload: dict = {
-        "company_id": company_id,
-        "user_id": current_user.get("id"),
-        "flow": "discover",
-        "return_to": "company_edit",
-    }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
-
-    state = oauth_state_serializer.dumps(state_payload)
-    params: dict = {
-        "client_id": oauth_client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "response_mode": "query",
-        "scope": m365_service.DISCOVER_SCOPE,
-        "state": state,
-        "prompt": "select_account",
-    }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
-
-    authorize_url = (
-        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
-        f"?{urlencode(params)}"
-    )
-    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/admin/csp/signin")
-async def admin_csp_signin(request: Request):
-    """Sign in as a CSP/Lighthouse account to enumerate managed customer tenants."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    m365_admin_client_id, m365_admin_client_secret = await _get_m365_admin_credentials()
-    if not m365_admin_client_id or not m365_admin_client_secret:
-        encoded = urlencode({"error": "Admin M365 credentials are not configured."})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-    redirect_uri = _build_m365_redirect_uri(request)
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": 0,
-            "user_id": current_user.get("id"),
-            "flow": "csp_signin",
-        }
-    )
-    params = {
-        "client_id": m365_admin_client_id,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "response_mode": "query",
-        "scope": m365_service.CSP_SCOPE,
-        "state": state,
-        "prompt": "select_account",
-    }
-    authorize_url = (
-        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
-        f"?{urlencode(params)}"
+    # Always use PKCE for the discover flow regardless of whether admin
+    # credentials are configured.  See the /m365/discover handler for the
+    # full rationale (avoids AADSTS700025 on reprovision with public client).
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
+        company_id, redirect_uri=redirect_uri
     )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -5054,7 +5610,7 @@ async def admin_csp_provision(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    redirect_uri = _build_m365_redirect_uri(request)
+    redirect_uri = str(request.url_for("m365_callback"))
 
     # Prefer existing admin credentials, then an explicitly configured
     # bootstrap client, and finally fall back to PKCE with the well-known
@@ -5063,26 +5619,30 @@ async def admin_csp_provision(request: Request):
     bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
 
     code_verifier: str | None = None
+    pkce_handle: str | None = None
     if existing_client_id:
         oauth_client_id = existing_client_id
     elif bootstrap_client_id:
         oauth_client_id = bootstrap_client_id
     else:
-        # No credentials configured – use PKCE with a public client.  The
-        # code_verifier is stored in the signed state so the callback can
-        # exchange the auth code without a client secret.
+        # No credentials configured – use PKCE with a public client.
+        # Persist the code_verifier server-side and send only an opaque
+        # one-time handle in state so the verifier is never exposed in URLs.
         # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
         # Azure CLI public client (which may be blocked in some tenants).
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
+        pkce_handle = await _store_pkce_verifier(code_verifier)
         oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
-        "company_id": 0,
+        "company_id": company_id,
         "user_id": current_user.get("id"),
-        "flow": "csp_admin_provision",
+        "flow": "discover",
+        "return_to": "company_edit",
+        "code_verifier": code_verifier,
     }
-    if code_verifier:
-        state_payload["code_verifier"] = code_verifier
+    if pkce_handle:
+        state_payload["pkce_handle"] = pkce_handle
 
     state = oauth_state_serializer.dumps(state_payload)
     params: dict = {
@@ -5090,69 +5650,13 @@ async def admin_csp_provision(request: Request):
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
-        "scope": m365_service.PROVISION_SCOPE,
+        "scope": m365_service.DISCOVER_SCOPE,
         "state": state,
         "prompt": "select_account",
-    }
-    if code_verifier:
-        params["code_challenge"] = code_challenge
-        params["code_challenge_method"] = "S256"
-
-    authorize_url = (
-        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
-        f"?{urlencode(params)}"
-    )
-    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/admin/csp/graph-bootstrap")
-async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...)):
-    """Start Option 3 Graph bootstrap to create the enterprise app in a tenant."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    clean_tenant_id = tenant_id.strip()
-    if not clean_tenant_id:
-        encoded = urlencode({"error": "Tenant ID is required for Graph bootstrap."})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    admin_client_id, _ = await _get_m365_admin_credentials()
-    if not admin_client_id:
-        encoded = urlencode(
-            {"error": "Admin M365 application ID is not configured for Graph bootstrap."}
-        )
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    redirect_uri = _build_m365_redirect_uri(request)
-    code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": 0,
-            "user_id": current_user.get("id"),
-            "flow": "csp_graph_bootstrap",
-            "tenant_id": clean_tenant_id,
-            "target_app_id": admin_client_id,
-            "code_verifier": code_verifier,
-        }
-    )
-
-    params = {
-        "client_id": m365_service.get_pkce_client_id(),
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "response_mode": "query",
-        "scope": m365_service.PROVISION_SCOPE,
-        "state": state,
-        "prompt": "consent",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
-        "domain_hint": clean_tenant_id,
     }
+
     authorize_url = (
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
         f"?{urlencode(params)}"
@@ -5164,16 +5668,156 @@ async def admin_csp_graph_bootstrap(request: Request, tenant_id: str = Query(...
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         message = request.query_params.get("error_description", error)
+        # Try to determine the flow from state so we can redirect to the
+        # correct page and clear any stale PKCE client IDs. If state is
+        # unparseable we fall back to /m365.
+        error_redirect = "/m365"
+        state_data: dict[str, Any] = {}
+        if state:
+            try:
+                state_data = oauth_state_serializer.loads(state)
+                if state_data.get("flow") == "m365_mail_auth":
+                    error_redirect = "/admin/modules/m365-mail"
+            except Exception:
+                pass
+        # AADSTS700016 means the PKCE app registration no longer exists in the
+        # tenant (it was deleted). Clear the stale pkce_client_id (including
+        # any company-specific value) so that the next sign-in attempt falls
+        # back to the Azure CLI public client, and guide the admin to re-
+        # provision so a fresh PKCE app is created.
+        if "AADSTS700016" in message:
+            company_id_raw = state_data.get("company_id")
+            if company_id_raw is not None:
+                try:
+                    await m365_service.clear_company_pkce_client_id(int(company_id_raw))
+                except (TypeError, ValueError):
+                    log_warning(
+                        "Skipping per-company PKCE clear; invalid company_id in state",
+                        company_id_raw=company_id_raw,
+                    )
+                except Exception as exc:
+                    log_warning(
+                        "Failed to clear per-company PKCE client ID after AADSTS700016",
+                        company_id_raw=company_id_raw,
+                        error=str(exc),
+                    )
+            try:
+                await m365_service.clear_pkce_client_id()
+            except Exception as exc:
+                log_warning(
+                    "Failed to clear global PKCE client ID after AADSTS700016",
+                    error=str(exc),
+                )
+            message = (
+                "The PKCE app registration was not found in Azure AD (AADSTS700016). "
+                "The cached app ID has been cleared. Please sign in again; if the problem "
+                "persists, re-provision the M365 integration via Admin → M365."
+            )
         encoded = urlencode({"error": message})
-        return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     if not code or not state:
         return RedirectResponse(url="/m365?error=invalid+response", status_code=status.HTTP_303_SEE_OTHER)
     try:
         state_data = oauth_state_serializer.loads(state)
     except BadSignature:
         return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
-    company_id = int(state_data.get("company_id", 0))
+    company_id_raw = state_data.get("company_id")
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        company_id = 0
     flow = state_data.get("flow", "connect")
+
+    if flow == "m365_mail_auth":
+        # ── Per-account delegated sign-in for M365 mail import ────────────
+        account_id_raw = state_data.get("account_id")
+        try:
+            account_id = int(account_id_raw)
+        except (TypeError, ValueError):
+            account_id = 0
+        code_verifier: str | None = state_data.get("code_verifier")
+        redirect_uri = _build_m365_redirect_uri(request)
+
+        def _mail_auth_error(msg: str) -> RedirectResponse:
+            return RedirectResponse(
+                url=f"/admin/modules/m365-mail?error={quote(msg)}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+        if not account_id:
+            return _mail_auth_error("Invalid account in OAuth state.")
+        if not code_verifier:
+            return _mail_auth_error("Missing PKCE code verifier.")
+
+        token_endpoint = (
+            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        )
+        token_data = {
+            "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+                company_id, redirect_uri=redirect_uri
+            )
+            if company_id
+            else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+            "scope": m365_mail_service.DELEGATED_MAIL_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(token_endpoint, data=token_data)
+        if token_response.status_code != 200:
+            log_error(
+                "M365 mail account OAuth token exchange failed",
+                account_id=account_id,
+                status=token_response.status_code,
+                body=token_response.text[:500] if token_response.text else "",
+            )
+            return _mail_auth_error("Sign-in failed. Please try again.")
+
+        token_payload = token_response.json()
+        access_token = token_payload.get("access_token", "")
+        refresh_token = token_payload.get("refresh_token")
+        expires_in = token_payload.get("expires_in")
+        expires_at: datetime | None = None
+        if isinstance(expires_in, (int, float)):
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
+
+        if not access_token or not refresh_token:
+            return _mail_auth_error(
+                "Sign-in did not return the required tokens. "
+                "Ensure offline_access permission is granted."
+            )
+
+        # Extract tenant ID from the token so we know which tenant to
+        # send refresh requests to later.
+        try:
+            tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+        except Exception:
+            # Try id_token as fallback
+            id_token = token_payload.get("id_token", "")
+            try:
+                tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+            except Exception:
+                return _mail_auth_error(
+                    "Unable to determine tenant ID from the sign-in response."
+                )
+
+        await m365_mail_service.store_delegated_tokens(
+            account_id,
+            tenant_id=tenant_id,
+            refresh_token=refresh_token,
+            access_token=access_token,
+            expires_at=expires_at,
+        )
+
+        account = await m365_mail_service.get_account(account_id)
+        label = account.get("name") if account else f"#{account_id}"
+        message = quote(f"Successfully signed in for mailbox {label}.")
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?success={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     if flow == "discover":
         # ── Tenant-discovery flow ──────────────────────────────────────────
@@ -5189,22 +5833,46 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        _discover_cid, _discover_csec = await _get_m365_admin_credentials()
+        _discover_cid, _discover_csec = await _get_m365_admin_credentials(company_id)
 
-        code_verifier: str | None = state_data.get("code_verifier")
+        # Determine the token exchange method.  When the flow was initiated
+        # using PKCE (state contains a verifier handle), the exchange is done
+        # with the configured PKCE public client – no client secret required.
+        # Otherwise fall back to the traditional secret-based exchange using
+        # existing admin credentials or the M365_BOOTSTRAP_* env vars.
+        code_verifier: str | None = None
+        pkce_handle = state_data.get("pkce_handle")
+        if isinstance(pkce_handle, str) and pkce_handle:
+            code_verifier = await _pop_pkce_verifier(pkce_handle)
+            if not code_verifier:
+                return _csp_provision_error(
+                    "Provisioning session expired. Please restart the CSP provisioning flow."
+                )
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+                    company_id, redirect_uri=redirect_uri
+                ),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
                 "code_verifier": code_verifier,
                 "scope": m365_service.DISCOVER_SCOPE,
             }
-        elif _discover_cid and _discover_csec:
+        else:
+            # code_verifier is always included by the discover endpoints now.
+            # This branch handles legacy state tokens that pre-date the PKCE-
+            # always change.  Using admin credentials here risks AADSTS700025
+            # if the configured client_id belongs to a public PKCE app, so we
+            # only fall back when the credentials are actually present and
+            # surface a clear error on failure.
+            if not _discover_cid or not _discover_csec:
+                return _discover_error(
+                    "Sign-in session is incomplete. Please click 'Sign in as Global Admin' again."
+                )
             token_data = {
                 "client_id": _discover_cid,
                 "client_secret": _discover_csec,
@@ -5213,8 +5881,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "redirect_uri": redirect_uri,
                 "scope": m365_service.DISCOVER_SCOPE,
             }
-        else:
-            return _discover_error("Admin M365 credentials are not configured.")
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
@@ -5223,6 +5889,17 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 status=token_response.status_code,
                 body=token_response.text,
             )
+            # AADSTS700025 means the client_id used is a public client but
+            # client_secret was presented.  This happens when the configured
+            # admin credentials reference a public PKCE app instead of a
+            # confidential app.  Provide an actionable error message.
+            error_body = token_response.text or ""
+            if "AADSTS700025" in error_body:
+                return _discover_error(
+                    "Tenant discovery failed: the configured admin client is a "
+                    "public app and cannot use a client secret (AADSTS700025). "
+                    "Please click 'Sign in as Global Admin' to retry using PKCE."
+                )
             return _discover_error("Sign-in failed during tenant discovery.")
 
         token_payload = token_response.json()
@@ -5259,21 +5936,27 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    if flow == "csp_signin":
-        # ── CSP/Lighthouse sign-in flow ───────────────────────────────────
-        user_id = int(state_data.get("user_id", 0))
+    if flow == "provision":
+        # ── Auto-provision flow ────────────────────────────────────────────
+        tenant_id = str(state_data.get("tenant_id", "")).strip()
+        return_to_company_edit = state_data.get("return_to") == "company_edit"
         redirect_uri = _build_m365_redirect_uri(request)
 
-        def _csp_error(msg: str) -> RedirectResponse:
+        def _provision_error(msg: str) -> RedirectResponse:
+            if return_to_company_edit:
+                return _company_edit_redirect(company_id=company_id, error=msg)
             encoded = urlencode({"error": msg})
             return RedirectResponse(
                 url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        _csp_cid, _csp_csec = await _get_m365_admin_credentials()
-        if not _csp_cid or not _csp_csec:
-            return _csp_error("Admin M365 credentials are not configured.")
+        if not tenant_id:
+            return _provision_error("Missing tenant ID in provision state.")
 
+        # Always use PKCE for the provision flow so the customer's Global Admin
+        # can grant consent without requiring the app to have a service
+        # principal in the tenant (avoids AADSTS700016).
+        code_verifier = state_data.get("code_verifier")
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
@@ -5313,7 +5996,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             expires_at=expires_at,
         )
         log_info("CSP session stored for user", user_id=user_id)
-        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url="/admin/csp/customers", status_code=status.HTTP_303_SEE_OTHER)
 
     if flow == "csp_admin_provision":
         # ── Auto-provision the CSP/Lighthouse admin app registration ──────
@@ -5326,7 +6009,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         def _csp_provision_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
             return RedirectResponse(
-                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+                url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
         # Determine the token exchange method.  When the flow was initiated
@@ -5426,77 +6109,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         encoded = urlencode({"success": "Microsoft 365 CSP admin app provisioned successfully. You can now sign in with your CSP account."})
         return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    if flow == "csp_graph_bootstrap":
-        # ── Option 3 Graph bootstrap for enterprise app creation ─────────
-        redirect_uri = _build_m365_redirect_uri(request)
-        tenant_id = str(state_data.get("tenant_id", "")).strip()
-        target_app_id = str(state_data.get("target_app_id", "")).strip()
-        code_verifier = str(state_data.get("code_verifier", "")).strip()
-
-        def _csp_graph_bootstrap_error(msg: str) -> RedirectResponse:
-            encoded = urlencode({"error": msg})
-            return RedirectResponse(
-                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-
-        if not tenant_id:
-            return _csp_graph_bootstrap_error("Missing tenant ID for Graph bootstrap.")
-        if not target_app_id:
-            return _csp_graph_bootstrap_error("Missing application ID for Graph bootstrap.")
-        if not code_verifier:
-            return _csp_graph_bootstrap_error("Missing PKCE verifier for Graph bootstrap.")
-
-        token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-        token_data = {
-            "client_id": m365_service.get_pkce_client_id(),
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "code_verifier": code_verifier,
-            "scope": m365_service.PROVISION_SCOPE,
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(token_endpoint, data=token_data)
-        if token_response.status_code != 200:
-            log_error(
-                "CSP Graph bootstrap token exchange failed",
-                status=token_response.status_code,
-                body=token_response.text,
-            )
-            return _csp_graph_bootstrap_error("Authorization failed during Graph bootstrap.")
-
-        token_payload = token_response.json()
-        access_token = str(token_payload.get("access_token") or "")
-        if not access_token:
-            return _csp_graph_bootstrap_error(
-                "No access token received during Graph bootstrap."
-            )
-
-        try:
-            bootstrap_result = await m365_service.ensure_service_principal_for_app(
-                access_token,
-                target_app_id,
-            )
-        except m365_service.M365Error as exc:
-            log_error(
-                "CSP Graph bootstrap failed",
-                tenant_id=tenant_id,
-                app_id=target_app_id,
-                error=str(exc),
-            )
-            return _csp_graph_bootstrap_error(f"Graph bootstrap failed: {exc}")
-
-        if bootstrap_result.get("created"):
-            message = "Graph bootstrap completed. Enterprise app created for this tenant."
-        else:
-            message = "Graph bootstrap completed. Enterprise app already existed in this tenant."
-
-        encoded = urlencode({"success": message})
-        return RedirectResponse(
-            url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url=f"/admin/csp/customers?{encoded}", status_code=status.HTTP_303_SEE_OTHER
         )
 
     if flow == "provision":
@@ -5519,13 +6132,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Always use PKCE for the provision flow so the customer's Global Admin
         # can grant consent without requiring the CSP admin app to have a service
         # principal in the customer tenant (avoids AADSTS700016).
-        code_verifier = state_data.get("code_verifier")
+        verifier_id = state_data.get("verifier_id")
+        code_verifier = await _pop_m365_provision_code_verifier(verifier_id)
         token_endpoint = (
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         )
         if code_verifier:
             token_data = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+                    company_id, redirect_uri=redirect_uri
+                ),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5534,18 +6150,29 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             }
         else:
             # Backward-compatibility: fall back to admin credentials when no
-            # code_verifier is present (e.g. old state tokens in flight).
-            _provision_cid, _provision_csec = await _get_m365_admin_credentials()
-            if not _provision_cid or not _provision_csec:
-                return _provision_error("Admin M365 credentials are not configured.")
-            token_data = {
-                "client_id": _provision_cid,
-                "client_secret": _provision_csec,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "scope": m365_service.PROVISION_SCOPE,
-            }
+            # verifier_id/code_verifier is present (e.g. old state tokens in flight).
+            code_verifier = state_data.get("code_verifier")
+            if code_verifier:
+                token_data = {
+                    "client_id": m365_service.get_pkce_client_id(),
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "code_verifier": code_verifier,
+                    "scope": m365_service.PROVISION_SCOPE,
+                }
+            else:
+                _provision_cid, _provision_csec = await _get_m365_admin_credentials()
+                if not _provision_cid or not _provision_csec:
+                    return _provision_error("Admin M365 credentials are not configured.")
+                token_data = {
+                    "client_id": _provision_cid,
+                    "client_secret": _provision_csec,
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "scope": m365_service.PROVISION_SCOPE,
+                }
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
@@ -5615,11 +6242,39 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             client_id=provision_result["client_id"],
         )
 
+        # Best-effort: provision a dedicated PKCE public client for this company
+        try:
+            await m365_service.auto_provision_company_pkce_client_id(
+                company_id,
+                redirect_uri=redirect_uri,
+                company_admin_creds={
+                    "tenant_id": effective_tenant_id,
+                    "client_id": provision_result["client_id"],
+                    "client_secret": provision_result["client_secret"],
+                    "app_object_id": provision_result.get("app_object_id"),
+                    "client_secret_key_id": provision_result.get("client_secret_key_id"),
+                    "client_secret_expires_at": provision_result.get(
+                        "client_secret_expires_at"
+                    ),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - best-effort helper
+            log_warning(
+                "Per-company PKCE auto-provision failed after M365 app provisioning",
+                company_id=company_id,
+                error=str(exc),
+            )
+
         # Auto-create default sync tasks for the company if not already present.
         existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
         has_m365_sync_task = bool({"sync_m365_data", "sync_o365"} & existing_commands)
+        m365_task_name = (
+            f"{company_name} - Sync Microsoft 365 data"
+            if company_name
+            else "Sync Microsoft 365 data"
+        )
         for command, label in (
-            ("sync_m365_data", "Sync Microsoft 365 data"),
+            ("sync_m365_data", m365_task_name),
             ("sync_staff", "Sync staff directory"),
         ):
             if command == "sync_m365_data" and has_m365_sync_task:
@@ -5658,7 +6313,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "scope": "offline_access https://graph.microsoft.com/.default",
+        "scope": m365_service.CONNECT_SCOPE,
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
@@ -5679,9 +6334,23 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     await m365_repo.update_tokens(
         company_id=company_id,
         refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
-        access_token=encrypt_secret(access_token) if access_token else None,
-        token_expires_at=expires_at.replace(tzinfo=None) if expires_at else None,
+        access_token=None,
+        token_expires_at=None,
     )
+    # Best-effort: grant any newly-required app role assignments (e.g. the
+    # permissions added for mailbox sync) using the admin's delegated token.
+    # This ensures existing deployments pick up new permissions automatically
+    # when an administrator re-runs "Authorize portal access".
+    if access_token:
+        new_permissions_granted = await m365_service.try_grant_missing_permissions(
+            company_id=company_id,
+            access_token=access_token,
+        )
+        if new_permissions_granted:
+            log_info(
+                "Granted missing M365 permissions via connect flow",
+                company_id=company_id,
+            )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -6147,6 +6816,24 @@ async def admin_shop_product_detail_api(request: Request, product_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
     return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
+
+
+@app.get("/api/admin/shop/products/{product_id}/price-history", response_class=JSONResponse)
+async def admin_shop_product_price_history_api(request: Request, product_id: int):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    vendor_sku = str(product.get("vendor_sku") or "").strip()
+    if not vendor_sku:
+        return JSONResponse(content=[])
+
+    history = await stock_feed_repo.get_price_history(vendor_sku)
+    return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(history)))
 
 
 @app.get(
@@ -7305,6 +7992,14 @@ async def place_order(request: Request) -> RedirectResponse:
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
 
+    payment_method = str((company or {}).get("payment_method") or "invoice").strip().lower()
+    if payment_method == "stripe":
+        message = quote("Order placement is unavailable while Stripe checkout is required.")
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?cartError={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     form = await request.form()
     po_number_raw = form.get("poNumber")
     po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
@@ -7714,8 +8409,15 @@ async def search_by_phone_number(request: Request):
             user_id=user.get("id"),
             company_ids=active_company_ids or None,
         )
-    except Exception as e:
-        log_error(f"Error searching tickets by phone number: {e}", exc_info=True)
+    except Exception as exc:
+        log_error(
+            "Error searching tickets by phone number",
+            exc=exc,
+            event="tickets.phone_search_failed",
+            request_id=_get_request_id(request),
+            path=request.url.path,
+            user_id=user.get("id"),
+        )
         # On error, redirect to tickets page with error message
         error_msg = quote("Failed to search tickets by phone number")
         return RedirectResponse(
@@ -8278,6 +8980,7 @@ async def staff_page(
     request: Request,
     enabled: str = "",
     department: str = "",
+    show_ex_staff: str = "",
 ):
     (
         user,
@@ -8292,6 +8995,12 @@ async def staff_page(
 
     is_super_admin = bool(user.get("is_super_admin"))
     is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
+    membership_permissions = set((membership or {}).get("combined_permissions") or (membership or {}).get("permissions") or [])
+    can_approve_onboarding = bool(
+        is_super_admin
+        or "staff.manage" in membership_permissions
+        or bool(membership and membership.get("can_manage_staff"))
+    )
 
     enabled_value = enabled.strip()
     enabled_filter: bool | None
@@ -8303,11 +9012,147 @@ async def staff_page(
         enabled_filter = None
 
     department_filter = department.strip()
+    show_ex_staff_flag = show_ex_staff.strip() == "1"
 
     staff_members: list[dict[str, Any]] = []
     departments: list[str] = []
+    field_config: list[dict[str, Any]] = []
+    custom_field_definitions: list[dict[str, Any]] = []
     if company_id is not None:
-        staff_members = await staff_repo.list_staff(company_id, enabled=enabled_filter)
+        field_config = await staff_field_config_service.load_effective_company_staff_fields(
+            company_id
+        )
+        custom_field_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+        staff_members = await staff_repo.list_staff(
+            company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
+        )
+        workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
+            [int(member["id"]) for member in staff_members if member.get("id") is not None]
+        )
+        execution_ids = [
+            int(execution["id"])
+            for execution in workflow_map.values()
+            if execution and execution.get("id") is not None
+        ]
+        workflow_step_logs = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
+        external_checkpoint_logs = await staff_workflow_repo.list_external_checkpoints_for_execution_ids(execution_ids)
+        for member in staff_members:
+            execution = workflow_map.get(int(member["id"])) if member.get("id") is not None else None
+            member["workflow_status"] = execution
+            member["workflow_next_run_at"] = (execution or {}).get("scheduled_for_utc")
+            member["workflow_requested_timezone"] = (execution or {}).get("requested_timezone")
+            member["workflow_is_overdue"] = False
+            raw_next_run = (execution or {}).get("scheduled_for_utc")
+            next_run_at: datetime | None = None
+            if isinstance(raw_next_run, datetime):
+                next_run_at = (
+                    raw_next_run.astimezone(timezone.utc).replace(tzinfo=None)
+                    if raw_next_run.tzinfo is not None
+                    else raw_next_run
+                )
+            elif isinstance(raw_next_run, str) and raw_next_run.strip():
+                try:
+                    parsed_next_run = datetime.fromisoformat(raw_next_run.strip().replace("Z", "+00:00"))
+                except ValueError:
+                    parsed_next_run = None
+                if parsed_next_run is not None:
+                    next_run_at = (
+                        parsed_next_run.astimezone(timezone.utc).replace(tzinfo=None)
+                        if parsed_next_run.tzinfo is not None
+                        else parsed_next_run
+                    )
+            workflow_state = str((execution or {}).get("state") or member.get("onboarding_status") or "requested").strip().lower()
+            if next_run_at is not None and workflow_state in {"approved", "offboarding_approved"}:
+                member["workflow_is_overdue"] = next_run_at <= datetime.now(timezone.utc).replace(tzinfo=None)
+            staff_id = member.get("id")
+            audit_logs: list[dict[str, Any]] = []
+            if staff_id is not None:
+                audit_logs = await audit_repo.list_audit_logs(
+                    entity_type="staff",
+                    entity_id=int(staff_id),
+                    limit=50,
+                )
+            audit_logs = sorted(audit_logs, key=lambda entry: entry.get("created_at") or datetime.min)
+            timeline: list[dict[str, Any]] = []
+            approver_user_ids: list[int] = []
+            for entry in audit_logs:
+                action = str(entry.get("action") or "").strip()
+                metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+                if action == "staff.onboarding.requested":
+                    raw_ids = metadata.get("approver_user_ids")
+                    if isinstance(raw_ids, list):
+                        approver_user_ids = [
+                            int(raw_id)
+                            for raw_id in raw_ids
+                            if isinstance(raw_id, int) or (isinstance(raw_id, str) and raw_id.isdigit())
+                        ]
+                timeline.append(
+                    {
+                        "timestamp": entry.get("created_at"),
+                        "event_type": "audit",
+                        "event": action,
+                        "actor": entry.get("user_email") or "System",
+                        "details": metadata,
+                    }
+                )
+
+            approver_emails: list[str] = []
+            for approver_id in approver_user_ids:
+                approver_user = await user_repo.get_user_by_id(int(approver_id))
+                if approver_user and approver_user.get("email"):
+                    approver_emails.append(str(approver_user["email"]))
+            if execution and execution.get("id") is not None:
+                execution_id = int(execution["id"])
+                for step in workflow_step_logs.get(execution_id, []):
+                    timeline.append(
+                        {
+                            "timestamp": step.get("started_at") or step.get("completed_at"),
+                            "event_type": "workflow_step",
+                            "event": f"{step.get('step_name')} ({step.get('status')})",
+                            "actor": "Workflow engine",
+                            "details": {
+                                "attempt": step.get("attempt"),
+                                "error_message": step.get("error_message"),
+                            },
+                        }
+                    )
+                for checkpoint in external_checkpoint_logs.get(execution_id, []):
+                    timeline.append(
+                        {
+                            "timestamp": checkpoint.get("updated_at") or checkpoint.get("created_at"),
+                            "event_type": "external_callback",
+                            "event": f"external checkpoint {checkpoint.get('status')}",
+                            "actor": f"API key #{checkpoint.get('confirmed_by_api_key_id')}" if checkpoint.get("confirmed_by_api_key_id") else "External system",
+                            "details": {
+                                "source": checkpoint.get("source"),
+                                "proof_reference_id": checkpoint.get("proof_reference_id"),
+                                "payload_hash": checkpoint.get("payload_hash"),
+                            },
+                        }
+                    )
+            timeline = sorted(timeline, key=lambda entry: entry.get("timestamp") or datetime.min)
+            member["onboarding_timeline"] = timeline
+            if workflow_state == "waiting_external":
+                current_step = str((execution or {}).get("current_step") or "await_external_confirmation")
+                member["onboarding_pending_details"] = (
+                    f"Waiting for external completion: callback pending for step "
+                    f"{current_step.replace('_', ' ')}."
+                )
+            elif workflow_state == "awaiting_approval":
+                if approver_emails:
+                    member["onboarding_pending_details"] = (
+                        "Waiting for approval from: " + ", ".join(approver_emails)
+                    )
+                else:
+                    member["onboarding_pending_details"] = "Waiting for approval from authorized approvers."
+            else:
+                member["onboarding_pending_details"] = None
+        company_email_domains = list((company or {}).get("email_domains") or [])
+        staff_members = [
+            member
+            for member in staff_members
+            if _staff_member_matches_company_email_domains(member, company_email_domains)
+        ]
         if not is_super_admin and staff_permission in (1, 2):
             user_email = (user.get("email") or "").lower()
             current_staff = next(
@@ -8364,12 +9209,1031 @@ async def staff_page(
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
         "staff_permission": staff_permission,
+        "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
         "staff_members": staff_members,
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
+        "show_ex_staff": show_ex_staff_flag,
+        "staff_field_config": field_config,
+        "staff_custom_field_definitions": custom_field_definitions,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
+
+
+_WORKFLOW_POLICY_FORM_SCHEMA: dict[str, Any] = {
+    "fields": [
+        {
+            "name": "workflow_key",
+            "label": "Workflow key/name",
+            "type": "text",
+            "required": True,
+            "description": "Unique workflow identifier. Letters, numbers, _, -, and . are normalized.",
+        },
+        {
+            "name": "enabled",
+            "label": "Enabled",
+            "type": "boolean",
+            "required": True,
+            "default": True,
+        },
+        {
+            "name": "max_retries",
+            "label": "Max retries",
+            "type": "number",
+            "required": True,
+            "min": 0,
+            "max": 20,
+            "default": 2,
+        },
+        {
+            "name": "config_json",
+            "label": "Config JSON",
+            "type": "json",
+            "required": False,
+            "description": (
+                "Workflow config object with `steps` and `failure_policy`, "
+                "or send `steps` + `failure_policy` as structured fields."
+            ),
+        },
+    ],
+}
+
+_OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
+    {
+        "type": "offboard_account",
+        "name": "Disable sign-in & remove access",
+        "description": "Disables sign-in and optionally removes licenses/group membership.",
+    },
+    {
+        "type": "m365_rename_upn_display_name",
+        "name": "Rename UPN/display name",
+        "description": "Renames the account UPN and display name for offboarded identity hygiene.",
+    },
+    {
+        "type": "m365_update_org_fields",
+        "name": "Update department/company",
+        "description": "Sets Entra ID department/companyName fields to offboarding values.",
+    },
+    {
+        "type": "m365_hide_from_gal",
+        "name": "Hide from GAL",
+        "description": "Updates showInAddressList (or configured property path) to hide mailbox from GAL.",
+    },
+    {
+        "type": "m365_identity_hygiene",
+        "name": "Identity hygiene",
+        "description": "Applies reversible profile cleanup and can revoke sign-in sessions.",
+    },
+    {
+        "type": "m365_remove_teams_group_member",
+        "name": "Remove from Teams groups",
+        "description": "Removes the staff member from one or more Teams/M365 groups using object IDs.",
+    },
+    {
+        "type": "m365_remove_sharepoint_site_member",
+        "name": "Remove from SharePoint sites",
+        "description": "Removes the staff member from one or more SharePoint sites using Graph site IDs.",
+    },
+    {
+        "type": "send_welcome_email",
+        "name": "Send welcome email",
+        "description": "Sends a templated email to configured destination(s). Supports ${vars.*} values from system and earlier steps.",
+    },
+    {
+        "type": "send_custom_email",
+        "name": "Send custom email",
+        "description": "Sends a custom email to configured destination(s) with custom subject/body and ${vars.*} interpolation.",
+    },
+    {
+        "type": "email_requestor",
+        "name": "Email requestor",
+        "description": "Sends workflow details to the requesting user using workflow/system variables.",
+    },
+    {
+        "type": "http_get",
+        "name": "HTTP GET request",
+        "description": "Calls an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "http_post",
+        "name": "HTTP POST request",
+        "description": "Posts JSON data to an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "curl_text",
+        "name": "CURL text fetch",
+        "description": "Fetches data from an external web source using CURL and stores response as plain text only.",
+    },
+]
+
+_ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
+    {
+        "type": "create_user",
+        "name": "Create user account",
+        "description": "Creates the staff user account in Microsoft 365 / Entra ID.",
+    },
+    {
+        "type": "assign_licenses",
+        "name": "Assign licenses",
+        "description": "Assigns one or more M365 licenses to the new starter.",
+    },
+    {
+        "type": "add_to_groups",
+        "name": "Add to groups",
+        "description": "Adds the new staff member to required security and distribution groups.",
+    },
+    {
+        "type": "m365_add_teams_group_member",
+        "name": "Add to Teams groups",
+        "description": "Adds the new staff member to one or more Teams/M365 groups using object IDs.",
+    },
+    {
+        "type": "m365_add_sharepoint_site_member",
+        "name": "Add to SharePoint sites",
+        "description": "Adds the new staff member to one or more SharePoint sites using Graph site IDs.",
+    },
+    {
+        "type": "set_manager",
+        "name": "Set manager",
+        "description": "Sets the direct manager relationship for org chart and approvals.",
+    },
+    {
+        "type": "send_welcome_email",
+        "name": "Send welcome email",
+        "description": "Sends a templated welcome email to the staff member. Supports ${vars.*} values from system and earlier steps.",
+    },
+    {
+        "type": "send_custom_email",
+        "name": "Send custom email",
+        "description": "Sends a custom email to configured destination(s) with custom subject/body and ${vars.*} interpolation.",
+    },
+    {
+        "type": "email_requestor",
+        "name": "Email requestor",
+        "description": "Sends onboarding details (for example login/password) to the requesting user using workflow/system variables.",
+    },
+    {
+        "type": "http_get",
+        "name": "HTTP GET request",
+        "description": "Calls an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "http_post",
+        "name": "HTTP POST request",
+        "description": "Posts JSON data to an external endpoint with optional headers/query parameters and stores response variables.",
+    },
+    {
+        "type": "curl_text",
+        "name": "CURL text fetch",
+        "description": "Fetches data from an external web source using CURL and stores response as plain text only.",
+    },
+]
+
+_WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
+    "*": {
+        "fields": [
+            {
+                "name": "conditions.department_in",
+                "label": "Only run for departments",
+                "type": "text",
+                "default": "",
+                "description": "Optional comma-separated department names. Step is skipped when the staff department does not match.",
+                "example": "Finance, Operations",
+            },
+            {
+                "name": "conditions.custom_fields_truthy",
+                "label": "Required tick-box fields",
+                "type": "text",
+                "default": "",
+                "description": "Optional comma-separated custom field names that must be checked/true before this step runs.",
+                "example": "needs_laptop, needs_phone",
+            },
+        ],
+        "retry_policy": {"max_retries": 0},
+        "failure_policy": {"mode": "fail_fast", "create_ticket_on_failure": True},
+    },
+    "create_user": {
+        "fields": [
+            {
+                "name": "display_name",
+                "label": "Display name",
+                "type": "text",
+                "default": "${vars.staff.full_name}",
+                "description": "Full name shown in Microsoft 365 and address lists.",
+                "example": "${vars.staff.first_name} ${vars.staff.last_name}",
+            },
+            {
+                "name": "given_name",
+                "label": "First name",
+                "type": "text",
+                "default": "${vars.staff.first_name}",
+            },
+            {
+                "name": "surname",
+                "label": "Last name",
+                "type": "text",
+                "default": "${vars.staff.last_name}",
+            },
+            {
+                "name": "job_title",
+                "label": "Job title",
+                "type": "text",
+                "default": "${vars.staff.job_title}",
+            },
+            {
+                "name": "department",
+                "label": "Department",
+                "type": "text",
+                "default": "${vars.staff.department}",
+            },
+            {
+                "name": "company_name",
+                "label": "Company",
+                "type": "text",
+                "default": "${vars.staff.company_name}",
+            },
+            {
+                "name": "office_location",
+                "label": "Office location",
+                "type": "text",
+                "default": "${vars.staff.office_location}",
+            },
+            {
+                "name": "usage_location",
+                "label": "Usage location",
+                "type": "text",
+                "default": "US",
+                "description": "Two-letter country code used for licensing.",
+                "example": "US",
+            },
+            {
+                "name": "mail_nickname",
+                "label": "Mail nickname",
+                "type": "text",
+                "default": "${vars.staff.email_local_part}",
+                "description": "Alias/local-part used for mailbox nickname.",
+            },
+            {
+                "name": "password",
+                "label": "Initial password",
+                "type": "text",
+                "default": "${vars.password.strong}",
+                "description": "Use variables where possible; avoid static passwords.",
+            },
+            {
+                "name": "force_change_password_next_signin",
+                "label": "Require password change at first sign-in",
+                "type": "checkbox",
+                "default": True,
+            },
+            {
+                "name": "account_enabled",
+                "label": "Enable account immediately",
+                "type": "checkbox",
+                "default": True,
+            },
+        ],
+    },
+    "assign_licenses": {
+        "fields": [
+            {
+                "name": "licenses_csv",
+                "label": "License SKUs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Comma-separated SKU part numbers to assign.",
+                "example": "ENTERPRISEPACK,BUSINESS_PREMIUM",
+            },
+            {
+                "name": "remove_existing_licenses",
+                "label": "Remove existing licenses first",
+                "type": "checkbox",
+                "default": False,
+            },
+        ],
+    },
+    "add_to_groups": {
+        "fields": [
+            {
+                "name": "group_ids_csv",
+                "label": "Group IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Microsoft 365 group object IDs.",
+            },
+            {
+                "name": "group_names_csv",
+                "label": "Group names (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Optional display names for readable configuration.",
+            },
+        ],
+    },
+    "set_manager": {
+        "fields": [
+            {
+                "name": "manager_email",
+                "label": "Manager email",
+                "type": "text",
+                "default": "",
+                "description": "Primary manager identifier for Microsoft Graph lookup.",
+                "example": "manager@company.com",
+            },
+            {
+                "name": "manager_id",
+                "label": "Manager object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "send_welcome_email": {
+        "fields": [
+            {
+                "name": "to",
+                "label": "To address",
+                "type": "text",
+                "default": "${vars.staff.email}",
+            },
+            {
+                "name": "cc",
+                "label": "CC addresses",
+                "type": "text",
+                "default": "",
+                "description": "Comma-separated email addresses.",
+            },
+            {
+                "name": "bcc",
+                "label": "BCC addresses",
+                "type": "text",
+                "default": "",
+                "description": "Comma-separated email addresses.",
+            },
+            {
+                "name": "subject",
+                "label": "Email subject",
+                "type": "text",
+                "default": "Welcome to ${vars.staff.company_name}, ${vars.staff.first_name}",
+            },
+            {
+                "name": "body",
+                "label": "Email body",
+                "type": "textarea",
+                "default": "Hi ${vars.staff.first_name}, welcome to ${vars.staff.company_name}.",
+            },
+            {
+                "name": "is_html",
+                "label": "Body is HTML",
+                "type": "checkbox",
+                "default": False,
+            },
+        ],
+    },
+    "send_custom_email": {
+        "fields": [
+            {"name": "to", "label": "To addresses", "type": "text", "default": ""},
+            {"name": "cc", "label": "CC addresses", "type": "text", "default": ""},
+            {"name": "bcc", "label": "BCC addresses", "type": "text", "default": ""},
+            {"name": "subject", "label": "Email subject", "type": "text", "default": ""},
+            {"name": "body", "label": "Email body", "type": "textarea", "default": ""},
+            {"name": "is_html", "label": "Body is HTML", "type": "checkbox", "default": False},
+            {
+                "name": "reply_to",
+                "label": "Reply-to address",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "email_requestor": {
+        "fields": [
+            {
+                "name": "to",
+                "label": "To address",
+                "type": "text",
+                "default": "${vars.requestor.email}",
+                "description": "Defaults to the user who requested onboarding.",
+            },
+            {
+                "name": "subject",
+                "label": "Email subject",
+                "type": "text",
+                "default": "Onboarding update for ${vars.staff.full_name}",
+            },
+            {
+                "name": "body",
+                "label": "Email body",
+                "type": "textarea",
+                "default": "Account provisioning complete for ${vars.staff.full_name}.",
+            },
+            {"name": "is_html", "label": "Body is HTML", "type": "checkbox", "default": False},
+        ],
+    },
+    "offboard_account": {
+        "fields": [
+            {"name": "disable_sign_in", "label": "Disable sign-in", "type": "checkbox", "default": True},
+            {"name": "revoke_licenses", "label": "Remove assigned licenses", "type": "checkbox", "default": False},
+            {
+                "name": "remove_from_groups",
+                "label": "Remove from groups",
+                "type": "checkbox",
+                "default": False,
+            },
+            {
+                "name": "forwarding_address",
+                "label": "Forward mail to",
+                "type": "text",
+                "default": "",
+                "example": "manager@company.com",
+            },
+            {
+                "name": "out_of_office_message",
+                "label": "Out of office message",
+                "type": "textarea",
+                "default": "",
+            },
+        ],
+    },
+    "m365_rename_upn_display_name": {
+        "fields": [
+            {
+                "name": "upn_prefix",
+                "label": "UPN prefix",
+                "type": "text",
+                "default": "former",
+                "description": "Prefix added before the current UPN local-part.",
+                "example": "former",
+            },
+            {
+                "name": "display_name",
+                "label": "Display name template",
+                "type": "text",
+                "default": "${vars.staff_full_name} (Former Staff)",
+                "description": (
+                    "Supports workflow variables, for example ${vars.staff.full_name}, "
+                    "${vars.staff.email}, ${vars.now.date}, or ${vars.now.local.display}."
+                ),
+                "example": "${vars.staff.full_name} (Former Staff - ${vars.now.local.display})",
+            },
+        ],
+    },
+    "m365_update_org_fields": {
+        "fields": [
+            {"name": "department", "label": "Department value", "type": "text", "default": "Former Staff"},
+            {"name": "company_name", "label": "Company value", "type": "text", "default": "Former Staff"},
+        ],
+    },
+    "m365_hide_from_gal": {
+        "fields": [
+            {"name": "hidden", "label": "Hide from GAL", "type": "checkbox", "default": True},
+            {
+                "name": "property_path",
+                "label": "Graph property path",
+                "type": "text",
+                "default": "showInAddressList",
+            },
+        ],
+    },
+    "m365_identity_hygiene": {
+        "fields": [
+            {"name": "revoke_sign_in_sessions", "label": "Revoke sign-in sessions", "type": "checkbox", "default": True},
+            {
+                "name": "office_location",
+                "label": "Office location",
+                "type": "text",
+                "default": "Offboarded",
+                "target": "hygiene_updates.officeLocation",
+            },
+            {
+                "name": "job_title",
+                "label": "Job title",
+                "type": "text",
+                "default": "Former Staff",
+                "target": "hygiene_updates.jobTitle",
+            },
+            {
+                "name": "mobile_phone",
+                "label": "Mobile phone",
+                "type": "text",
+                "default": "",
+                "target": "hygiene_updates.mobilePhone",
+            },
+        ],
+    },
+    "m365_add_teams_group_member": {
+        "fields": [
+            {
+                "name": "group_ids_csv",
+                "label": "Teams group IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Microsoft 365 group object IDs backing Teams teams.",
+                "example": "11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222",
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+                "description": "Optional override. Defaults to the workflow staff member's M365 user ID.",
+            },
+        ],
+    },
+    "m365_remove_teams_group_member": {
+        "fields": [
+            {
+                "name": "group_ids_csv",
+                "label": "Teams group IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Microsoft 365 group object IDs to remove the user from.",
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "m365_add_sharepoint_site_member": {
+        "fields": [
+            {
+                "name": "site_ids_csv",
+                "label": "SharePoint site IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Graph site IDs to grant access to.",
+                "example": "contoso.sharepoint.com,12345678-aaaa-bbbb-cccc-1234567890ab,11111111-2222-3333-4444-555555555555",
+            },
+            {
+                "name": "site_role",
+                "label": "SharePoint role",
+                "type": "select",
+                "default": "write",
+                "options": [
+                    {"value": "write", "label": "Edit (write)"},
+                    {"value": "read", "label": "Read"},
+                ],
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "m365_remove_sharepoint_site_member": {
+        "fields": [
+            {
+                "name": "site_ids_csv",
+                "label": "SharePoint site IDs (comma separated)",
+                "type": "text",
+                "default": "",
+                "description": "Graph site IDs to remove access from.",
+            },
+            {
+                "name": "user_id",
+                "label": "User object ID (optional)",
+                "type": "text",
+                "default": "",
+            },
+        ],
+    },
+    "http_get": {
+        "fields": [
+            {
+                "name": "url",
+                "label": "Request URL",
+                "type": "text",
+                "default": "",
+                "description": "Supports workflow variables like ${vars.staff.email}.",
+                "example": "https://api.example.com/users/${vars.staff.email}",
+            },
+            {
+                "name": "headers_json",
+                "label": "Headers (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object of headers. Values can include ${vars.*}.",
+                "example": "{\"Authorization\":\"Bearer ${vars.system.api_token}\"}",
+            },
+            {
+                "name": "query_params_json",
+                "label": "Query params (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object of query parameters.",
+                "example": "{\"staffId\":\"${vars.staff_id}\",\"status\":\"active\"}",
+            },
+            {
+                "name": "store_json",
+                "label": "Workflow variables to store (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
+                "example": "{\"external_user_id\":\"body.id\",\"sync_status\":\"body.status\"}",
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": 30,
+            },
+        ],
+    },
+    "http_post": {
+        "fields": [
+            {
+                "name": "url",
+                "label": "Request URL",
+                "type": "text",
+                "default": "",
+                "description": "Supports workflow variables like ${vars.staff.email}.",
+                "example": "https://api.example.com/users",
+            },
+            {
+                "name": "headers_json",
+                "label": "Headers (JSON object)",
+                "type": "textarea",
+                "default": "{\"Content-Type\":\"application/json\"}",
+                "description": "JSON object of headers. Values can include ${vars.*}.",
+            },
+            {
+                "name": "query_params_json",
+                "label": "Query params (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object of query parameters.",
+            },
+            {
+                "name": "json_body",
+                "label": "JSON body",
+                "type": "textarea",
+                "default": "{}",
+                "description": "JSON object/array sent as request body. Supports ${vars.*}.",
+                "example": "{\"email\":\"${vars.staff.email}\",\"firstName\":\"${vars.staff.first_name}\"}",
+            },
+            {
+                "name": "store_json",
+                "label": "Workflow variables to store (JSON object)",
+                "type": "textarea",
+                "default": "{}",
+                "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
+                "example": "{\"external_user_id\":\"body.id\",\"external_ticket_id\":\"body.ticket.id\"}",
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": 30,
+            },
+        ],
+    },
+    "curl_text": {
+        "fields": [
+            {
+                "name": "url",
+                "label": "Request URL",
+                "type": "text",
+                "default": "",
+                "description": "HTTP/HTTPS URL to fetch via CURL. Supports workflow variables like ${vars.staff.email}.",
+                "example": "https://example.com/api/source?email=${vars.staff.email}",
+            },
+            {
+                "name": "store_json",
+                "label": "Workflow variables to store (JSON object)",
+                "type": "textarea",
+                "default": "{\"external_text\":\"body\"}",
+                "description": "Map variable name to response path. CURL response is stored as plain text in `body`.",
+                "example": "{\"external_text\":\"body\"}",
+            },
+            {
+                "name": "timeout_seconds",
+                "label": "Timeout seconds",
+                "type": "number",
+                "default": 30,
+            },
+        ],
+    },
+}
+
+
+def _collect_validation_errors(exc: ValidationError) -> list[str]:
+    errors: list[str] = []
+    for item in exc.errors():
+        loc = ".".join(str(part) for part in item.get("loc") or [])
+        message = str(item.get("msg") or "Invalid value")
+        errors.append(f"{loc}: {message}" if loc else message)
+    return errors or ["Invalid workflow policy payload."]
+
+
+def _parse_json_object(value: Any, *, field_name: str) -> tuple[dict[str, Any] | None, str | None]:
+    if value is None or value == "":
+        return {}, None
+    if isinstance(value, dict):
+        return dict(value), None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}, None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return None, f"{field_name} must be valid JSON: {exc.msg}."
+        if not isinstance(parsed, dict):
+            return None, f"{field_name} must decode to an object."
+        return parsed, None
+    return None, f"{field_name} must be a JSON object."
+
+
+def _parse_json_list(value: Any, *, field_name: str) -> tuple[list[Any] | None, str | None]:
+    if value is None or value == "":
+        return None, None
+    if isinstance(value, list):
+        return list(value), None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None, None
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return None, f"{field_name} must be valid JSON: {exc.msg}."
+        if not isinstance(parsed, list):
+            return None, f"{field_name} must decode to an array."
+        return parsed, None
+    return None, f"{field_name} must be a JSON array."
+
+
+def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, Any]:
+    try:
+        validated = WorkflowConfigSchema.model_validate(raw_config or {})
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": _collect_validation_errors(exc)},
+        ) from exc
+    return validated.model_dump(mode="python")
+
+
+def _normalise_workflow_policy_response(
+    policy: dict[str, Any],
+    *,
+    default_workflow_key: str = staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+) -> dict[str, Any]:
+    config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+    return {
+        "company_id": int(policy.get("company_id") or 0),
+        "workflow_key": str(policy.get("workflow_key") or default_workflow_key),
+        "enabled": bool(policy.get("is_enabled", True)),
+        "max_retries": max(0, int(policy.get("max_retries") or 0)),
+        "config_json": _normalise_workflow_config(config),
+    }
+
+
+async def _extract_workflow_policy_payload(request: Request) -> CompanyWorkflowPolicyUpsertSchema:
+    if _request_prefers_json(request):
+        payload: dict[str, Any] = await request.json()
+    else:
+        form = await request.form()
+        payload = {str(key): form.get(key) for key in form.keys()}
+        if "enabled" in payload:
+            payload["enabled"] = str(payload.get("enabled")).strip().lower() in {"1", "true", "on", "yes"}
+        elif "is_enabled" in payload:
+            payload["enabled"] = str(payload.get("is_enabled")).strip().lower() in {"1", "true", "on", "yes"}
+        elif "enabled_present" in payload or "is_enabled_present" in payload:
+            payload["enabled"] = False
+
+    config_obj, config_error = _parse_json_object(
+        payload.get("config") or payload.get("config_json") or payload.get("configJson"),
+        field_name="config_json",
+    )
+    if config_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": [config_error]},
+        )
+
+    steps_list, steps_error = _parse_json_list(
+        payload.get("steps") or payload.get("step_definitions") or payload.get("stepDefinitions"),
+        field_name="steps",
+    )
+    if steps_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": [steps_error]},
+        )
+    if steps_list is not None:
+        config_obj["steps"] = steps_list
+
+    failure_obj, failure_error = _parse_json_object(
+        payload.get("failure_policy") or payload.get("failurePolicy"),
+        field_name="failure_policy",
+    )
+    if failure_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow config.", "errors": [failure_error]},
+        )
+    if failure_obj:
+        config_obj["failure_policy"] = failure_obj
+
+    payload["config"] = _normalise_workflow_config(config_obj)
+    try:
+        return CompanyWorkflowPolicyUpsertSchema.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Invalid workflow policy fields.", "errors": _collect_validation_errors(exc)},
+        ) from exc
+
+
+@app.get("/staff/workflows/onboarding", response_class=HTMLResponse)
+async def staff_onboarding_workflow_page(request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        _company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
+    extra = {
+        "title": "Staff onboarding workflow",
+        "is_super_admin": is_super_admin,
+        "is_admin": is_admin,
+        "staff_permission": staff_permission,
+        "company": company,
+    }
+    return await _render_template("staff/workflows_onboarding.html", request, user, extra=extra)
+
+
+@app.get("/staff/workflows/onboarding/policy")
+async def staff_onboarding_workflow_policy(request: Request):
+    (
+        _user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+    return JSONResponse(
+        {
+            "policy": _normalise_workflow_policy_response(policy),
+            "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
+            "step_catalog": _ONBOARDING_STEP_CATALOG,
+            "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
+        }
+    )
+
+
+@app.post("/staff/workflows/onboarding/policy")
+async def upsert_staff_onboarding_workflow_policy(request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy_input = await _extract_workflow_policy_payload(request)
+    updated = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=company_id,
+        workflow_key=policy_input.workflow_key or staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+        is_enabled=bool(policy_input.enabled),
+        max_retries=int(policy_input.max_retries),
+        config=policy_input.config,
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.workflows.onboarding.policy.upserted",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"policy": _normalise_workflow_policy_response(updated)},
+    )
+    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated)})
+
+
+@app.get("/staff/workflows/offboarding", response_class=HTMLResponse)
+async def staff_offboarding_workflow_page(request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        _company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
+    extra = {
+        "title": "Staff offboarding workflow",
+        "is_super_admin": is_super_admin,
+        "is_admin": is_admin,
+        "staff_permission": staff_permission,
+        "company": company,
+    }
+    return await _render_template("staff/workflows_offboarding.html", request, user, extra=extra)
+
+
+@app.get("/staff/workflows/offboarding/policy")
+async def staff_offboarding_workflow_policy(request: Request):
+    (
+        _user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy = await staff_workflow_repo.get_company_workflow_policy(
+        company_id,
+        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+    )
+    return JSONResponse(
+        {
+            "policy": _normalise_workflow_policy_response(
+                policy,
+                default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+            ),
+            "form_schema": _WORKFLOW_POLICY_FORM_SCHEMA,
+            "step_catalog": _OFFBOARDING_STEP_CATALOG,
+            "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
+        }
+    )
+
+
+@app.post("/staff/workflows/offboarding/policy")
+async def upsert_staff_offboarding_workflow_policy(request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    policy_input = await _extract_workflow_policy_payload(request)
+    updated = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=company_id,
+        workflow_key=policy_input.workflow_key or "",
+        is_enabled=bool(policy_input.enabled),
+        max_retries=int(policy_input.max_retries),
+        config=policy_input.config,
+        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.workflows.offboarding.policy.upserted",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={
+            "policy": _normalise_workflow_policy_response(
+                updated,
+                default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+            )
+        },
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "policy": _normalise_workflow_policy_response(
+                updated,
+                default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+            ),
+        }
+    )
 
 
 @app.post("/staff", response_class=HTMLResponse)
@@ -8388,46 +10252,107 @@ async def create_staff_member(request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
 
     form = await request.form()
-    first_name = (form.get("firstName") or form.get("first_name") or "").strip()
-    last_name = (form.get("lastName") or form.get("last_name") or "").strip()
-    email = (form.get("email") or "").strip()
-    if not first_name or not last_name or not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="First name, last name, and email are required")
+    field_config = await staff_field_config_service.load_effective_company_staff_fields(company_id)
+    submitted = {str(key): form.get(key) for key in form.keys()}
+    values, validation_errors = staff_field_config_service.validate_staff_form_values(
+        submitted, field_config
+    )
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="; ".join(validation_errors),
+        )
 
-    mobile_phone = (form.get("mobilePhone") or form.get("mobile_phone") or "").strip() or None
-    date_onboarded = _parse_input_datetime(form.get("dateOnboarded"), assume_midnight=True)
-    date_offboarded = _parse_input_datetime(form.get("dateOffboarded"))
-    enabled = str(form.get("enabled", "1")).lower() in {"1", "true", "on"}
-    street = (form.get("street") or "").strip() or None
-    city = (form.get("city") or "").strip() or None
-    state_val = (form.get("state") or "").strip() or None
-    postcode = (form.get("postcode") or "").strip() or None
-    country = (form.get("country") or "").strip() or None
-    department = (form.get("department") or "").strip() or None
-    job_title = (form.get("jobTitle") or form.get("job_title") or "").strip() or None
-    org_company = (form.get("company") or "").strip() or None
-    manager_name = (form.get("managerName") or form.get("manager_name") or "").strip() or None
+    first_name = str(values.get("first_name") or "").strip()
+    last_name = str(values.get("last_name") or "").strip()
+    email = str(values.get("email") or "").strip() or None
+    if not first_name or not last_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="First name and last name are required",
+        )
 
-    await staff_repo.create_staff(
+    mobile_phone = str(values.get("mobile_phone") or "").strip() or None
+    raw_date_onboarded = str(submitted.get("date_onboarded") or "").strip()
+    submitted_timezone = str(
+        submitted.get("browser_timezone")
+        or submitted.get("onboarding_timezone")
+        or submitted.get("date_onboarded_timezone")
+        or ""
+    ).strip() or None
+    date_onboarded = _parse_local_datetime_to_utc(
+        raw_date_onboarded,
+        timezone_name=submitted_timezone,
+        assume_midnight=True,
+    )
+    enabled = bool(values.get("enabled", True))
+    department = str(values.get("department") or "").strip() or None
+
+    created = await staff_repo.create_staff(
         company_id=company_id,
         first_name=first_name,
         last_name=last_name,
         email=email,
         mobile_phone=mobile_phone,
         date_onboarded=date_onboarded,
-        date_offboarded=date_offboarded,
+        date_offboarded=None,
         enabled=enabled,
-        street=street,
-        city=city,
-        state=state_val,
-        postcode=postcode,
-        country=country,
+        street=None,
+        city=None,
+        state=None,
+        postcode=None,
+        country=None,
         department=department,
-        job_title=job_title,
-        org_company=org_company,
-        manager_name=manager_name,
+        job_title=None,
+        org_company=None,
+        manager_name=None,
         account_action=None,
         syncro_contact_id=None,
+        onboarding_status="awaiting_approval",
+        onboarding_complete=False,
+        onboarding_completed_at=None,
+        approval_status="pending",
+        requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_at=datetime.now(tz=timezone.utc),
+    )
+    custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+    custom_values: dict[str, Any] = {}
+    for definition in custom_definitions:
+        key = str(definition.get("name") or "").strip()
+        if not key:
+            continue
+        field_type = str(definition.get("field_type") or "text")
+        raw_value = form.get(key)
+        if field_type == "checkbox":
+            custom_values[key] = str(raw_value or "").lower() in {"1", "true", "on", "yes"}
+        else:
+            custom_values[key] = str(raw_value or "").strip() or None
+    await staff_custom_fields_repo.set_staff_field_values_by_name(
+        company_id=company_id,
+        staff_id=int(created["id"]),
+        values=custom_values,
+    )
+
+    approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
+        company_id=company_id,
+        staff=created,
+        requester_user_id=int(user["id"]) if user.get("id") is not None else None,
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.onboarding.requested",
+        entity_type="staff",
+        entity_id=int(created["id"]),
+        metadata={
+            "company_id": company_id,
+            "onboarding_status": created.get("onboarding_status"),
+            "approval_status": created.get("approval_status"),
+            "approver_user_ids": approver_user_ids,
+            "onboarding_input": {
+                "date_onboarded_local": raw_date_onboarded or None,
+                "timezone": submitted_timezone,
+            },
+        },
     )
 
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
@@ -8455,6 +10380,10 @@ async def update_staff_member(staff_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
 
     def get_value(*keys: str) -> Any:
         for key in keys:
@@ -8513,6 +10442,7 @@ async def update_staff_member(staff_id: int, request: Request):
         date_onboarded=date_onboarded,
         date_offboarded=date_offboarded,
         enabled=enabled,
+        is_ex_staff=bool(existing.get("is_ex_staff", False)),
         street=street,
         city=city,
         state=state_val,
@@ -8524,7 +10454,169 @@ async def update_staff_member(staff_id: int, request: Request):
         manager_name=manager_name,
         account_action=account_action,
         syncro_contact_id=existing.get("syncro_contact_id"),
+        onboarding_status=existing.get("onboarding_status"),
+        onboarding_complete=bool(existing.get("onboarding_complete", False)),
+        onboarding_completed_at=existing.get("onboarding_completed_at"),
     )
+    raw_custom_fields = get_value("customFields", "custom_fields")
+    if isinstance(raw_custom_fields, dict):
+        await staff_custom_fields_repo.set_staff_field_values_by_name(
+            company_id=int(existing.get("company_id") or company_id or 0),
+            staff_id=staff_id,
+            values=raw_custom_fields,
+        )
+        refreshed = await staff_repo.get_staff_by_id(staff_id)
+        if refreshed:
+            updated = refreshed
+
+    requested_status = str(get_value("onboardingStatus", "onboarding_status") or "").strip().lower()
+    if requested_status in {
+        staff_onboarding_workflow_service.STATE_APPROVED,
+        staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED,
+    }:
+        await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+            company_id=int(updated.get("company_id") or company_id or 0),
+            staff_id=staff_id,
+            initiated_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+            direction=(
+                staff_onboarding_workflow_service.DIRECTION_OFFBOARDING
+                if requested_status == staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
+                else staff_onboarding_workflow_service.DIRECTION_ONBOARDING
+            ),
+        )
+
+    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    return JSONResponse({"success": True, "staff": updated})
+
+
+@app.post("/api/staff/{staff_id}/offboarding/request")
+async def request_staff_offboarding(staff_id: int, request: Request):
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+
+    existing = await staff_repo.get_staff_by_id(staff_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    if not is_super_admin and existing.get("company_id") != company_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    if not bool(existing.get("enabled", False)) or bool(existing.get("is_ex_staff", False)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active staff members can be offboarding requested",
+        )
+
+    if str(existing.get("account_action") or "").strip().lower() == "offboard requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An offboarding request is already pending for this staff member",
+        )
+
+    payload = await request.json()
+    reason = str(payload.get("reason") or "").strip()
+    requested_at_raw = str(payload.get("requestedAt", payload.get("requested_at")) or "").strip()
+    requested_timezone = str(payload.get("requestedTimezone") or payload.get("requested_timezone") or "").strip() or None
+    requested_at = _parse_local_datetime_to_utc(
+        requested_at_raw,
+        timezone_name=requested_timezone,
+    )
+    notes = str(payload.get("notes") or "").strip() or None
+
+    if not reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reason is required")
+    if not requested_at_raw or not _raw_value_includes_time(requested_at_raw):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Requested offboarding date and time are both required",
+        )
+    if requested_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid requested offboarding date/time is required",
+        )
+
+    request_notes = reason if not notes else f"Reason: {reason}\n\nNotes: {notes}"
+
+    updated = await staff_repo.update_staff(
+        staff_id,
+        company_id=int(existing.get("company_id") or company_id or 0),
+        first_name=existing.get("first_name") or "",
+        last_name=existing.get("last_name") or "",
+        email=existing.get("email") or "",
+        mobile_phone=existing.get("mobile_phone"),
+        date_onboarded=_parse_input_datetime(existing.get("date_onboarded")),
+        date_offboarded=None,
+        enabled=bool(existing.get("enabled", True)),
+        is_ex_staff=bool(existing.get("is_ex_staff", False)),
+        street=existing.get("street"),
+        city=existing.get("city"),
+        state=existing.get("state"),
+        postcode=existing.get("postcode"),
+        country=existing.get("country"),
+        department=existing.get("department"),
+        job_title=existing.get("job_title"),
+        org_company=existing.get("org_company"),
+        manager_name=existing.get("manager_name"),
+        account_action="Offboard Requested",
+        syncro_contact_id=existing.get("syncro_contact_id"),
+        onboarding_status=staff_onboarding_workflow_service.STATE_OFFBOARDING_AWAITING_APPROVAL,
+        onboarding_complete=bool(existing.get("onboarding_complete", False)),
+        onboarding_completed_at=existing.get("onboarding_completed_at"),
+        approval_status="pending",
+        requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+        requested_at=datetime.now(tz=timezone.utc),
+        approved_by_user_id=None,
+        approved_at=None,
+        request_notes=request_notes,
+        approval_notes=None,
+        m365_last_sign_in=_parse_input_datetime(existing.get("m365_last_sign_in")),
+    )
+
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action="staff.offboarding.requested",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": int(existing.get("company_id") or company_id or 0),
+            "requested_offboarding_at": requested_at,
+            "reason": reason,
+            "notes": notes,
+            "requested_offboarding_input": {
+                "requested_at_local": requested_at_raw,
+                "timezone": requested_timezone,
+            },
+        },
+    )
+
+    policy = await staff_workflow_repo.get_company_workflow_policy(
+        int(updated["company_id"]),
+        default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+    )
+    scheduled_for_utc, normalized_timezone = staff_onboarding_workflow_service._compute_scheduled_execution(
+        staff=updated,
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+        requested_timezone=requested_timezone,
+    )
+    await staff_workflow_repo.create_or_reset_execution(
+        company_id=int(updated["company_id"]),
+        staff_id=staff_id,
+        workflow_key=str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY),
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+        scheduled_for_utc=scheduled_for_utc,
+        requested_timezone=normalized_timezone,
+    )
+
     return JSONResponse({"success": True, "staff": updated})
 
 
@@ -9472,6 +11564,177 @@ async def admin_update_company(company_id: int, request: Request):
     )
 
 
+@app.post("/admin/companies/{company_id}/staff-fields", response_class=HTMLResponse)
+async def admin_update_company_staff_fields(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    form_data = {str(key): form.get(key) for key in form.keys()}
+    await staff_field_config_service.save_company_staff_field_admin_config(
+        company_id, form_data
+    )
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Staff intake field configuration updated.",
+    )
+
+
+def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for part in (options_text or "").split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if ":" in item:
+            value_part, label_part = item.split(":", 1)
+            value = value_part.strip()
+            label = label_part.strip() or value
+        else:
+            value = item
+            label = item
+        if not value:
+            continue
+        options.append({"value": value, "label": label})
+    return options
+
+
+def _parse_staff_custom_field_condition(
+    *,
+    parent_name_value: str,
+    operator_value: str,
+    condition_value: str,
+) -> tuple[str | None, str | None, str | None]:
+    parent_name = str(parent_name_value or "").strip().lower().replace(" ", "_")
+    operator = str(operator_value or "").strip().lower()
+    normalized_condition_value = str(condition_value or "").strip()
+    if not parent_name:
+        return None, None, None
+    if operator not in {"equals", "not_equals", "one_of", "is_checked", "is_not_checked", "select_map"}:
+        operator = "equals"
+    if operator == "select_map":
+        if normalized_condition_value.startswith("{"):
+            try:
+                parsed_map = json.loads(normalized_condition_value)
+            except (TypeError, ValueError):
+                return parent_name, operator, normalized_condition_value or None
+            if isinstance(parsed_map, dict):
+                return parent_name, operator, json.dumps(parsed_map, separators=(",", ":"))
+        return parent_name, operator, normalized_condition_value or None
+    if operator in {"is_checked", "is_not_checked"}:
+        normalized_condition_value = None
+    if operator in {"equals", "not_equals"} and not normalized_condition_value:
+        # Treat empty equals/not-equals conditions as checkbox-style toggles so
+        # parent-linked fields still behave predictably when no value is provided.
+        fallback_operator = "is_checked" if operator == "equals" else "is_not_checked"
+        return parent_name, fallback_operator, None
+    return parent_name, operator, normalized_condition_value or None
+
+
+@app.post("/admin/companies/{company_id}/staff-custom-fields", response_class=HTMLResponse)
+async def admin_create_company_staff_custom_field(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    name = str(form.get("name") or "").strip().lower().replace(" ", "_")
+    display_name = str(form.get("display_name") or "").strip() or None
+    help_text = str(form.get("help_text") or "").strip() or None
+    field_type = str(form.get("field_type") or "text").strip().lower()
+    field_group = str(form.get("field_group") or "").strip() or None
+    try:
+        display_order = int(str(form.get("display_order") or "0").strip())
+    except ValueError:
+        display_order = 0
+    condition_parent_name, condition_operator, condition_value = _parse_staff_custom_field_condition(
+        parent_name_value=str(form.get("condition_parent_name") or ""),
+        operator_value=str(form.get("condition_operator") or ""),
+        condition_value=str(form.get("condition_value") or ""),
+    )
+    options = _parse_custom_field_options(str(form.get("options") or ""))
+    if not name:
+        return _company_edit_redirect(company_id=company_id, error="Custom field name is required.")
+    if field_type not in {"text", "checkbox", "date", "select"}:
+        return _company_edit_redirect(company_id=company_id, error="Invalid custom field type.")
+    await staff_custom_fields_repo.create_company_definition(
+        company_id=company_id,
+        name=name,
+        display_name=display_name,
+        help_text=help_text,
+        field_type=field_type,
+        field_group=field_group,
+        display_order=display_order,
+        condition_parent_name=condition_parent_name,
+        condition_operator=condition_operator,
+        condition_value=condition_value,
+        options=options,
+    )
+    return _company_edit_redirect(company_id=company_id, success="Staff custom field created.")
+
+
+@app.post("/admin/companies/{company_id}/staff-custom-fields/{definition_id}", response_class=HTMLResponse)
+async def admin_update_company_staff_custom_field(
+    company_id: int, definition_id: int, request: Request
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+    display_name = str(form.get("display_name") or "").strip() or None
+    help_text = str(form.get("help_text") or "").strip() or None
+    field_type = str(form.get("field_type") or "text").strip().lower()
+    field_group = str(form.get("field_group") or "").strip() or None
+    try:
+        display_order = int(str(form.get("display_order") or "0").strip())
+    except ValueError:
+        display_order = 0
+    is_active = str(form.get("is_active") or "").lower() in {"1", "true", "on", "yes"}
+    condition_parent_name, condition_operator, condition_value = _parse_staff_custom_field_condition(
+        parent_name_value=str(form.get("condition_parent_name") or ""),
+        operator_value=str(form.get("condition_operator") or ""),
+        condition_value=str(form.get("condition_value") or ""),
+    )
+    options = _parse_custom_field_options(str(form.get("options") or ""))
+    await staff_custom_fields_repo.update_company_definition(
+        definition_id,
+        company_id=company_id,
+        display_name=display_name,
+        help_text=help_text,
+        field_type=field_type,
+        field_group=field_group,
+        display_order=display_order,
+        is_active=is_active,
+        condition_parent_name=condition_parent_name,
+        condition_operator=condition_operator,
+        condition_value=condition_value,
+        options=options,
+    )
+    return _company_edit_redirect(company_id=company_id, success="Staff custom field updated.")
+
+
+@app.post(
+    "/admin/companies/{company_id}/staff-custom-fields/{definition_id}/delete",
+    response_class=HTMLResponse,
+)
+async def admin_delete_company_staff_custom_field(
+    company_id: int, definition_id: int, request: Request
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    await staff_custom_fields_repo.delete_company_definition(definition_id, company_id)
+    return _company_edit_redirect(company_id=company_id, success="Staff custom field deleted.")
+
+
 @app.post("/admin/companies/{company_id}/m365-credentials", response_class=HTMLResponse)
 async def admin_save_company_m365_credentials(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -9489,7 +11752,7 @@ async def admin_save_company_m365_credentials(company_id: int, request: Request)
             company_id=company_id,
             error="Tenant ID and Client ID are required.",
         )
-    existing_creds = await m365_service.get_credentials(company_id)
+    existing_creds = await m365_repo.get_credentials(company_id)
     if not client_secret and not existing_creds:
         return _company_edit_redirect(
             company_id=company_id,
@@ -10687,6 +12950,7 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         {"value": "sync_m365_data", "label": "Sync Microsoft 365 data"},
         {"value": "sync_to_xero", "label": "Sync to Xero"},
         {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
+        {"value": "generate_invoice", "label": "Generate Invoice"},
         {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
         {"value": "sync_recordings", "label": "Sync call recordings"},
         {
@@ -10718,6 +12982,52 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         "show_inactive_tasks": show_inactive,
     }
     return await _render_template("admin/automation.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/scheduled-tasks", response_class=HTMLResponse)
+async def admin_scheduled_tasks(request: Request, show_inactive: bool = Query(default=False)):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive)
+    companies = await company_repo.list_companies()
+
+    company_lookup: dict[int, str] = {}
+    for company in companies:
+        try:
+            company_id = int(company.get("id")) if company.get("id") is not None else None
+        except (TypeError, ValueError):
+            company_id = None
+        if company_id is None:
+            continue
+        company_lookup[company_id] = str(company.get("name") or f"Company #{company_id}")
+
+    prepared_tasks: list[dict[str, Any]] = []
+    for task in tasks:
+        serialised_task = _serialise_mapping(task)
+        serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
+        raw_company_id = task.get("company_id")
+        company_key: int | None = None
+        if raw_company_id is not None:
+            try:
+                company_key = int(raw_company_id)
+            except (TypeError, ValueError):
+                company_key = None
+        if company_key is None:
+            serialised_task["company_name"] = "All companies"
+            serialised_task["company_edit_url"] = None
+        else:
+            company_name = company_lookup.get(company_key, f"Company #{company_key}")
+            serialised_task["company_name"] = company_name
+            serialised_task["company_edit_url"] = f"/admin/companies/{company_key}/edit"
+        prepared_tasks.append(serialised_task)
+
+    extra = {
+        "title": "Scheduled Tasks",
+        "tasks": prepared_tasks,
+        "show_inactive": show_inactive,
+    }
+    return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/webhooks", response_class=HTMLResponse)
@@ -11720,6 +14030,19 @@ async def admin_shop_page(
         product["profit"] = float(_profit) if _profit is not None else None
         _vip_profit = shop_service.calculate_profit(product, is_vip=True)
         product["vip_profit"] = float(_vip_profit) if _vip_profit is not None else None
+
+    # Collect the SKU used for price-history look-ups (vendor_sku preferred).
+    history_skus = [
+        product["vendor_sku"] or product["sku"]
+        for product in products
+        if product.get("vendor_sku") or product.get("sku")
+    ]
+    dbp_trends: dict[str, str | None] = {}
+    if history_skus:
+        dbp_trends = await stock_feed_repo.get_recent_dbp_trends(history_skus)
+    for product in products:
+        lookup_sku = product.get("vendor_sku") or product.get("sku") or ""
+        product["dbp_trend"] = dbp_trends.get(lookup_sku)
 
     extra = {
         "title": "Shop admin",
@@ -13176,6 +15499,18 @@ async def _render_portal_tickets_page(
     return response
 
 
+def _format_attachment_uploaded_iso(uploaded_at: datetime | None) -> str | None:
+    """Normalize attachment timestamps to UTC ISO strings."""
+    if not isinstance(uploaded_at, datetime):
+        return None
+    uploaded_dt = (
+        uploaded_at.replace(tzinfo=timezone.utc)
+        if uploaded_at.tzinfo is None
+        else uploaded_at.astimezone(timezone.utc)
+    )
+    return uploaded_dt.isoformat()
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -13438,6 +15773,36 @@ async def _render_portal_ticket_detail(
                 "email": watcher.get("email"),
             })
 
+    # Get ticket attachments
+    attachment_records: list[Mapping[str, Any]] = []
+    try:
+        if has_helpdesk_access or is_super_admin:
+            attachment_records = await attachments_repo.list_attachments(ticket_id)
+        else:
+            attachment_records = await attachments_repo.list_attachments(
+                ticket_id, access_levels=("open", "closed")
+            )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load ticket attachments", ticket_id=ticket_id, error=str(exc))
+        attachment_records = []
+
+    formatted_attachments: list[dict[str, Any]] = []
+    for attachment in attachment_records:
+        uploaded_at = attachment.get("uploaded_at")
+        uploaded_iso = _format_attachment_uploaded_iso(uploaded_at)
+        try:
+            file_size = int(attachment.get("file_size", 0) or 0)
+        except (TypeError, ValueError):
+            file_size = 0
+
+        formatted_attachments.append(
+            {
+                **attachment,
+                "uploaded_iso": uploaded_iso,
+                "file_size": file_size,
+            }
+        )
+
     # Get linked assets
     ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
     
@@ -13475,6 +15840,7 @@ async def _render_portal_ticket_detail(
         "assigned_user": assigned_record,
         "ticket_replies": timeline_entries,
         "ticket_watchers": watchers,
+        "ticket_attachments": formatted_attachments,
         "ticket_assets": ticket_assets,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
@@ -13599,9 +15965,12 @@ async def _render_tickets_dashboard(
             except Exception as exc:
                 log_error(
                     "Error searching tickets by phone number",
+                    exc=exc,
+                    event="tickets.phone_search_failed",
+                    request_id=_get_request_id(request),
+                    path=request.url.path,
+                    user_id=user.get("id"),
                     phone_number_provided=True,
-                    error=str(exc),
-                    exc_info=True
                 )
                 error_message = "Failed to search tickets by phone number. Please try again."
                 # Load normal dashboard on error
@@ -13776,7 +16145,11 @@ async def _render_ticket_detail(
     if tactical_module:
         tactical_settings = tactical_module.get("settings") or {}
         if isinstance(tactical_settings, Mapping):
-            base_rmm_url = str(tactical_settings.get("base_rmm_url") or "").strip()
+            base_rmm_url = str(
+                tactical_settings.get("base_rmm_url")
+                or tactical_settings.get("base_url")
+                or ""
+            ).strip()
             if base_rmm_url:
                 tactical_base_url = base_rmm_url.rstrip("/")
 
@@ -13785,6 +16158,34 @@ async def _render_ticket_detail(
     # Fetch call recordings linked to this ticket
     from app.repositories import call_recordings as call_recordings_repo
     call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
+
+    attachment_records: list[Mapping[str, Any]] = []
+    try:
+        attachment_records = await attachments_repo.list_attachments(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to load ticket attachments",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        attachment_records = []
+
+    formatted_attachments: list[dict[str, Any]] = []
+    for attachment in attachment_records:
+        uploaded_at = attachment.get("uploaded_at")
+        uploaded_iso = _format_attachment_uploaded_iso(uploaded_at)
+        try:
+            file_size = int(attachment.get("file_size", 0) or 0)
+        except (TypeError, ValueError):
+            file_size = 0
+
+        formatted_attachments.append(
+            {
+                **attachment,
+                "uploaded_iso": uploaded_iso,
+                "file_size": file_size,
+            }
+        )
 
     total_billable_minutes = 0
     total_non_billable_minutes = 0
@@ -14043,6 +16444,7 @@ async def _render_ticket_detail(
         "ticket_replies": enriched_replies,
         "ticket_call_recordings": enriched_recordings,
         "ticket_watchers": enriched_watchers,
+        "ticket_attachments": formatted_attachments,
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
@@ -14433,7 +16835,11 @@ async def admin_update_issue_assignment_status(
         updated_by=_get_current_user_id(current_user),
     )
 
-    destination = return_url or f"/admin/issues?issueId={issue_id}&success={quote('Status updated.')}"
+    destination = _sanitize_local_redirect_target(
+        return_url,
+        fallback=f"/admin/issues?issueId={issue_id}&success={quote('Status updated.')}",
+        allowed_prefixes=("/admin/issues",),
+    )
     if "success=" not in destination:
         separator = "&" if "?" in destination else "?"
         destination = f"{destination}{separator}success={quote('Status updated.')}"
@@ -14464,7 +16870,11 @@ async def admin_delete_issue_assignment(
         removed_by=_get_current_user_id(current_user),
     )
 
-    destination = return_url or f"/admin/issues?issueId={issue_id}"
+    destination = _sanitize_local_redirect_target(
+        return_url,
+        fallback=f"/admin/issues?issueId={issue_id}",
+        allowed_prefixes=("/admin/issues",),
+    )
     separator = "&" if "?" in destination else "?"
     destination = f"{destination}{separator}success={quote('Assignment removed.')}"
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
@@ -14662,9 +17072,10 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     )
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
-    if return_url and return_url.startswith("/") and not return_url.startswith("//"):
-        separator = "&" if "?" in return_url else "?"
-        destination = f"{return_url}{separator}success={message}"
+    safe_return_url = _sanitize_local_redirect_target(return_url, fallback="")
+    if safe_return_url:
+        separator = "&" if "?" in safe_return_url else "?"
+        destination = f"{safe_return_url}{separator}success={message}"
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15271,9 +17682,10 @@ async def admin_bulk_delete_tickets(request: Request):
 
     return_url_raw = form.get("returnUrl")
     return_url = str(return_url_raw) if isinstance(return_url_raw, str) else ""
-    if return_url and return_url.startswith("/") and not return_url.startswith("//"):
-        separator = "&" if "?" in return_url else "?"
-        destination = f"{return_url}{separator}success={message}"
+    safe_return_url = _sanitize_local_redirect_target(return_url, fallback="")
+    if safe_return_url:
+        separator = "&" if "?" in safe_return_url else "?"
+        destination = f"{safe_return_url}{separator}success={message}"
     else:
         destination = f"/admin/tickets?success={message}"
 
@@ -15381,17 +17793,49 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     
+    has_failed_attachments = False
     try:
         author_id = current_user.get("id")
+        if not isinstance(author_id, int):
+            try:
+                author_id = int(author_id)
+            except (TypeError, ValueError, AttributeError):
+                author_id = None
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
-            author_id=author_id if isinstance(author_id, int) else None,
+            author_id=author_id,
             body=sanitized_body.html,
             is_internal=is_internal,
             minutes_spent=minutes_spent,
             is_billable=is_billable,
             labour_type_id=labour_type_id,
         )
+        attachments = form.getlist("attachments")
+        if attachments:
+            for attachment in attachments:
+                filename = (attachment.filename or "") if attachment else ""
+                if filename:
+                    try:
+                        await attachments_service.save_uploaded_file(
+                            ticket_id=ticket_id,
+                            file=attachment,
+                            access_level="closed",
+                            uploaded_by_user_id=author_id,
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        log_error(
+                            "Failed to save attachment",
+                            ticket_id=ticket_id,
+                            filename=filename,
+                            error=str(exc),
+                        )
+                        has_failed_attachments = True
+                else:
+                    log_error(
+                        "Skipped attachment without filename; treating as failed upload",
+                        ticket_id=ticket_id,
+                    )
+                    has_failed_attachments = True
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
@@ -15411,8 +17855,11 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             error_message="Unable to save the reply. Please try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+    message_text = "Reply posted."
+    if has_failed_attachments:
+        message_text = "Reply posted, but some attachments failed to upload."
     return RedirectResponse(
-        url=f"/admin/tickets/{ticket_id}?success=" + quote("Reply posted."),
+        url=f"/admin/tickets/{ticket_id}?success=" + quote(message_text),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -15612,6 +18059,8 @@ def _parse_automation_form_submission(
     scheduled_time_raw = _get_str_value("scheduledTime").strip()
     trigger_event_raw = _get_str_value("triggerEvent").strip()
     trigger_filters_raw = _get_str_value("triggerFilters").strip()
+    trigger_filters_mode_raw = _get_str_value("triggerFiltersMode").strip().lower()
+    trigger_filters_mode = "advanced" if trigger_filters_mode_raw == "advanced" else "builder"
     action_module_raw = _get_str_value("actionModule").strip()
     action_payload_raw = _get_str_value("actionPayload").strip()
 
@@ -15626,6 +18075,7 @@ def _parse_automation_form_submission(
         "scheduledTime": scheduled_time_raw,
         "triggerEvent": trigger_event_raw,
         "triggerFiltersRaw": trigger_filters_raw,
+        "triggerFiltersMode": trigger_filters_mode,
         "actionModule": action_module_raw,
         "actionPayloadRaw": action_payload_raw,
     }
@@ -15668,10 +18118,11 @@ def _parse_automation_form_submission(
     try:
         trigger_filters = json.loads(trigger_filters_raw) if trigger_filters_raw else None
     except json.JSONDecodeError:
+        invalid_section = "Advanced JSON trigger filters" if trigger_filters_mode == "advanced" else "Trigger filter builder payload"
         return (
             None,
             form_state,
-            "Trigger filters must be valid JSON.",
+            f"{invalid_section} is invalid JSON.",
             status.HTTP_400_BAD_REQUEST,
         )
 
@@ -15719,6 +18170,15 @@ def _parse_automation_form_submission(
                     f"Trigger action {index} payload must be an object.",
                     status.HTTP_400_BAD_REQUEST,
                 )
+            try:
+                modules_service.validate_action_payload(module_value, payload_value)
+            except ValueError as exc:
+                return (
+                    None,
+                    form_state,
+                    f"Trigger action {index}: {exc}",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             action_entry: dict[str, Any] = {"module": module_value, "payload": payload_value}
             raw_order = entry.get("order")
             if raw_order is not None:
@@ -15736,6 +18196,16 @@ def _parse_automation_form_submission(
         action_module = normalised_actions[0]["module"] if normalised_actions else None
         form_state["actionPayloadRaw"] = json.dumps(action_payload)
         form_state["actionModule"] = action_module or ""
+    elif action_module and isinstance(action_payload, dict):
+        try:
+            modules_service.validate_action_payload(action_module, action_payload)
+        except ValueError as exc:
+            return (
+                None,
+                form_state,
+                str(exc),
+                status.HTTP_400_BAD_REQUEST,
+            )
 
     data = {
         "name": name,
@@ -16467,6 +18937,385 @@ async def admin_sync_imap_account(account_id: int, request: Request):
     message = quote(f"IMAP sync imported {processed} message{'s' if processed != 1 else ''}.")
     return RedirectResponse(
         url=f"/admin/modules/imap?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Office 365 Mail Import admin routes
+# ---------------------------------------------------------------------------
+
+
+async def _render_m365_mail_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    editing_account_id: int | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    accounts = await m365_mail_service.list_accounts()
+    editing_account = None
+    if editing_account_id is not None:
+        for account in accounts:
+            if account.get("id") == editing_account_id:
+                editing_account = account
+                break
+        if not editing_account:
+            editing_account = await m365_mail_service.get_account(editing_account_id)
+    companies = await company_repo.list_companies()
+    extra = {
+        "title": "Office 365 mailboxes",
+        "accounts": accounts,
+        "editing_account": editing_account,
+        "companies": companies,
+        "success_message": success_message,
+        "error_message": error_message,
+    }
+    response = await _render_template("admin/m365_mail.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+@app.get("/admin/modules/m365-mail", response_class=HTMLResponse)
+async def admin_m365_mail_accounts_page(
+    request: Request,
+    account_id: int | None = Query(default=None, alias="accountId"),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_m365_mail_dashboard(
+        request,
+        current_user,
+        editing_account_id=account_id,
+        success_message=_sanitize_message(success),
+        error_message=_sanitize_message(error),
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts", response_class=HTMLResponse)
+async def admin_create_m365_mail_account(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    data: dict[str, Any] = {
+        "name": form.get("name", ""),
+        "user_principal_name": form.get("userPrincipalName", ""),
+        "mailbox_type": form.get("mailboxType", "user"),
+        "folder": form.get("folder", ""),
+        "schedule_cron": form.get("scheduleCron", ""),
+        "filter_query": form.get("filterQuery"),
+        "process_unread_only": _form_bool(form, "processUnreadOnly"),
+        "mark_as_read": _form_bool(form, "markAsRead"),
+        "sync_known_only": _form_bool(form, "syncKnownOnly"),
+        "active": _form_bool(form, "active"),
+    }
+    priority_value = form.get("priority")
+    if priority_value not in (None, ""):
+        try:
+            data["priority"] = int(priority_value)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                success_message=None,
+                error_message="Priority must be a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    company_id = form.get("companyId")
+    if company_id not in (None, ""):
+        try:
+            data["company_id"] = int(company_id)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                success_message=None,
+                error_message="Company selection is invalid.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    try:
+        account = await m365_mail_service.create_account(data)
+    except ValueError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to create M365 mail account", error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to create the Office 365 mail account. Please verify the configuration and try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    message = quote(f"Mailbox {account.get('name') or account.get('user_principal_name') or 'created'} added.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}", response_class=HTMLResponse)
+async def admin_update_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    updates: dict[str, Any] = {}
+    for field in ("name", "userPrincipalName", "mailboxType"):
+        if field in form:
+            value = form.get(field)
+            if value is None:
+                continue
+            if field == "userPrincipalName":
+                updates["user_principal_name"] = value
+            elif field == "mailboxType":
+                updates["mailbox_type"] = value
+            else:
+                updates[field] = value
+    if "folder" in form:
+        updates["folder"] = form.get("folder")
+    if "scheduleCron" in form:
+        updates["schedule_cron"] = form.get("scheduleCron")
+    if "filterQuery" in form:
+        updates["filter_query"] = form.get("filterQuery")
+    updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
+    updates["mark_as_read"] = _form_bool(form, "markAsRead")
+    updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
+    updates["active"] = _form_bool(form, "active")
+    priority_value = form.get("priority")
+    if priority_value not in (None, ""):
+        try:
+            updates["priority"] = int(priority_value)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                editing_account_id=account_id,
+                success_message=None,
+                error_message="Priority must be a whole number.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    company_id = form.get("companyId")
+    if company_id in (None, ""):
+        updates["company_id"] = None
+    else:
+        try:
+            updates["company_id"] = int(company_id)
+        except (TypeError, ValueError):
+            return await _render_m365_mail_dashboard(
+                request,
+                current_user,
+                editing_account_id=account_id,
+                success_message=None,
+                error_message="Company selection is invalid.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    try:
+        account = await m365_mail_service.update_account(account_id, updates)
+    except ValueError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to update M365 mail account", account_id=account_id, error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            editing_account_id=account_id,
+            success_message=None,
+            error_message="Unable to update the Office 365 mail account. Please review the settings and try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    message = quote(f"Mailbox {account.get('name') or account.get('user_principal_name') or account_id} updated.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/clone", response_class=HTMLResponse)
+async def admin_clone_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        account = await m365_mail_service.clone_account(account_id)
+    except LookupError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    except ValueError as exc:
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to clone M365 mail account", account_id=account_id, error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to clone the Office 365 mail account at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    label = account.get("name") or f"Mailbox {account_id} copy"
+    message = quote(f"Mailbox {label} cloned.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/delete", response_class=HTMLResponse)
+async def admin_delete_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await m365_mail_service.get_account(account_id)
+    try:
+        await m365_mail_service.delete_account(account_id)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to delete M365 mail account", account_id=account_id, error=str(exc))
+        return await _render_m365_mail_dashboard(
+            request,
+            current_user,
+            success_message=None,
+            error_message="Unable to delete the Office 365 mail account at this time.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    label = account.get("name") if account else f"#{account_id}"
+    message = quote(f"Mailbox {label} deleted.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/sync", response_class=HTMLResponse)
+async def admin_sync_m365_mail_account(account_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await m365_mail_service.sync_account(account_id)
+    status_value = str(result.get("status") or "").lower()
+    processed = int(result.get("processed") or 0)
+    error_count = len(result.get("errors") or [])
+    if status_value in {"error"}:
+        message = result.get("error") or "Office 365 mail synchronisation failed."
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote(message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if status_value == "skipped":
+        message = result.get("reason") or "Office 365 mail synchronisation skipped."
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote(message)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if status_value == "completed_with_errors" and error_count:
+        first_error = (result.get("errors") or [{}])[0].get("error") or "Office 365 mail sync completed with errors."
+        if processed:
+            first_error = f"{first_error} ({processed} message{'s' if processed != 1 else ''} imported.)"
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote(first_error)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    message = quote(f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/admin/modules/m365-mail/accounts/{account_id}/authorize")
+async def admin_m365_mail_authorize(account_id: int, request: Request):
+    """Start an OAuth2 PKCE sign-in for a specific mail account.
+
+    The admin will be redirected to Microsoft to sign in as a user that has
+    access to the target shared/user mailbox.  The resulting delegated tokens
+    are stored on the account so that syncs use per-account authentication.
+    """
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await m365_mail_service.get_account(account_id)
+    if not account:
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    company_id = account.get("company_id")
+    redirect_uri = _build_m365_redirect_uri(request)
+    code_verifier, code_challenge = m365_service.generate_pkce_pair()
+    state = oauth_state_serializer.dumps({
+        "user_id": current_user.get("id"),
+        "flow": "m365_mail_auth",
+        "account_id": account_id,
+        "company_id": company_id,
+        "code_verifier": code_verifier,
+    })
+    params = {
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
+            company_id, redirect_uri=redirect_uri
+        )
+        if company_id
+        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_mail_service.DELEGATED_MAIL_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
+    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/admin/modules/m365-mail/accounts/{account_id}/disconnect", response_class=HTMLResponse)
+async def admin_m365_mail_disconnect(account_id: int, request: Request):
+    """Remove the per-account delegated tokens and revert to company credentials."""
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    account = await m365_mail_service.get_account(account_id)
+    if not account:
+        return RedirectResponse(
+            url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    await m365_mail_service.clear_delegated_tokens(account_id)
+    label = account.get("name") or f"#{account_id}"
+    message = quote(f"Disconnected user sign-in for {label}.")
+    return RedirectResponse(
+        url=f"/admin/modules/m365-mail?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

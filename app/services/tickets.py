@@ -995,6 +995,8 @@ async def _send_ticket_creation_email(
     """
     requester_id: int | None = enriched_ticket.get("requester_id")  # type: ignore[assignment]
     requester_email: str | None = enriched_ticket.get("requester_email") or requester_email_fallback  # type: ignore[assignment]
+    if requester_email is not None:
+        requester_email = requester_email.strip() or None
 
     if not requester_email and not requester_id:
         return
@@ -1034,7 +1036,10 @@ async def _send_ticket_creation_email(
 
     # Render the email body using the configured notification template so that
     # admin-configured JSON templates are honoured for external requesters too.
-    context: dict[str, Any] = {"ticket": dict(enriched_ticket)}
+    ticket_context = dict(enriched_ticket)
+    if requester_email and not ticket_context.get("requester_email"):
+        ticket_context["requester_email"] = requester_email
+    context: dict[str, Any] = {"ticket": ticket_context}
     rendered_message: str | None = None
     event_setting: dict[str, Any] = {}
     try:
@@ -1066,7 +1071,7 @@ async def _send_ticket_creation_email(
             "event_type": "tickets.created",
             "metadata": {"ticket": dict(enriched_ticket)},
             "message": rendered_message,
-            "ticket": dict(enriched_ticket),
+            "ticket": dict(ticket_context),
         }
         for _action in _module_actions:
             _slug = str(_action.get("module") or "").strip()

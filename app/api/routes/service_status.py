@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.api_keys import get_optional_api_key
 from app.api.dependencies.auth import get_current_user, get_optional_user, require_super_admin
+from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
 from app.repositories import user_companies as user_company_repo
 from app.schemas.service_status import (
     ServiceStatusCreate,
@@ -131,7 +132,13 @@ async def create_service(
             updated_by=int(current_user.get("id")) if current_user.get("id") else None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id("Failed to create service status", error_id=error_id, route="service_status.create_service")
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to create service.",
+            error_id=error_id,
+        ) from exc
     if not created:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create service")
     return _serialize_service(created)
@@ -151,7 +158,18 @@ async def update_service(
             updated_by=int(current_user.get("id")) if current_user.get("id") else None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to update service",
+            error_id=error_id,
+            route="service_status.update_service",
+            service_id=service_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to update service.",
+            error_id=error_id,
+        ) from exc
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return _serialize_service(updated)
@@ -186,7 +204,18 @@ async def update_service_status(
             updated_by=updated_by,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to update service status",
+            error_id=error_id,
+            route="service_status.update_service_status",
+            service_id=service_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to update service status.",
+            error_id=error_id,
+        ) from exc
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return _serialize_service(updated)
@@ -201,7 +230,18 @@ async def refresh_service_tags(
     try:
         updated = await service_status_service.refresh_service_tags(service_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "Failed to refresh service tags",
+            error_id=error_id,
+            route="service_status.refresh_service_tags",
+            service_id=service_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "Unable to refresh service tags.",
+            error_id=error_id,
+        ) from exc
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return _serialize_service(updated)
