@@ -519,7 +519,7 @@ async def update_staff(
     company_id: int,
     first_name: str,
     last_name: str,
-    email: str,
+    email: str | None,
     mobile_phone: str | None,
     date_onboarded: datetime | None,
     date_offboarded: datetime | None,
