@@ -49,6 +49,10 @@ def _make_license(
     }
 
 
+def _make_m365_app(vendor_sku: str) -> dict[str, Any]:
+    return {"id": 10, "vendor_sku": vendor_sku, "license_sku_id": "graph-guid"}
+
+
 # ---------------------------------------------------------------------------
 # Stale license (SKU no longer in M365 tenant) is removed
 # ---------------------------------------------------------------------------
@@ -76,7 +80,7 @@ async def test_sync_removes_license_not_in_tenant():
             "_graph_get",
             AsyncMock(return_value={"value": m365_skus}),
         ),
-        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(side_effect=_make_m365_app)),
         patch.object(
             m365_service.license_repo,
             "get_license_by_company_and_sku",
@@ -125,7 +129,7 @@ async def test_sync_removes_expired_license():
             "_graph_get",
             AsyncMock(return_value={"value": m365_skus}),
         ),
-        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(side_effect=_make_m365_app)),
         patch.object(
             m365_service.license_repo,
             "get_license_by_company_and_sku",
@@ -173,7 +177,7 @@ async def test_sync_retains_license_with_future_expiry():
             "_graph_get",
             AsyncMock(return_value={"value": m365_skus}),
         ),
-        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(side_effect=_make_m365_app)),
         patch.object(
             m365_service.license_repo,
             "get_license_by_company_and_sku",
@@ -220,7 +224,7 @@ async def test_sync_retains_license_with_no_expiry():
             "_graph_get",
             AsyncMock(return_value={"value": m365_skus}),
         ),
-        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(side_effect=_make_m365_app)),
         patch.object(
             m365_service.license_repo,
             "get_license_by_company_and_sku",
@@ -239,6 +243,58 @@ async def test_sync_retains_license_with_no_expiry():
         await m365_service.sync_company_licenses(1)
 
     assert 1 not in deleted_ids, "License with no expiry should not be deleted if SKU still in M365"
+
+
+# ---------------------------------------------------------------------------
+# Non-M365/manual license is retained
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_does_not_remove_non_m365_license():
+    """Licenses not mapped to an M365 app must not be touched by M365 cleanup."""
+    m365_skus = [_make_sku("M365_SKU", "sku-id-a")]
+    db_licenses = [
+        _make_license(1, "M365_SKU"),
+        _make_license(2, "MANUAL_LICENSE"),
+    ]
+
+    deleted_ids: list[int] = []
+
+    async def _mock_delete(license_id: int) -> None:
+        deleted_ids.append(license_id)
+
+    async def _mock_get_app(vendor_sku: str) -> dict[str, Any] | None:
+        if vendor_sku == "M365_SKU":
+            return {"id": 10, "vendor_sku": "M365_SKU", "license_sku_id": "graph-guid"}
+        return None
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(
+            m365_service,
+            "_graph_get",
+            AsyncMock(return_value={"value": m365_skus}),
+        ),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", side_effect=_mock_get_app),
+        patch.object(
+            m365_service.license_repo,
+            "get_license_by_company_and_sku",
+            AsyncMock(return_value=_make_license(1, "M365_SKU")),
+        ),
+        patch.object(m365_service.license_repo, "update_license", AsyncMock(return_value=_make_license(1, "M365_SKU"))),
+        patch.object(m365_service, "_sync_staff_assignments", AsyncMock()),
+        patch.object(
+            m365_service.license_repo,
+            "list_company_licenses",
+            AsyncMock(return_value=db_licenses),
+        ),
+        patch.object(m365_service.license_repo, "delete_license", side_effect=_mock_delete),
+        patch.object(m365_service, "log_info", lambda *a, **kw: None),
+    ):
+        await m365_service.sync_company_licenses(1)
+
+    assert 2 not in deleted_ids, "Manual/non-M365 license should not be deleted"
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +321,7 @@ async def test_sync_logs_stale_license_removal():
             "_graph_get",
             AsyncMock(return_value={"value": m365_skus}),
         ),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(side_effect=_make_m365_app)),
         patch.object(
             m365_service.license_repo,
             "list_company_licenses",
