@@ -129,24 +129,26 @@
                 <input type="hidden" id="automation-trigger" name="triggerEvent" value="{{ values.get('triggerEvent', '') }}" />
                 <p class="form-help">Choose the event that starts this automation. Select “Custom event…” to enter your own value.</p>
               </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-filters">Trigger filters (JSON)</label>
-                <div class="form-quick-add">
-                  <label class="sr-only" for="automation-filter-quick-add">Quick add trigger filter template</label>
-                  <select id="automation-filter-quick-add" class="form-input form-quick-add__select" data-filter-quick-add>
-                    <option value="">Select a filter template</option>
-                  </select>
-                  <button type="button" class="button button--ghost" data-filter-quick-add-apply>Insert template</button>
+              <div class="form-field" data-filter-builder data-filter-raw="{{ values.get('triggerFiltersRaw', '') | e }}">
+                <label class="form-label" for="automation-filters-advanced">Trigger filters</label>
+                <input type="hidden" id="automation-filters-data" name="triggerFilters" value="{{ values.get('triggerFiltersRaw', '') }}" />
+                <input type="hidden" id="automation-filters-mode" name="triggerFiltersMode" value="builder" />
+                <div class="automation-filters" data-filter-builder-list></div>
+                <button type="button" class="button button--ghost" data-filter-add-condition>Add condition</button>
+                <div class="form-actions" style="justify-content: flex-start;">
+                  <button type="button" class="button button--ghost" data-filter-advanced-toggle aria-expanded="false">Advanced JSON</button>
                 </div>
-                <textarea
-                  id="automation-filters"
-                  name="triggerFilters"
-                  class="form-input"
-                  rows="3"
-                  style="resize: vertical;"
-                  placeholder='{"match":{"status":"open"}}'
-                >{{ values.get('triggerFiltersRaw', '') }}</textarea>
-                <p class="form-help">Use filter templates to match webhook payloads without manually writing JSON.</p>
+                <div data-filter-advanced-panel hidden>
+                  <textarea
+                    id="automation-filters-advanced"
+                    class="form-input"
+                    rows="6"
+                    style="resize: vertical;"
+                    placeholder='{"match":{"status":"open"}}'
+                  >{{ values.get('triggerFiltersRaw', '') }}</textarea>
+                </div>
+                <p class="form-help" data-filter-builder-error hidden></p>
+                <p class="form-help">Build common trigger filters with structured conditions. Use Advanced JSON for complex nested logic.</p>
               </div>
               <div class="form-field" data-automation-actions>
                 <label class="form-label">Trigger actions</label>
@@ -192,5 +194,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
 {% endblock %}

@@ -92,3 +92,41 @@ def test_parse_form_omits_empty_note():
     assert status_code == 200
     saved_actions = data["action_payload"]["actions"]
     assert "note" not in saved_actions[0]
+
+
+def test_parse_form_validates_schema_required_fields():
+    payload = {
+        "actions": [
+            {"order": 0, "module": "add-ticket-reply", "payload": {"ticket_id": "123"}},
+        ]
+    }
+    form = _make_action_form("Missing required field", payload)
+
+    data, form_state, error_message, status_code = _parse_automation_form_submission(
+        form, kind="event"
+    )
+
+    assert data is None
+    assert status_code == 400
+    assert "required" in (error_message or "").lower()
+
+
+def test_parse_form_accepts_schema_payload():
+    payload = {
+        "actions": [
+            {
+                "order": 0,
+                "module": "add-ticket-reply",
+                "payload": {"ticket_id": "123", "body": "Automated reply"},
+            },
+        ]
+    }
+    form = _make_action_form("Valid schema payload", payload)
+
+    data, form_state, error_message, status_code = _parse_automation_form_submission(
+        form, kind="event"
+    )
+
+    assert error_message is None
+    assert status_code == 200
+    assert data["action_payload"]["actions"][0]["payload"]["body"] == "Automated reply"

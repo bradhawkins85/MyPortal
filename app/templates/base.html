@@ -264,6 +264,12 @@
                 <li class="menu__subitem">
                   <a href="/m365/benchmarks" {% if current_path.startswith('/m365/benchmarks') %}aria-current="page"{% endif %}>CIS Benchmarks</a>
                 </li>
+                <li class="menu__subitem">
+                  <a href="/m365/mailboxes/users" {% if current_path.startswith('/m365/mailboxes/users') %}aria-current="page"{% endif %}>User Mailboxes</a>
+                </li>
+                <li class="menu__subitem">
+                  <a href="/m365/mailboxes/shared" {% if current_path.startswith('/m365/mailboxes/shared') %}aria-current="page"{% endif %}>Shared Mailboxes</a>
+                </li>
               </ul>
             </li>
           {% endif %}
@@ -353,6 +359,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/scheduled-tasks" {% if current_path.startswith('/admin/scheduled-tasks') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a10 10 0 1 1 0 20A10 10 0 0 1 12 2zm0 2a8 8 0 1 0 0 16A8 8 0 0 0 12 4zm0 2v6l4 2-1 1.73-5-2.5V6z"/></svg>
+                  </span>
+                  <span class="menu__label">Scheduled Tasks</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/message-templates" {% if current_path.startswith('/admin/message-templates') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3z"/><path d="M7 6h10v2H7zm0 4h10v2H7zm0 4h6v2H7z"/></svg>
@@ -369,19 +383,11 @@
                 </a>
               </li>
               <li class="menu__item">
-                <a href="/admin/companies" {% if current_path.startswith('/admin/companies') and not current_path.startswith('/admin/csp') %}aria-current="page"{% endif %}>
+                <a href="/admin/companies" {% if current_path.startswith('/admin/companies') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 3h16a1 1 0 0 1 1 1v17h-6v-6h-6v6H3V4a1 1 0 0 1 1-1zm7 17v-4h2v4h3v-6h2V5H6v9h2v6z"/></svg>
                   </span>
                   <span class="menu__label">Companies</span>
-                </a>
-              </li>
-              <li class="menu__item">
-                <a href="/admin/csp/customers" {% if current_path.startswith('/admin/csp') %}aria-current="page"{% endif %}>
-                  <span class="menu__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
-                  </span>
-                  <span class="menu__label">CSP / Lighthouse</span>
                 </a>
               </li>
               <li class="menu__item">
@@ -526,6 +532,16 @@
           {% endif %}
         </header>
         <section class="layout__content">
+          <div
+            class="pull-refresh-banner"
+            data-pull-refresh-banner
+            role="status"
+            aria-live="polite"
+            aria-hidden="true"
+            hidden
+          >
+            Refreshing…
+          </div>
           <div
             class="update-banner"
             data-update-banner

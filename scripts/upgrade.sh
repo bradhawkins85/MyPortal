@@ -4,31 +4,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv"
-FLAG_DIR="${PROJECT_ROOT}/var/state"
-RESTART_FLAG_FILE="${FLAG_DIR}/restart_required.flag"
-
-ensure_flag_directory() {
-  if mkdir -p "$FLAG_DIR"; then
-    chmod 750 "$FLAG_DIR" >/dev/null 2>&1 || true
-  else
-    echo "Error: Unable to create flag directory at $FLAG_DIR" >&2
-    exit 1
-  fi
-}
-
-mark_restart_required() {
-  ensure_flag_directory
-
-  local message="$(date -u +"%Y-%m-%dT%H:%M:%SZ") ${POST_PULL_HEAD:-unknown}"
-
-  if printf '%s\n' "$message" >"$RESTART_FLAG_FILE"; then
-    chmod 640 "$RESTART_FLAG_FILE" >/dev/null 2>&1 || true
-    echo "Flagged pending dependency install and service restart at $RESTART_FLAG_FILE"
-  else
-    echo "Error: Failed to write restart flag at $RESTART_FLAG_FILE" >&2
-    exit 1
-  fi
-}
 
 purge_spurious_dist_info() {
   if [[ ! -d "$VENV_DIR" ]]; then
@@ -387,19 +362,45 @@ update_version_file() {
   echo "Updated version.txt to ${version}."
 }
 
+install_dependencies() {
+  if [[ -z "$PYTHON_INTERPRETER" ]]; then
+    echo "Warning: Unable to locate a Python interpreter; skipping dependency installation." >&2
+    return 1
+  fi
+
+  echo "Installing updated dependencies…"
+  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"; then
+    echo "Error: Dependency installation failed." >&2
+    return 1
+  fi
+}
+
+run_restart_helper() {
+  local status=0
+  "${SCRIPT_DIR}/restart.sh" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    echo "Restart helper completed successfully."
+  else
+    echo "Error: restart helper exited with status ${status}." >&2
+    exit "$status"
+  fi
+}
+
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
   update_version_file
+  install_dependencies
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-    mark_restart_required
+    run_restart_helper
   else
-    echo "Auto-fallback mode detected; skipping restart flag because caller will relaunch the service." >&2
+    echo "Auto-fallback mode detected; caller will relaunch the service." >&2
   fi
 elif [[ "$FORCE_RESTART" == "1" ]]; then
-  echo "No repository changes detected but FORCE_RESTART=1; flagging dependency install and service restart."
+  echo "No repository changes detected but FORCE_RESTART=1; reinstalling dependencies and restarting service."
   update_version_file
+  install_dependencies
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-    mark_restart_required
+    run_restart_helper
   else
     echo "Auto-fallback mode detected; caller responsible for restart handling." >&2
   fi

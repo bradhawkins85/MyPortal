@@ -398,6 +398,54 @@ async def test_send_creation_email_uses_event_template_for_external_requester(mo
 
 
 @pytest.mark.anyio
+async def test_send_creation_email_uses_requester_fallback_in_template(monkeypatch):
+    """Fallback email address is available to templates when requester is unknown."""
+    captured: dict[str, object] = {}
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "{{ ticket.requester_email }}",
+            "module_actions": [],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_send_email(*, subject, recipients, html_body, text_body=None, **kwargs):
+        captured["subject"] = subject
+        captured["recipients"] = recipients
+        captured["html_body"] = html_body
+        captured["text_body"] = text_body
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 401,
+        "ticket_number": "401",
+        "subject": "Fallback template test",
+        "requester_id": None,
+        "requester_email": None,
+    }
+
+    await tickets_service._send_ticket_creation_email(
+        enriched,
+        requester_email_fallback="unknown@example.com",
+    )
+
+    assert captured["recipients"] == ["unknown@example.com"]
+    assert captured["text_body"] == "unknown@example.com"
+    assert captured["html_body"] == "<p>unknown@example.com</p>"
+    assert "unknown@example.com" in captured["subject"]
+
+
+@pytest.mark.anyio
 async def test_send_creation_email_falls_back_when_template_unavailable(monkeypatch):
     """When event setting lookup fails, a sensible fallback message is used."""
     captured: dict[str, object] = {}
@@ -482,6 +530,53 @@ async def test_send_creation_email_skips_direct_send_when_email_module_action_su
     # smtp2go module should have been triggered
     assert "smtp2go" in module_triggered
     # Direct fallback email should NOT have been sent
+    assert not direct_send_called
+
+
+@pytest.mark.anyio
+async def test_send_creation_email_skips_when_requester_email_blank(monkeypatch):
+    """No notification is attempted when requester email is blank/whitespace."""
+    module_triggered: list[str] = []
+    direct_send_called = False
+
+    async def fake_get_event_setting(event_type: str):
+        return {
+            "event_type": event_type,
+            "display_name": "Ticket created",
+            "message_template": "Ticket created",
+            "module_actions": [{"module": "smtp2go", "payload": {"to": ["{{ ticket.requester_email }}"]}}],
+            "allow_channel_in_app": True,
+            "allow_channel_email": True,
+            "allow_channel_sms": False,
+            "default_channel_in_app": True,
+            "default_channel_email": True,
+            "default_channel_sms": False,
+        }
+
+    async def fake_trigger_module(slug, payload, *, background=True, **kwargs):
+        module_triggered.append(slug)
+        return {"status": "success"}
+
+    async def fake_send_email(**kwargs):
+        nonlocal direct_send_called
+        direct_send_called = True
+        return True, None
+
+    monkeypatch.setattr(notification_event_settings, "get_event_setting", fake_get_event_setting)
+    monkeypatch.setattr(modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(email_service, "send_email", fake_send_email)
+
+    enriched = {
+        "id": 51,
+        "ticket_number": "501",
+        "subject": "Blank requester test",
+        "requester_id": None,
+        "requester_email": "   ",
+    }
+
+    await tickets_service._send_ticket_creation_email(enriched)
+
+    assert not module_triggered
     assert not direct_send_called
 
 

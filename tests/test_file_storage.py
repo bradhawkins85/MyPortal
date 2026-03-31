@@ -11,6 +11,7 @@ from starlette.datastructures import Headers
 from app.services.file_storage import (
     delete_stored_file,
     sanitize_filename,
+    store_port_document,
     store_product_image,
 )
 
@@ -72,3 +73,31 @@ def test_store_product_image_enforces_size_limit(tmp_path: Path):
     with pytest.raises(HTTPException) as exc:
         asyncio.run(store_product_image(upload=upload, uploads_root=uploads_root, max_size=1024))
     assert exc.value.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+
+
+def test_store_port_document_rejects_html_type(tmp_path: Path):
+    uploads_root = tmp_path / "static" / "uploads"
+    upload = _make_upload(b"<script>alert(1)</script>", "payload.html", "text/html")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(store_port_document(port_id=1, upload=upload, uploads_root=uploads_root))
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_store_port_document_persists_pdf(tmp_path: Path):
+    uploads_root = tmp_path / "static" / "uploads"
+    data = b"%PDF-1.7\n"
+    upload = _make_upload(data, "manifest.pdf", "application/pdf")
+
+    relative_path, size, original_name = asyncio.run(
+        store_port_document(port_id=5, upload=upload, uploads_root=uploads_root)
+    )
+
+    assert relative_path.startswith("uploads/ports/5/")
+    assert relative_path.endswith(".pdf")
+    stored_path = uploads_root.parent / relative_path
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == data
+    assert size == len(data)
+    assert original_name == "manifest.pdf"

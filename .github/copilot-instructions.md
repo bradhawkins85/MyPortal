@@ -83,6 +83,7 @@ MyPortal is a Python-first customer portal built with FastAPI, async MySQL, and 
 - Use responsive layout design
 - Apps should not exceed viewport width or height (unless explicitly specified)
 - Keep row divider heights consistent across table width
+- Prefer form based user input over JSON code blocks, example an input box for Ticket Subject instead of a JSON code block for {"ticket.subject": ""} or instead of {"match": {"ticket.subject": "New Voicemail from 61%"}} use and/or grouping of supported fields that the admin can add/remove.
 
 ### Tables and Data Display
 
@@ -163,3 +164,4 @@ When working with external APIs, use the documentation for these systems:
 - Use regression tests where possible
 - Ensure tests cover edge cases and error conditions
 - Run full test suite before submitting changes
+- Fix Possible SQL injection vectors before completing the assigned task

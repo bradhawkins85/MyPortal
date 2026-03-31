@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from datetime import date, datetime, time, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -32,36 +35,84 @@ def configure_logging() -> None:
                 )
 
 
+def _sanitize_log_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        target = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return target.astimezone(timezone.utc).isoformat()
+    if isinstance(value, (date, time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        if value == value.to_integral():
+            return int(value)
+        return float(value)
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _sanitize_log_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, Exception):
+        return str(value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+def _sanitize_log_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    return {key: _sanitize_log_value(value) for key, value in meta.items()}
+
+
 def _format_meta(meta: dict[str, Any]) -> str:
     return " ".join(f"{key}={meta[key]}" for key in sorted(meta))
 
 
-def log_error(message: str, **meta) -> None:
-    if meta:
-        logger.bind(**meta).error(f"{message} | {_format_meta(meta)}")
+def _log_with_meta(level: str, message: str, **meta: Any) -> None:
+    sanitized_meta = _sanitize_log_meta(meta)
+    if sanitized_meta:
+        logger.bind(**sanitized_meta).log(level, f"{message} | {_format_meta(sanitized_meta)}")
     else:
-        logger.error(message)
+        logger.log(level, message)
 
 
-def log_info(message: str, **meta) -> None:
-    if meta:
-        logger.bind(**meta).info(f"{message} | {_format_meta(meta)}")
-    else:
-        logger.info(message)
+def log_error(
+    message: str,
+    *,
+    exc: Exception | None = None,
+    include_traceback: bool = False,
+    **meta: Any,
+) -> None:
+    exc_info = bool(meta.pop("exc_info", False))
+    include_exception = exc is not None
+    include_traceback = include_traceback or exc_info or include_exception
+    sanitized_meta = _sanitize_log_meta(meta)
+
+    if exc is not None and "error_type" not in sanitized_meta:
+        sanitized_meta["error_type"] = type(exc).__name__
+
+    rendered_message = message
+    if sanitized_meta:
+        rendered_message = f"{message} | {_format_meta(sanitized_meta)}"
+
+    logger_instance = logger.bind(**sanitized_meta) if sanitized_meta else logger
+    if exc is not None:
+        logger_instance.opt(exception=exc).error(rendered_message)
+        return
+    if include_traceback:
+        logger_instance.exception(rendered_message)
+        return
+    logger_instance.error(rendered_message)
 
 
-def log_warning(message: str, **meta) -> None:
-    if meta:
-        logger.bind(**meta).warning(f"{message} | {_format_meta(meta)}")
-    else:
-        logger.warning(message)
+def log_info(message: str, **meta: Any) -> None:
+    _log_with_meta("INFO", message, **meta)
 
 
-def log_debug(message: str, **meta) -> None:
-    if meta:
-        logger.bind(**meta).debug(f"{message} | {_format_meta(meta)}")
-    else:
-        logger.debug(message)
+def log_warning(message: str, **meta: Any) -> None:
+    _log_with_meta("WARNING", message, **meta)
+
+
+def log_debug(message: str, **meta: Any) -> None:
+    _log_with_meta("DEBUG", message, **meta)
 
 
 def _ensure_log_path(path: Path) -> bool:
@@ -122,10 +173,11 @@ def log_audit_event(
 
     # Add any extra metadata
     meta.update(extra_meta)
+    sanitized_meta = _sanitize_log_meta(meta)
 
     message = " ".join(parts)
-    if meta:
-        message = f"{message} | {_format_meta(meta)}"
-        logger.bind(**meta).info(message)
+    if sanitized_meta:
+        message = f"{message} | {_format_meta(sanitized_meta)}"
+        logger.bind(**sanitized_meta).info(message)
     else:
         logger.info(message)

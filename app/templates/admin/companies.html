@@ -15,12 +15,6 @@
   </div>
 {% endblock %}
 
-{% block header_actions %}
-  {% if is_super_admin and admin_credentials_configured %}
-    <a class="button button--ghost" href="/admin/csp/customers">CSP / Lighthouse</a>
-  {% endif %}
-{% endblock %}
-
 {% block content %}
   <div class="admin-grid admin-grid--columns">
     {% if is_super_admin %}

@@ -472,9 +472,11 @@ async def test_sync_company_creates_webhook_monitor_event():
     
     with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
          patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
-         patch("app.services.xero.recurring_items_repo.list_company_recurring_invoice_items") as mock_get_items, \
-         patch("app.services.xero.build_invoice_context") as mock_build_context, \
-         patch("app.services.xero.build_recurring_invoice_items") as mock_build_line_items, \
+         patch("app.services.xero.invoice_repo.list_unsynced_company_invoices") as mock_list_unsynced, \
+         patch("app.services.xero.invoice_lines_repo.list_invoice_lines") as mock_list_lines, \
+         patch("app.services.xero.invoice_repo.patch_invoice") as mock_patch_invoice, \
+         patch("app.services.xero.billed_time_repo.rename_invoice_number") as mock_rename_billed, \
+         patch("app.services.xero.tickets_repo.rename_xero_invoice_number") as mock_rename_tickets, \
          patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
          patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
          patch("app.services.xero.webhook_monitor.record_manual_success") as mock_record_success, \
@@ -500,27 +502,19 @@ async def test_sync_company_creates_webhook_monitor_event():
             "xero_id": "xero-contact-123",
         }
         
-        mock_get_items.return_value = [
+        mock_list_unsynced.return_value = [
             {
-                "active": True,
-                "product_code": "MONTHLY-FEE",
-                "description_template": "Monthly service fee",
-                "qty_expression": "1",
-                "price_override": None,
+                "id": 321,
+                "invoice_number": "INV-LOCAL-001",
+                "due_date": None,
             }
         ]
-        
-        mock_build_context.return_value = {
-            "company_id": 123,
-            "company_name": "Test Company",
-        }
-        
-        mock_build_line_items.return_value = [
+        mock_list_lines.return_value = [
             {
-                "Description": "Monthly service fee",
-                "Quantity": 1.0,
-                "ItemCode": "MONTHLY-FEE",
-                "TaxType": "OUTPUT",
+                "description": "Monthly service fee",
+                "quantity": 1,
+                "unit_amount": 99.50,
+                "product_code": "MONTHLY-FEE",
             }
         ]
         
@@ -535,7 +529,7 @@ async def test_sync_company_creates_webhook_monitor_event():
         mock_client = AsyncMock()
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = '{"Invoices": [{"InvoiceID": "invoice-123"}]}'
+        mock_response.text = '{"Invoices": [{"InvoiceID": "invoice-123", "InvoiceNumber": "XERO-1001", "Status": "DRAFT"}]}'
         mock_response.headers = {"Content-Type": "application/json"}
         mock_client.post.return_value = mock_response
         mock_client_class.return_value.__aenter__.return_value = mock_client
@@ -546,8 +540,10 @@ async def test_sync_company_creates_webhook_monitor_event():
         # Verify result
         assert result["status"] == "succeeded"
         assert result["company_id"] == 123
-        assert result["event_id"] == 456
-        assert result["response_status"] == 200
+        assert result["synced_count"] == 1
+        assert result["failed_count"] == 0
+        assert result["synced_invoices"][0]["event_id"] == 456
+        assert result["synced_invoices"][0]["response_status"] == 200
         
         # Verify webhook event was created
         mock_create_event.assert_called_once()
@@ -562,6 +558,7 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert post_call[0][0] == "https://api.xero.com/api.xro/2.0/Invoices"
         assert post_call[1]["headers"]["Authorization"] == "Bearer test-access-token"
         assert post_call[1]["headers"]["xero-tenant-id"] == "test-tenant-id"
+        assert post_call[1]["json"]["Invoices"][0]["Reference"] == "MyPortal INV-LOCAL-001"
         
         # Verify success was recorded
         mock_record_success.assert_called_once()
@@ -569,7 +566,10 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert record_call[0][0] == 456  # event_id
         assert record_call[1]["attempt_number"] == 1
         assert record_call[1]["response_status"] == 200
-        assert record_call[1]["response_body"] == '{"Invoices": [{"InvoiceID": "invoice-123"}]}'
+        assert record_call[1]["response_body"] == '{"Invoices": [{"InvoiceID": "invoice-123", "InvoiceNumber": "XERO-1001", "Status": "DRAFT"}]}'
+        mock_patch_invoice.assert_awaited_once()
+        mock_rename_billed.assert_awaited_once_with(123, "INV-LOCAL-001", "XERO-1001")
+        mock_rename_tickets.assert_awaited_once_with(123, "INV-LOCAL-001", "XERO-1001")
 
 
 @pytest.mark.anyio("asyncio")
@@ -578,9 +578,8 @@ async def test_sync_company_records_webhook_failure():
     
     with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
          patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
-         patch("app.services.xero.recurring_items_repo.list_company_recurring_invoice_items") as mock_get_items, \
-         patch("app.services.xero.build_invoice_context") as mock_build_context, \
-         patch("app.services.xero.build_recurring_invoice_items") as mock_build_line_items, \
+         patch("app.services.xero.invoice_repo.list_unsynced_company_invoices") as mock_list_unsynced, \
+         patch("app.services.xero.invoice_lines_repo.list_invoice_lines") as mock_list_lines, \
          patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
          patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
          patch("app.services.xero.webhook_monitor.record_manual_failure") as mock_record_failure, \
@@ -606,19 +605,15 @@ async def test_sync_company_records_webhook_failure():
             "xero_id": "xero-contact-123",
         }
         
-        mock_get_items.return_value = [
+        mock_list_unsynced.return_value = [
             {
-                "active": True,
-                "product_code": "MONTHLY-FEE",
-                "description_template": "Monthly service fee",
-                "qty_expression": "1",
-                "price_override": None,
+                "id": 321,
+                "invoice_number": "INV-LOCAL-001",
+                "due_date": None,
             }
         ]
-        
-        mock_build_context.return_value = {"company_id": 123}
-        mock_build_line_items.return_value = [
-            {"Description": "Test item", "Quantity": 1.0, "ItemCode": "MONTHLY-FEE"}
+        mock_list_lines.return_value = [
+            {"description": "Test item", "quantity": 1.0, "unit_amount": 10.0, "product_code": "MONTHLY-FEE"}
         ]
         mock_get_token.return_value = "test-access-token"
         mock_create_event.return_value = {"id": 789, "status": "in_progress"}
@@ -637,8 +632,9 @@ async def test_sync_company_records_webhook_failure():
         
         # Verify result indicates failure
         assert result["status"] == "failed"
-        assert result["response_status"] == 400
-        assert result["event_id"] == 789
+        assert result["failed_count"] == 1
+        assert result["failed_invoices"][0]["response_status"] == 400
+        assert result["failed_invoices"][0]["event_id"] == 789
         
         # Verify failure was recorded
         mock_record_failure.assert_called_once()

@@ -709,3 +709,148 @@ def test_provision_app_roles_include_cis_permissions():
     assert "2f51be20-0bb4-4fed-bf7b-db946066c75e" in roles
     # AuditLog.Read.All
     assert "b0afded3-3588-46d8-8b3d-9842eff778da" in roles
+
+
+# ---------------------------------------------------------------------------
+# _graph_get error includes HTTP status code
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_graph_get_error_includes_status_code():
+    """_graph_get raises M365Error with the HTTP status code in the message."""
+    from unittest.mock import MagicMock
+    from app.services.m365 import _graph_get, M365Error
+
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = '{"error": {"code": "Forbidden"}}'
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client_ctx = MagicMock()
+    mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client_ctx):
+        with pytest.raises(M365Error) as exc_info:
+            await _graph_get("fake-token", "https://graph.microsoft.com/v1.0/test")
+
+    assert "403" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# _check_audit_log_enabled distinguishes 403 from other errors
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_check_audit_log_enabled_unknown_on_403():
+    """A 403 from the audit-log endpoint should return STATUS_UNKNOWN.
+
+    A 403 means the app lacks AuditLog.Read.All permission – it does NOT tell
+    us whether auditing is enabled or disabled.  Returning STATUS_FAIL would be
+    misleading, so STATUS_UNKNOWN is the correct outcome.
+    """
+    from app.services.m365 import M365Error
+
+    with patch(
+        "app.services.cis_benchmark._graph_get",
+        side_effect=M365Error("Microsoft Graph request failed (403)"),
+    ):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_audit_log_enabled")
+    assert check["status"] == STATUS_UNKNOWN
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_audit_log_enabled_unknown_on_non_403_error():
+    """A non-403 error from the audit-log endpoint returns STATUS_UNKNOWN."""
+    from app.services.m365 import M365Error
+
+    with patch(
+        "app.services.cis_benchmark._graph_get",
+        side_effect=M365Error("Microsoft Graph request failed (500)"),
+    ):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_audit_log_enabled")
+    assert check["status"] == STATUS_UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# _graph_get_all handles @odata.nextLink pagination
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_graph_get_all_follows_pagination():
+    """_graph_get_all follows @odata.nextLink and returns all items from every page."""
+    page1_url = "https://graph.microsoft.com/v1.0/test"
+    page2_url = "https://graph.microsoft.com/v1.0/test?$skip=2"
+
+    call_order: list[str] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        call_order.append(url)
+        if url == page1_url:
+            # First page has a nextLink; second page has none (loop terminates)
+            return {"value": [{"id": "item1"}, {"id": "item2"}], "@odata.nextLink": page2_url}
+        return {"value": [{"id": "item3"}]}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        items = await cis_service._graph_get_all("fake-token", page1_url)
+
+    assert len(items) == 3
+    assert items[0]["id"] == "item1"
+    assert items[2]["id"] == "item3"
+    # Both pages were fetched in order
+    assert call_order == [page1_url, page2_url]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_conditional_access_checks_follow_pagination():
+    """CA policy benchmark checks use _graph_get_all so paginated tenants are evaluated fully.
+
+    Specifically tests that when the blocking legacy-auth policy is on the second
+    page, _check_legacy_auth_blocked still returns STATUS_PASS.  Without
+    pagination the check would see only the first page and incorrectly return FAIL.
+    """
+    page2_url = (
+        "https://graph.microsoft.com/v1.0/policies/conditionalAccessPolicies"
+        "?$select=id,displayName,state,conditions,grantControls&$skip=1"
+    )
+    blocking_policy = _make_ca_policy(
+        name="Block Legacy Auth",
+        state="enabled",
+        client_app_types=["exchangeActiveSync", "other"],
+        built_in_controls=["block"],
+    )
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "identitySecurityDefaults" in url:
+            return {"isEnabled": False}
+        if "conditionalAccessPolicies" in url and "$skip" not in url:
+            # First page: no blocking policy, but provides a nextLink
+            return {
+                "value": [_make_ca_policy(name="MFA Policy", built_in_controls=["mfa"])],
+                "@odata.nextLink": page2_url,
+            }
+        if "$skip=1" in url:
+            # Second page: blocking policy is here
+            return {"value": [blocking_policy]}
+        if "authorizationPolicy" in url:
+            return {"allowedToUseSspr": True, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3"}
+        if "directoryRoles" in url and "members" not in url:
+            return {"value": [{"id": "role-1", "displayName": "Global Administrator"}]}
+        if "directoryRoles/role-1/members" in url:
+            return {"value": [{"id": "u1"}, {"id": "u2"}]}
+        if "domains" in url:
+            return {"value": [{"id": "example.com", "passwordValidityPeriodInDays": 2147483647}]}
+        if "auditLog" in url:
+            return {"value": []}
+        return {}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_legacy_auth_blocked")
+    assert check["status"] == STATUS_PASS
