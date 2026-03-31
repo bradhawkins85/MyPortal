@@ -10292,18 +10292,15 @@ async def staff_workflow_history_recent(request: Request):
     staff_ids = list({int(ex["staff_id"]) for ex in executions if ex.get("staff_id")})
     staff_map: dict[int, dict] = {}
     if staff_ids:
-        from app.repositories import staff as staff_repo_local
         for sid in staff_ids:
-            member = await staff_repo_local.get_staff_by_id(sid)
+            member = await staff_repo.get_staff_by_id(sid)
             if member:
                 staff_map[sid] = member
 
     step_logs_map = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
-    import json as _json_mod
 
     def _serialise_dt(val: Any) -> str | None:
-        from datetime import datetime as _dt
-        if isinstance(val, _dt):
+        if isinstance(val, datetime):
             return val.isoformat()
         return str(val) if val else None
 
@@ -10319,12 +10316,12 @@ async def staff_workflow_history_recent(request: Request):
             res_p = log.get("response_payload")
             if isinstance(req_p, str):
                 try:
-                    req_p = _json_mod.loads(req_p)
+                    req_p = json.loads(req_p)
                 except Exception:
                     req_p = {}
             if isinstance(res_p, str):
                 try:
-                    res_p = _json_mod.loads(res_p)
+                    res_p = json.loads(res_p)
                 except Exception:
                     res_p = {}
             steps.append({
