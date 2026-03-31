@@ -134,7 +134,7 @@ class StaffResponse(BaseModel):
     company_id: int
     first_name: str
     last_name: str
-    email: str
+    email: Optional[str] = None
     mobile_phone: Optional[str] = None
     date_onboarded: Optional[datetime] = None
     date_offboarded: Optional[datetime] = None
