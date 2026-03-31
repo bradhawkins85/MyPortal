@@ -11008,6 +11008,16 @@ def _extract_service_status_form(form: FormData) -> tuple[dict[str, Any], list[i
         "status_message": form.get("status_message"),
         "display_order": form.get("display_order"),
         "is_active": bool(form.get("is_active")),
+        # AI lookup fields
+        "ai_lookup_enabled": bool(form.get("ai_lookup_enabled")),
+        "ai_lookup_url": form.get("ai_lookup_url"),
+        "ai_lookup_prompt": form.get("ai_lookup_prompt"),
+        "ai_lookup_model_override": form.get("ai_lookup_model_override"),
+        "ai_lookup_frequency_operational": form.get("ai_lookup_frequency_operational"),
+        "ai_lookup_frequency_degraded": form.get("ai_lookup_frequency_degraded"),
+        "ai_lookup_frequency_partial_outage": form.get("ai_lookup_frequency_partial_outage"),
+        "ai_lookup_frequency_outage": form.get("ai_lookup_frequency_outage"),
+        "ai_lookup_frequency_maintenance": form.get("ai_lookup_frequency_maintenance"),
     }
     # Handle tags - can be comma-separated string
     tags_input = form.get("tags")
