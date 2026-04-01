@@ -606,7 +606,7 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
     now_utc = datetime.now(timezone.utc)
     ai_response_text: str | None = None
 
-    ollama_payload: dict[str, Any] = {"prompt": full_prompt}
+    ollama_payload: dict[str, Any] = {"prompt": full_prompt, "format": "json"}
     if model_override:
         ollama_payload["model"] = model_override
 

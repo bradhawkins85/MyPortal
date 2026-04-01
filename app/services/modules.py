@@ -1440,6 +1440,8 @@ async def _record_success(
     attempt_number: int,
     response_status: int | None,
     response_body: str | None,
+    request_headers: Mapping[str, Any] | None = None,
+    request_body: Any = None,
 ) -> dict[str, Any]:
     await webhook_repo.record_attempt(
         event_id=event_id,
@@ -1448,6 +1450,8 @@ async def _record_success(
         response_status=response_status,
         response_body=response_body,
         error_message=None,
+        request_headers=request_headers,
+        request_body=request_body,
     )
     await webhook_repo.mark_event_completed(
         event_id,
@@ -1467,6 +1471,8 @@ async def _record_failure(
     error_message: str | None,
     response_status: int | None,
     response_body: str | None,
+    request_headers: Mapping[str, Any] | None = None,
+    request_body: Any = None,
 ) -> dict[str, Any]:
     await webhook_repo.record_attempt(
         event_id=event_id,
@@ -1475,6 +1481,8 @@ async def _record_failure(
         response_status=response_status,
         response_body=response_body,
         error_message=error_message,
+        request_headers=request_headers,
+        request_body=request_body,
     )
     await webhook_repo.mark_event_failed(
         event_id,
@@ -1506,12 +1514,18 @@ async def _invoke_ollama(
     if not prompt:
         raise ValueError("Ollama prompt cannot be empty")
     endpoint = urljoin(f"{base_url}/", "api/generate")
-    body = {"model": model, "prompt": prompt, "stream": False}
+    body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+    # Forward the ``format`` parameter when provided so callers can request
+    # structured output (e.g. ``"json"``).
+    payload_format = payload.get("format")
+    if payload_format is not None:
+        body["format"] = payload_format
+    request_headers = {"Content-Type": "application/json"}
     event = await webhook_monitor.create_manual_event(
         name="module.ollama.generate",
         target_url=endpoint,
         payload={"request_body": body},
-        headers={"Content-Type": "application/json"},
+        headers=request_headers,
         max_attempts=1,
         backoff_seconds=60,
     )
@@ -1534,6 +1548,8 @@ async def _invoke_ollama(
             error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
+            request_headers=request_headers,
+            request_body=body,
         )
         return _build_event_result(
             updated_event,
@@ -1547,6 +1563,8 @@ async def _invoke_ollama(
             error_message=str(exc),
             response_status=None,
             response_body=None,
+            request_headers=request_headers,
+            request_body=body,
         )
         return _build_event_result(
             updated_event,
@@ -1559,6 +1577,8 @@ async def _invoke_ollama(
         attempt_number=attempt_number,
         response_status=response.status_code,
         response_body=response_body,
+        request_headers=request_headers,
+        request_body=body,
     )
     return _build_event_result(
         updated_event,
