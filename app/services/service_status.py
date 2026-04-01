@@ -517,7 +517,7 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
 
     Returns a dict with keys: service_id, status, message, changed, error.
     """
-    from app.repositories import modules as modules_repo  # local import to avoid circular
+    from app.repositories import integration_modules as modules_repo  # local import to avoid circular
 
     service = await get_service(service_id)
     if not service:
