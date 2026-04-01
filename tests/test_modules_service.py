@@ -105,6 +105,160 @@ def test_invoke_ollama_records_event_success(monkeypatch):
     assert result["response"] == {"result": "ok"}
     assert captured_event.get("max_attempts") == 1
     assert "attempt_immediately" not in captured_event
+    # Request data should be recorded in the attempt
+    assert len(attempts) == 1
+    assert attempts[0]["request_headers"] == {"Content-Type": "application/json"}
+    assert attempts[0]["request_body"]["prompt"] == "Hi"
+
+
+def test_invoke_ollama_forwards_format_parameter(monkeypatch):
+    """When payload includes 'format', it should be forwarded in the Ollama request body."""
+    async def fake_enqueue_event(**kwargs):
+        return {"id": 2, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {"id": 2, "status": "pending", "attempt_count": 0}
+
+    async def fake_record_attempt(**kwargs):
+        pass
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        fake_event_state.update(
+            {"status": "succeeded", "attempt_count": attempt_number, "response_status": response_status, "response_body": response_body}
+        )
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self._text = json.dumps({"response": '{"status": "ok"}'})
+            self.request = httpx.Request("POST", "http://example.com")
+
+        @property
+        def text(self):
+            return self._text
+
+        def raise_for_status(self):
+            return None
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    asyncio.run(
+        modules._invoke_ollama(
+            {"base_url": "http://127.0.0.1:11434"},
+            {"prompt": "Analyse status", "format": "json"},
+        )
+    )
+
+    sent_body = client_factory.captured_kwargs["json"]
+    assert sent_body["format"] == "json"
+    assert sent_body["prompt"] == "Analyse status"
+
+
+def test_invoke_ollama_omits_format_when_not_provided(monkeypatch):
+    """When payload does not include 'format', it should not appear in the request body."""
+    async def fake_enqueue_event(**kwargs):
+        return {"id": 3, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {"id": 3, "status": "pending", "attempt_count": 0}
+
+    async def fake_record_attempt(**kwargs):
+        pass
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        fake_event_state.update(
+            {"status": "succeeded", "attempt_count": attempt_number, "response_status": response_status, "response_body": response_body}
+        )
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self._text = json.dumps({"response": "ok"})
+            self.request = httpx.Request("POST", "http://example.com")
+
+        @property
+        def text(self):
+            return self._text
+
+        def raise_for_status(self):
+            return None
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    asyncio.run(
+        modules._invoke_ollama(
+            {"base_url": "http://127.0.0.1:11434"},
+            {"prompt": "Hello"},
+        )
+    )
+
+    sent_body = client_factory.captured_kwargs["json"]
+    assert "format" not in sent_body
+
+
+def test_invoke_ollama_records_request_data_on_failure(monkeypatch):
+    """Request headers and body should be recorded even when the Ollama call fails."""
+    async def fake_enqueue_event(**kwargs):
+        return {"id": 5, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {"id": 5, "status": "pending", "attempt_count": 0}
+    attempts: list[dict[str, object]] = []
+
+    async def fake_record_attempt(**kwargs):
+        attempts.append(kwargs)
+
+    async def fake_mark_event_failed(event_id, *, attempt_number, error_message, response_status, response_body):
+        fake_event_state.update(
+            {"status": "failed", "attempt_count": attempt_number, "last_error": error_message}
+        )
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    request = httpx.Request("POST", "http://example.com")
+
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 500
+            self.text = "error"
+            self.request = request
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("boom", request=request, response=self)
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", fake_mark_event_failed)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    result = asyncio.run(modules._invoke_ollama({"base_url": "http://localhost"}, {"prompt": "Hi"}))
+
+    assert result["status"] == "failed"
+    assert len(attempts) == 1
+    assert attempts[0]["request_headers"] == {"Content-Type": "application/json"}
+    assert attempts[0]["request_body"]["prompt"] == "Hi"
 
 
 def test_update_module_preserves_tacticalrmm_api_key_when_blank(monkeypatch):
