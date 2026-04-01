@@ -41,6 +41,12 @@ _AI_LOOKUP_INT_FIELDS = {
     "ai_lookup_frequency_maintenance",
 }
 
+_AI_LOOKUP_TEXT_FIELDS = {
+    "ai_lookup_url",
+    "ai_lookup_prompt",
+    "ai_lookup_model_override",
+}
+
 _AI_LOOKUP_DEFAULTS = {
     "ai_lookup_enabled": 0,
     "ai_lookup_url": None,
@@ -99,6 +105,11 @@ def _normalise_service(row: dict[str, Any], assignments: dict[int, list[int]]) -
                 normalised[field] = int(normalised[field])
             except (TypeError, ValueError):
                 normalised[field] = _AI_LOOKUP_DEFAULTS[field]
+    for field in _AI_LOOKUP_TEXT_FIELDS:
+        value = normalised.get(field)
+        if isinstance(value, str):
+            stripped = value.strip()
+            normalised[field] = None if not stripped or stripped.lower() == "none" else stripped
     return normalised
 
 

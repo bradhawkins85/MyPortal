@@ -259,7 +259,7 @@
               name="ai_lookup_url"
               class="form-input"
               type="url"
-              value="{{ service_status_editing.ai_lookup_url if service_status_editing else '' }}"
+              value="{{ (service_status_editing.ai_lookup_url or '') if service_status_editing else '' }}"
               placeholder="https://status.example.com/api/status"
             />
             <p class="form-help">URL whose content is passed to the AI model for status analysis.</p>
@@ -273,7 +273,7 @@
               class="form-input form-input--textarea"
               rows="4"
               placeholder="Analyse the following status page content and determine the current operational state of the service."
-            >{{ service_status_editing.ai_lookup_prompt if service_status_editing else '' }}</textarea>
+            >{{ (service_status_editing.ai_lookup_prompt or '') if service_status_editing else '' }}</textarea>
             <p class="form-help">Instructions sent to the AI model along with the URL content.</p>
           </div>
 
@@ -283,7 +283,7 @@
               id="ai-lookup-model"
               name="ai_lookup_model_override"
               class="form-input"
-              value="{{ service_status_editing.ai_lookup_model_override if service_status_editing else '' }}"
+              value="{{ (service_status_editing.ai_lookup_model_override or '') if service_status_editing else '' }}"
               placeholder="Leave blank to use the default Ollama model"
             />
             <p class="form-help">Override the default Ollama model for this service.</p>
