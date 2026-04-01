@@ -373,6 +373,7 @@
           <div class="form-actions">
             <button type="submit" class="button button--primary">{{ 'Save AI lookup settings' if service_status_editing else 'Create service' }}</button>
             {% if service_status_editing %}
+              <button type="submit" form="check-now-form" class="button button--ghost">Check Now</button>
               <a class="button button--ghost" href="/admin/service-status">Cancel</a>
             {% endif %}
           </div>
@@ -381,6 +382,9 @@
 
       {% if service_status_editing %}
         <form id="refresh-tags-form" action="/admin/service-status/{{ service_status_editing.id }}/refresh-tags" method="post" class="inline-form">
+          {% include "partials/csrf.html" %}
+        </form>
+        <form id="check-now-form" action="/admin/service-status/{{ service_status_editing.id }}/check-now" method="post" class="inline-form">
           {% include "partials/csrf.html" %}
         </form>
       {% endif %}

@@ -11110,6 +11110,24 @@ async def admin_refresh_service_tags(request: Request, service_id: int):
     )
 
 
+@app.post("/admin/service-status/{service_id}/check-now", response_class=HTMLResponse)
+async def admin_service_status_check_now(request: Request, service_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    result = await service_status_service.run_ai_lookup_for_service(service_id)
+    if result.get("error"):
+        url = f"/admin/service-status?serviceId={service_id}&error={quote(result['error'])}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    msg = "AI lookup completed."
+    if result.get("changed"):
+        msg = "AI lookup completed — status updated."
+    return RedirectResponse(
+        url=f"/admin/service-status?serviceId={service_id}&success={quote(msg)}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.get("/admin/profile", response_class=HTMLResponse)
 async def admin_profile_page(request: Request):
     user, membership, redirect = await _require_administration_access(request)
