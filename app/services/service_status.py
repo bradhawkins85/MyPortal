@@ -13,10 +13,10 @@ import httpx
 
 from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
+from app.services import modules as modules_service
 from app.services import tag_generator
 
 _AI_LOOKUP_MAX_URL_CONTENT = 8000
-_AI_LOOKUP_OLLAMA_TIMEOUT = 60.0
 _SSRF_BLOCKED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -517,8 +517,6 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
 
     Returns a dict with keys: service_id, status, message, changed, error.
     """
-    from app.repositories import integration_modules as modules_repo  # local import to avoid circular
-
     service = await get_service(service_id)
     if not service:
         return {"service_id": service_id, "error": "Service not found", "changed": False}
@@ -559,41 +557,40 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
         f'and "message" (a short human-readable description of the current state).'
     )
 
-    # Get Ollama settings
-    module = await modules_repo.get_module("ollama")
-    ollama_enabled = bool(module and module.get("enabled"))
-    raw_settings = (module or {}).get("settings") or {}
-    if isinstance(raw_settings, str):
-        try:
-            raw_settings = json.loads(raw_settings)
-        except json.JSONDecodeError:
-            raw_settings = {}
-
-    base_url = str(raw_settings.get("base_url") or "http://127.0.0.1:11434").rstrip("/")
-    default_model = str(raw_settings.get("model") or "llama3")
-    model = model_override or default_model
-
     now_utc = datetime.now(timezone.utc)
     ai_response_text: str | None = None
 
-    if ollama_enabled:
-        endpoint = f"{base_url}/api/generate"
-        body = {"model": model, "prompt": full_prompt, "stream": False}
-        try:
-            async with httpx.AsyncClient(timeout=_AI_LOOKUP_OLLAMA_TIMEOUT) as client:
-                ai_response = await client.post(endpoint, json=body)
-            ai_response.raise_for_status()
-            ai_data = ai_response.json()
-            ai_response_text = str(ai_data.get("response") or "").strip()
-        except Exception as exc:
-            # Record the failed attempt time and return error
-            await service_status_repo.update_service(
-                service_id,
-                {"ai_lookup_last_checked_at": now_utc},
-            )
-            return {"service_id": service_id, "error": f"Ollama request failed: {exc}", "changed": False}
-    else:
+    ollama_payload: dict[str, Any] = {"prompt": full_prompt}
+    if model_override:
+        ollama_payload["model"] = model_override
+
+    try:
+        module_result = await modules_service.trigger_module(
+            "ollama", ollama_payload, background=False
+        )
+    except ValueError as exc:
+        # trigger_module raises ValueError when the module is not configured at all
+        return {"service_id": service_id, "error": f"Ollama module not configured: {exc}", "changed": False}
+
+    module_status = str(module_result.get("status") or "")
+    if module_status == "skipped":
         return {"service_id": service_id, "error": "Ollama module not enabled", "changed": False}
+    if module_status != "succeeded":
+        last_error = module_result.get("last_error") or module_result.get("error") or module_status
+        await service_status_repo.update_service(
+            service_id,
+            {"ai_lookup_last_checked_at": now_utc},
+        )
+        return {"service_id": service_id, "error": f"Ollama request failed: {last_error}", "changed": False}
+
+    response_data = module_result.get("response")
+    # response_data is typically a parsed dict from the Ollama JSON response body.
+    # The text answer lives in response_data["response"]. A plain string fallback
+    # handles any unexpected non-dict payloads.
+    if isinstance(response_data, Mapping):
+        ai_response_text = str(response_data.get("response") or "").strip()
+    else:
+        ai_response_text = str(response_data or "").strip()
 
     derived_status, derived_message = _parse_ai_status_response(ai_response_text or "")
 
