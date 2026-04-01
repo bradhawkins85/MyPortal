@@ -52,7 +52,7 @@
         <tr>
           <th scope="col" data-sort="string">Direction</th>
           <th scope="col" data-sort="string">Name</th>
-          <th scope="col" data-sort="string">Target</th>
+          <th scope="col" data-sort="string" class="table__col--truncate">Target</th>
           <th scope="col" data-sort="string">Status</th>
           <th scope="col" data-sort="number">Attempts</th>
           <th scope="col" data-sort="date">Next attempt</th>
@@ -78,7 +78,7 @@
               {% endif %}
             </td>
             <td data-label="Name">{{ event.name }}</td>
-            <td data-label="Target">{{ event.target_url }}</td>
+            <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}">{{ event.target_url }}</td>
             <td data-label="Status">{{ event.status }}</td>
             <td data-label="Attempts" data-value="{{ event.attempt_count }}">
               {{ event.attempt_count }}/{{ event.max_attempts }}
