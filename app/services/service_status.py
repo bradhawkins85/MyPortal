@@ -447,6 +447,9 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     * Pure JSON strings
     * JSON wrapped in markdown fenced code blocks (```json ... ```)
     * JSON embedded in surrounding prose (first ``{`` … last ``}``)
+
+    Each extraction attempt is validated with ``json.loads`` so stray braces or
+    non-JSON code blocks are safely rejected.
     """
     stripped = text.strip()
 
