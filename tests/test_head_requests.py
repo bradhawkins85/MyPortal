@@ -67,3 +67,20 @@ def test_service_status_head_request():
     assert response.status_code != 405, "HEAD requests should be supported"
     # Expect redirect to login (303) since no authentication
     assert response.status_code in {200, 303, 401, 403}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/admin/service-status/1/check-now",
+        "/admin/service-status/1/check_now",
+        "/admin/service-status/check-now/1",
+    ],
+)
+def test_admin_service_status_check_now_routes_exist(path: str):
+    """Check-now route aliases should exist and never return 404."""
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(path)
+
+    assert response.status_code != 404
+    assert response.status_code in {200, 303, 401, 403, 422}

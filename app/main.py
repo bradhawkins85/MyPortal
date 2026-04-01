@@ -11110,8 +11110,7 @@ async def admin_refresh_service_tags(request: Request, service_id: int):
     )
 
 
-@app.post("/admin/service-status/{service_id}/check-now", response_class=HTMLResponse)
-async def admin_service_status_check_now(request: Request, service_id: int):
+async def _admin_service_status_check_now_handler(request: Request, service_id: int):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
@@ -11126,6 +11125,19 @@ async def admin_service_status_check_now(request: Request, service_id: int):
         url=f"/admin/service-status?serviceId={service_id}&success={quote(msg)}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@app.post("/admin/service-status/{service_id}/check-now", response_class=HTMLResponse)
+@app.post("/admin/service-status/{service_id}/check_now", response_class=HTMLResponse)
+@app.post("/admin/service-status/check-now/{service_id}", response_class=HTMLResponse)
+async def admin_service_status_check_now(request: Request, service_id: int):
+    """
+    Trigger an immediate AI lookup for a service.
+
+    Multiple route aliases are kept for backward compatibility with earlier UI
+    paths and bookmarked/admin-proxied URLs.
+    """
+    return await _admin_service_status_check_now_handler(request, service_id)
 
 
 @app.get("/admin/profile", response_class=HTMLResponse)
