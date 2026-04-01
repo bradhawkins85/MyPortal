@@ -449,3 +449,55 @@ def test_run_ai_lookup_parses_markdown_wrapped_json(monkeypatch):
     assert result["status"] == "degraded"
     assert result["message"] == "High latency detected"
     assert result["changed"] is True
+
+
+def test_run_ai_lookup_sends_browser_headers(monkeypatch):
+    """URL fetch should include browser-like headers to avoid cutdown responses."""
+    service = _make_service()
+    captured_kwargs: list[dict] = []
+
+    async def fake_get_service(service_id):
+        return service
+
+    class FakeHttpxClient:
+        def __init__(self, **kwargs):
+            captured_kwargs.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, **kwargs):
+            class FakeResp:
+                text = "OK"
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+            return FakeResp()
+
+    async def fake_trigger_module(slug, payload=None, *, background=True, on_complete=None):
+        return {
+            "status": "succeeded",
+            "response": {"response": '{"status": "operational", "message": "OK"}'},
+        }
+
+    async def fake_update_service(service_id, updates):
+        pass
+
+    monkeypatch.setattr(service_status_svc, "get_service", fake_get_service)
+    monkeypatch.setattr(service_status_svc, "_validate_lookup_url", lambda url: url)
+    monkeypatch.setattr(service_status_svc.httpx, "AsyncClient", lambda *a, **kw: FakeHttpxClient(**kw))
+    monkeypatch.setattr(service_status_svc.modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(service_status_svc.service_status_repo, "update_service", fake_update_service)
+
+    asyncio.run(service_status_svc.run_ai_lookup_for_service(1))
+
+    assert len(captured_kwargs) == 1
+    headers = captured_kwargs[0].get("headers", {})
+    assert "User-Agent" in headers
+    assert "Mozilla" in headers["User-Agent"]
+    assert "Accept" in headers
