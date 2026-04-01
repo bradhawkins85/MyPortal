@@ -76,6 +76,7 @@ def test_run_ai_lookup_routes_through_trigger_module(monkeypatch):
     assert len(captured_calls) == 1
     assert captured_calls[0]["slug"] == "ollama"
     assert "prompt" in captured_calls[0]["payload"]
+    assert captured_calls[0]["payload"].get("format") == "json"
 
 
 def test_run_ai_lookup_passes_model_override(monkeypatch):
