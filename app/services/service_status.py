@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import socket
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -439,6 +440,48 @@ def _is_lookup_due(service: Mapping[str, Any]) -> bool:
     return elapsed_minutes >= frequency_minutes
 
 
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    """Try to extract a JSON object from *text*.
+
+    Handles:
+    * Pure JSON strings
+    * JSON wrapped in markdown fenced code blocks (```json ... ```)
+    * JSON embedded in surrounding prose (first ``{`` … last ``}``)
+    """
+    stripped = text.strip()
+
+    # 1. Direct parse
+    try:
+        data = json.loads(stripped)
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. Strip markdown fenced code blocks
+    md_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
+    if md_match:
+        try:
+            data = json.loads(md_match.group(1).strip())
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # 3. Find the first { … last } substring
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(stripped[start : end + 1])
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return None
+
+
 def _parse_ai_status_response(text: str) -> tuple[str | None, str | None]:
     """
     Parse an Ollama response into (status, message).
@@ -446,21 +489,21 @@ def _parse_ai_status_response(text: str) -> tuple[str | None, str | None]:
     The model is expected to return a JSON object like:
     {"status": "operational", "message": "All systems normal"}
 
+    Handles responses where the JSON is wrapped in markdown code blocks or
+    surrounded by explanatory prose (common with LLM outputs).
+
     Falls back to keyword scanning if JSON is not found.
     """
     if not text:
         return None, None
 
-    # Try JSON parsing first
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            status_raw = str(data.get("status") or "").strip().lower()
-            message_raw = str(data.get("message") or "").strip() or None
-            if status_raw in _STATUS_LOOKUP:
-                return status_raw, message_raw
-    except (json.JSONDecodeError, ValueError):
-        pass
+    # Try JSON extraction (handles plain, markdown-wrapped, and embedded JSON)
+    data = _extract_json_object(text)
+    if data is not None:
+        status_raw = str(data.get("status") or "").strip().lower()
+        message_raw = str(data.get("message") or "").strip() or None
+        if status_raw in _STATUS_LOOKUP:
+            return status_raw, message_raw
 
     # Keyword scan fallback (order matters – most specific first)
     lower_text = text.lower()
@@ -593,6 +636,22 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
         ai_response_text = str(response_data or "").strip()
 
     derived_status, derived_message = _parse_ai_status_response(ai_response_text or "")
+
+    if derived_status is None:
+        log_warning(
+            "AI lookup could not determine service status from Ollama response",
+            service_id=service_id,
+            response_preview=ai_response_text[:200] if ai_response_text else "(empty)",
+        )
+        await service_status_repo.update_service(
+            service_id,
+            {"ai_lookup_last_checked_at": now_utc},
+        )
+        return {
+            "service_id": service_id,
+            "error": "AI response could not be interpreted as a valid service status",
+            "changed": False,
+        }
 
     updates: dict[str, Any] = {
         "ai_lookup_last_checked_at": now_utc,

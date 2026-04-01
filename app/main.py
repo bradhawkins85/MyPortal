@@ -11114,7 +11114,16 @@ async def _admin_service_status_check_now_handler(request: Request, service_id: 
     user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
-    result = await service_status_service.run_ai_lookup_for_service(service_id)
+    try:
+        result = await service_status_service.run_ai_lookup_for_service(service_id)
+    except Exception as exc:
+        log_error(
+            "Service status AI lookup raised an unexpected error",
+            service_id=service_id,
+            error=str(exc),
+        )
+        url = f"/admin/service-status?serviceId={service_id}&error={quote('AI lookup failed unexpectedly. Check server logs for details.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
     if result.get("error"):
         url = f"/admin/service-status?serviceId={service_id}&error={quote(result['error'])}"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
