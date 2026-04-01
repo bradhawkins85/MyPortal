@@ -18,6 +18,15 @@ from app.services import modules as modules_service
 from app.services import tag_generator
 
 _AI_LOOKUP_MAX_URL_CONTENT = 8000
+_AI_LOOKUP_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 _SSRF_BLOCKED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -586,7 +595,11 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
 
     # Fetch the URL content
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            headers=_AI_LOOKUP_HTTP_HEADERS,
+        ) as client:
             response = await client.get(lookup_url)
         response.raise_for_status()
         url_content = _sanitize_url_content(response.text)
