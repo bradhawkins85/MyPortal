@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
 from app.services import tag_generator
 
@@ -649,7 +650,17 @@ async def run_ai_lookup_for_all_services() -> dict[str, Any]:
                 changed += 1
             if result.get("error"):
                 errors += 1
-        except Exception:
+                log_warning(
+                    "Service status AI lookup error",
+                    service_id=service_id,
+                    error=result["error"],
+                )
+        except Exception as exc:
             errors += 1
+            log_error(
+                "Service status AI lookup exception",
+                service_id=service_id,
+                error=str(exc),
+            )
 
     return {"checked": checked, "changed": changed, "skipped": skipped, "errors": errors}
