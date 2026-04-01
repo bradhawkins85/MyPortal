@@ -257,3 +257,26 @@ async def refresh_service_tags(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
     return _serialize_service(updated)
+
+
+@router.post("/services/{service_id}/check-now")
+async def check_now(
+    service_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, Any]:
+    """Trigger an immediate AI lookup for a service."""
+    result = await service_status_service.run_ai_lookup_for_service(service_id)
+    if result.get("error"):
+        error_id = new_error_id()
+        log_exception_with_error_id(
+            "AI lookup check-now failed",
+            error_id=error_id,
+            route="service_status.check_now",
+            service_id=service_id,
+        )
+        raise build_client_http_error(
+            status.HTTP_400_BAD_REQUEST,
+            result["error"],
+            error_id=error_id,
+        )
+    return result
