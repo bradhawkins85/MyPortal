@@ -665,3 +665,52 @@ async def test_get_staff_workflow_history_returns_executions_with_steps(monkeypa
     assert step["status"] == "success"
     assert step["requestPayload"] == {"user": "test@example.com"}
     assert step["responsePayload"] == {"created": True, "userId": "u-123"}
+
+
+@pytest.mark.anyio
+async def test_store_json_variable_is_applied_after_step_and_resolves_in_next_step(monkeypatch):
+    """Regression: store_json mapping must use the coerced resolved_step so that
+    variables like ${vars.pwd} are populated and substituted in subsequent steps."""
+
+    # Step 1: curl_text returns a plain-text password body.
+    class DummyProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"S3cr3tP@ss!", b"")
+
+    async def fake_subprocess_exec(*args, **kwargs):
+        return DummyProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subprocess_exec)
+
+    # Execute the curl_text step and confirm the body is returned.
+    curl_result = await workflows._execute_policy_step(
+        step={
+            "type": "curl_text",
+            "url": "https://example.test/password",
+            "timeout_seconds": 5,
+        },
+        company_id=1,
+        staff={"id": 10, "email": "user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+    assert curl_result["body"] == "S3cr3tP@ss!"
+
+    # Verify that _coerce_step_json_fields converts store_json to a store dict,
+    # which is what allows the variable mapping to work.
+    step = {"type": "curl_text", "url": "https://example.test/password", "store_json": '{"pwd":"body"}'}
+    resolved_step = workflows._coerce_step_json_fields(step)
+    assert resolved_step["store"] == {"pwd": "body"}
+
+    # Confirm that extracting the password via the store mapping gives the correct value.
+    pwd_value = workflows._get_nested_value(curl_result, "body")
+    assert pwd_value == "S3cr3tP@ss!"
+
+    # Verify the variable resolves correctly in an email body template (the end-to-end scenario).
+    email_body = workflows._resolve_template_value(
+        "Password: ${vars.pwd}",
+        vars_map={"pwd": pwd_value},
+    )
+    assert email_body == "Password: S3cr3tP@ss!"

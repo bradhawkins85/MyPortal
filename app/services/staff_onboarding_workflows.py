@@ -1532,15 +1532,16 @@ async def _execute_policy_steps(
             raise
         step_outputs = response_payload if isinstance(response_payload, dict) else {"result": response_payload}
         context_patch: dict[str, Any] = {"vars": {}, "secret_vars": []}
-        output_var = str(step.get("output_var") or "").strip()
+        effective_step = resolved_step if isinstance(resolved_step, dict) else step
+        output_var = str(effective_step.get("output_var") or "").strip()
         if output_var:
             vars_map[output_var] = step_outputs
             context_patch["vars"][output_var] = step_outputs
             if _is_secret_var(output_var):
                 secret_vars.add(output_var)
                 context_patch["secret_vars"].append(output_var)
-        if isinstance(step.get("store"), dict):
-            for variable_name, source_path in step["store"].items():
+        if isinstance(effective_step.get("store"), dict):
+            for variable_name, source_path in effective_step["store"].items():
                 value = _get_nested_value(step_outputs, str(source_path))
                 vars_map[str(variable_name)] = value
                 if _is_secret_var(str(variable_name)):
