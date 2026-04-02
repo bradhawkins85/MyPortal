@@ -2376,6 +2376,13 @@ button.header-title-menu__link {
   text-align: right;
 }
 
+.table__col--truncate {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-drag-handle {
   display: inline-flex;
   align-items: center;
