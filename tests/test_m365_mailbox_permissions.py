@@ -96,7 +96,7 @@ async def test_get_mailbox_permissions_can_access_empty_when_no_db_rows():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_get_mailbox_permissions_can_access_empty_on_user_lookup_failure():
+async def test_get_mailbox_permissions_can_access_served_from_db_on_user_lookup_failure():
     """If the Graph user lookup fails, can_access is still served from DB (by raw UPN)."""
     accessible = [_accessible_mailbox("shared@contoso.com", "Shared Mailbox")]
     db_members = [_db_member("delegate@contoso.com", "Delegate User")]
@@ -124,16 +124,8 @@ async def test_get_mailbox_permissions_can_access_deduplicates_upn_and_mail_vari
     """can_access de-duplicates mailboxes found via raw UPN vs Graph-resolved mail address."""
     # Graph resolves alice@contoso.onmicrosoft.com -> mail: alice@contoso.com
     user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
-    # Same mailbox appears in both UPN and mail address lookups
-    accessible_by_upn = [_accessible_mailbox("shared@contoso.com", "Shared")]
-    accessible_by_mail = [_accessible_mailbox("shared@contoso.com", "Shared")]
-
-    async def _fake_accessible(company_id: int, member_upn: str) -> list[dict]:
-        if member_upn == "alice@contoso.onmicrosoft.com":
-            return accessible_by_upn
-        if member_upn == "alice@contoso.com":
-            return accessible_by_mail
-        return []
+    # The repo is called once with both UPN variants; DISTINCT in the query handles deduplication.
+    accessible = [_accessible_mailbox("shared@contoso.com", "Shared")]
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
@@ -144,12 +136,12 @@ async def test_get_mailbox_permissions_can_access_deduplicates_upn_and_mail_vari
         patch.object(
             m365_repo,
             "get_mailboxes_accessible_by_member",
-            AsyncMock(side_effect=_fake_accessible),
+            AsyncMock(return_value=accessible),
         ),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.onmicrosoft.com")
 
-    # shared@contoso.com appears exactly once despite being returned by both lookups
+    # shared@contoso.com appears exactly once; deduplication is handled by DISTINCT in the query
     assert len(result["can_access"]) == 1
     assert result["can_access"][0]["email"] == "shared@contoso.com"
 

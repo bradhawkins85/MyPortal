@@ -3366,21 +3366,15 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     # email with member_upn pointing to the user who has access.
     # Query the reverse index (member_upn = this user) to find all mailboxes
     # the given UPN has been granted access to without any live API call.
+    # Include the Graph-resolved mail address as a second lookup key in the
+    # same query so mailboxes stored under a different address variant (e.g.
+    # group primary SMTP vs. onmicrosoft.com UPN) are also returned.
+    upn_keys: list[str] = list(dict.fromkeys(
+        k for k in [raw_mailbox_email, mailbox_email] if k
+    ))
     can_access_rows = await m365_repo.get_mailboxes_accessible_by_member(
-        company_id, raw_mailbox_email
+        company_id, upn_keys
     )
-    # Also try the Graph-resolved mail address in case the sync stored the
-    # membership under a different address variant (e.g. the group's primary
-    # SMTP address differs from the user's UPN).
-    if mailbox_email != raw_mailbox_email:
-        seen_emails = {r["mailbox_email"] for r in can_access_rows}
-        extra_rows = await m365_repo.get_mailboxes_accessible_by_member(
-            company_id, mailbox_email
-        )
-        for row in extra_rows:
-            if row["mailbox_email"] not in seen_emails:
-                can_access_rows.append(row)
-                seen_emails.add(row["mailbox_email"])
 
     can_access: list[dict[str, Any]] = [
         {"display_name": row["display_name"], "email": row["mailbox_email"]}
