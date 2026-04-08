@@ -3220,13 +3220,12 @@ async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
 async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     """Return mailbox permission details for a given UPN.
 
-    Queries Microsoft Graph for **Mailboxes I can access** and combines
-    pre-computed DB data with a live Exchange Online lookup for **Users
-    that can access me**.
-
-    **Mailboxes I can access** – mail-enabled M365 groups the given identity is
-    a direct member of.  In Exchange Online, group membership on a group that
-    backs a shared mailbox grants FullAccess.
+    **Mailboxes I can access** – populated entirely from the pre-synced
+    ``m365_mailbox_members`` table written by ``sync_mailboxes``.  The table
+    stores both group-based access (mail-enabled M365 group membership) and
+    direct FullAccess assignments collected via Exchange Online during the
+    scheduled sync.  No live Graph or Exchange Online call is made for this
+    direction; run a mailbox sync to refresh the data.
 
     **Users that can access me** – users who have been assigned full access
     to this mailbox.  Data is gathered from three sources:
@@ -3359,29 +3358,34 @@ async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
             )
 
     # ------------------------------------------------------------------
-    # "Mailboxes I can access": live mail-enabled group memberships
+    # "Mailboxes I can access": from pre-synced DB data
     # ------------------------------------------------------------------
-    user_id = user_data.get("id")
-    groups: list[dict[str, Any]] = []
-    if user_id:
-        member_of_url = (
-            f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf"
-            "?$select=id,displayName,mail,mailEnabled"
+    # The sync_mailboxes scheduled job stores both group-based access
+    # (mail-enabled M365 group membership) and direct FullAccess assignments
+    # from Exchange Online in m365_mailbox_members, keyed by the mailbox
+    # email with member_upn pointing to the user who has access.
+    # Query the reverse index (member_upn = this user) to find all mailboxes
+    # the given UPN has been granted access to without any live API call.
+    can_access_rows = await m365_repo.get_mailboxes_accessible_by_member(
+        company_id, raw_mailbox_email
+    )
+    # Also try the Graph-resolved mail address in case the sync stored the
+    # membership under a different address variant (e.g. the group's primary
+    # SMTP address differs from the user's UPN).
+    if mailbox_email != raw_mailbox_email:
+        seen_emails = {r["mailbox_email"] for r in can_access_rows}
+        extra_rows = await m365_repo.get_mailboxes_accessible_by_member(
+            company_id, mailbox_email
         )
-        try:
-            groups = await _graph_get_all(access_token, member_of_url)
-        except M365Error:
-            groups = []
+        for row in extra_rows:
+            if row["mailbox_email"] not in seen_emails:
+                can_access_rows.append(row)
+                seen_emails.add(row["mailbox_email"])
 
-    can_access: list[dict[str, Any]] = []
-    for group in groups:
-        if group.get("mailEnabled") and group.get("mail"):
-            can_access.append(
-                {
-                    "display_name": group.get("displayName") or group["mail"],
-                    "email": group["mail"],
-                }
-            )
+    can_access: list[dict[str, Any]] = [
+        {"display_name": row["display_name"], "email": row["mailbox_email"]}
+        for row in can_access_rows
+    ]
     can_access.sort(key=lambda x: x["display_name"].lower())
 
     # ------------------------------------------------------------------

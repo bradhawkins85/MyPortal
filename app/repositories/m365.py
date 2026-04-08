@@ -327,6 +327,37 @@ async def get_mailbox_members_by_local_part(
     return [dict(row) for row in rows]
 
 
+async def get_mailboxes_accessible_by_member(
+    company_id: int, member_upn: str
+) -> list[dict[str, Any]]:
+    """Return mailboxes that the given member UPN has been granted access to.
+
+    Queries ``m365_mailbox_members`` for all rows where ``member_upn`` matches,
+    joining ``m365_mailboxes`` to retrieve the human-readable display name for
+    each mailbox.  Falls back to the ``mailbox_email`` value when no matching
+    row exists in ``m365_mailboxes`` (e.g. the mailbox was not captured in the
+    usage report).
+
+    :returns: A list of dicts with ``mailbox_email`` and ``display_name`` keys,
+        ordered alphabetically by ``display_name``.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT
+            mm.mailbox_email,
+            COALESCE(mb.display_name, mm.mailbox_email) AS display_name
+        FROM m365_mailbox_members mm
+        LEFT JOIN m365_mailboxes mb
+            ON mb.company_id = mm.company_id
+           AND mb.user_principal_name = mm.mailbox_email
+        WHERE mm.company_id = %s AND mm.member_upn = %s
+        ORDER BY display_name ASC
+        """,
+        (company_id, member_upn),
+    )
+    return [dict(row) for row in rows]
+
+
 async def get_admin_credentials(company_id: int) -> dict[str, Any] | None:
     """Retrieve the M365 admin app credentials for a specific company.
 
