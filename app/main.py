@@ -1169,6 +1169,9 @@ def _serialise_for_json(value: Any) -> Any:
     return value
 
 
+_NOTIFICATION_METADATA_HIDDEN_KEYS: frozenset[str] = frozenset({"staff_id"})
+
+
 def _prepare_notification_metadata(metadata: Any) -> list[dict[str, str]]:
     if metadata is None:
         return []
@@ -1178,6 +1181,8 @@ def _prepare_notification_metadata(metadata: Any) -> list[dict[str, str]]:
     if isinstance(serialised, Mapping):
         items: list[dict[str, str]] = []
         for key in sorted(serialised.keys(), key=lambda item: str(item)):
+            if str(key) in _NOTIFICATION_METADATA_HIDDEN_KEYS:
+                continue
             value = serialised[key]
             if isinstance(value, Mapping) or (
                 isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray))
@@ -8284,6 +8289,7 @@ async def notifications_dashboard(request: Request):
     prepared_notifications: list[dict[str, Any]] = []
     for record in records:
         metadata_items = _prepare_notification_metadata(record.get("metadata"))
+        raw_metadata = record.get("metadata") or {}
         created_iso = _to_iso(record.get("created_at")) or ""
         read_iso = _to_iso(record.get("read_at")) or ""
         is_unread = record.get("read_at") is None
@@ -8293,6 +8299,7 @@ async def notifications_dashboard(request: Request):
                 "event_type": record.get("event_type"),
                 "message": record.get("message"),
                 "metadata_items": metadata_items,
+                "raw_metadata": raw_metadata,
                 "created_iso": created_iso,
                 "read_iso": read_iso,
                 "is_unread": is_unread,
