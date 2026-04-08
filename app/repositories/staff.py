@@ -194,11 +194,12 @@ async def list_staff(
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
         LEFT JOIN (
-            SELECT e1.* FROM staff_onboarding_workflow_executions e1
-            WHERE e1.id = (
-                SELECT MAX(e2.id) FROM staff_onboarding_workflow_executions e2
-                WHERE e2.staff_id = e1.staff_id
-            )
+            SELECT e1.* FROM staff_onboarding_workflow_executions AS e1
+            INNER JOIN (
+                SELECT staff_id, MAX(id) AS max_id
+                FROM staff_onboarding_workflow_executions
+                GROUP BY staff_id
+            ) AS latest ON e1.id = latest.max_id
         ) AS e ON e.staff_id = s.id
         WHERE {where}
         ORDER BY s.updated_at ASC, s.id ASC
@@ -312,11 +313,12 @@ async def list_all_staff(
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
         LEFT JOIN (
-            SELECT e1.* FROM staff_onboarding_workflow_executions e1
-            WHERE e1.id = (
-                SELECT MAX(e2.id) FROM staff_onboarding_workflow_executions e2
-                WHERE e2.staff_id = e1.staff_id
-            )
+            SELECT e1.* FROM staff_onboarding_workflow_executions AS e1
+            INNER JOIN (
+                SELECT staff_id, MAX(id) AS max_id
+                FROM staff_onboarding_workflow_executions
+                GROUP BY staff_id
+            ) AS latest ON e1.id = latest.max_id
         ) AS e ON e.staff_id = s.id
     """
     if where_clause:
