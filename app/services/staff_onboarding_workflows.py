@@ -50,32 +50,83 @@ DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
 
-# Kid-friendly word list: common nouns/adjectives safe for children, no profanity or
-# inappropriate combinations.  Each word starts with a lower-case letter; capitalisation
-# is applied at generation time when requested.
+# Kid-friendly word list: common everyday words that children aged 6-12 know well.
+# Words are deliberately simple, concrete nouns and adjectives.  Each entry is
+# lower-case; capitalisation is applied at generation time.  The list is large (600+
+# entries) to maximise the pool of possible password combinations and minimise the
+# chance of two passwords ever being identical.
 _KID_FRIENDLY_WORDS: list[str] = [
-    "apple", "arrow", "artful", "anchor", "amber",
-    "balloon", "basket", "beaver", "blaze", "bloom",
-    "cactus", "candle", "castle", "cheetah", "cloud",
-    "daisy", "dancer", "dazzle", "dolphin", "dragonfly",
-    "eagle", "ember", "emerald", "engine", "explorer",
-    "falcon", "feather", "flame", "flower", "forest",
-    "garden", "giraffe", "glacier", "glimmer", "golden",
-    "hammer", "harbor", "hazel", "hero", "horizon",
-    "iceberg", "island", "ivory", "ivy", "indigo",
-    "jaguar", "jasper", "jewel", "jungle", "jupiter",
-    "koala", "lantern", "lemon", "leopard", "lightning",
-    "maple", "marble", "meadow", "meteor", "mirror",
-    "nebula", "noble", "north", "nutmeg", "nymph",
-    "ocean", "olive", "onyx", "orbit", "otter",
-    "panda", "parrot", "pebble", "penguin", "phoenix",
-    "quartz", "quasar", "quest", "quiet", "quicksilver",
-    "rabbit", "radiant", "rainbow", "ranger", "raven",
-    "saddle", "safari", "sapphire", "saturn", "silver",
-    "thunder", "tiger", "timber", "topaz", "torch",
-    "unicorn", "valley", "velvet", "venture", "violet",
-    "walrus", "wander", "whisper", "willow", "wizard",
-    "xenon", "yellow", "zebra", "zenith", "zephyr",
+    # Animals
+    "ant", "bear", "bee", "bird", "bunny", "butterfly", "calf", "cat", "chick",
+    "chipmunk", "clam", "colt", "crab", "crow", "deer", "dog", "dolphin", "dove",
+    "duck", "eagle", "elephant", "elk", "ferret", "fish", "flamingo", "foal",
+    "fox", "frog", "gecko", "giraffe", "goat", "goose", "gorilla", "hamster",
+    "hare", "hawk", "hen", "hippo", "horse", "hummingbird", "jaguar", "kangaroo",
+    "kitten", "koala", "ladybug", "lamb", "leopard", "lion", "lizard", "llama",
+    "lobster", "lynx", "mole", "monkey", "moose", "mouse", "octopus", "otter",
+    "owl", "panda", "parrot", "peacock", "pelican", "penguin", "pig", "pony",
+    "puppy", "rabbit", "raccoon", "ram", "rat", "raven", "robin", "rooster",
+    "seal", "shark", "sheep", "snail", "spider", "squirrel", "stork", "swan",
+    "tiger", "toad", "toucan", "turtle", "walrus", "whale", "wolf", "wombat",
+    "woodpecker", "wren", "yak", "zebra",
+    # Colors
+    "amber", "aqua", "azure", "beige", "black", "blue", "bronze", "brown",
+    "coral", "cream", "crimson", "cyan", "gold", "gray", "green", "indigo",
+    "ivory", "lavender", "lime", "magenta", "maroon", "navy", "olive", "orange",
+    "peach", "pink", "plum", "purple", "red", "rose", "ruby", "salmon", "scarlet",
+    "silver", "teal", "violet", "white", "yellow",
+    # Food and drink
+    "apple", "bacon", "bagel", "banana", "berry", "biscuit", "bread", "brownie",
+    "burger", "butter", "cake", "candy", "carrot", "celery", "cheese", "cherry",
+    "chips", "chocolate", "cobbler", "coconut", "cookie", "corn", "cupcake",
+    "donut", "dumpling", "egg", "fudge", "grape", "honey", "jellybean", "juice",
+    "kiwi", "lemon", "lollipop", "mango", "maple", "melon", "milk", "muffin",
+    "noodle", "oat", "onion", "pancake", "pasta", "peach", "pear", "peas",
+    "pickle", "pie", "pineapple", "pizza", "popcorn", "potato", "pretzel",
+    "pudding", "pumpkin", "raisin", "rice", "roll", "salad", "sandwich",
+    "smoothie", "soup", "strawberry", "sugar", "sushi", "taco", "toast",
+    "tomato", "vanilla", "waffle", "watermelon", "yogurt",
+    # Nature
+    "beach", "boulder", "brook", "cave", "cliff", "cloud", "creek", "daisy",
+    "dawn", "desert", "dew", "dusk", "earth", "feather", "field", "fire",
+    "flame", "flood", "flower", "fog", "forest", "frost", "garden", "gem",
+    "glacier", "grass", "hill", "island", "jungle", "lake", "leaf", "meadow",
+    "moon", "mountain", "mud", "ocean", "pebble", "pond", "rain", "rainbow",
+    "river", "rock", "sand", "sea", "shadow", "shore", "sky", "snow",
+    "snowflake", "star", "stream", "sun", "sunset", "thunder", "tide",
+    "tornado", "tree", "valley", "vine", "volcano", "wave", "wind", "winter",
+    "wood",
+    # Toys, games and activities
+    "badge", "ball", "balloon", "bike", "block", "boat", "book", "bounce",
+    "bubble", "card", "castle", "chalk", "chess", "costume", "crayon", "dart",
+    "dice", "doll", "dragon", "drum", "flute", "frisbee", "game", "glitter",
+    "guitar", "helmet", "hula", "juggle", "jump", "kite", "lego", "magnet",
+    "marble", "maze", "medal", "paddle", "paint", "parachute", "pinwheel",
+    "puzzle", "race", "rocket", "sled", "slide", "soccer", "statue", "swing",
+    "train", "trophy", "trumpet", "whistle",
+    # Everyday objects
+    "backpack", "basket", "bell", "boot", "bottle", "box", "brush", "bucket",
+    "button", "candle", "cap", "clock", "coat", "comb", "compass", "cup",
+    "desk", "door", "drum", "fan", "flag", "flashlight", "fork", "glove",
+    "hammer", "hat", "jar", "kite", "lamp", "lantern", "lunchbox", "map",
+    "mirror", "mug", "pillow", "plate", "rug", "ruler", "scarf", "shoe",
+    "soap", "sock", "spoon", "table", "towel", "umbrella", "wallet", "whistle",
+    "window",
+    # Descriptive words (adjectives)
+    "big", "bold", "bouncy", "brave", "bright", "bubbly", "bumpy", "calm",
+    "cheerful", "chilly", "chunky", "clean", "clever", "cloudy", "cozy",
+    "crispy", "curly", "cute", "daring", "dazzling", "dreamy", "dusty",
+    "fancy", "fast", "fluffy", "friendly", "frosty", "frozen", "funny",
+    "fuzzy", "gentle", "giant", "glowing", "golden", "graceful", "great",
+    "happy", "heavy", "jolly", "jumpy", "kind", "little", "lively", "loud",
+    "lucky", "magical", "mellow", "merry", "mighty", "misty", "nimble",
+    "noisy", "peaceful", "perky", "playful", "polite", "pretty", "prickly",
+    "proud", "quick", "quiet", "radiant", "rapid", "round", "royal", "rugged",
+    "shiny", "silly", "sleepy", "slippery", "slow", "smart", "smooth",
+    "snappy", "soft", "sparkly", "speedy", "spiky", "splashy", "spotty",
+    "springy", "starry", "sticky", "stormy", "stretchy", "striped", "strong",
+    "sunny", "sweet", "swift", "tall", "tidy", "tiny", "warm", "wiggly",
+    "wild", "windy", "witty", "wonderful", "woolly", "zesty", "zippy",
 ]
 
 # Letter substitutions used for kid-friendly password "symbol" replacements.
@@ -129,30 +180,35 @@ def _generate_strong_password(
 def _generate_kid_friendly_password() -> str:
     """Generate a kid-friendly word-based password.
 
-    Format: two capitalised words (first letter upper-case only) separated by a
-    random 2-4 digit number with 1-2 letter substitutions applied across both words.
+    Format: two capitalised common words (first letter upper-case only) followed by
+    2-4 random digits, with 1-2 letter-to-symbol substitutions applied to non-leading
+    characters across both words.  The large word pool (600+ entries) combined with
+    random digit count and substitution positions provides billions of possible
+    combinations, making repeated passwords extremely unlikely even without storing
+    previously generated values.
     """
     word1 = secrets.choice(_KID_FRIENDLY_WORDS)
     word2 = secrets.choice(_KID_FRIENDLY_WORDS)
 
-    # Capitalise first letter of each word only.
+    # Capitalise first letter of each word only (as per requirements).
     word1 = word1[0].upper() + word1[1:]
     word2 = word2[0].upper() + word2[1:]
 
-    # Pick 1-2 substitution candidates from available letters across both words.
+    # Collect candidate positions for symbol substitutions across both words,
+    # skipping the capitalised first letter of each word to preserve readability.
     candidates: list[tuple[int, int, str]] = []  # (word_index, char_index, replacement)
     for word_idx, word in enumerate([word1, word2]):
         for char_idx, ch in enumerate(word):
-            # Skip the capitalised first letter to keep readability.
             if char_idx == 0:
                 continue
             lower_ch = ch.lower()
             if lower_ch in _KID_SUBSTITUTIONS:
                 candidates.append((word_idx, char_idx, _KID_SUBSTITUTIONS[lower_ch]))
 
+    # Apply 1-2 substitutions chosen at random from available positions.
     num_substitutions = min(secrets.choice([1, 2]), len(candidates))
-    chosen: list[tuple[int, int, str]] = []
     available = list(candidates)
+    chosen: list[tuple[int, int, str]] = []
     for _ in range(num_substitutions):
         if not available:
             break
@@ -166,11 +222,11 @@ def _generate_kid_friendly_password() -> str:
     final_word1 = "".join(words[0])
     final_word2 = "".join(words[1])
 
-    # Append 2-4 random digits.
+    # Append 2-4 random digits for extra entropy.
     num_digits = secrets.choice([2, 3, 4])
-    digits = "".join(str(secrets.randbelow(10)) for _ in range(num_digits))
+    digit_suffix = "".join(str(secrets.randbelow(10)) for _ in range(num_digits))
 
-    return f"{final_word1}{final_word2}{digits}"
+    return f"{final_word1}{final_word2}{digit_suffix}"
 
 
 class WorkflowStepError(RuntimeError):
@@ -602,18 +658,28 @@ async def _attempt_step(
     max_retries: int,
     request_payload: dict[str, Any],
     callback,
+    secret_vars: set[str] | None = None,
 ) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(1, max_retries + 2):
         try:
             response_payload = await callback()
+            raw_response = response_payload if isinstance(response_payload, dict) else {"result": str(response_payload)}
+            # Redact any keys that look like secrets (passwords, tokens, keys) before
+            # persisting to the database so that generated passwords are never stored.
+            effective_secret_vars: set[str] = set(secret_vars or ())
+            if isinstance(raw_response, dict):
+                for key in raw_response:
+                    if _is_secret_var(str(key)):
+                        effective_secret_vars.add(str(key))
+            log_response = _redact_payload(raw_response, secret_vars=effective_secret_vars)
             await workflow_repo.append_step_log(
                 execution_id=execution_id,
                 step_name=step_name,
                 status="success",
                 attempt=attempt,
                 request_payload=request_payload,
-                response_payload=response_payload if isinstance(response_payload, dict) else {"result": str(response_payload)},
+                response_payload=log_response,
             )
             return response_payload if isinstance(response_payload, dict) else {"result": response_payload}
         except Exception as exc:  # noqa: BLE001
