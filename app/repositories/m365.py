@@ -327,6 +327,46 @@ async def get_mailbox_members_by_local_part(
     return [dict(row) for row in rows]
 
 
+async def get_mailboxes_accessible_by_member(
+    company_id: int, member_upns: str | list[str]
+) -> list[dict[str, Any]]:
+    """Return mailboxes that the given member UPN (or list of UPNs) has been granted access to.
+
+    Queries ``m365_mailbox_members`` for all rows where ``member_upn`` matches,
+    joining ``m365_mailboxes`` to retrieve the human-readable display name for
+    each mailbox.  Falls back to the ``mailbox_email`` value when no matching
+    row exists in ``m365_mailboxes`` (e.g. the mailbox was not captured in the
+    usage report).
+
+    Accepts a single UPN string or a list of UPN strings.  When a list is
+    provided the results are de-duplicated by ``mailbox_email`` so that
+    mailboxes accessible via multiple address variants of the same user appear
+    only once.
+
+    :returns: A list of dicts with ``mailbox_email`` and ``display_name`` keys,
+        ordered alphabetically by ``display_name``.
+    """
+    upns: list[str] = [member_upns] if isinstance(member_upns, str) else list(member_upns)
+    if not upns:
+        return []
+    placeholders = ", ".join(["%s"] * len(upns))
+    rows = await db.fetch_all(
+        f"""
+        SELECT DISTINCT
+            mm.mailbox_email,
+            COALESCE(mb.display_name, mm.mailbox_email) AS display_name
+        FROM m365_mailbox_members mm
+        LEFT JOIN m365_mailboxes mb
+            ON mb.company_id = mm.company_id
+           AND mb.user_principal_name = mm.mailbox_email
+        WHERE mm.company_id = %s AND mm.member_upn IN ({placeholders})
+        ORDER BY display_name ASC
+        """,
+        (company_id, *upns),
+    )
+    return [dict(row) for row in rows]
+
+
 async def get_admin_credentials(company_id: int) -> dict[str, Any] | None:
     """Retrieve the M365 admin app credentials for a specific company.
 

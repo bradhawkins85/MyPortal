@@ -1,11 +1,12 @@
 """Tests for the get_mailbox_permissions M365 service function.
 
 Covers:
-- Returns correct can_access list from live mail-enabled group memberships
-- Ignores groups that are not mail-enabled
+- Returns correct can_access list from pre-synced DB data (m365_mailbox_members)
+- can_access includes both group-backed and direct FullAccess mailboxes stored during sync
+- can_access de-duplicates results from raw UPN and Graph-resolved mail address lookups
 - Returns correct accessible_by list from synced DB member data (m365_mailbox_members)
+- can_access is empty when no DB rows exist for the member
 - Returns empty can_access but still serves accessible_by data when user lookup fails
-- Returns empty can_access when memberOf call fails; accessible_by still served from DB
 - Returns empty accessible_by when DB has no synced data
 - Lists are sorted alphabetically by display_name
 - accessible_by DB lookup uses user object mail property (not raw UPN)
@@ -33,47 +34,38 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_group(
-    group_id: str,
-    display_name: str,
-    mail: str,
-    *,
-    mail_enabled: bool = True,
-) -> dict[str, Any]:
-    return {
-        "@odata.type": "#microsoft.graph.group",
-        "id": group_id,
-        "displayName": display_name,
-        "mail": mail,
-        "mailEnabled": mail_enabled,
-    }
-
-
 def _db_member(upn: str, display_name: str = "") -> dict[str, Any]:
     return {"member_upn": upn, "member_display_name": display_name}
 
 
+def _accessible_mailbox(mailbox_email: str, display_name: str = "") -> dict[str, Any]:
+    """Simulates a row returned by get_mailboxes_accessible_by_member."""
+    return {"mailbox_email": mailbox_email, "display_name": display_name or mailbox_email}
+
+
 # ---------------------------------------------------------------------------
-# can_access (live Graph membership)
+# can_access (DB-backed scheduled sync data)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio("asyncio")
-async def test_get_mailbox_permissions_can_access_returns_mail_enabled_groups():
-    """Mail-enabled group memberships appear in can_access."""
+async def test_get_mailbox_permissions_can_access_returns_db_rows():
+    """can_access is populated from pre-synced m365_mailbox_members DB rows."""
     user_obj = {"id": "uid-1", "displayName": "Alice"}
-    groups = [
-        _make_group("g1", "Sales Team", "sales@contoso.com"),
-        _make_group("g2", "Finance", "finance@contoso.com"),
+    accessible = [
+        _accessible_mailbox("sales@contoso.com", "Sales Team"),
+        _accessible_mailbox("finance@contoso.com", "Finance"),
     ]
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=groups)),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
+        patch.object(
+            m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=accessible)
+        ),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
@@ -84,46 +76,74 @@ async def test_get_mailbox_permissions_can_access_returns_mail_enabled_groups():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_get_mailbox_permissions_ignores_non_mail_enabled_groups():
-    """Groups with mailEnabled=False are excluded from can_access."""
+async def test_get_mailbox_permissions_can_access_empty_when_no_db_rows():
+    """can_access is empty when the DB has no synced access rows for the member."""
     user_obj = {"id": "uid-1", "displayName": "Alice"}
-    groups = [
-        _make_group("g1", "Sales Team", "sales@contoso.com", mail_enabled=True),
-        _make_group("g2", "Security Group", None, mail_enabled=False),
-    ]
 
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=groups)),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
-    ):
-        result = await get_mailbox_permissions(1, "alice@contoso.com")
-
-    assert len(result["can_access"]) == 1
-    assert result["can_access"][0]["email"] == "sales@contoso.com"
-
-
-@pytest.mark.anyio("asyncio")
-async def test_get_mailbox_permissions_empty_can_access_on_member_of_failure():
-    """If memberOf raises M365Error, can_access is empty but accessible_by still served from DB."""
-    user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
-    db_members = [_db_member("bob@contoso.com", "Bob")]
-
-    with (
-        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
-        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(side_effect=M365Error("memberOf failed"))),
-        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
-        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(
+            m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])
+        ),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
     assert result["can_access"] == []
-    assert len(result["accessible_by"]) == 1
-    assert result["accessible_by"][0]["upn"] == "bob@contoso.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_can_access_served_from_db_on_user_lookup_failure():
+    """If the Graph user lookup fails, can_access is still served from DB (by raw UPN)."""
+    accessible = [_accessible_mailbox("shared@contoso.com", "Shared Mailbox")]
+    db_members = [_db_member("delegate@contoso.com", "Delegate User")]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(side_effect=M365Error("404"))),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(
+            m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=accessible)
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "alice@contoso.com")
+
+    assert len(result["can_access"]) == 1
+    assert result["can_access"][0]["email"] == "shared@contoso.com"
+    assert result["accessible_by"] == [
+        {"display_name": "Delegate User", "upn": "delegate@contoso.com"}
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_mailbox_permissions_can_access_deduplicates_upn_and_mail_variants():
+    """can_access de-duplicates mailboxes found via raw UPN vs Graph-resolved mail address."""
+    # Graph resolves alice@contoso.onmicrosoft.com -> mail: alice@contoso.com
+    user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
+    # The repo is called once with both UPN variants; DISTINCT in the query handles deduplication.
+    accessible = [_accessible_mailbox("shared@contoso.com", "Shared")]
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
+        patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
+        patch.object(
+            m365_repo,
+            "get_mailboxes_accessible_by_member",
+            AsyncMock(return_value=accessible),
+        ),
+    ):
+        result = await get_mailbox_permissions(1, "alice@contoso.onmicrosoft.com")
+
+    # shared@contoso.com appears exactly once; deduplication is handled by DISTINCT in the query
+    assert len(result["can_access"]) == 1
+    assert result["can_access"][0]["email"] == "shared@contoso.com"
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +163,9 @@ async def test_get_mailbox_permissions_accessible_by_returns_db_members():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -167,9 +187,9 @@ async def test_get_mailbox_permissions_accessible_by_includes_live_group_members
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=live_members)),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -187,10 +207,10 @@ async def test_get_mailbox_permissions_empty_accessible_by_when_no_db_data():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
@@ -217,9 +237,9 @@ async def test_get_mailbox_permissions_accessible_by_uses_mail_property_for_db_l
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         # UPN passed in uses onmicrosoft.com domain; DB lookup must use mail property.
         result = await get_mailbox_permissions(1, "helpdesk@company.onmicrosoft.com")
@@ -247,10 +267,10 @@ async def test_get_mailbox_permissions_accessible_by_falls_back_to_upn_when_mail
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
         patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -267,9 +287,9 @@ async def test_get_mailbox_permissions_accessible_by_display_name_fallback():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -293,6 +313,7 @@ async def test_get_mailbox_permissions_returns_empty_on_user_lookup_failure():
         patch.object(m365_service, "_graph_get", AsyncMock(side_effect=M365Error("404"))),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -317,9 +338,9 @@ async def test_get_mailbox_permissions_accessible_by_combines_raw_upn_and_mail_l
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "helpdesk@company.onmicrosoft.com")
 
@@ -333,9 +354,9 @@ async def test_get_mailbox_permissions_accessible_by_combines_raw_upn_and_mail_l
 async def test_get_mailbox_permissions_lists_sorted_alphabetically():
     """can_access and accessible_by lists are sorted alphabetically by display_name."""
     user_obj = {"id": "uid-1", "displayName": "Alice", "mail": "alice@contoso.com"}
-    groups = [
-        _make_group("g2", "Zebra Mailbox", "zebra@contoso.com"),
-        _make_group("g1", "Alpha Mailbox", "alpha@contoso.com"),
+    accessible = [
+        _accessible_mailbox("zebra@contoso.com", "Zebra Mailbox"),
+        _accessible_mailbox("alpha@contoso.com", "Alpha Mailbox"),
     ]
     db_members = [
         _db_member("zoe@contoso.com", "Zoe"),
@@ -345,9 +366,11 @@ async def test_get_mailbox_permissions_lists_sorted_alphabetically():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=groups)),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(
+            m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=accessible)
+        ),
     ):
         result = await get_mailbox_permissions(1, "alice@contoso.com")
 
@@ -388,9 +411,9 @@ async def test_get_mailbox_permissions_accessible_by_uses_proxy_addresses():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "payroll@company.com.au")
 
@@ -420,9 +443,9 @@ async def test_get_mailbox_permissions_proxy_addresses_deduplicates_members():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(side_effect=_fake_get_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "payroll@company.com.au")
 
@@ -460,9 +483,9 @@ async def test_get_mailbox_permissions_proxy_addresses_live_group_lookup():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(side_effect=_fake_group_members)),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "payroll@company.com.au")
 
@@ -493,9 +516,9 @@ async def test_get_mailbox_permissions_accessible_by_includes_live_exo_permissio
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=[])),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
         patch.object(
             m365_service,
             "_acquire_exo_access_token",
@@ -535,9 +558,9 @@ async def test_get_mailbox_permissions_accessible_by_exo_supplements_db_data():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
         patch.object(
             m365_service,
             "_acquire_exo_access_token",
@@ -565,9 +588,9 @@ async def test_get_mailbox_permissions_accessible_by_exo_failure_silent():
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
         patch.object(
             m365_service,
             "_acquire_exo_access_token",
@@ -606,6 +629,7 @@ async def test_get_mailbox_permissions_local_part_fallback_when_graph_fails():
             "get_mailbox_members_by_local_part",
             AsyncMock(return_value=fallback_members),
         ),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "payroll@company.onmicrosoft.com")
 
@@ -628,10 +652,10 @@ async def test_get_mailbox_permissions_local_part_fallback_not_triggered_when_da
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(m365_service, "_graph_get", AsyncMock(return_value=user_obj)),
-        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=[])),
         patch.object(m365_service, "_get_mailbox_group_members", AsyncMock(return_value=[])),
         patch.object(m365_repo, "get_mailbox_members", AsyncMock(return_value=db_members)),
         patch.object(m365_repo, "get_mailbox_members_by_local_part", AsyncMock(side_effect=_fake_fallback)),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "shared@contoso.com")
 
@@ -662,6 +686,7 @@ async def test_get_mailbox_permissions_local_part_fallback_deduplicates():
             "get_mailbox_members_by_local_part",
             AsyncMock(return_value=fallback_members),
         ),
+        patch.object(m365_repo, "get_mailboxes_accessible_by_member", AsyncMock(return_value=[])),
     ):
         result = await get_mailbox_permissions(1, "support@contoso.onmicrosoft.com")
 
