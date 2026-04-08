@@ -50,85 +50,9 @@ DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
 
-# Kid-friendly word list: common everyday words that children aged 6-12 know well.
-# Words are deliberately simple, concrete nouns and adjectives.  Each entry is
-# lower-case; capitalisation is applied at generation time.  The list is large (600+
-# entries) to maximise the pool of possible password combinations and minimise the
-# chance of two passwords ever being identical.
-_KID_FRIENDLY_WORDS: list[str] = [
-    # Animals
-    "ant", "bear", "bee", "bird", "bunny", "butterfly", "calf", "cat", "chick",
-    "chipmunk", "clam", "colt", "crab", "crow", "deer", "dog", "dolphin", "dove",
-    "duck", "eagle", "elephant", "elk", "ferret", "fish", "flamingo", "foal",
-    "fox", "frog", "gecko", "giraffe", "goat", "goose", "gorilla", "hamster",
-    "hare", "hawk", "hen", "hippo", "horse", "hummingbird", "jaguar", "kangaroo",
-    "kitten", "koala", "ladybug", "lamb", "leopard", "lion", "lizard", "llama",
-    "lobster", "lynx", "mole", "monkey", "moose", "mouse", "octopus", "otter",
-    "owl", "panda", "parrot", "peacock", "pelican", "penguin", "pig", "pony",
-    "puppy", "rabbit", "raccoon", "ram", "rat", "raven", "robin", "rooster",
-    "seal", "shark", "sheep", "snail", "spider", "squirrel", "stork", "swan",
-    "tiger", "toad", "toucan", "turtle", "walrus", "whale", "wolf", "wombat",
-    "woodpecker", "wren", "yak", "zebra",
-    # Colors
-    "amber", "aqua", "azure", "beige", "black", "blue", "bronze", "brown",
-    "coral", "cream", "crimson", "cyan", "gold", "gray", "green", "indigo",
-    "ivory", "lavender", "lime", "magenta", "maroon", "navy", "olive", "orange",
-    "peach", "pink", "plum", "purple", "red", "rose", "ruby", "salmon", "scarlet",
-    "silver", "teal", "violet", "white", "yellow",
-    # Food and drink
-    "apple", "bacon", "bagel", "banana", "berry", "biscuit", "bread", "brownie",
-    "burger", "butter", "cake", "candy", "carrot", "celery", "cheese", "cherry",
-    "chips", "chocolate", "cobbler", "coconut", "cookie", "corn", "cupcake",
-    "donut", "dumpling", "egg", "fudge", "grape", "honey", "jellybean", "juice",
-    "kiwi", "lemon", "lollipop", "mango", "maple", "melon", "milk", "muffin",
-    "noodle", "oat", "onion", "pancake", "pasta", "peach", "pear", "peas",
-    "pickle", "pie", "pineapple", "pizza", "popcorn", "potato", "pretzel",
-    "pudding", "pumpkin", "raisin", "rice", "roll", "salad", "sandwich",
-    "smoothie", "soup", "strawberry", "sugar", "sushi", "taco", "toast",
-    "tomato", "vanilla", "waffle", "watermelon", "yogurt",
-    # Nature
-    "beach", "boulder", "brook", "cave", "cliff", "cloud", "creek", "daisy",
-    "dawn", "desert", "dew", "dusk", "earth", "feather", "field", "fire",
-    "flame", "flood", "flower", "fog", "forest", "frost", "garden", "gem",
-    "glacier", "grass", "hill", "island", "jungle", "lake", "leaf", "meadow",
-    "moon", "mountain", "mud", "ocean", "pebble", "pond", "rain", "rainbow",
-    "river", "rock", "sand", "sea", "shadow", "shore", "sky", "snow",
-    "snowflake", "star", "stream", "sun", "sunset", "thunder", "tide",
-    "tornado", "tree", "valley", "vine", "volcano", "wave", "wind", "winter",
-    "wood",
-    # Toys, games and activities
-    "badge", "ball", "balloon", "bike", "block", "boat", "book", "bounce",
-    "bubble", "card", "castle", "chalk", "chess", "costume", "crayon", "dart",
-    "dice", "doll", "dragon", "drum", "flute", "frisbee", "game", "glitter",
-    "guitar", "helmet", "hula", "juggle", "jump", "kite", "lego", "magnet",
-    "marble", "maze", "medal", "paddle", "paint", "parachute", "pinwheel",
-    "puzzle", "race", "rocket", "sled", "slide", "soccer", "statue", "swing",
-    "train", "trophy", "trumpet", "whistle",
-    # Everyday objects
-    "backpack", "basket", "bell", "boot", "bottle", "box", "brush", "bucket",
-    "button", "candle", "cap", "clock", "coat", "comb", "compass", "cup",
-    "desk", "door", "drum", "fan", "flag", "flashlight", "fork", "glove",
-    "hammer", "hat", "jar", "kite", "lamp", "lantern", "lunchbox", "map",
-    "mirror", "mug", "pillow", "plate", "rug", "ruler", "scarf", "shoe",
-    "soap", "sock", "spoon", "table", "towel", "umbrella", "wallet", "whistle",
-    "window",
-    # Descriptive words (adjectives)
-    "big", "bold", "bouncy", "brave", "bright", "bubbly", "bumpy", "calm",
-    "cheerful", "chilly", "chunky", "clean", "clever", "cloudy", "cozy",
-    "crispy", "curly", "cute", "daring", "dazzling", "dreamy", "dusty",
-    "fancy", "fast", "fluffy", "friendly", "frosty", "frozen", "funny",
-    "fuzzy", "gentle", "giant", "glowing", "golden", "graceful", "great",
-    "happy", "heavy", "jolly", "jumpy", "kind", "little", "lively", "loud",
-    "lucky", "magical", "mellow", "merry", "mighty", "misty", "nimble",
-    "noisy", "peaceful", "perky", "playful", "polite", "pretty", "prickly",
-    "proud", "quick", "quiet", "radiant", "rapid", "round", "royal", "rugged",
-    "shiny", "silly", "sleepy", "slippery", "slow", "smart", "smooth",
-    "snappy", "soft", "sparkly", "speedy", "spiky", "splashy", "spotty",
-    "springy", "starry", "sticky", "stormy", "stretchy", "striped", "strong",
-    "sunny", "sweet", "swift", "tall", "tidy", "tiny", "warm", "wiggly",
-    "wild", "windy", "witty", "wonderful", "woolly", "zesty", "zippy",
-]
-
+# Kid-friendly word list: words are stored exclusively in the database table
+# workflow_kid_friendly_words (migration 199).  They are never served by any
+# API or UI route; the only access path is workflow_repo.get_kid_friendly_words().
 # Letter substitutions used for kid-friendly password "symbol" replacements.
 _KID_SUBSTITUTIONS: dict[str, str] = {
     "a": "@",
@@ -137,6 +61,11 @@ _KID_SUBSTITUTIONS: dict[str, str] = {
     "e": "3",
     "o": "0",
 }
+
+# In-process cache populated on first use; avoids repeated DB round-trips while
+# ensuring the word list remains inaccessible via any network interface.
+_kid_words_cache: list[str] = []
+_kid_words_lock = asyncio.Lock()
 
 
 def _generate_strong_password(
@@ -177,18 +106,30 @@ def _generate_strong_password(
     return "".join(password_chars)
 
 
-def _generate_kid_friendly_password() -> str:
-    """Generate a kid-friendly word-based password.
+async def _generate_kid_friendly_password() -> str:
+    """Generate a kid-friendly word-based password using words from the database.
 
-    Format: two capitalised common words (first letter upper-case only) followed by
-    2-4 random digits, with 1-2 letter-to-symbol substitutions applied to non-leading
-    characters across both words.  The large word pool (600+ entries) combined with
-    random digit count and substitution positions provides billions of possible
-    combinations, making repeated passwords extremely unlikely even without storing
-    previously generated values.
+    Words are loaded from workflow_kid_friendly_words on first call and cached
+    in-process; the cache is never serialised or transmitted.
+
+    Format: two capitalised common words (first letter upper-case only) followed
+    by 2-4 random digits, with 1-2 letter-to-symbol substitutions applied to
+    non-leading characters across both words.  The large DB word pool (~4 000+
+    entries) combined with random digit count and substitution positions provides
+    many billions of possible combinations.
     """
-    word1 = secrets.choice(_KID_FRIENDLY_WORDS)
-    word2 = secrets.choice(_KID_FRIENDLY_WORDS)
+    global _kid_words_cache
+
+    async with _kid_words_lock:
+        if not _kid_words_cache:
+            _kid_words_cache = await workflow_repo.get_kid_friendly_words()
+
+    word_pool = _kid_words_cache
+    if not word_pool:
+        raise WorkflowStepError("Kid-friendly word list is empty — ensure migration 199 has run")
+
+    word1 = secrets.choice(word_pool)
+    word2 = secrets.choice(word_pool)
 
     # Capitalise first letter of each word only (as per requirements).
     word1 = word1[0].upper() + word1[1:]
@@ -1410,7 +1351,7 @@ async def _execute_policy_step(
         return {"generated_password": generated, var_name: generated}
 
     if step_type == "generate_kid_friendly_password":
-        generated = _generate_kid_friendly_password()
+        generated = await _generate_kid_friendly_password()
         var_name = str(step.get("output_var") or "generated_password").strip() or "generated_password"
         return {"generated_password": generated, var_name: generated}
 
