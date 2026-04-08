@@ -50,6 +50,128 @@ DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
 
+# Kid-friendly word list: common nouns/adjectives safe for children, no profanity or
+# inappropriate combinations.  Each word starts with a lower-case letter; capitalisation
+# is applied at generation time when requested.
+_KID_FRIENDLY_WORDS: list[str] = [
+    "apple", "arrow", "artful", "anchor", "amber",
+    "balloon", "basket", "beaver", "blaze", "bloom",
+    "cactus", "candle", "castle", "cheetah", "cloud",
+    "daisy", "dancer", "dazzle", "dolphin", "dragonfly",
+    "eagle", "ember", "emerald", "engine", "explorer",
+    "falcon", "feather", "flame", "flower", "forest",
+    "garden", "giraffe", "glacier", "glimmer", "golden",
+    "hammer", "harbor", "hazel", "hero", "horizon",
+    "iceberg", "island", "ivory", "ivy", "indigo",
+    "jaguar", "jasper", "jewel", "jungle", "jupiter",
+    "koala", "lantern", "lemon", "leopard", "lightning",
+    "maple", "marble", "meadow", "meteor", "mirror",
+    "nebula", "noble", "north", "nutmeg", "nymph",
+    "ocean", "olive", "onyx", "orbit", "otter",
+    "panda", "parrot", "pebble", "penguin", "phoenix",
+    "quartz", "quasar", "quest", "quiet", "quicksilver",
+    "rabbit", "radiant", "rainbow", "ranger", "raven",
+    "saddle", "safari", "sapphire", "saturn", "silver",
+    "thunder", "tiger", "timber", "topaz", "torch",
+    "unicorn", "valley", "velvet", "venture", "violet",
+    "walrus", "wander", "whisper", "willow", "wizard",
+    "xenon", "yellow", "zebra", "zenith", "zephyr",
+]
+
+# Letter substitutions used for kid-friendly password "symbol" replacements.
+_KID_SUBSTITUTIONS: dict[str, str] = {
+    "a": "@",
+    "i": "!",
+    "s": "$",
+    "e": "3",
+    "o": "0",
+}
+
+
+def _generate_strong_password(
+    *,
+    length: int = 16,
+    use_upper: bool = True,
+    use_digits: bool = True,
+    use_symbols: bool = True,
+) -> str:
+    """Generate a cryptographically random strong password."""
+    import string
+
+    lower = string.ascii_lowercase
+    upper = string.ascii_uppercase if use_upper else ""
+    digits = string.digits if use_digits else ""
+    symbols = "!@#$%^&*-_=+?" if use_symbols else ""
+    alphabet = lower + upper + digits + symbols
+    if not alphabet:
+        alphabet = lower
+
+    length = max(8, min(length, 128))
+
+    # Guarantee at least one character from each requested category.
+    required: list[str] = [secrets.choice(lower)]
+    if use_upper:
+        required.append(secrets.choice(upper))
+    if use_digits:
+        required.append(secrets.choice(digits))
+    if use_symbols:
+        required.append(secrets.choice(symbols))
+
+    remaining = [secrets.choice(alphabet) for _ in range(length - len(required))]
+    password_chars = required + remaining
+    # Shuffle using secrets module for unpredictable ordering.
+    for i in range(len(password_chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        password_chars[i], password_chars[j] = password_chars[j], password_chars[i]
+    return "".join(password_chars)
+
+
+def _generate_kid_friendly_password() -> str:
+    """Generate a kid-friendly word-based password.
+
+    Format: two capitalised words (first letter upper-case only) separated by a
+    random 2-4 digit number with 1-2 letter substitutions applied across both words.
+    """
+    word1 = secrets.choice(_KID_FRIENDLY_WORDS)
+    word2 = secrets.choice(_KID_FRIENDLY_WORDS)
+
+    # Capitalise first letter of each word only.
+    word1 = word1[0].upper() + word1[1:]
+    word2 = word2[0].upper() + word2[1:]
+
+    # Pick 1-2 substitution candidates from available letters across both words.
+    candidates: list[tuple[int, int, str]] = []  # (word_index, char_index, replacement)
+    for word_idx, word in enumerate([word1, word2]):
+        for char_idx, ch in enumerate(word):
+            # Skip the capitalised first letter to keep readability.
+            if char_idx == 0:
+                continue
+            lower_ch = ch.lower()
+            if lower_ch in _KID_SUBSTITUTIONS:
+                candidates.append((word_idx, char_idx, _KID_SUBSTITUTIONS[lower_ch]))
+
+    num_substitutions = min(secrets.choice([1, 2]), len(candidates))
+    chosen: list[tuple[int, int, str]] = []
+    available = list(candidates)
+    for _ in range(num_substitutions):
+        if not available:
+            break
+        pick_idx = secrets.randbelow(len(available))
+        chosen.append(available.pop(pick_idx))
+
+    words = [list(word1), list(word2)]
+    for word_idx, char_idx, replacement in chosen:
+        words[word_idx][char_idx] = replacement
+
+    final_word1 = "".join(words[0])
+    final_word2 = "".join(words[1])
+
+    # Append 2-4 random digits.
+    num_digits = secrets.choice([2, 3, 4])
+    digits = "".join(str(secrets.randbelow(10)) for _ in range(num_digits))
+
+    return f"{final_word1}{final_word2}{digits}"
+
 
 class WorkflowStepError(RuntimeError):
     def __init__(
@@ -1206,6 +1328,25 @@ async def _execute_policy_step(
             "subject": subject,
             "provider_metadata": provider_metadata or {},
         }
+
+    if step_type == "generate_password":
+        pw_length = max(8, min(int(step.get("length") or 16), 128))
+        use_upper = bool(step.get("use_upper", True))
+        use_digits = bool(step.get("use_digits", True))
+        use_symbols = bool(step.get("use_symbols", True))
+        generated = _generate_strong_password(
+            length=pw_length,
+            use_upper=use_upper,
+            use_digits=use_digits,
+            use_symbols=use_symbols,
+        )
+        var_name = str(step.get("output_var") or "generated_password").strip() or "generated_password"
+        return {"generated_password": generated, var_name: generated}
+
+    if step_type == "generate_kid_friendly_password":
+        generated = _generate_kid_friendly_password()
+        var_name = str(step.get("output_var") or "generated_password").strip() or "generated_password"
+        return {"generated_password": generated, var_name: generated}
 
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
