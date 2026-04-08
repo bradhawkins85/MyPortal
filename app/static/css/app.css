@@ -6911,6 +6911,30 @@ dialog.dialog::backdrop {
   margin-top: auto;
   font-size: 0.85rem;
   color: rgba(148, 163, 184, 0.9);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.service-card__ai-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(139, 92, 246, 0.9);
+  text-decoration: none;
+  cursor: default;
+}
+
+a.service-card__ai-icon {
+  cursor: pointer;
+}
+
+a.service-card__ai-icon:hover {
+  color: rgba(167, 139, 250, 1);
+  text-decoration: none;
 }
 
 .service-status-admin__stats {

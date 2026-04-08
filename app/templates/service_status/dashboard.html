@@ -78,9 +78,22 @@
           {% endif %}
           <footer class="service-card__footer">
             {% if service.updated_at %}
-              <span>Updated {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}</span>
+              <span>Last Change {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}</span>
             {% else %}
-              <span>Last updated recently</span>
+              <span>Last Change not recorded</span>
+            {% endif %}
+            {% if service.ai_lookup_enabled %}
+              {% if service.ai_lookup_url %}
+                <a href="{{ service.ai_lookup_url }}" target="_blank" rel="noopener noreferrer" class="service-card__ai-icon" title="Status updated by AI — click to see the status page for detailed information" aria-label="AI Lookup — view status page">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  AI
+                </a>
+              {% else %}
+                <span class="service-card__ai-icon" title="Status updated by AI" aria-label="AI Lookup">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  AI
+                </span>
+              {% endif %}
             {% endif %}
           </footer>
         </article>
