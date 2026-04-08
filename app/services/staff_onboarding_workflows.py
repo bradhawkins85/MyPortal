@@ -2288,6 +2288,96 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
     }
 
 
+async def retry_failed_workflow_execution(
+    *,
+    execution_id: int,
+    initiated_by_user_id: int | None,
+) -> dict[str, Any]:
+    """Reset a failed workflow execution and re-queue it for processing."""
+    execution = await workflow_repo.get_execution_by_id(execution_id)
+    if not execution:
+        raise ValueError("Workflow execution not found")
+
+    state = str(execution.get("state") or "").strip().lower()
+    failed_states = {STATE_FAILED, STATE_OFFBOARDING_FAILED}
+    if state not in failed_states:
+        raise ValueError(f"Execution is not in a failed state (current: {state})")
+
+    company_id = int(execution["company_id"])
+    staff_id = int(execution["staff_id"])
+    direction = str(execution.get("direction") or DIRECTION_ONBOARDING).strip().lower()
+    if direction not in {DIRECTION_ONBOARDING, DIRECTION_OFFBOARDING}:
+        direction = DIRECTION_ONBOARDING
+
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise ValueError("Staff member not found")
+
+    reset_status = STATE_OFFBOARDING_APPROVED if direction == DIRECTION_OFFBOARDING else STATE_APPROVED
+    await staff_repo.update_staff(
+        staff_id,
+        company_id=company_id,
+        first_name=staff.get("first_name") or "",
+        last_name=staff.get("last_name") or "",
+        email=staff.get("email") or "",
+        mobile_phone=staff.get("mobile_phone"),
+        date_onboarded=staff.get("date_onboarded"),
+        date_offboarded=staff.get("date_offboarded"),
+        enabled=bool(staff.get("enabled", True)),
+        is_ex_staff=bool(staff.get("is_ex_staff", False)),
+        street=staff.get("street"),
+        city=staff.get("city"),
+        state=staff.get("state"),
+        postcode=staff.get("postcode"),
+        country=staff.get("country"),
+        department=staff.get("department"),
+        job_title=staff.get("job_title"),
+        org_company=staff.get("org_company"),
+        manager_name=staff.get("manager_name"),
+        account_action=staff.get("account_action"),
+        syncro_contact_id=staff.get("syncro_contact_id"),
+        onboarding_status=reset_status,
+        onboarding_complete=False,
+        onboarding_completed_at=None,
+    )
+
+    await enqueue_staff_onboarding_workflow(
+        company_id=company_id,
+        staff_id=staff_id,
+        initiated_by_user_id=initiated_by_user_id,
+        direction=direction,
+        requested_timezone=execution.get("requested_timezone"),
+    )
+
+    staff_name = f"{staff.get('first_name', '')} {staff.get('last_name', '')}".strip() or f"Staff #{staff_id}"
+    await audit_service.log_action(
+        user_id=initiated_by_user_id,
+        action=f"staff.{direction}.workflow.retry",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": company_id,
+            "original_execution_id": execution_id,
+            "direction": direction,
+        },
+    )
+    log_info(
+        "Retrying failed staff workflow execution",
+        company_id=company_id,
+        staff_id=staff_id,
+        original_execution_id=execution_id,
+        direction=direction,
+        initiated_by_user_id=initiated_by_user_id,
+    )
+    return {
+        "state": "queued",
+        "direction": direction,
+        "staff_id": staff_id,
+        "staff_name": staff_name,
+        "original_execution_id": execution_id,
+    }
+
+
 async def confirm_external_checkpoint_and_resume(
     *,
     company_id: int,
