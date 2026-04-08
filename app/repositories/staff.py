@@ -626,6 +626,20 @@ async def update_staff(
     return updated
 
 
+async def reset_staff_onboarding_status(staff_id: int, *, onboarding_status: str) -> None:
+    """Reset onboarding-related fields for a staff record."""
+    await db.execute(
+        """
+        UPDATE staff
+        SET onboarding_status = %s,
+            onboarding_complete = 0,
+            onboarding_completed_at = NULL
+        WHERE id = %s
+        """,
+        (onboarding_status, staff_id),
+    )
+
+
 async def delete_staff(staff_id: int) -> None:
     await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 

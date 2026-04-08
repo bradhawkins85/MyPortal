@@ -2314,32 +2314,7 @@ async def retry_failed_workflow_execution(
         raise ValueError("Staff member not found")
 
     reset_status = STATE_OFFBOARDING_APPROVED if direction == DIRECTION_OFFBOARDING else STATE_APPROVED
-    await staff_repo.update_staff(
-        staff_id,
-        company_id=company_id,
-        first_name=staff.get("first_name") or "",
-        last_name=staff.get("last_name") or "",
-        email=staff.get("email") or "",
-        mobile_phone=staff.get("mobile_phone"),
-        date_onboarded=staff.get("date_onboarded"),
-        date_offboarded=staff.get("date_offboarded"),
-        enabled=bool(staff.get("enabled", True)),
-        is_ex_staff=bool(staff.get("is_ex_staff", False)),
-        street=staff.get("street"),
-        city=staff.get("city"),
-        state=staff.get("state"),
-        postcode=staff.get("postcode"),
-        country=staff.get("country"),
-        department=staff.get("department"),
-        job_title=staff.get("job_title"),
-        org_company=staff.get("org_company"),
-        manager_name=staff.get("manager_name"),
-        account_action=staff.get("account_action"),
-        syncro_contact_id=staff.get("syncro_contact_id"),
-        onboarding_status=reset_status,
-        onboarding_complete=False,
-        onboarding_completed_at=None,
-    )
+    await staff_repo.reset_staff_onboarding_status(staff_id, onboarding_status=reset_status)
 
     await enqueue_staff_onboarding_workflow(
         company_id=company_id,
