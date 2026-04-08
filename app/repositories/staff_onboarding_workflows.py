@@ -727,7 +727,7 @@ async def get_kid_friendly_words() -> list[str]:
     this function.  The caller is expected to cache the result for the
     lifetime of the process so that this query is only executed once.
     """
-    rows = await db.fetchall(
+    rows = await db.fetch_all(
         "SELECT word FROM workflow_kid_friendly_words ORDER BY id",
         (),
     )
