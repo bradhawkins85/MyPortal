@@ -9333,6 +9333,16 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "CURL text fetch",
         "description": "Fetches data from an external web source using CURL and stores response as plain text only.",
     },
+    {
+        "type": "generate_password",
+        "name": "Generate password",
+        "description": "Generates a cryptographically random password with configurable complexity and stores it as a workflow variable.",
+    },
+    {
+        "type": "generate_kid_friendly_password",
+        "name": "Generate kid-friendly password",
+        "description": "Generates a word-based password with capitalisation, number suffix and symbol substitutions, safe for children.",
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
@@ -9395,6 +9405,16 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "curl_text",
         "name": "CURL text fetch",
         "description": "Fetches data from an external web source using CURL and stores response as plain text only.",
+    },
+    {
+        "type": "generate_password",
+        "name": "Generate password",
+        "description": "Generates a cryptographically random password with configurable complexity and stores it as a workflow variable.",
+    },
+    {
+        "type": "generate_kid_friendly_password",
+        "name": "Generate kid-friendly password",
+        "description": "Generates a word-based password with capitalisation, number suffix and symbol substitutions, safe for children.",
     },
 ]
 
@@ -9924,6 +9944,57 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Timeout seconds",
                 "type": "number",
                 "default": 30,
+            },
+        ],
+    },
+    "generate_password": {
+        "fields": [
+            {
+                "name": "length",
+                "label": "Password length",
+                "type": "number",
+                "default": 16,
+                "description": "Number of characters in the generated password (8–128).",
+            },
+            {
+                "name": "use_upper",
+                "label": "Include uppercase letters",
+                "type": "checkbox",
+                "default": True,
+            },
+            {
+                "name": "use_digits",
+                "label": "Include digits",
+                "type": "checkbox",
+                "default": True,
+            },
+            {
+                "name": "use_symbols",
+                "label": "Include symbols",
+                "type": "checkbox",
+                "default": True,
+            },
+            {
+                "name": "output_var",
+                "label": "Store password as variable",
+                "type": "text",
+                "default": "generated_password",
+                "description": "Workflow variable name used to reference this password in later steps, e.g. ${vars.generated_password}.",
+            },
+        ],
+    },
+    "generate_kid_friendly_password": {
+        "fields": [
+            {
+                "name": "output_var",
+                "label": "Store password as variable",
+                "type": "text",
+                "default": "generated_password",
+                "description": (
+                    "Workflow variable name used to reference this password in later steps, "
+                    "e.g. ${vars.generated_password}. The password will also be available as "
+                    "${vars.generated_password} automatically."
+                ),
             },
         ],
     },

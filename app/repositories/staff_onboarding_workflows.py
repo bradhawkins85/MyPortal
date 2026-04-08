@@ -717,3 +717,18 @@ async def finalize_external_confirmation_idempotency(
             idempotency_key,
         ),
     )
+
+
+async def get_kid_friendly_words() -> list[str]:
+    """Return all words from the kid-friendly word table.
+
+    Words are stored exclusively in the database (migration 199) and are
+    never returned by any API or UI route — the only access path is through
+    this function.  The caller is expected to cache the result for the
+    lifetime of the process so that this query is only executed once.
+    """
+    rows = await db.fetchall(
+        "SELECT word FROM workflow_kid_friendly_words ORDER BY id",
+        (),
+    )
+    return [str(row["word"]) for row in rows if row.get("word")]
