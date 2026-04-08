@@ -206,10 +206,12 @@ async def delete_stale_mailboxes(company_id: int, current_upns: list[str]) -> No
         )
         return
     placeholders = ", ".join(["%s"] * len(current_upns))
-    await db.execute(
-        f"DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ({placeholders})",
-        (company_id, *current_upns),
+    query = (
+        "DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ("
+        + placeholders  # contains only %s parameter markers, not user data
+        + ")"
     )
+    await db.execute(query, (company_id, *current_upns))
 
 
 async def get_mailboxes(company_id: int, mailbox_type: str) -> list[dict]:
@@ -350,20 +352,18 @@ async def get_mailboxes_accessible_by_member(
     if not upns:
         return []
     placeholders = ", ".join(["%s"] * len(upns))
-    rows = await db.fetch_all(
-        f"""
-        SELECT DISTINCT
-            mm.mailbox_email,
-            COALESCE(mb.display_name, mm.mailbox_email) AS display_name
-        FROM m365_mailbox_members mm
-        LEFT JOIN m365_mailboxes mb
-            ON mb.company_id = mm.company_id
-           AND mb.user_principal_name = mm.mailbox_email
-        WHERE mm.company_id = %s AND mm.member_upn IN ({placeholders})
-        ORDER BY display_name ASC
-        """,
-        (company_id, *upns),
+    query = (
+        "SELECT DISTINCT mm.mailbox_email,"
+        " COALESCE(mb.display_name, mm.mailbox_email) AS display_name"
+        " FROM m365_mailbox_members mm"
+        " LEFT JOIN m365_mailboxes mb"
+        "     ON mb.company_id = mm.company_id"
+        "    AND mb.user_principal_name = mm.mailbox_email"
+        " WHERE mm.company_id = %s AND mm.member_upn IN ("
+        + placeholders  # contains only %s parameter markers, not user data
+        + ") ORDER BY display_name ASC"
     )
+    rows = await db.fetch_all(query, (company_id, *upns))
     return [dict(row) for row in rows]
 
 
