@@ -328,7 +328,7 @@ async def get_mailbox_members_by_local_part(
 
 
 async def get_mailboxes_accessible_by_member(
-    company_id: int, member_upn: str | list[str]
+    company_id: int, member_upns: str | list[str]
 ) -> list[dict[str, Any]]:
     """Return mailboxes that the given member UPN (or list of UPNs) has been granted access to.
 
@@ -346,7 +346,7 @@ async def get_mailboxes_accessible_by_member(
     :returns: A list of dicts with ``mailbox_email`` and ``display_name`` keys,
         ordered alphabetically by ``display_name``.
     """
-    upns: list[str] = [member_upn] if isinstance(member_upn, str) else list(member_upn)
+    upns: list[str] = [member_upns] if isinstance(member_upns, str) else list(member_upns)
     if not upns:
         return []
     placeholders = ", ".join(["%s"] * len(upns))
