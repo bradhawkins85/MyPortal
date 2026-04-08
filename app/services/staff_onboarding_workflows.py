@@ -50,6 +50,125 @@ DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
 
+# Kid-friendly word list: words are stored exclusively in the database table
+# workflow_kid_friendly_words (migration 199).  They are never served by any
+# API or UI route; the only access path is workflow_repo.get_kid_friendly_words().
+# Letter substitutions used for kid-friendly password "symbol" replacements.
+_KID_SUBSTITUTIONS: dict[str, str] = {
+    "a": "@",
+    "i": "!",
+    "s": "$",
+    "e": "3",
+    "o": "0",
+}
+
+# In-process cache populated on first use; avoids repeated DB round-trips while
+# ensuring the word list remains inaccessible via any network interface.
+_kid_words_cache: list[str] = []
+_kid_words_lock = asyncio.Lock()
+
+
+def _generate_strong_password(
+    *,
+    length: int = 16,
+    use_upper: bool = True,
+    use_digits: bool = True,
+    use_symbols: bool = True,
+) -> str:
+    """Generate a cryptographically random strong password."""
+    import string
+
+    lower = string.ascii_lowercase
+    upper = string.ascii_uppercase if use_upper else ""
+    digits = string.digits if use_digits else ""
+    symbols = "!@#$%^&*-_=+?" if use_symbols else ""
+    alphabet = lower + upper + digits + symbols
+    if not alphabet:
+        alphabet = lower
+
+    length = max(8, min(length, 128))
+
+    # Guarantee at least one character from each requested category.
+    required: list[str] = [secrets.choice(lower)]
+    if use_upper:
+        required.append(secrets.choice(upper))
+    if use_digits:
+        required.append(secrets.choice(digits))
+    if use_symbols:
+        required.append(secrets.choice(symbols))
+
+    remaining = [secrets.choice(alphabet) for _ in range(length - len(required))]
+    password_chars = required + remaining
+    # Shuffle using secrets module for unpredictable ordering.
+    for i in range(len(password_chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        password_chars[i], password_chars[j] = password_chars[j], password_chars[i]
+    return "".join(password_chars)
+
+
+async def _generate_kid_friendly_password() -> str:
+    """Generate a kid-friendly word-based password using words from the database.
+
+    Words are loaded from workflow_kid_friendly_words on first call and cached
+    in-process; the cache is never serialised or transmitted.
+
+    Format: two capitalised common words (first letter upper-case only) followed
+    by 2-4 random digits, with 1-2 letter-to-symbol substitutions applied to
+    non-leading characters across both words.  The large DB word pool (~4 000+
+    entries) combined with random digit count and substitution positions provides
+    many billions of possible combinations.
+    """
+    global _kid_words_cache
+
+    async with _kid_words_lock:
+        if not _kid_words_cache:
+            _kid_words_cache = await workflow_repo.get_kid_friendly_words()
+
+    word_pool = _kid_words_cache
+    if not word_pool:
+        raise WorkflowStepError("Kid-friendly word list is empty — ensure migration 199 has run")
+
+    word1 = secrets.choice(word_pool)
+    word2 = secrets.choice(word_pool)
+
+    # Capitalise first letter of each word only (as per requirements).
+    word1 = word1[0].upper() + word1[1:]
+    word2 = word2[0].upper() + word2[1:]
+
+    # Collect candidate positions for symbol substitutions across both words,
+    # skipping the capitalised first letter of each word to preserve readability.
+    candidates: list[tuple[int, int, str]] = []  # (word_index, char_index, replacement)
+    for word_idx, word in enumerate([word1, word2]):
+        for char_idx, ch in enumerate(word):
+            if char_idx == 0:
+                continue
+            lower_ch = ch.lower()
+            if lower_ch in _KID_SUBSTITUTIONS:
+                candidates.append((word_idx, char_idx, _KID_SUBSTITUTIONS[lower_ch]))
+
+    # Apply 1-2 substitutions chosen at random from available positions.
+    num_substitutions = min(secrets.choice([1, 2]), len(candidates))
+    available = list(candidates)
+    chosen: list[tuple[int, int, str]] = []
+    for _ in range(num_substitutions):
+        if not available:
+            break
+        pick_idx = secrets.randbelow(len(available))
+        chosen.append(available.pop(pick_idx))
+
+    words = [list(word1), list(word2)]
+    for word_idx, char_idx, replacement in chosen:
+        words[word_idx][char_idx] = replacement
+
+    final_word1 = "".join(words[0])
+    final_word2 = "".join(words[1])
+
+    # Append 2-4 random digits for extra entropy.
+    num_digits = secrets.choice([2, 3, 4])
+    digit_suffix = "".join(str(secrets.randbelow(10)) for _ in range(num_digits))
+
+    return f"{final_word1}{final_word2}{digit_suffix}"
+
 
 class WorkflowStepError(RuntimeError):
     def __init__(
@@ -494,18 +613,28 @@ async def _attempt_step(
     max_retries: int,
     request_payload: dict[str, Any],
     callback,
+    secret_vars: set[str] | None = None,
 ) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(1, max_retries + 2):
         try:
             response_payload = await callback()
+            raw_response = response_payload if isinstance(response_payload, dict) else {"result": str(response_payload)}
+            # Redact any keys that look like secrets (passwords, tokens, keys) before
+            # persisting to the database so that generated passwords are never stored.
+            effective_secret_vars: set[str] = set(secret_vars or ())
+            if isinstance(raw_response, dict):
+                for key in raw_response:
+                    if _is_secret_var(str(key)):
+                        effective_secret_vars.add(str(key))
+            log_response = _redact_payload(raw_response, secret_vars=effective_secret_vars)
             await workflow_repo.append_step_log(
                 execution_id=execution_id,
                 step_name=step_name,
                 status="success",
                 attempt=attempt,
                 request_payload=request_payload,
-                response_payload=response_payload if isinstance(response_payload, dict) else {"result": str(response_payload)},
+                response_payload=log_response,
             )
             return response_payload if isinstance(response_payload, dict) else {"result": response_payload}
         except Exception as exc:  # noqa: BLE001
@@ -1220,6 +1349,25 @@ async def _execute_policy_step(
             "subject": subject,
             "provider_metadata": provider_metadata or {},
         }
+
+    if step_type == "generate_password":
+        pw_length = max(8, min(int(step.get("length") or 16), 128))
+        use_upper = bool(step.get("use_upper", True))
+        use_digits = bool(step.get("use_digits", True))
+        use_symbols = bool(step.get("use_symbols", True))
+        generated = _generate_strong_password(
+            length=pw_length,
+            use_upper=use_upper,
+            use_digits=use_digits,
+            use_symbols=use_symbols,
+        )
+        var_name = str(step.get("output_var") or "generated_password").strip() or "generated_password"
+        return {"generated_password": generated, var_name: generated}
+
+    if step_type == "generate_kid_friendly_password":
+        generated = await _generate_kid_friendly_password()
+        var_name = str(step.get("output_var") or "generated_password").strip() or "generated_password"
+        return {"generated_password": generated, var_name: generated}
 
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
