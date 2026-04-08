@@ -375,11 +375,25 @@ async def notify_staff_approval_requested(
         part for part in [staff.get("first_name"), staff.get("last_name")] if part
     ).strip() or (staff.get("email") or f"staff #{staff.get('id')}")
     message = f"Approval requested for staff onboarding: {staff_name}."
+
+    company = await company_repo.get_company_by_id(company_id)
+    company_name = (company or {}).get("name") or f"Company #{company_id}"
+
+    requested_by: str | None = None
+    if requester_user_id is not None:
+        requester = await user_repo.get_user_by_id(requester_user_id)
+        if requester:
+            requested_by = " ".join(
+                part for part in [requester.get("first_name"), requester.get("last_name")] if part
+            ).strip() or (requester.get("email") or f"User #{requester_user_id}")
+        else:
+            requested_by = f"User #{requester_user_id}"
+
     metadata = {
-        "company_id": company_id,
+        "company": company_name,
+        "staff": staff_name,
+        "requested_by": requested_by,
         "staff_id": staff.get("id"),
-        "staff_email": staff.get("email"),
-        "requested_by_user_id": requester_user_id,
     }
     for approver_id in approver_ids:
         try:

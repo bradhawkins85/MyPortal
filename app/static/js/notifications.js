@@ -528,6 +528,145 @@
     });
   }
 
+  function bindOnboardingActionButtons() {
+    const modal = document.getElementById('onboarding-action-modal');
+    if (!modal) {
+      return;
+    }
+
+    const approveForm = document.getElementById('onboarding-approve-form');
+    const denyForm = document.getElementById('onboarding-deny-form');
+    const description = document.getElementById('onboarding-action-description');
+
+    function openOnboardingModal(staffId, notificationId, staffName) {
+      document.getElementById('onboarding-approve-staff-id').value = staffId;
+      document.getElementById('onboarding-approve-notification-id').value = notificationId;
+      document.getElementById('onboarding-deny-staff-id').value = staffId;
+      document.getElementById('onboarding-deny-notification-id').value = notificationId;
+      if (description) {
+        description.textContent = staffName
+          ? `Review the onboarding request for ${staffName}.`
+          : 'Review the pending onboarding request.';
+      }
+      if (approveForm) {
+        approveForm.querySelector('#onboarding-approve-comment').value = '';
+      }
+      if (denyForm) {
+        denyForm.querySelector('#onboarding-deny-reason').value = '';
+        const errorEl = denyForm.querySelector('#onboarding-deny-reason-error');
+        if (errorEl) {
+          errorEl.hidden = true;
+        }
+      }
+      modal.hidden = false;
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeOnboardingModal() {
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    modal.querySelectorAll('[data-modal-close]').forEach((btn) => {
+      btn.addEventListener('click', closeOnboardingModal);
+    });
+
+    document.querySelectorAll('[data-onboarding-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const notificationId = button.getAttribute('data-onboarding-action');
+        const staffId = button.getAttribute('data-staff-id');
+        const row = document.querySelector(`[data-notification-row="${notificationId}"]`);
+        const messageCell = row ? row.querySelector('td[data-label="Message"] .notification-message') : null;
+        const staffName = messageCell ? messageCell.textContent.trim() : '';
+        openOnboardingModal(staffId, notificationId, staffName);
+      });
+    });
+
+    async function submitStaffDecision(action, staffId, body, notificationId) {
+      const response = await fetch(`/api/staff/${staffId}/onboarding/${action}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCsrfToken(),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(buildErrorMessage(detail, `Failed to ${action} onboarding request`));
+      }
+      try {
+        const record = await markNotification(notificationId);
+        const changed = applyNotificationUpdate(record);
+        if (changed) {
+          try {
+            await refreshNotificationSummary();
+          } catch (summaryError) {
+            console.warn(summaryError);
+          }
+        }
+      } catch (markError) {
+        console.warn('Could not mark notification as read:', markError);
+      }
+    }
+
+    if (approveForm) {
+      approveForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const staffId = document.getElementById('onboarding-approve-staff-id').value;
+        const notificationId = document.getElementById('onboarding-approve-notification-id').value;
+        const comment = document.getElementById('onboarding-approve-comment').value.trim();
+        const submitBtn = document.getElementById('onboarding-approve-btn');
+        submitBtn.disabled = true;
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Approving…';
+        try {
+          await submitStaffDecision('approve', staffId, { comment: comment || null }, notificationId);
+          closeOnboardingModal();
+          window.alert('Onboarding request approved successfully.');
+        } catch (error) {
+          window.alert(error.message || 'Unable to approve onboarding request');
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }
+      });
+    }
+
+    if (denyForm) {
+      denyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const staffId = document.getElementById('onboarding-deny-staff-id').value;
+        const notificationId = document.getElementById('onboarding-deny-notification-id').value;
+        const reason = document.getElementById('onboarding-deny-reason').value.trim();
+        const errorEl = document.getElementById('onboarding-deny-reason-error');
+        if (!reason) {
+          if (errorEl) {
+            errorEl.hidden = false;
+          }
+          document.getElementById('onboarding-deny-reason').focus();
+          return;
+        }
+        if (errorEl) {
+          errorEl.hidden = true;
+        }
+        const submitBtn = document.getElementById('onboarding-deny-btn');
+        submitBtn.disabled = true;
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Denying…';
+        try {
+          await submitStaffDecision('deny', staffId, { reason }, notificationId);
+          closeOnboardingModal();
+          window.alert('Onboarding request denied.');
+        } catch (error) {
+          window.alert(error.message || 'Unable to deny onboarding request');
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }
+      });
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindFilters();
     bindSelectionControls();
@@ -535,6 +674,7 @@
     bindBulkActions();
     bindDeleteActions();
     bindBulkDeleteActions();
+    bindOnboardingActionButtons();
     updateSelectionState();
 
     const visibleCounter = document.querySelector(notificationSelectors.unreadVisible);

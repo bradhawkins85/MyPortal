@@ -170,6 +170,16 @@
             </td>
             <td class="table__actions">
               <div class="table__action-buttons">
+                {% if notification.event_type == 'staff.onboarding.approval_requested' and notification.raw_metadata.get('staff_id') %}
+                <button
+                  type="button"
+                  class="button button--primary button--small"
+                  data-onboarding-action="{{ notification.id }}"
+                  data-staff-id="{{ notification.raw_metadata.get('staff_id') }}"
+                >
+                  Action
+                </button>
+                {% endif %}
                 <button
                   type="button"
                   class="button button--ghost button--small"
@@ -230,4 +240,50 @@
 {% block scripts %}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/notifications.js') }}" defer></script>
+{% endblock %}
+
+{% block modals %}
+<div id="onboarding-action-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-action-modal-title" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="onboarding-action-modal-title">Onboarding Approval</h2>
+    <p id="onboarding-action-description" class="modal__subtitle"></p>
+
+    <div id="onboarding-action-approve-section">
+      <h3>Approve request</h3>
+      <form id="onboarding-approve-form" novalidate>
+        <input type="hidden" id="onboarding-approve-staff-id" value="" />
+        <input type="hidden" id="onboarding-approve-notification-id" value="" />
+        <div class="form-group">
+          <label for="onboarding-approve-comment" class="form-label">Comment (optional)</label>
+          <textarea id="onboarding-approve-comment" name="comment" class="input" rows="3" placeholder="Optional approval comment"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" id="onboarding-approve-btn">Approve</button>
+        </div>
+      </form>
+    </div>
+
+    <hr />
+
+    <div id="onboarding-action-deny-section">
+      <h3>Deny request</h3>
+      <form id="onboarding-deny-form" novalidate>
+        <input type="hidden" id="onboarding-deny-staff-id" value="" />
+        <input type="hidden" id="onboarding-deny-notification-id" value="" />
+        <div class="form-group">
+          <label for="onboarding-deny-reason" class="form-label">Reason <span aria-hidden="true">*</span></label>
+          <textarea id="onboarding-deny-reason" name="reason" class="input" rows="3" placeholder="Required reason for denial" required></textarea>
+          <span id="onboarding-deny-reason-error" class="form-error" hidden>A reason is required to deny the request.</span>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--danger" id="onboarding-deny-btn">Deny</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}
