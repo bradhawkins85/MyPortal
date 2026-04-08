@@ -143,8 +143,9 @@
             <span class="execution-direction text-muted text-small"></span>
             <span class="execution-requested-at text-muted text-small"></span>
           </div>
-          <div class="execution-summary-right text-muted text-small" style="white-space:nowrap; flex-shrink:0;">
-            <span class="execution-step-count"></span>
+          <div class="execution-summary-right" style="display:flex; gap:0.5rem; align-items:center; white-space:nowrap; flex-shrink:0;">
+            <span class="execution-step-count text-muted text-small"></span>
+            <button type="button" class="btn btn-sm btn-secondary execution-retry-btn" hidden>Retry</button>
           </div>
         </summary>
         <div class="card__body stack-xs execution-body">
@@ -250,6 +251,8 @@
         container.appendChild(table);
       };
 
+      const FAILED_STATES = new Set(['failed', 'offboarding_failed']);
+
       const renderExecution = (execution) => {
         const clone = cardTemplate.content.cloneNode(true);
         const card = clone.querySelector('.execution-card');
@@ -278,6 +281,40 @@
           const errEl = card.querySelector('.meta-error');
           errEl.hidden = false;
           errEl.textContent = execution.lastError;
+        }
+
+        const retryBtn = card.querySelector('.execution-retry-btn');
+        if (FAILED_STATES.has((execution.state || '').toLowerCase())) {
+          retryBtn.hidden = false;
+          retryBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm('Retry this workflow execution for ' + (execution.staffName || 'Staff #' + execution.staffId) + '?')) return;
+            retryBtn.disabled = true;
+            retryBtn.textContent = 'Retrying\u2026';
+            try {
+              const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+              const headers = { 'Content-Type': 'application/json' };
+              if (csrfMeta) headers['X-CSRF-Token'] = csrfMeta.getAttribute('content');
+              const resp = await fetch('/api/staff/workflows/executions/' + execution.executionId + '/retry', {
+                method: 'POST',
+                headers,
+              });
+              const data = await resp.json();
+              if (!resp.ok) {
+                alert('Retry failed: ' + (data.detail || resp.status));
+                retryBtn.disabled = false;
+                retryBtn.textContent = 'Retry';
+              } else {
+                retryBtn.textContent = 'Queued';
+                badge.textContent = 'queued';
+                badge.className = 'history-state history-state--approved';
+              }
+            } catch (err) {
+              alert('Retry failed: ' + err.message);
+              retryBtn.disabled = false;
+              retryBtn.textContent = 'Retry';
+            }
+          });
         }
 
         renderStepsTable(execution.steps || [], card.querySelector('.execution-steps-container'));

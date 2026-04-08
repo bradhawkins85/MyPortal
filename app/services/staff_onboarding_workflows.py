@@ -2288,6 +2288,71 @@ async def get_staff_workflow_status(staff_id: int) -> dict[str, Any] | None:
     }
 
 
+async def retry_failed_workflow_execution(
+    *,
+    execution_id: int,
+    initiated_by_user_id: int | None,
+) -> dict[str, Any]:
+    """Reset a failed workflow execution and re-queue it for processing."""
+    execution = await workflow_repo.get_execution_by_id(execution_id)
+    if not execution:
+        raise ValueError("Workflow execution not found")
+
+    state = str(execution.get("state") or "").strip().lower()
+    failed_states = {STATE_FAILED, STATE_OFFBOARDING_FAILED}
+    if state not in failed_states:
+        raise ValueError(f"Execution is not in a failed state (current: {state})")
+
+    company_id = int(execution["company_id"])
+    staff_id = int(execution["staff_id"])
+    direction = str(execution.get("direction") or DIRECTION_ONBOARDING).strip().lower()
+    if direction not in {DIRECTION_ONBOARDING, DIRECTION_OFFBOARDING}:
+        direction = DIRECTION_ONBOARDING
+
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise ValueError("Staff member not found")
+
+    reset_status = STATE_OFFBOARDING_APPROVED if direction == DIRECTION_OFFBOARDING else STATE_APPROVED
+    await staff_repo.reset_staff_onboarding_status(staff_id, onboarding_status=reset_status)
+
+    await enqueue_staff_onboarding_workflow(
+        company_id=company_id,
+        staff_id=staff_id,
+        initiated_by_user_id=initiated_by_user_id,
+        direction=direction,
+        requested_timezone=execution.get("requested_timezone"),
+    )
+
+    staff_name = f"{staff.get('first_name', '')} {staff.get('last_name', '')}".strip() or f"Staff #{staff_id}"
+    await audit_service.log_action(
+        user_id=initiated_by_user_id,
+        action=f"staff.{direction}.workflow.retry",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": company_id,
+            "original_execution_id": execution_id,
+            "direction": direction,
+        },
+    )
+    log_info(
+        "Retrying failed staff workflow execution",
+        company_id=company_id,
+        staff_id=staff_id,
+        original_execution_id=execution_id,
+        direction=direction,
+        initiated_by_user_id=initiated_by_user_id,
+    )
+    return {
+        "state": "queued",
+        "direction": direction,
+        "staff_id": staff_id,
+        "staff_name": staff_name,
+        "original_execution_id": execution_id,
+    }
+
+
 async def confirm_external_checkpoint_and_resume(
     *,
     company_id: int,
