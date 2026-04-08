@@ -10803,6 +10803,12 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         m365_last_sign_in=_parse_input_datetime(existing.get("m365_last_sign_in")),
     )
 
+    approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
+        company_id=int(updated["company_id"]),
+        staff=updated,
+        requester_user_id=int(user["id"]) if user.get("id") is not None else None,
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+    )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
         action="staff.offboarding.requested",
@@ -10817,6 +10823,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
                 "requested_at_local": requested_at_raw,
                 "timezone": requested_timezone,
             },
+            "approver_user_ids": approver_user_ids,
         },
     )
 
