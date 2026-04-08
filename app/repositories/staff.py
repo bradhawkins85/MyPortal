@@ -193,7 +193,13 @@ async def list_staff(
         SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
-        LEFT JOIN staff_onboarding_workflow_executions AS e ON e.staff_id = s.id
+        LEFT JOIN (
+            SELECT e1.* FROM staff_onboarding_workflow_executions e1
+            WHERE e1.id = (
+                SELECT MAX(e2.id) FROM staff_onboarding_workflow_executions e2
+                WHERE e2.staff_id = e1.staff_id
+            )
+        ) AS e ON e.staff_id = s.id
         WHERE {where}
         ORDER BY s.updated_at ASC, s.id ASC
         LIMIT %s
@@ -305,7 +311,13 @@ async def list_all_staff(
         SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
-        LEFT JOIN staff_onboarding_workflow_executions AS e ON e.staff_id = s.id
+        LEFT JOIN (
+            SELECT e1.* FROM staff_onboarding_workflow_executions e1
+            WHERE e1.id = (
+                SELECT MAX(e2.id) FROM staff_onboarding_workflow_executions e2
+                WHERE e2.staff_id = e1.staff_id
+            )
+        ) AS e ON e.staff_id = s.id
     """
     if where_clause:
         sql += f" WHERE {where_clause}"
