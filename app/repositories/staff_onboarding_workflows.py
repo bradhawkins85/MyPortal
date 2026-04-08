@@ -177,6 +177,19 @@ async def create_or_reset_execution(
     return execution
 
 
+async def get_execution_by_id(execution_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT *
+        FROM staff_onboarding_workflow_executions
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (execution_id,),
+    )
+    return _normalise_execution(row)
+
+
 async def get_execution_by_staff_id(staff_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
