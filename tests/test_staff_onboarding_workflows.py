@@ -714,3 +714,34 @@ async def test_store_json_variable_is_applied_after_step_and_resolves_in_next_st
         vars_map={"pwd": pwd_value},
     )
     assert email_body == "Password: S3cr3tP@ss!"
+
+
+@pytest.mark.anyio
+async def test_kid_friendly_password_always_contains_symbol(monkeypatch):
+    """Kid-friendly passwords must always contain at least one symbol.
+
+    This covers the edge case where both generated words contain no substitutable
+    letters in non-leading positions, which previously produced a symbol-free password.
+    """
+    import app.repositories.staff_onboarding_workflows as wf_repo
+
+    _symbols = set(workflows._KID_SUBSTITUTIONS.values())
+
+    # Force a word list that has no substitutable characters outside the first letter
+    # so candidates will always be empty unless we pick words that happen to qualify.
+    # Using "Bbc" and "Ddf" — no a/i/s/e/o in any position.
+    monkeypatch.setattr(workflows, "_kid_words_cache", ["bbc", "ddf"])
+
+    for _ in range(50):
+        password = await workflows._generate_kid_friendly_password()
+        assert any(ch in _symbols for ch in password), (
+            f"Kid-friendly password '{password}' contains no symbol"
+        )
+
+    # Also verify that normal words still always yield a symbol.
+    monkeypatch.setattr(workflows, "_kid_words_cache", ["sunshine", "rainbow"])
+    for _ in range(50):
+        password = await workflows._generate_kid_friendly_password()
+        assert any(ch in _symbols for ch in password), (
+            f"Kid-friendly password '{password}' contains no symbol"
+        )

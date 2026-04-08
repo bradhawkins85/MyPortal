@@ -160,6 +160,17 @@ async def _generate_kid_friendly_password() -> str:
     for word_idx, char_idx, replacement in chosen:
         words[word_idx][char_idx] = replacement
 
+    # Guarantee at least one symbol is present even when no substitution
+    # candidates were found (e.g. both words lack substitutable letters).
+    if not chosen:
+        sym = secrets.choice(list(_KID_SUBSTITUTIONS.values()))
+        # Insert after the first character of word2 to preserve capitalization.
+        if len(words[1]) > 1:
+            pos = secrets.randbelow(len(words[1]) - 1) + 1
+            words[1].insert(pos, sym)
+        else:
+            words[1].append(sym)
+
     final_word1 = "".join(words[0])
     final_word2 = "".join(words[1])
 
