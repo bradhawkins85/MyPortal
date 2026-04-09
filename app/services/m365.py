@@ -1802,7 +1802,11 @@ async def test_connectivity(company_id: int) -> dict[str, Any]:
     }
 
 
-async def get_all_users(company_id: int) -> list[dict[str, Any]]:
+async def get_all_users(
+    company_id: int,
+    *,
+    force_client_credentials: bool = False,
+) -> list[dict[str, Any]]:
     """Return all M365 users for the given company, including disabled accounts.
 
     Fetches members from the Microsoft Graph ``/users`` endpoint and handles
@@ -1811,8 +1815,14 @@ async def get_all_users(company_id: int) -> list[dict[str, Any]]:
 
     The returned user objects include ``accountEnabled`` so callers can
     distinguish active users from blocked/disabled (ex-staff) accounts.
+
+    Pass ``force_client_credentials=True`` to bypass any cached/delegated token
+    and always acquire a fresh application-permission token.  This is recommended
+    when the returned user IDs will be used in subsequent write operations (e.g.
+    offboarding PATCH calls) so that both the lookup and the write use the same
+    token and therefore the same tenant context.
     """
-    access_token = await acquire_access_token(company_id)
+    access_token = await acquire_access_token(company_id, force_client_credentials=force_client_credentials)
     url = (
         "https://graph.microsoft.com/v1.0/users?"
         "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
