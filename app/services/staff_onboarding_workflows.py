@@ -1410,9 +1410,18 @@ async def _execute_policy_step(
         return {"generated_password": generated, var_name: generated}
 
     if step_type == "create_user":
-        email = str(staff.get("email") or "").strip().lower()
+        # Resolve UPN/email: prefer the configured user_principal_name template (which
+        # supports variables like ${vars.staff.first_name}.${vars.staff.last_name}@co.com),
+        # then fall back to the staff member's stored email address.
+        configured_upn = str(_resolve_template_value(step.get("user_principal_name"), vars_map=vars_map) or "").strip().lower()
+        staff_email = str(staff.get("email") or "").strip().lower()
+        email = configured_upn or staff_email
         if not email:
-            raise WorkflowStepError("Staff email is required for create_user")
+            raise WorkflowStepError(
+                "User Principal Name is required for create_user. "
+                "Configure the 'User Principal Name (email)' field on this step "
+                "or ensure the staff member has an email address set."
+            )
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         nickname = email.split("@", 1)[0]
         raw_password = str(_resolve_template_value(step.get("password"), vars_map=vars_map) or "").strip()
@@ -1423,9 +1432,7 @@ async def _execute_policy_step(
             or " ".join(p for p in [staff.get("first_name"), staff.get("last_name")] if p).strip()
             or email
         ).strip()
-        upn = str(
-            _resolve_template_value(step.get("user_principal_name"), vars_map=vars_map) or email
-        ).strip()
+        upn = email
         mail_nickname = str(
             _resolve_template_value(step.get("mail_nickname"), vars_map=vars_map) or nickname
         ).strip()

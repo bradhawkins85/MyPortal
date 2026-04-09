@@ -9444,6 +9444,19 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     "create_user": {
         "fields": [
             {
+                "name": "user_principal_name",
+                "label": "User Principal Name (email)",
+                "type": "text",
+                "default": "${vars.staff.email}",
+                "description": (
+                    "The login email / UPN for the new account. "
+                    "You can build it from variables and fixed text, e.g. "
+                    "${vars.staff.first_name}.${vars.staff.last_name}@company.com. "
+                    "Falls back to the staff member's email address if left blank."
+                ),
+                "example": "${vars.staff.first_name}.${vars.staff.last_name}@company.com",
+            },
+            {
                 "name": "display_name",
                 "label": "Display name",
                 "type": "text",
