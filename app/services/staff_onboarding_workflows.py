@@ -50,6 +50,14 @@ DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
 _SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
 
+
+def _default_workflow_key(direction: str) -> str:
+    return (
+        workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+        if direction == DIRECTION_OFFBOARDING
+        else workflow_repo.DEFAULT_WORKFLOW_KEY
+    )
+
 # Kid-friendly word list: words are stored exclusively in the database table
 # workflow_kid_friendly_words (migration 199).  They are never served by any
 # API or UI route; the only access path is workflow_repo.get_kid_friendly_words().
@@ -377,15 +385,19 @@ async def notify_staff_approval_requested(
     company_id: int,
     staff: dict[str, Any],
     requester_user_id: int | None,
+    direction: str = DIRECTION_ONBOARDING,
 ) -> list[int]:
-    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    policy = await workflow_repo.get_company_workflow_policy(
+        company_id, default_workflow_key=_default_workflow_key(direction)
+    )
     approver_ids = await resolve_approver_user_ids(company_id=company_id, policy=policy)
     if not approver_ids:
         return []
     staff_name = " ".join(
         part for part in [staff.get("first_name"), staff.get("last_name")] if part
     ).strip() or (staff.get("email") or f"staff #{staff.get('id')}")
-    message = f"Approval requested for staff onboarding: {staff_name}."
+    direction_label = "offboarding" if direction == DIRECTION_OFFBOARDING else "onboarding"
+    message = f"Approval requested for staff {direction_label}: {staff_name}."
 
     company = await company_repo.get_company_by_id(company_id)
     company_name = (company or {}).get("name") or f"Company #{company_id}"
@@ -406,10 +418,15 @@ async def notify_staff_approval_requested(
         "requested_by": requested_by,
         "staff_id": staff.get("id"),
     }
+    event_type = (
+        "staff.offboarding.approval_requested"
+        if direction == DIRECTION_OFFBOARDING
+        else "staff.onboarding.approval_requested"
+    )
     for approver_id in approver_ids:
         try:
             await notifications_service.emit_notification(
-                event_type="staff.onboarding.approval_requested",
+                event_type=event_type,
                 message=message,
                 user_id=approver_id,
                 metadata=metadata,
@@ -1818,11 +1835,14 @@ async def run_staff_onboarding_workflow(
             "direction": direction,
         }
 
-    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    policy = await workflow_repo.get_company_workflow_policy(
+        company_id,
+        default_workflow_key=_default_workflow_key(direction),
+    )
     if not policy.get("is_enabled", True):
         return {"state": "skipped", "reason": "workflow_disabled"}
 
-    workflow_key = str(policy.get("workflow_key") or workflow_repo.DEFAULT_WORKFLOW_KEY)
+    workflow_key = str(policy.get("workflow_key") or _default_workflow_key(direction))
     max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
 
@@ -1862,14 +1882,16 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise ValueError("Staff not found")
-    policy = await workflow_repo.get_company_workflow_policy(company_id)
-    workflow_key = str(policy.get("workflow_key") or workflow_repo.DEFAULT_WORKFLOW_KEY)
-    max_retries = max(0, int(policy.get("max_retries") or 0))
-    policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
-
     direction = str((await workflow_repo.get_execution_by_staff_id(staff_id) or {}).get("direction") or DIRECTION_ONBOARDING).strip().lower()
     if direction not in {DIRECTION_ONBOARDING, DIRECTION_OFFBOARDING}:
         direction = DIRECTION_ONBOARDING
+    policy = await workflow_repo.get_company_workflow_policy(
+        company_id, default_workflow_key=_default_workflow_key(direction)
+    )
+    workflow_key = str(policy.get("workflow_key") or _default_workflow_key(direction))
+    max_retries = max(0, int(policy.get("max_retries") or 0))
+    policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+
     in_progress_state = STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING
     completed_state = STATE_OFFBOARDING_COMPLETED if direction == DIRECTION_OFFBOARDING else STATE_COMPLETED
     failed_state = STATE_OFFBOARDING_FAILED if direction == DIRECTION_OFFBOARDING else STATE_FAILED
