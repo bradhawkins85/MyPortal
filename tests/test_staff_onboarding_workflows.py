@@ -353,7 +353,7 @@ async def test_resume_offboarding_marks_staff_disabled_only_after_success(monkey
     )
     monkeypatch.setattr(
         workflows.workflow_repo,
-        "get_execution_by_staff_id",
+        "get_execution_by_id",
         AsyncMock(return_value={"id": 71, "direction": workflows.DIRECTION_OFFBOARDING}),
     )
     monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
@@ -412,7 +412,7 @@ async def test_resume_offboarding_failure_creates_ticket_with_step_payload(monke
     )
     monkeypatch.setattr(
         workflows.workflow_repo,
-        "get_execution_by_staff_id",
+        "get_execution_by_id",
         AsyncMock(return_value={"id": 72, "direction": workflows.DIRECTION_OFFBOARDING}),
     )
     monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
@@ -445,7 +445,101 @@ async def test_resume_offboarding_failure_creates_ticket_with_step_payload(monke
     assert context["payload"] == {"group_id": "abc"}
 
 
-def test_compute_scheduled_execution_onboarding_uses_local_midnight_minus_three_days():
+@pytest.mark.anyio
+async def test_resume_uses_direction_from_execution_id_not_latest_staff_execution(monkeypatch):
+    """Regression test: resume must derive direction from execution_id, not from the
+    most-recent execution for the staff.  Previously get_execution_by_staff_id was
+    used, which could return a newer *onboarding* execution and cause offboarding
+    requests to incorrectly run the onboarding workflow."""
+    staff_record = {
+        "id": 601,
+        "company_id": 9,
+        "first_name": "Test",
+        "last_name": "User",
+        "email": "test@example.com",
+        "enabled": True,
+        "is_ex_staff": False,
+        "onboarding_status": workflows.STATE_OFFBOARDING_APPROVED,
+    }
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_company_workflow_policy",
+        AsyncMock(return_value={"workflow_key": "staff_onboarding_m365", "max_retries": 0, "config": {}}),
+    )
+    # execution_id=80 is an offboarding execution.
+    # get_execution_by_id must be called with 80 and return the offboarding direction.
+    # A stale onboarding execution (id=99) would have been returned by the old
+    # get_execution_by_staff_id call, causing the onboarding workflow to run instead.
+    get_by_id_mock = AsyncMock(return_value={"id": 80, "direction": workflows.DIRECTION_OFFBOARDING})
+    monkeypatch.setattr(workflows.workflow_repo, "get_execution_by_id", get_by_id_mock)
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_step_logs_for_execution_ids",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        workflows.staff_custom_fields_repo,
+        "get_all_staff_field_values",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        workflows.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 9, "name": "Test Co"}),
+    )
+    monkeypatch.setattr(workflows.workflow_repo, "append_step_log", AsyncMock())
+    update_mock = AsyncMock(return_value=staff_record)
+    monkeypatch.setattr(workflows.staff_repo, "update_staff", update_mock)
+    monkeypatch.setattr(workflows, "_attempt_step", AsyncMock(return_value={"offboarded": True}))
+    monkeypatch.setattr(workflows.audit_service, "log_action", AsyncMock())
+
+    result = await workflows.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=9,
+        staff_id=601,
+        execution_id=80,
+        initiated_by_user_id=None,
+    )
+
+    # Must complete as offboarding, not onboarding.
+    assert result["state"] == workflows.STATE_OFFBOARDING_COMPLETED
+    # get_execution_by_id must have been called with the specific execution_id.
+    get_by_id_mock.assert_awaited_once_with(80)
+    # Staff must be marked disabled and ex-staff as part of offboarding completion.
+    final_kwargs = update_mock.await_args_list[-1].kwargs
+    assert final_kwargs["enabled"] is False
+    assert final_kwargs["is_ex_staff"] is True
+
+
+@pytest.mark.anyio
+async def test_enqueue_offboarding_uses_offboarding_workflow_key(monkeypatch):
+    """Regression: enqueue_staff_onboarding_workflow must use the direction-specific
+    workflow key when creating the queued execution for offboarding requests."""
+    staff_record = {"id": 700, "date_offboarded": None}
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    get_policy_mock = AsyncMock(return_value={"workflow_key": None})
+    monkeypatch.setattr(workflows.workflow_repo, "get_company_workflow_policy", get_policy_mock)
+    create_mock = AsyncMock(return_value={"id": 88})
+    monkeypatch.setattr(workflows.workflow_repo, "create_or_reset_execution", create_mock)
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+
+    await workflows.enqueue_staff_onboarding_workflow(
+        company_id=5,
+        staff_id=700,
+        initiated_by_user_id=None,
+        direction=workflows.DIRECTION_OFFBOARDING,
+    )
+
+    # Policy must be fetched with the offboarding default key.
+    assert get_policy_mock.await_args.kwargs.get("default_workflow_key") == workflows.workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+    # Execution must be created with the offboarding default workflow key as fallback.
+    assert create_mock.await_args.kwargs["workflow_key"] == workflows.workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+    # Execution state must be set to offboarding_approved.
+    assert workflows.workflow_repo.update_execution_state.await_args.kwargs["state"] == workflows.STATE_OFFBOARDING_APPROVED
+
+
+
     scheduled_for_utc, requested_timezone = workflows._compute_scheduled_execution(
         staff={"date_onboarded": "2026-04-10T09:30:00"},
         direction=workflows.DIRECTION_ONBOARDING,
@@ -541,7 +635,7 @@ async def test_resume_workflow_pauses_on_license_exhaustion(monkeypatch):
     )
     monkeypatch.setattr(
         workflows.workflow_repo,
-        "get_execution_by_staff_id",
+        "get_execution_by_id",
         AsyncMock(return_value={"id": 90, "direction": workflows.DIRECTION_ONBOARDING}),
     )
     monkeypatch.setattr(

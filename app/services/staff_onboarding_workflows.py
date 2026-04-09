@@ -1882,7 +1882,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise ValueError("Staff not found")
-    direction = str((await workflow_repo.get_execution_by_staff_id(staff_id) or {}).get("direction") or DIRECTION_ONBOARDING).strip().lower()
+    direction = str((await workflow_repo.get_execution_by_id(execution_id) or {}).get("direction") or DIRECTION_ONBOARDING).strip().lower()
     if direction not in {DIRECTION_ONBOARDING, DIRECTION_OFFBOARDING}:
         direction = DIRECTION_ONBOARDING
     policy = await workflow_repo.get_company_workflow_policy(
@@ -2209,11 +2209,13 @@ async def enqueue_staff_onboarding_workflow(
         direction=direction,
         requested_timezone=requested_timezone,
     )
-    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    policy = await workflow_repo.get_company_workflow_policy(
+        company_id, default_workflow_key=_default_workflow_key(direction)
+    )
     execution = await workflow_repo.create_or_reset_execution(
         company_id=company_id,
         staff_id=staff_id,
-        workflow_key=str(policy.get("workflow_key") or workflow_repo.DEFAULT_WORKFLOW_KEY),
+        workflow_key=str(policy.get("workflow_key") or _default_workflow_key(direction)),
         direction=direction,
         scheduled_for_utc=scheduled_for_utc,
         requested_timezone=normalized_timezone,
