@@ -894,8 +894,8 @@ async def test_create_user_step_creates_m365_user_and_stores_id(monkeypatch):
 
 @pytest.mark.anyio
 async def test_create_user_step_raises_without_email(monkeypatch):
-    """create_user raises WorkflowStepError when staff email is missing."""
-    with pytest.raises(workflows.WorkflowStepError, match="Staff email is required"):
+    """create_user raises WorkflowStepError when staff email is missing and no user_principal_name template is set."""
+    with pytest.raises(workflows.WorkflowStepError, match="User Principal Name is required"):
         await workflows._execute_policy_step(
             step={"type": "create_user"},
             company_id=1,
@@ -903,6 +903,41 @@ async def test_create_user_step_raises_without_email(monkeypatch):
             policy_config={},
             vars_map={},
         )
+
+
+@pytest.mark.anyio
+async def test_create_user_step_uses_upn_template_when_staff_email_missing(monkeypatch):
+    """create_user uses configured user_principal_name template even when staff has no email."""
+    captured: dict[str, object] = {}
+
+    async def fake_acquire_token(company_id, *, force_client_credentials=False):
+        return "token-xyz"
+
+    async def fake_graph_post(access_token, url, payload):
+        captured["payload"] = payload
+        return {"id": "guid-002", "userPrincipalName": payload.get("userPrincipalName")}
+
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", fake_graph_post)
+
+    vars_map: dict[str, object] = {
+        "staff.first_name": "Bob",
+        "staff.last_name": "Smith",
+    }
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_user",
+            "user_principal_name": "${vars.staff.first_name}.${vars.staff.last_name}@contoso.com",
+        },
+        company_id=1,
+        staff={"id": 7, "email": "", "first_name": "Bob", "last_name": "Smith"},
+        policy_config={},
+        vars_map=vars_map,
+    )
+
+    assert result["user_principal_name"] == "bob.smith@contoso.com"
+    assert captured["payload"]["userPrincipalName"] == "bob.smith@contoso.com"  # type: ignore[index]
+    assert captured["payload"]["mailNickname"] == "bob.smith"  # type: ignore[index]
 
 
 @pytest.mark.anyio
