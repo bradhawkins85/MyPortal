@@ -1297,6 +1297,77 @@
       });
     }
 
+    async function approveStaffRequest(requestId, comment) {
+      await requestJson(`/api/staff/requests/${requestId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ comment: comment || null }),
+      });
+    }
+
+    async function denyStaffRequest(requestId, reason) {
+      if (!reason) {
+        throw new Error('A deny reason is required.');
+      }
+      await requestJson(`/api/staff/requests/${requestId}/deny`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+    }
+
+    container.querySelectorAll('[data-request-approve]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-request-approve');
+        if (!id) {
+          return;
+        }
+        const comment = window.prompt('Approval comment (optional):') ?? '';
+        try {
+          await approveStaffRequest(id, comment);
+          const row = button.closest('tr');
+          if (row) {
+            row.remove();
+          }
+          const tbody = document.querySelector('#staff-requests-table tbody');
+          if (tbody && !tbody.querySelector('tr')) {
+            const section = document.querySelector('#staff-requests-table')?.closest('section');
+            if (section) {
+              section.remove();
+            }
+          }
+        } catch (error) {
+          alert(`Failed to approve staff request: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-request-deny]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-request-deny');
+        if (!id) {
+          return;
+        }
+        const reason = window.prompt('Deny reason (required):');
+        if (!reason) {
+          return;
+        }
+        try {
+          await denyStaffRequest(id, reason);
+          const row = button.closest('tr');
+          if (row) {
+            row.remove();
+          }
+          const tbody = document.querySelector('#staff-requests-table tbody');
+          if (tbody && !tbody.querySelector('tr')) {
+            const section = document.querySelector('#staff-requests-table')?.closest('section');
+            if (section) {
+              section.remove();
+            }
+          }
+        } catch (error) {
+          alert(`Failed to deny staff request: ${error.message}`);
+        }
+      });
+    });
 
   });
 })();
