@@ -64,7 +64,7 @@ async def create_request(
             request_notes,
             custom_fields_json,
             requested_by_user_id,
-            _coerce_datetime(requested_at) or datetime.now(timezone.utc).replace(tzinfo=None),
+            _coerce_datetime(requested_at) or _coerce_datetime(datetime.now(timezone.utc)),
         ),
     )
     row = await get_request_by_id(request_id)
