@@ -127,6 +127,7 @@ async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
                 "is_ex_staff": False,
                 "account_action": "Offboard Requested",
                 "onboarding_complete": False,
+                "date_offboarded": "2099-06-01T09:00:00",
             }
         ),
     )
@@ -171,7 +172,7 @@ async def test_offboarding_approve_persists_decision_and_audits(monkeypatch):
     assert kwargs["approval_notes"] == "HR validated"
     assert kwargs["enabled"] is True
     assert kwargs["is_ex_staff"] is False
-    assert kwargs["date_offboarded"] is None
+    assert kwargs["date_offboarded"] == "2099-06-01T09:00:00"
     assert kwargs["onboarding_status"] == staff.staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
     audit_mock.assert_awaited_once()
     assert audit_mock.await_args.kwargs["action"] == "staff.offboarding.approved"
