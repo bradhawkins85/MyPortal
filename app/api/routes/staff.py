@@ -14,6 +14,7 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as staff_workflow_repo
+from app.repositories import staff_requests as staff_requests_repo
 from app.schemas.staff import (
     StaffApprovalDecision,
     StaffCreate,
@@ -22,6 +23,7 @@ from app.schemas.staff import (
     StaffWorkflowManualActionRequest,
     StaffWorkflowManualActionResponse,
     StaffRequestCreate,
+    StaffRequestResponse,
     StaffResponse,
     StaffUpdate,
 )
@@ -267,7 +269,20 @@ async def create_staff(
     return StaffResponse.model_validate(created)
 
 
-@router.post("/requests", response_model=StaffResponse, status_code=status.HTTP_201_CREATED)
+@router.get("/requests", response_model=list[StaffRequestResponse])
+async def list_staff_requests(
+    company_id: int = Query(..., alias="companyId"),
+    request_status: str | None = Query(default=None, alias="status"),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    await _ensure_company_exists(company_id)
+    await _require_staff_request_access(current_user, company_id)
+    records = await staff_requests_repo.list_requests(company_id, status=request_status)
+    return [StaffRequestResponse.model_validate(r) for r in records]
+
+
+@router.post("/requests", response_model=StaffRequestResponse, status_code=status.HTTP_201_CREATED)
 async def create_staff_request(
     payload: StaffRequestCreate,
     company_id: int = Query(..., alias="companyId"),
@@ -278,7 +293,7 @@ async def create_staff_request(
     await _require_staff_request_access(current_user, company_id)
     payload_data = payload.model_dump(by_alias=False)
     payload_data.pop("company_id", None)
-    custom_fields = payload_data.pop("custom_fields", None) or {}
+    custom_fields: dict = payload_data.pop("custom_fields", None) or {}
     if custom_fields and not await _can_submit_group_mapped_custom_fields(current_user, company_id):
         policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
         policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
@@ -288,42 +303,174 @@ async def create_staff_request(
             for field_name, value in custom_fields.items()
             if field_name not in mapped_custom_fields
         }
-    payload_data["company_id"] = company_id
-    payload_data["onboarding_status"] = "awaiting_approval"
-    payload_data.setdefault("onboarding_complete", False)
-    payload_data.setdefault("onboarding_completed_at", None)
-    payload_data.setdefault("approval_status", "pending")
-    payload_data.setdefault("requested_by_user_id", int(current_user.get("id")) if current_user.get("id") is not None else None)
-    payload_data.setdefault("requested_at", datetime.now(tz=timezone.utc))
-    payload_data.setdefault("approved_by_user_id", None)
-    payload_data.setdefault("approved_at", None)
-    payload_data.setdefault("approval_notes", None)
-    created = await staff_repo.create_staff(**payload_data)
-    await staff_custom_fields_repo.set_staff_field_values_by_name(
-        company_id=created["company_id"],
-        staff_id=created["id"],
-        values=custom_fields,
+    requester_id = int(current_user.get("id")) if current_user.get("id") is not None else None
+    created = await staff_requests_repo.create_request(
+        company_id=company_id,
+        first_name=str(payload_data.get("first_name") or "").strip(),
+        last_name=str(payload_data.get("last_name") or "").strip(),
+        email=str(payload_data.get("email") or "").strip() or None,
+        mobile_phone=str(payload_data.get("mobile_phone") or "").strip() or None,
+        date_onboarded=payload_data.get("date_onboarded"),
+        department=str(payload_data.get("department") or "").strip() or None,
+        job_title=str(payload_data.get("job_title") or "").strip() or None,
+        request_notes=str(payload_data.get("request_notes") or "").strip() or None,
+        custom_fields=custom_fields or None,
+        requested_by_user_id=requester_id,
+        requested_at=datetime.now(tz=timezone.utc),
     )
-    created = await staff_repo.get_staff_by_id(created["id"]) or created
     approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
-        company_id=int(created["company_id"]),
-        staff=created,
-        requester_user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        company_id=company_id,
+        staff={
+            "id": created["id"],
+            "company_id": company_id,
+            "first_name": created.get("first_name"),
+            "last_name": created.get("last_name"),
+            "email": created.get("email"),
+            "onboarding_status": "awaiting_approval",
+            "approval_status": "pending",
+        },
+        requester_user_id=requester_id,
     )
     await audit_service.log_action(
-        user_id=int(current_user.get("id")) if current_user.get("id") is not None else None,
+        user_id=requester_id,
         action="staff.onboarding.requested",
-        entity_type="staff",
+        entity_type="staff_request",
         entity_id=int(created["id"]),
         metadata={
-            "company_id": int(created["company_id"]),
-            "onboarding_status": created.get("onboarding_status"),
-            "approval_status": created.get("approval_status"),
+            "company_id": company_id,
+            "approval_status": "pending",
             "approver_user_ids": approver_user_ids,
         },
     )
-    created["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(int(created["id"]))
-    return StaffResponse.model_validate(created)
+    return StaffRequestResponse.model_validate(created)
+
+
+@router.post("/requests/{request_id}/approve", response_model=StaffRequestResponse)
+async def approve_staff_request_entry(
+    request_id: int,
+    payload: StaffApprovalDecision,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    staff_request = await staff_requests_repo.get_request_by_id(request_id)
+    if not staff_request:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff request not found")
+    await _require_staff_approval_access(current_user, int(staff_request["company_id"]))
+    if str(staff_request.get("status") or "").lower() != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Staff request is not in a pending state",
+        )
+    comment_text = str(payload.comment or payload.reason or "").strip() or None
+    approver_id = int(current_user.get("id")) if current_user.get("id") is not None else None
+    now = datetime.now(tz=timezone.utc)
+
+    # Check if a staff record already exists for this email to avoid duplicates
+    existing_staff = None
+    email = str(staff_request.get("email") or "").strip().lower()
+    if email:
+        matches = await staff_repo.list_staff_by_email(email)
+        for candidate in matches:
+            if int(candidate.get("company_id") or 0) == int(staff_request["company_id"]):
+                existing_staff = candidate
+                break
+
+    if existing_staff:
+        staff_id = int(existing_staff["id"])
+    else:
+        created_staff = await staff_repo.create_staff(
+            company_id=int(staff_request["company_id"]),
+            first_name=str(staff_request.get("first_name") or ""),
+            last_name=str(staff_request.get("last_name") or ""),
+            email=str(staff_request.get("email") or ""),
+            mobile_phone=staff_request.get("mobile_phone"),
+            date_onboarded=staff_request.get("date_onboarded"),
+            department=staff_request.get("department"),
+            job_title=staff_request.get("job_title"),
+            onboarding_status="approved",
+            onboarding_complete=False,
+            approval_status="approved",
+            approved_by_user_id=approver_id,
+            approved_at=now,
+            approval_notes=comment_text,
+            requested_by_user_id=staff_request.get("requested_by_user_id"),
+            requested_at=staff_request.get("requested_at"),
+        )
+        staff_id = int(created_staff["id"])
+        custom_fields = staff_request.get("custom_fields") or {}
+        if custom_fields:
+            await staff_custom_fields_repo.set_staff_field_values_by_name(
+                company_id=int(staff_request["company_id"]),
+                staff_id=staff_id,
+                values=custom_fields,
+            )
+        await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+            company_id=int(staff_request["company_id"]),
+            staff_id=staff_id,
+            initiated_by_user_id=approver_id,
+        )
+
+    updated_request = await staff_requests_repo.update_request_status(
+        request_id,
+        status="approved",
+        approved_by_user_id=approver_id,
+        approved_at=now,
+        approval_notes=comment_text,
+        staff_id=staff_id,
+    )
+    await audit_service.log_action(
+        user_id=approver_id,
+        action="staff.onboarding.approved",
+        entity_type="staff_request",
+        entity_id=request_id,
+        metadata={
+            "company_id": int(staff_request["company_id"]),
+            "staff_id": staff_id,
+            "comment": comment_text,
+            "linked_existing": existing_staff is not None,
+        },
+    )
+    return StaffRequestResponse.model_validate(updated_request)
+
+
+@router.post("/requests/{request_id}/deny", response_model=StaffRequestResponse)
+async def deny_staff_request_entry(
+    request_id: int,
+    payload: StaffApprovalDecision,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    staff_request = await staff_requests_repo.get_request_by_id(request_id)
+    if not staff_request:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff request not found")
+    await _require_staff_approval_access(current_user, int(staff_request["company_id"]))
+    if str(staff_request.get("status") or "").lower() != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Staff request is not in a pending state",
+        )
+    reason_text = str(payload.reason or payload.comment or "").strip()
+    if not reason_text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deny reason is required")
+    approver_id = int(current_user.get("id")) if current_user.get("id") is not None else None
+    updated_request = await staff_requests_repo.update_request_status(
+        request_id,
+        status="denied",
+        approved_by_user_id=approver_id,
+        approved_at=datetime.now(tz=timezone.utc),
+        approval_notes=reason_text,
+    )
+    await audit_service.log_action(
+        user_id=approver_id,
+        action="staff.onboarding.denied",
+        entity_type="staff_request",
+        entity_id=request_id,
+        metadata={
+            "company_id": int(staff_request["company_id"]),
+            "reason": reason_text,
+        },
+    )
+    return StaffRequestResponse.model_validate(updated_request)
 
 
 @router.post("/{staff_id}/approve", response_model=StaffResponse, include_in_schema=False)

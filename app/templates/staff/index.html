@@ -32,6 +32,53 @@
 
 {% block content %}
 <div class="admin-grid">
+  {% if can_approve_onboarding and staff_pending_requests %}
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Pending staff requests <span class="badge">{{ staff_pending_requests | length }}</span></h2>
+        <p class="card__subtitle">New staff requests awaiting approval. Approve or deny each request below.</p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="staff-requests-table" data-table>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">First name</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Last name</th>
+            <th scope="col" data-sort="string" data-mobile-priority="essential">Email</th>
+            <th scope="col" data-sort="string">Mobile</th>
+            <th scope="col" data-sort="string">Department</th>
+            <th scope="col" data-sort="date">Start date</th>
+            <th scope="col" data-sort="date">Requested at</th>
+            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for req in staff_pending_requests %}
+            <tr data-request-id="{{ req.id }}">
+              <td data-label="First name">{{ req.first_name }}</td>
+              <td data-label="Last name">{{ req.last_name }}</td>
+              <td data-label="Email">{{ req.email or '—' }}</td>
+              <td data-label="Mobile">{{ req.mobile_phone or '—' }}</td>
+              <td data-label="Department">{{ req.department or '—' }}</td>
+              <td data-label="Start date" data-value="{{ req.date_onboarded or '' }}" data-utc="{{ req.date_onboarded or '' }}">
+                {% if req.date_onboarded %}{{ req.date_onboarded }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td data-label="Requested at" data-value="{{ req.requested_at or '' }}" data-utc="{{ req.requested_at or '' }}">
+                {% if req.requested_at %}{{ req.requested_at }}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              <td class="table__actions">
+                <button type="button" class="button button--small button--ghost" data-request-approve="{{ req.id }}">Approve</button>
+                <button type="button" class="button button--small button--ghost button--danger" data-request-deny="{{ req.id }}">Deny</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
   <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div>
@@ -629,6 +676,7 @@
 </div>
 
 <script type="application/json" id="staff-data">{{ staff_members | tojson }}</script>
+<script type="application/json" id="staff-pending-requests-data">{{ staff_pending_requests | tojson }}</script>
 <script type="application/json" id="staff-custom-field-definitions">{{ staff_custom_field_definitions | tojson }}</script>
 <script type="application/json" id="staff-flags">{{ {
   'isSuperAdmin': is_super_admin,
