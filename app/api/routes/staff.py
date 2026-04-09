@@ -361,7 +361,7 @@ async def approve_staff_request_entry(
             status_code=status.HTTP_409_CONFLICT,
             detail="Staff request is not in a pending state",
         )
-    comment_text = str(payload.comment or payload.reason or "").strip() or None
+    approval_comment = str(payload.comment or payload.reason or "").strip() or None
     approver_id = int(current_user.get("id")) if current_user.get("id") is not None else None
     now = datetime.now(tz=timezone.utc)
 
@@ -392,7 +392,7 @@ async def approve_staff_request_entry(
             approval_status="approved",
             approved_by_user_id=approver_id,
             approved_at=now,
-            approval_notes=comment_text,
+            approval_notes=approval_comment,
             requested_by_user_id=staff_request.get("requested_by_user_id"),
             requested_at=staff_request.get("requested_at"),
         )
@@ -415,7 +415,7 @@ async def approve_staff_request_entry(
         status="approved",
         approved_by_user_id=approver_id,
         approved_at=now,
-        approval_notes=comment_text,
+        approval_notes=approval_comment,
         staff_id=staff_id,
     )
     await audit_service.log_action(
@@ -426,7 +426,7 @@ async def approve_staff_request_entry(
         metadata={
             "company_id": int(staff_request["company_id"]),
             "staff_id": staff_id,
-            "comment": comment_text,
+            "comment": approval_comment,
             "linked_existing": existing_staff is not None,
         },
     )
@@ -449,8 +449,8 @@ async def deny_staff_request_entry(
             status_code=status.HTTP_409_CONFLICT,
             detail="Staff request is not in a pending state",
         )
-    reason_text = str(payload.reason or payload.comment or "").strip()
-    if not reason_text:
+    denial_reason = str(payload.reason or payload.comment or "").strip()
+    if not denial_reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deny reason is required")
     approver_id = int(current_user.get("id")) if current_user.get("id") is not None else None
     updated_request = await staff_requests_repo.update_request_status(
@@ -458,7 +458,7 @@ async def deny_staff_request_entry(
         status="denied",
         approved_by_user_id=approver_id,
         approved_at=datetime.now(tz=timezone.utc),
-        approval_notes=reason_text,
+        approval_notes=denial_reason,
     )
     await audit_service.log_action(
         user_id=approver_id,
@@ -467,7 +467,7 @@ async def deny_staff_request_entry(
         entity_id=request_id,
         metadata={
             "company_id": int(staff_request["company_id"]),
-            "reason": reason_text,
+            "reason": denial_reason,
         },
     )
     return StaffRequestResponse.model_validate(updated_request)
