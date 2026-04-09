@@ -388,7 +388,7 @@ async def notify_staff_approval_requested(
     direction: str = DIRECTION_ONBOARDING,
 ) -> list[int]:
     policy = await workflow_repo.get_company_workflow_policy(
-        company_id, default_workflow_key=_default_workflow_key(direction)
+        company_id, default_workflow_key=_default_workflow_key(direction), direction=direction
     )
     approver_ids = await resolve_approver_user_ids(company_id=company_id, policy=policy)
     if not approver_ids:
@@ -504,7 +504,19 @@ async def _escalate_stale_non_actionable_state(
     onboarding_status: str,
     initiated_by_user_id: int | None,
 ) -> dict[str, Any]:
-    policy = await workflow_repo.get_company_workflow_policy(company_id)
+    direction = (
+        DIRECTION_OFFBOARDING
+        if onboarding_status in {
+            STATE_OFFBOARDING_AWAITING_APPROVAL,
+            STATE_OFFBOARDING_WAITING_EXTERNAL,
+        }
+        else DIRECTION_ONBOARDING
+    )
+    policy = await workflow_repo.get_company_workflow_policy(
+        company_id,
+        default_workflow_key=_default_workflow_key(direction),
+        direction=direction,
+    )
     policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
     timeout_by_state = {
         STATE_AWAITING_APPROVAL: _parse_timeout_hours(
@@ -1999,6 +2011,7 @@ async def run_staff_onboarding_workflow(
     policy = await workflow_repo.get_company_workflow_policy(
         company_id,
         default_workflow_key=_default_workflow_key(direction),
+        direction=direction,
     )
     if not policy.get("is_enabled", True):
         return {"state": "skipped", "reason": "workflow_disabled"}
@@ -2047,7 +2060,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     if direction not in {DIRECTION_ONBOARDING, DIRECTION_OFFBOARDING}:
         direction = DIRECTION_ONBOARDING
     policy = await workflow_repo.get_company_workflow_policy(
-        company_id, default_workflow_key=_default_workflow_key(direction)
+        company_id, default_workflow_key=_default_workflow_key(direction), direction=direction
     )
     workflow_key = str(policy.get("workflow_key") or _default_workflow_key(direction))
     max_retries = max(0, int(policy.get("max_retries") or 0))
@@ -2371,7 +2384,7 @@ async def enqueue_staff_onboarding_workflow(
         requested_timezone=requested_timezone,
     )
     policy = await workflow_repo.get_company_workflow_policy(
-        company_id, default_workflow_key=_default_workflow_key(direction)
+        company_id, default_workflow_key=_default_workflow_key(direction), direction=direction
     )
     execution = await workflow_repo.create_or_reset_execution(
         company_id=company_id,
