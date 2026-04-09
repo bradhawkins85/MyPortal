@@ -1056,7 +1056,13 @@ async def _execute_policy_step(
     if step_type == "provision_account":
         return await _run_provisioning_step(company_id=company_id, staff=staff)
     if step_type == "offboard_account":
-        return await _run_offboarding_step(company_id=company_id, staff=staff, policy_config=policy_config)
+        return await _run_offboarding_step(
+            company_id=company_id,
+            staff=staff,
+            policy_config=policy_config,
+            step_config=step,
+            vars_map=vars_map,
+        )
     if step_type == "m365_assign_license":
         return await _run_licensing_step(company_id=company_id, staff=staff, policy_config=policy_config)
 
@@ -1685,18 +1691,53 @@ async def _run_offboarding_step(
     company_id: int,
     staff: dict[str, Any],
     policy_config: dict[str, Any],
+    step_config: dict[str, Any] | None = None,
+    vars_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    disable_sign_in = bool(policy_config.get("offboarding_disable_sign_in", True))
-    remove_licenses = bool(policy_config.get("offboarding_remove_licenses", True))
-    remove_groups = bool(policy_config.get("offboarding_remove_groups", True))
+    _vars = vars_map or {}
+    _step = step_config or {}
+
+    disable_sign_in = bool(
+        _step.get("disable_sign_in", policy_config.get("offboarding_disable_sign_in", True))
+    )
+    remove_licenses = bool(
+        _step.get("revoke_licenses", policy_config.get("offboarding_remove_licenses", True))
+    )
+    remove_groups = bool(
+        _step.get("remove_from_groups", policy_config.get("offboarding_remove_groups", True))
+    )
     configured_group_ids = [
         str(group_id).strip()
         for group_id in (policy_config.get("offboarding_group_ids") or [])
         if str(group_id).strip()
     ]
 
+    # Email forwarding: step field may reference a workflow var or be a literal address.
+    raw_forwarding = _step.get("forwarding_address") or ""
+    forwarding_address = str(
+        _resolve_template_value(raw_forwarding, vars_map=_vars) or ""
+    ).strip() or None
+
+    # Out-of-office: step field may reference a workflow var.
+    raw_ooo = _step.get("out_of_office_message") or ""
+    out_of_office_message = str(
+        _resolve_template_value(raw_ooo, vars_map=_vars) or ""
+    ).strip() or None
+
+    # Mailbox access grant: step field lists comma-separated emails or a workflow var.
+    raw_mailbox_grant = _step.get("mailbox_grant_emails") or ""
+    resolved_mailbox_grant_raw = _resolve_template_value(raw_mailbox_grant, vars_map=_vars)
+    mailbox_grant_email_list: list[str] = []
+    if isinstance(resolved_mailbox_grant_raw, list):
+        mailbox_grant_email_list = [str(e).strip() for e in resolved_mailbox_grant_raw if str(e).strip()]
+    elif resolved_mailbox_grant_raw:
+        mailbox_grant_email_list = [
+            e.strip() for e in str(resolved_mailbox_grant_raw).split(",") if e.strip()
+        ]
+
     user = await _resolve_staff_m365_user(company_id, staff)
     user_id = str(user["id"])
+    user_upn = str(user.get("userPrincipalName") or staff.get("email") or "").strip()
     access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
     steps_executed: list[str] = []
     removed_license_count = 0
@@ -1763,6 +1804,45 @@ async def _run_offboarding_step(
                 )
         steps_executed.append("remove_groups")
 
+    if out_of_office_message:
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{user_id}/mailboxSettings",
+            {
+                "automaticRepliesSetting": {
+                    "status": "AlwaysEnabled",
+                    "internalReplyMessage": out_of_office_message,
+                    "externalReplyMessage": out_of_office_message,
+                }
+            },
+        )
+        steps_executed.append("set_out_of_office")
+
+    if forwarding_address:
+        mailbox_settings_patch: dict[str, Any] = {
+            "forwardingSmtpAddress": forwarding_address,
+            "isForwardingEnabled": True,
+        }
+        if out_of_office_message:
+            # Include the OOO setting in the same PATCH to avoid overwriting it.
+            mailbox_settings_patch["automaticRepliesSetting"] = {
+                "status": "AlwaysEnabled",
+                "internalReplyMessage": out_of_office_message,
+                "externalReplyMessage": out_of_office_message,
+            }
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{user_id}/mailboxSettings",
+            mailbox_settings_patch,
+        )
+        steps_executed.append("set_email_forwarding")
+
+    if mailbox_grant_email_list and user_upn:
+        # Mailbox access delegation (e.g. FullAccess) requires Exchange Online PowerShell
+        # or Graph-based user consent flows. We record the request here so downstream
+        # workflow steps or manual processes can action it.
+        steps_executed.append("mailbox_access_requested")
+
     return {
         "company_id": int(company_id),
         "staff_id": int(staff["id"]),
@@ -1771,6 +1851,9 @@ async def _run_offboarding_step(
         "steps_executed": steps_executed,
         "licenses_removed": removed_license_count,
         "groups_removed": removed_group_count,
+        "out_of_office_set": out_of_office_message is not None,
+        "email_forwarding_set": forwarding_address is not None,
+        "mailbox_access_requested_for": mailbox_grant_email_list,
     }
 
 
@@ -1841,6 +1924,24 @@ async def _execute_policy_steps(
     for name, value in staff_custom_fields.items():
         vars_map[f"custom_fields.{name}"] = value
         vars_map[f"staff_custom_fields.{name}"] = value
+
+    # Offboarding-request-specific variables (captured at request time).
+    if direction == DIRECTION_OFFBOARDING:
+        ooo_message = str(staff.get("offboarding_out_of_office") or "").strip() or None
+        forward_to = str(staff.get("offboarding_email_forward_to") or "").strip() or None
+        raw_grant = staff.get("offboarding_mailbox_grant_emails")
+        grant_emails: list[str] = []
+        if isinstance(raw_grant, str) and raw_grant.strip():
+            try:
+                parsed_grant = json.loads(raw_grant)
+                if isinstance(parsed_grant, list):
+                    grant_emails = [str(e) for e in parsed_grant if e]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        vars_map["offboarding.out_of_office_message"] = ooo_message
+        vars_map["offboarding.email_forward_to"] = forward_to
+        vars_map["offboarding.mailbox_grant_emails"] = grant_emails
+
     secret_vars: set[str] = set()
 
     for item in prior_logs:

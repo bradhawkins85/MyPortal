@@ -412,6 +412,7 @@
     const staffList = parseJson('staff-data', []);
     const customFieldDefinitions = parseJson('staff-custom-field-definitions', []);
     const flags = parseJson('staff-flags', {});
+    const activeStaffForOffboarding = parseJson('active-staff-for-offboarding', []);
     const staffById = new Map(staffList.map((member) => [member.id, member]));
 
     submitOnChange(container);
@@ -428,6 +429,9 @@
     const offboardingTimeField = getField('offboarding-time');
     const offboardingTimezoneField = getField('offboarding-timezone');
     const offboardingReasonNotesField = getField('offboarding-reason-notes');
+    const offboardingOutOfOfficeField = getField('offboarding-out-of-office');
+    const offboardingEmailForwardToField = getField('offboarding-email-forward-to');
+    const offboardingMailboxGrantField = getField('offboarding-mailbox-grant');
     const offboardingImmediateButton = getField('offboarding-immediate');
     const offboardingFormError = getField('offboarding-form-error');
     const addForm = container.querySelector('form.staff-form');
@@ -655,6 +659,29 @@
       offboardingTimeField.value = localTime;
     }
 
+    function buildStaffOptions(excludeStaffId) {
+      return activeStaffForOffboarding
+        .filter((s) => String(s.id) !== String(excludeStaffId))
+        .map((s) => {
+          const nameParts = [s.first_name, s.last_name].filter(Boolean);
+          const label = nameParts.length ? `${nameParts.join(' ')} (${s.email})` : s.email;
+          return { value: s.id, label };
+        });
+    }
+
+    function populateStaffSelect(selectEl, options, multipleMode) {
+      if (!selectEl) return;
+      while (selectEl.options.length > (multipleMode ? 0 : 1)) {
+        selectEl.remove(multipleMode ? 0 : 1);
+      }
+      options.forEach(({ value, label }) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        selectEl.appendChild(opt);
+      });
+    }
+
     function openOffboardingRequestModal(staffId) {
       const member = staffById.get(Number(staffId));
       if (
@@ -670,7 +697,13 @@
       offboardingStaffIdField.value = String(staffId);
       offboardingReasonNotesField.value = '';
       offboardingTimezoneField.value = getBrowserTimezone() || '';
+      if (offboardingOutOfOfficeField) offboardingOutOfOfficeField.value = '';
       setDefaultOffboardingDateTime();
+
+      const staffOptions = buildStaffOptions(staffId);
+      populateStaffSelect(offboardingEmailForwardToField, staffOptions, false);
+      populateStaffSelect(offboardingMailboxGrantField, staffOptions, true);
+
       closeModal(editModal);
       openModal(offboardingModal);
     }
@@ -925,6 +958,12 @@
           setInlineError(offboardingFormError, 'Offboarding date, time, timezone, and reason/notes are required.');
           return;
         }
+        const outOfOfficeMessage = offboardingOutOfOfficeField ? offboardingOutOfOfficeField.value.trim() || null : null;
+        const emailForwardToStaffId = offboardingEmailForwardToField && offboardingEmailForwardToField.value
+          ? Number(offboardingEmailForwardToField.value) : null;
+        const mailboxGrantStaffIds = offboardingMailboxGrantField
+          ? Array.from(offboardingMailboxGrantField.selectedOptions).map((opt) => Number(opt.value))
+          : [];
         try {
           setInlineError(offboardingFormError, '');
           await requestJson(`/api/staff/${staffId}/offboarding/request`, {
@@ -934,6 +973,9 @@
               requestedAt,
               requestedTimezone: timezone,
               notes: null,
+              outOfOfficeMessage,
+              emailForwardToStaffId,
+              mailboxGrantStaffIds,
             }),
           });
           window.location.reload();

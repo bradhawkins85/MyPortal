@@ -3609,6 +3609,10 @@ async def _render_company_edit_page(
             "payment_method", (company_record.get("payment_method") or "invoice_prepay").strip()
         ),
         "require_po": _bool_value("require_po", bool(company_record.get("require_po"))),
+        "offboarding_email_forwarding_enabled": _bool_value(
+            "offboarding_email_forwarding_enabled",
+            bool(int(company_record.get("offboarding_email_forwarding_enabled", 1) or 1)),
+        ),
     }
 
     form_email_text = form_data.get("email_domains", "")
@@ -9043,6 +9047,8 @@ async def staff_page(
     departments: list[str] = []
     field_config: list[dict[str, Any]] = []
     custom_field_definitions: list[dict[str, Any]] = []
+    active_staff_for_offboarding: list[dict[str, Any]] = []
+    offboarding_email_forwarding_enabled: bool = True
     if company_id is not None:
         field_config = await staff_field_config_service.load_effective_company_staff_fields(
             company_id
@@ -9050,6 +9056,11 @@ async def staff_page(
         custom_field_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
         staff_members = await staff_repo.list_staff(
             company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag
+        )
+        active_staff_for_offboarding = await staff_repo.list_active_staff_for_offboarding(company_id)
+        company_record = await company_repo.get_company_by_id(company_id)
+        offboarding_email_forwarding_enabled = bool(
+            int((company_record or {}).get("offboarding_email_forwarding_enabled", 1) or 1)
         )
         if can_approve_onboarding:
             staff_pending_requests = await staff_requests_repo.list_requests(
@@ -9248,6 +9259,8 @@ async def staff_page(
         "show_ex_staff": show_ex_staff_flag,
         "staff_field_config": field_config,
         "staff_custom_field_definitions": custom_field_definitions,
+        "active_staff_for_offboarding": active_staff_for_offboarding,
+        "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -9294,7 +9307,11 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
     {
         "type": "offboard_account",
         "name": "Disable sign-in & remove access",
-        "description": "Disables sign-in and optionally removes licenses/group membership.",
+        "description": (
+            "Disables sign-in and optionally removes licenses/group membership. "
+            "Can also set out-of-office reply and configure email forwarding using "
+            "${vars.offboarding.*} variables from the request."
+        ),
     },
     {
         "type": "m365_rename_upn_display_name",
@@ -9710,13 +9727,33 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Forward mail to",
                 "type": "text",
                 "default": "",
-                "example": "manager@company.com",
+                "description": (
+                    "Email address to forward mail to. Supports ${vars.offboarding.email_forward_to} "
+                    "to use the address selected on the offboarding request."
+                ),
+                "example": "${vars.offboarding.email_forward_to}",
             },
             {
                 "name": "out_of_office_message",
                 "label": "Out of office message",
                 "type": "textarea",
                 "default": "",
+                "description": (
+                    "Sets an automatic reply message on the mailbox. Supports "
+                    "${vars.offboarding.out_of_office_message} to use the message entered on the request."
+                ),
+            },
+            {
+                "name": "mailbox_grant_emails",
+                "label": "Grant mailbox access to (comma-separated emails)",
+                "type": "text",
+                "default": "",
+                "description": (
+                    "Comma-separated list of email addresses to record as mailbox access requests. "
+                    "Supports ${vars.offboarding.mailbox_grant_emails} to use the list from the request. "
+                    "Note: actual Exchange Online delegation must be actioned separately."
+                ),
+                "example": "${vars.offboarding.mailbox_grant_emails}",
             },
         ],
     },
@@ -10783,6 +10820,48 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     )
     notes = str(payload.get("notes") or "").strip() or None
 
+    # Optional offboarding request fields
+    out_of_office_message = str(payload.get("outOfOfficeMessage") or payload.get("out_of_office_message") or "").strip() or None
+    email_forward_to_staff_id_raw = payload.get("emailForwardToStaffId") or payload.get("email_forward_to_staff_id")
+    mailbox_grant_staff_ids_raw = payload.get("mailboxGrantStaffIds") or payload.get("mailbox_grant_staff_ids") or []
+
+    # Resolve email forwarding target
+    email_forward_to: str | None = None
+    if email_forward_to_staff_id_raw is not None:
+        try:
+            forward_staff_id = int(email_forward_to_staff_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid emailForwardToStaffId")
+        forward_staff = await staff_repo.get_staff_by_id(forward_staff_id)
+        if not forward_staff or not forward_staff.get("email"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target staff not found")
+        if (
+            not bool(forward_staff.get("enabled", False))
+            or bool(forward_staff.get("is_ex_staff", False))
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must be an active staff member")
+        email_forward_to = str(forward_staff["email"]).strip().lower()
+
+    # Resolve mailbox grant access list
+    mailbox_grant_emails: list[str] = []
+    if isinstance(mailbox_grant_staff_ids_raw, list):
+        for raw_id in mailbox_grant_staff_ids_raw:
+            try:
+                grant_staff_id = int(raw_id)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mailboxGrantStaffIds entry")
+            grant_staff = await staff_repo.get_staff_by_id(grant_staff_id)
+            if not grant_staff or not grant_staff.get("email"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant staff #{grant_staff_id} not found")
+            if (
+                not bool(grant_staff.get("enabled", False))
+                or bool(grant_staff.get("is_ex_staff", False))
+            ):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must be an active staff member")
+            mailbox_grant_emails.append(str(grant_staff["email"]).strip().lower())
+
+    mailbox_grant_emails_json: str | None = json.dumps(mailbox_grant_emails) if mailbox_grant_emails else None
+
     if not reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reason is required")
     if not requested_at_raw or not _raw_value_includes_time(requested_at_raw):
@@ -10831,6 +10910,9 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         request_notes=request_notes,
         approval_notes=None,
         m365_last_sign_in=_parse_input_datetime(existing.get("m365_last_sign_in")),
+        offboarding_out_of_office=out_of_office_message,
+        offboarding_email_forward_to=email_forward_to,
+        offboarding_mailbox_grant_emails=mailbox_grant_emails_json,
     )
 
     approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
@@ -10854,6 +10936,9 @@ async def request_staff_offboarding(staff_id: int, request: Request):
                 "timezone": requested_timezone,
             },
             "approver_user_ids": approver_user_ids,
+            "out_of_office_message": out_of_office_message,
+            "email_forward_to": email_forward_to,
+            "mailbox_grant_emails": mailbox_grant_emails,
         },
     )
 
@@ -11798,6 +11883,7 @@ async def admin_update_company(company_id: int, request: Request):
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
     stripe_enabled = bool(form.get("stripeEnabled"))
     require_po = bool(form.get("requirePo"))
+    offboarding_email_forwarding_enabled = bool(form.get("offboardingEmailForwardingEnabled"))
     _selected_methods = [
         m for m, enabled in [
             ("invoice_prepay", invoice_prepay_enabled),
@@ -11817,6 +11903,7 @@ async def admin_update_company(company_id: int, request: Request):
         "is_vip": is_vip,
         "payment_method": payment_method,
         "require_po": require_po,
+        "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
     }
     existing = await company_repo.get_company_by_id(company_id)
     if not existing:
@@ -11853,6 +11940,7 @@ async def admin_update_company(company_id: int, request: Request):
         "email_domains": email_domains,
         "payment_method": payment_method,
         "require_po": 1 if require_po else 0,
+        "offboarding_email_forwarding_enabled": 1 if offboarding_email_forwarding_enabled else 0,
     }
     try:
         await company_repo.update_company(company_id, **updates)
