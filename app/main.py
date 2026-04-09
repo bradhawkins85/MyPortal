@@ -5310,6 +5310,22 @@ async def delete_m365_admin_credentials(request: Request):
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _build_m365_redirect_uri(request: Request) -> str:
+    """Return the absolute redirect URI for the M365 OAuth callback.
+
+    Uses PORTAL_URL when configured so that the redirect URI is stable
+    regardless of which host the request arrives on.  Falls back to
+    request.url_for and forces the scheme to HTTPS (required by Azure AD).
+    """
+    if settings.portal_url:
+        base = str(settings.portal_url).rstrip("/")
+        return f"{base}/m365/callback"
+    uri = str(request.url_for("m365_callback"))
+    if uri.startswith("http://"):
+        uri = "https://" + uri[len("http://"):]
+    return uri
+
+
 @app.post("/m365/test", response_class=RedirectResponse)
 async def test_m365_connectivity(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)
