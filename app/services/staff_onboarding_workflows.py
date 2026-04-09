@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 import secrets
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1152,11 +1152,12 @@ async def _execute_policy_step(
         m365_user_id = await _resolve_step_user_id()
         if not group_id or not m365_user_id:
             raise WorkflowStepError("m365_add_group requires group_id and user_id")
+        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
             access_token,
             f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
-            {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
+            {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_user_id}"},
         )
         return {"group_id": group_id, "m365_user_id": m365_user_id, "added": True}
 
@@ -1169,6 +1170,7 @@ async def _execute_policy_step(
         if not group_ids:
             raise WorkflowStepError(f"{step_type} requires one or more group IDs")
         m365_user_id = await _resolve_step_user_id()
+        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         changed_group_ids: list[str] = []
         for group_id in group_ids:
@@ -1176,12 +1178,12 @@ async def _execute_policy_step(
                 await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                     access_token,
                     f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
-                    {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
+                    {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_user_id}"},
                 )
             else:
                 await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{m365_user_id}/$ref",
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{encoded_user_id}/$ref",
                 )
             changed_group_ids.append(group_id)
         return {
@@ -1199,6 +1201,7 @@ async def _execute_policy_step(
         if not site_ids:
             raise WorkflowStepError(f"{step_type} requires one or more site IDs")
         m365_user_id = await _resolve_step_user_id()
+        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         site_role = str(_resolve_template_value(step.get("site_role"), vars_map=vars_map) or "write").strip().lower()
         if site_role not in {"read", "write"}:
@@ -1246,7 +1249,8 @@ async def _execute_policy_step(
 
     if step_type == "m365_rename_upn_display_name":
         user = await _resolve_staff_m365_user(company_id, staff)
-        user_id = str(user["id"])
+        user_id = str(user["id"]).strip()
+        encoded_user_id = quote(user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         current_display_name = str(user.get("displayName") or "").strip()
         current_upn = str(user.get("userPrincipalName") or user.get("mail") or "").strip()
@@ -1263,7 +1267,7 @@ async def _execute_policy_step(
             "displayName": next_display_name,
             "userPrincipalName": next_upn,
         }
-        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         return {
             "m365_user_id": user_id,
             "renamed": True,
@@ -1273,7 +1277,8 @@ async def _execute_policy_step(
 
     if step_type == "m365_update_org_fields":
         user = await _resolve_staff_m365_user(company_id, staff)
-        user_id = str(user["id"])
+        user_id = str(user["id"]).strip()
+        encoded_user_id = quote(user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         next_department = str(
             _resolve_template_value(step.get("department"), vars_map=vars_map) or step.get("department_value") or "Former Staff"
@@ -1285,7 +1290,7 @@ async def _execute_policy_step(
             "department": next_department,
             "companyName": next_company,
         }
-        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         return {
             "m365_user_id": user_id,
             "updated": patch_payload,
@@ -1293,13 +1298,14 @@ async def _execute_policy_step(
 
     if step_type == "m365_hide_from_gal":
         user = await _resolve_staff_m365_user(company_id, staff)
-        user_id = str(user["id"])
+        user_id = str(user["id"]).strip()
+        encoded_user_id = quote(user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         property_path = str(step.get("property_path") or "showInAddressList").strip() or "showInAddressList"
         hidden_value = bool(step.get("hidden", True))
         patch_payload: dict[str, Any] = {}
         _set_nested_payload_value(patch_payload, path=property_path, value=not hidden_value)
-        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         return {
             "m365_user_id": user_id,
             "property_path": property_path,
@@ -1309,7 +1315,8 @@ async def _execute_policy_step(
 
     if step_type == "m365_identity_hygiene":
         user = await _resolve_staff_m365_user(company_id, staff)
-        user_id = str(user["id"])
+        user_id = str(user["id"]).strip()
+        encoded_user_id = quote(user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         hygiene_updates = step.get("hygiene_updates") if isinstance(step.get("hygiene_updates"), dict) else {
             "officeLocation": "Offboarded",
@@ -1320,12 +1327,12 @@ async def _execute_policy_step(
         patch_payload = _resolve_template_value(hygiene_updates, vars_map=vars_map)
         if not isinstance(patch_payload, dict):
             raise WorkflowStepError("m365_identity_hygiene requires hygiene_updates object")
-        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{user_id}", patch_payload)
+        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         revoked_sessions = False
         if bool(step.get("revoke_sign_in_sessions", True)):
             await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{user_id}/revokeSignInSessions",
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/revokeSignInSessions",
                 {},
             )
             revoked_sessions = True
@@ -1490,6 +1497,7 @@ async def _execute_policy_step(
         m365_user_id = await _resolve_step_user_id()
         if not m365_user_id:
             raise WorkflowStepError("assign_licenses requires a resolvable M365 user ID")
+        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         licenses_csv = str(
             _resolve_template_value(step.get("licenses_csv") or step.get("license_skus"), vars_map=vars_map) or ""
@@ -1518,7 +1526,7 @@ async def _execute_policy_step(
         if remove_first:
             license_details = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{m365_user_id}/licenseDetails",
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/licenseDetails",
             )
             remove_licenses = [
                 str(entry.get("skuId"))
@@ -1527,7 +1535,7 @@ async def _execute_policy_step(
             ]
         await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{m365_user_id}/assignLicense",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/assignLicense",
             {"addLicenses": add_licenses, "removeLicenses": remove_licenses},
         )
         return {
@@ -1540,6 +1548,7 @@ async def _execute_policy_step(
         m365_user_id = await _resolve_step_user_id()
         if not m365_user_id:
             raise WorkflowStepError("add_to_groups requires a resolvable M365 user ID")
+        encoded_user_id = quote(m365_user_id, safe="")
         group_ids = _normalize_group_ids(
             _resolve_template_value(step.get("group_ids_csv") or step.get("group_ids") or step.get("group_id"), vars_map=vars_map)
         )
@@ -1551,7 +1560,7 @@ async def _execute_policy_step(
             await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                 access_token,
                 f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
-                {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
+                {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_user_id}"},
             )
             added_group_ids.append(group_id)
         return {"m365_user_id": m365_user_id, "groups_added": added_group_ids}
@@ -1560,21 +1569,24 @@ async def _execute_policy_step(
         m365_user_id = await _resolve_step_user_id()
         if not m365_user_id:
             raise WorkflowStepError("set_manager requires a resolvable M365 user ID")
+        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         manager_id = str(_resolve_template_value(step.get("manager_id"), vars_map=vars_map) or "").strip()
         if not manager_id:
             manager_email = str(_resolve_template_value(step.get("manager_email"), vars_map=vars_map) or "").strip().lower()
             if not manager_email:
                 raise WorkflowStepError("set_manager requires manager_id or manager_email")
+            encoded_manager_email = quote(manager_email, safe="")
             manager_lookup = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{manager_email}?$select=id",
+                f"https://graph.microsoft.com/v1.0/users/{encoded_manager_email}?$select=id",
             )
             manager_id = str(manager_lookup.get("id") or "").strip()
             if not manager_id:
                 raise WorkflowStepError(f"set_manager: unable to resolve manager from email {manager_email}")
-        ref_url = f"https://graph.microsoft.com/v1.0/users/{m365_user_id}/manager/$ref"
-        ref_payload = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{manager_id}"}
+        encoded_manager_id = quote(manager_id, safe="")
+        ref_url = f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/manager/$ref"
+        ref_payload = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_manager_id}"}
         headers = {"Authorization": f"Bearer {access_token}"}
         async with httpx.AsyncClient(timeout=30) as client:
             ref_response = await client.put(ref_url, headers=headers, json=ref_payload)
@@ -1659,6 +1671,12 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.patch(url, headers=headers, json=payload)
     if response.status_code not in (200, 204):
+        log_error(
+            "Microsoft Graph PATCH failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
         raise WorkflowStepError(
             f"Microsoft Graph PATCH failed ({response.status_code})",
             request_payload={"url": url, "payload": payload},
@@ -1672,7 +1690,12 @@ async def _resolve_staff_m365_user(company_id: int, staff: dict[str, Any]) -> di
     email = str(staff.get("email") or "").strip().lower()
     if not email:
         raise WorkflowStepError("Staff email is required for offboarding")
-    users = await m365_service.get_all_users(company_id)
+    # Use force_client_credentials=True so the token used for user lookup is
+    # consistent with the token used for subsequent write operations (PATCH,
+    # POST, DELETE).  Without this, a stale cached/delegated token for a
+    # different tenant could return user GUIDs that are unknown to the
+    # client-credentials token, causing 404 errors on PATCH.
+    users = await m365_service.get_all_users(company_id, force_client_credentials=True)
     matched = next(
         (
             user
@@ -1736,7 +1759,8 @@ async def _run_offboarding_step(
         ]
 
     user = await _resolve_staff_m365_user(company_id, staff)
-    user_id = str(user["id"])
+    user_id = str(user["id"]).strip()
+    encoded_user_id = quote(user_id, safe="")
     user_upn = str(user.get("userPrincipalName") or staff.get("email") or "").strip()
     access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
     steps_executed: list[str] = []
@@ -1746,7 +1770,7 @@ async def _run_offboarding_step(
     if disable_sign_in:
         await _graph_patch(
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{user_id}",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
             {"accountEnabled": False},
         )
         steps_executed.append("disable_sign_in")
@@ -1754,13 +1778,13 @@ async def _run_offboarding_step(
     if remove_licenses:
         license_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{user_id}/licenseDetails",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/licenseDetails",
         )
         sku_ids = [entry.get("skuId") for entry in (license_payload.get("value") or []) if entry.get("skuId")]
         if sku_ids:
             await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{user_id}/assignLicense",
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/assignLicense",
                 {"addLicenses": [], "removeLicenses": sku_ids},
             )
             removed_license_count = len(sku_ids)
@@ -1774,7 +1798,7 @@ async def _run_offboarding_step(
             # Include groupTypes so we can skip dynamic-membership groups below.
             membership_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf/microsoft.graph.group?$select=id,groupTypes",
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/memberOf/microsoft.graph.group?$select=id,groupTypes",
             )
             group_ids = [
                 str(item.get("id")).strip()
@@ -1787,7 +1811,7 @@ async def _run_offboarding_step(
             try:
                 await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{user_id}/$ref",
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{encoded_user_id}/$ref",
                 )
                 removed_group_count += 1
             except M365Error as exc:
@@ -1807,7 +1831,7 @@ async def _run_offboarding_step(
     if out_of_office_message:
         await _graph_patch(
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{user_id}/mailboxSettings",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailboxSettings",
             {
                 "automaticRepliesSetting": {
                     "status": "AlwaysEnabled",
@@ -1832,7 +1856,7 @@ async def _run_offboarding_step(
             }
         await _graph_patch(
             access_token,
-            f"https://graph.microsoft.com/v1.0/users/{user_id}/mailboxSettings",
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailboxSettings",
             mailbox_settings_patch,
         )
         steps_executed.append("set_email_forwarding")
