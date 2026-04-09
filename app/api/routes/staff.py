@@ -629,7 +629,7 @@ async def approve_staff_offboarding(
         email=staff["email"],
         mobile_phone=staff.get("mobile_phone"),
         date_onboarded=staff.get("date_onboarded"),
-        date_offboarded=None,
+        date_offboarded=staff.get("date_offboarded"),
         enabled=bool(staff.get("enabled", True)),
         is_ex_staff=bool(staff.get("is_ex_staff", False)),
         street=staff.get("street"),
