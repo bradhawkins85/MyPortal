@@ -1397,6 +1397,162 @@ async def _execute_policy_step(
         var_name = str(step.get("output_var") or "generated_password").strip() or "generated_password"
         return {"generated_password": generated, var_name: generated}
 
+    if step_type == "create_user":
+        email = str(staff.get("email") or "").strip().lower()
+        if not email:
+            raise WorkflowStepError("Staff email is required for create_user")
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        nickname = email.split("@", 1)[0]
+        raw_password = str(_resolve_template_value(step.get("password"), vars_map=vars_map) or "").strip()
+        if not raw_password:
+            raw_password = secrets.token_urlsafe(18)
+        display_name = str(
+            _resolve_template_value(step.get("display_name"), vars_map=vars_map)
+            or " ".join(p for p in [staff.get("first_name"), staff.get("last_name")] if p).strip()
+            or email
+        ).strip()
+        upn = str(
+            _resolve_template_value(step.get("user_principal_name"), vars_map=vars_map) or email
+        ).strip()
+        mail_nickname = str(
+            _resolve_template_value(step.get("mail_nickname"), vars_map=vars_map) or nickname
+        ).strip()
+        user_payload: dict[str, Any] = {
+            "accountEnabled": bool(step.get("account_enabled", True)),
+            "displayName": display_name,
+            "mailNickname": mail_nickname,
+            "userPrincipalName": upn,
+            "passwordProfile": {
+                "forceChangePasswordNextSignIn": bool(step.get("force_change_password_next_signin", True)),
+                "password": raw_password,
+            },
+        }
+        given_name = str(_resolve_template_value(step.get("given_name"), vars_map=vars_map) or staff.get("first_name") or "").strip()
+        if given_name:
+            user_payload["givenName"] = given_name
+        surname = str(_resolve_template_value(step.get("surname"), vars_map=vars_map) or staff.get("last_name") or "").strip()
+        if surname:
+            user_payload["surname"] = surname
+        job_title = str(_resolve_template_value(step.get("job_title"), vars_map=vars_map) or staff.get("job_title") or "").strip()
+        if job_title:
+            user_payload["jobTitle"] = job_title
+        department = str(_resolve_template_value(step.get("department"), vars_map=vars_map) or staff.get("department") or "").strip()
+        if department:
+            user_payload["department"] = department
+        company_name_val = str(_resolve_template_value(step.get("company_name"), vars_map=vars_map) or "").strip()
+        if company_name_val:
+            user_payload["companyName"] = company_name_val
+        office_location = str(_resolve_template_value(step.get("office_location"), vars_map=vars_map) or "").strip()
+        if office_location:
+            user_payload["officeLocation"] = office_location
+        usage_location = str(_resolve_template_value(step.get("usage_location"), vars_map=vars_map) or "").strip()
+        if usage_location:
+            user_payload["usageLocation"] = usage_location
+        result = await m365_service._graph_post(access_token, "https://graph.microsoft.com/v1.0/users", user_payload)  # pyright: ignore[reportPrivateUsage]
+        new_user_id = result.get("id")
+        if new_user_id:
+            vars_map["m365_user_id"] = str(new_user_id)
+        return {"m365_user_id": new_user_id, "user_principal_name": upn, "generated_password": raw_password}
+
+    if step_type == "assign_licenses":
+        m365_user_id = await _resolve_step_user_id()
+        if not m365_user_id:
+            raise WorkflowStepError("assign_licenses requires a resolvable M365 user ID")
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        licenses_csv = str(
+            _resolve_template_value(step.get("licenses_csv") or step.get("license_skus"), vars_map=vars_map) or ""
+        ).strip()
+        sku_part_numbers = [s.strip() for s in licenses_csv.split(",") if s.strip()]
+        if not sku_part_numbers:
+            raise WorkflowStepError("assign_licenses requires licenses_csv with at least one SKU part number")
+        # Resolve subscribed SKU IDs from the tenant by matching part numbers.
+        skus_response = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            "https://graph.microsoft.com/v1.0/subscribedSkus?$select=skuId,skuPartNumber",
+        )
+        sku_map = {
+            str(entry.get("skuPartNumber") or "").upper(): str(entry.get("skuId") or "")
+            for entry in (skus_response.get("value") or [])
+            if entry.get("skuId")
+        }
+        add_licenses = []
+        for part_number in sku_part_numbers:
+            sku_id = sku_map.get(part_number.upper())
+            if not sku_id:
+                raise WorkflowStepError(f"assign_licenses: SKU part number not found in tenant: {part_number}")
+            add_licenses.append({"skuId": sku_id})
+        remove_first = bool(step.get("remove_existing_licenses", False))
+        remove_licenses: list[str] = []
+        if remove_first:
+            license_details = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{m365_user_id}/licenseDetails",
+            )
+            remove_licenses = [
+                str(entry.get("skuId"))
+                for entry in (license_details.get("value") or [])
+                if entry.get("skuId")
+            ]
+        await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{m365_user_id}/assignLicense",
+            {"addLicenses": add_licenses, "removeLicenses": remove_licenses},
+        )
+        return {
+            "m365_user_id": m365_user_id,
+            "licenses_assigned": sku_part_numbers,
+            "licenses_removed": remove_licenses,
+        }
+
+    if step_type == "add_to_groups":
+        m365_user_id = await _resolve_step_user_id()
+        if not m365_user_id:
+            raise WorkflowStepError("add_to_groups requires a resolvable M365 user ID")
+        group_ids = _normalize_group_ids(
+            _resolve_template_value(step.get("group_ids_csv") or step.get("group_ids") or step.get("group_id"), vars_map=vars_map)
+        )
+        if not group_ids:
+            raise WorkflowStepError("add_to_groups requires group_ids_csv with at least one group ID")
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        added_group_ids: list[str] = []
+        for group_id in group_ids:
+            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/$ref",
+                {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{m365_user_id}"},
+            )
+            added_group_ids.append(group_id)
+        return {"m365_user_id": m365_user_id, "groups_added": added_group_ids}
+
+    if step_type == "set_manager":
+        m365_user_id = await _resolve_step_user_id()
+        if not m365_user_id:
+            raise WorkflowStepError("set_manager requires a resolvable M365 user ID")
+        access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+        manager_id = str(_resolve_template_value(step.get("manager_id"), vars_map=vars_map) or "").strip()
+        if not manager_id:
+            manager_email = str(_resolve_template_value(step.get("manager_email"), vars_map=vars_map) or "").strip().lower()
+            if not manager_email:
+                raise WorkflowStepError("set_manager requires manager_id or manager_email")
+            manager_lookup = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{manager_email}?$select=id",
+            )
+            manager_id = str(manager_lookup.get("id") or "").strip()
+            if not manager_id:
+                raise WorkflowStepError(f"set_manager: unable to resolve manager from email {manager_email}")
+        ref_url = f"https://graph.microsoft.com/v1.0/users/{m365_user_id}/manager/$ref"
+        ref_payload = {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{manager_id}"}
+        headers = {"Authorization": f"Bearer {access_token}"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            ref_response = await client.put(ref_url, headers=headers, json=ref_payload)
+        if ref_response.status_code not in (200, 204):
+            raise WorkflowStepError(
+                f"set_manager: Graph PUT manager/$ref failed ({ref_response.status_code})",
+                request_payload={"url": ref_url},
+            )
+        return {"m365_user_id": m365_user_id, "manager_id": manager_id, "manager_set": True}
+
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
 
@@ -1592,6 +1748,7 @@ async def _execute_policy_steps(
     staff_last_name = str(staff.get("last_name") or "").strip()
     staff_full_name = " ".join(part for part in [staff_first_name, staff_last_name] if part).strip()
     staff_email = str(staff.get("email") or "").strip().lower() or None
+    staff_email_local_part = staff_email.split("@", 1)[0] if staff_email else ""
     vars_map: dict[str, Any] = {
         "company_id": company_id,
         "staff_id": int(staff["id"]),
@@ -1601,6 +1758,10 @@ async def _execute_policy_steps(
         "staff.last_name": staff_last_name,
         "staff.full_name": staff_full_name,
         "staff.email": staff_email,
+        "staff.email_local_part": staff_email_local_part,
+        "staff.job_title": str(staff.get("job_title") or "").strip() or None,
+        "staff.department": str(staff.get("department") or "").strip() or None,
+        "staff.office_location": str(staff.get("office_location") or "").strip() or None,
         # Backward-compatible aliases.
         "staff_first_name": staff_first_name,
         "staff_last_name": staff_last_name,

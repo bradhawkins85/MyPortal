@@ -839,3 +839,246 @@ async def test_kid_friendly_password_always_contains_symbol(monkeypatch):
         assert any(ch in _symbols for ch in password), (
             f"Kid-friendly password '{password}' contains no symbol"
         )
+
+
+@pytest.mark.anyio
+async def test_create_user_step_creates_m365_user_and_stores_id(monkeypatch):
+    """create_user step posts to Graph /users with correct fields and stores m365_user_id in vars_map."""
+    captured: dict[str, object] = {}
+
+    async def fake_acquire_token(company_id, *, force_client_credentials=False):
+        return "token-abc"
+
+    async def fake_graph_post(access_token, url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+        return {"id": "m365-user-guid-001", "userPrincipalName": payload.get("userPrincipalName")}
+
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", fake_graph_post)
+
+    vars_map: dict[str, object] = {"staff.full_name": "Alice Example"}
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_user",
+            "display_name": "${vars.staff.full_name}",
+            "given_name": "Alice",
+            "surname": "Example",
+            "job_title": "Engineer",
+            "department": "Tech",
+            "usage_location": "AU",
+            "force_change_password_next_signin": True,
+            "account_enabled": True,
+        },
+        company_id=1,
+        staff={"id": 5, "email": "alice@example.com", "first_name": "Alice", "last_name": "Example"},
+        policy_config={},
+        vars_map=vars_map,
+    )
+
+    assert result["m365_user_id"] == "m365-user-guid-001"
+    assert result["user_principal_name"] == "alice@example.com"
+    assert "generated_password" in result
+    assert captured["url"] == "https://graph.microsoft.com/v1.0/users"
+    payload = captured["payload"]
+    assert payload["displayName"] == "Alice Example"  # type: ignore[index]
+    assert payload["givenName"] == "Alice"  # type: ignore[index]
+    assert payload["surname"] == "Example"  # type: ignore[index]
+    assert payload["jobTitle"] == "Engineer"  # type: ignore[index]
+    assert payload["department"] == "Tech"  # type: ignore[index]
+    assert payload["usageLocation"] == "AU"  # type: ignore[index]
+    assert payload["accountEnabled"] is True  # type: ignore[index]
+    # m365_user_id should be stored back into vars_map for downstream steps.
+    assert vars_map.get("m365_user_id") == "m365-user-guid-001"
+
+
+@pytest.mark.anyio
+async def test_create_user_step_raises_without_email(monkeypatch):
+    """create_user raises WorkflowStepError when staff email is missing."""
+    with pytest.raises(workflows.WorkflowStepError, match="Staff email is required"):
+        await workflows._execute_policy_step(
+            step={"type": "create_user"},
+            company_id=1,
+            staff={"id": 5, "email": ""},
+            policy_config={},
+            vars_map={},
+        )
+
+
+@pytest.mark.anyio
+async def test_assign_licenses_step_resolves_sku_and_posts(monkeypatch):
+    """assign_licenses resolves SKU part numbers against tenant and calls assignLicense."""
+    captured: dict[str, object] = {}
+
+    async def fake_acquire_token(company_id, *, force_client_credentials=False):
+        return "tok"
+
+    async def fake_graph_get(access_token, url):
+        if "subscribedSkus" in url:
+            return {"value": [{"skuId": "sku-id-001", "skuPartNumber": "ENTERPRISEPACK"}]}
+        return {}
+
+    async def fake_graph_post(access_token, url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+        return {}
+
+    async def fake_resolve_user(*args, **kwargs):
+        return "m365-user-guid-001"
+
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(workflows.m365_service, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", fake_graph_post)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "assign_licenses", "licenses_csv": "ENTERPRISEPACK"},
+        company_id=1,
+        staff={"id": 5, "email": "alice@example.com"},
+        policy_config={},
+        vars_map={"m365_user_id": "m365-user-guid-001"},
+    )
+
+    assert result["licenses_assigned"] == ["ENTERPRISEPACK"]
+    assert captured["url"] == "https://graph.microsoft.com/v1.0/users/m365-user-guid-001/assignLicense"
+    assert captured["payload"]["addLicenses"] == [{"skuId": "sku-id-001"}]  # type: ignore[index]
+    assert captured["payload"]["removeLicenses"] == []  # type: ignore[index]
+
+
+@pytest.mark.anyio
+async def test_assign_licenses_raises_for_unknown_sku(monkeypatch):
+    """assign_licenses raises WorkflowStepError when SKU is not found in the tenant."""
+
+    async def fake_acquire_token(company_id, *, force_client_credentials=False):
+        return "tok"
+
+    async def fake_graph_get(access_token, url):
+        return {"value": [{"skuId": "other-id", "skuPartNumber": "SOMEOTHERSKU"}]}
+
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(workflows.m365_service, "_graph_get", fake_graph_get)
+
+    with pytest.raises(workflows.WorkflowStepError, match="SKU part number not found"):
+        await workflows._execute_policy_step(
+            step={"type": "assign_licenses", "licenses_csv": "ENTERPRISEPACK"},
+            company_id=1,
+            staff={"id": 5, "email": "alice@example.com"},
+            policy_config={},
+            vars_map={"m365_user_id": "m365-user-guid-001"},
+        )
+
+
+@pytest.mark.anyio
+async def test_add_to_groups_step_posts_member_ref_for_each_group(monkeypatch):
+    """add_to_groups posts member $ref for each group ID in the CSV."""
+    posted_urls: list[str] = []
+
+    async def fake_acquire_token(company_id, *, force_client_credentials=False):
+        return "tok"
+
+    async def fake_graph_post(access_token, url, payload):
+        posted_urls.append(url)
+        return {}
+
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", fake_graph_post)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "add_to_groups", "group_ids_csv": "grp-001,grp-002"},
+        company_id=1,
+        staff={"id": 5, "email": "alice@example.com"},
+        policy_config={},
+        vars_map={"m365_user_id": "m365-user-guid-001"},
+    )
+
+    assert result["groups_added"] == ["grp-001", "grp-002"]
+    assert "https://graph.microsoft.com/v1.0/groups/grp-001/members/$ref" in posted_urls
+    assert "https://graph.microsoft.com/v1.0/groups/grp-002/members/$ref" in posted_urls
+
+
+@pytest.mark.anyio
+async def test_set_manager_step_puts_manager_ref_with_resolved_id(monkeypatch):
+    """set_manager issues a PUT to manager/$ref when manager_id is provided directly."""
+
+    class DummyResponse:
+        status_code = 204
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def put(self, url, headers=None, json=None):
+            self._captured_url = url
+            self._captured_json = json
+            return DummyResponse()
+
+    dummy_client = DummyClient()
+
+    async def fake_acquire_token(company_id, *, force_client_credentials=False):
+        return "tok"
+
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(workflows.httpx, "AsyncClient", lambda **kw: dummy_client)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "set_manager", "manager_id": "mgr-obj-id-001"},
+        company_id=1,
+        staff={"id": 5, "email": "alice@example.com"},
+        policy_config={},
+        vars_map={"m365_user_id": "m365-user-guid-001"},
+    )
+
+    assert result["manager_set"] is True
+    assert result["manager_id"] == "mgr-obj-id-001"
+    assert dummy_client._captured_url == "https://graph.microsoft.com/v1.0/users/m365-user-guid-001/manager/$ref"
+    assert dummy_client._captured_json["@odata.id"] == "https://graph.microsoft.com/v1.0/directoryObjects/mgr-obj-id-001"
+
+
+@pytest.mark.anyio
+async def test_vars_map_contains_staff_extended_fields(monkeypatch):
+    """_execute_policy_steps populates email_local_part, job_title, department in vars_map."""
+    captured_vars: dict[str, object] = {}
+
+    async def fake_step(*, step, company_id, staff, policy_config, vars_map):
+        captured_vars.update(vars_map)
+        return {"ok": True}
+
+    monkeypatch.setattr(workflows, "_execute_policy_step", fake_step)
+    monkeypatch.setattr(workflows.workflow_repo, "list_step_logs_for_execution_ids", AsyncMock(return_value={}))
+    monkeypatch.setattr(workflows.staff_custom_fields_repo, "get_all_staff_field_values", AsyncMock(return_value={}))
+    monkeypatch.setattr(workflows.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 1, "name": "Acme"}))
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    monkeypatch.setattr(workflows.workflow_repo, "append_step_log", AsyncMock())
+    monkeypatch.setattr(workflows.audit_service, "log_action", AsyncMock())
+    monkeypatch.setattr(workflows.staff_repo, "update_staff", AsyncMock(return_value={}))
+    monkeypatch.setattr(workflows.notifications_service, "emit_notification", AsyncMock())
+    monkeypatch.setattr(workflows.system_variables, "get_system_variables", lambda: {})
+    monkeypatch.setattr(workflows.user_repo, "get_user_by_id", AsyncMock(return_value=None))
+
+    staff = {
+        "id": 10,
+        "first_name": "Alice",
+        "last_name": "Example",
+        "email": "alice@example.com",
+        "job_title": "Engineer",
+        "department": "Tech",
+    }
+    policy_config = {"steps": [{"name": "step1", "type": "fake_step"}]}
+    await workflows._execute_policy_steps(
+        execution_id=1,
+        company_id=1,
+        staff=staff,
+        direction=workflows.DIRECTION_ONBOARDING,
+        policy_config=policy_config,
+        max_retries=0,
+        waiting_external_state=workflows.STATE_WAITING_EXTERNAL,
+    )
+
+    assert captured_vars.get("staff.email_local_part") == "alice"
+    assert captured_vars.get("staff.job_title") == "Engineer"
+    assert captured_vars.get("staff.department") == "Tech"
