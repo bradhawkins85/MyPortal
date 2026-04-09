@@ -659,7 +659,7 @@
       offboardingTimeField.value = localTime;
     }
 
-    function _buildStaffOptions(excludeStaffId) {
+    function buildStaffOptions(excludeStaffId) {
       return activeStaffForOffboarding
         .filter((s) => String(s.id) !== String(excludeStaffId))
         .map((s) => {
@@ -669,7 +669,7 @@
         });
     }
 
-    function _populateStaffSelect(selectEl, options, multipleMode) {
+    function populateStaffSelect(selectEl, options, multipleMode) {
       if (!selectEl) return;
       while (selectEl.options.length > (multipleMode ? 0 : 1)) {
         selectEl.remove(multipleMode ? 0 : 1);
@@ -700,9 +700,9 @@
       if (offboardingOutOfOfficeField) offboardingOutOfOfficeField.value = '';
       setDefaultOffboardingDateTime();
 
-      const staffOptions = _buildStaffOptions(staffId);
-      _populateStaffSelect(offboardingEmailForwardToField, staffOptions, false);
-      _populateStaffSelect(offboardingMailboxGrantField, staffOptions, true);
+      const staffOptions = buildStaffOptions(staffId);
+      populateStaffSelect(offboardingEmailForwardToField, staffOptions, false);
+      populateStaffSelect(offboardingMailboxGrantField, staffOptions, true);
 
       closeModal(editModal);
       openModal(offboardingModal);
