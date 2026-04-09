@@ -1124,7 +1124,7 @@ async def _execute_policy_step(
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         nickname = email.split("@", 1)[0]
         password = secrets.token_urlsafe(18)
-        payload = {
+        payload: dict[str, Any] = {
             "accountEnabled": True,
             "displayName": " ".join(part for part in [staff.get("first_name"), staff.get("last_name")] if part).strip() or email,
             "mailNickname": str(step.get("mail_nickname") or nickname).strip(),
@@ -1134,6 +1134,9 @@ async def _execute_policy_step(
                 "password": password,
             },
         }
+        mobile_phone_val = str(staff.get("mobile_phone") or "").strip()
+        if mobile_phone_val:
+            payload["mobilePhone"] = mobile_phone_val
         result = await m365_service._graph_post(access_token, "https://graph.microsoft.com/v1.0/users", payload)  # pyright: ignore[reportPrivateUsage]
         return {"m365_user_id": result.get("id"), "user_principal_name": payload["userPrincipalName"], "generated_password": password}
 
@@ -1467,6 +1470,9 @@ async def _execute_policy_step(
         usage_location = str(_resolve_template_value(step.get("usage_location"), vars_map=vars_map) or "").strip()
         if usage_location:
             user_payload["usageLocation"] = usage_location
+        mobile_phone = str(_resolve_template_value(step.get("mobile_phone"), vars_map=vars_map) or staff.get("mobile_phone") or "").strip()
+        if mobile_phone:
+            user_payload["mobilePhone"] = mobile_phone
         result = await m365_service._graph_post(access_token, "https://graph.microsoft.com/v1.0/users", user_payload)  # pyright: ignore[reportPrivateUsage]
         new_user_id = result.get("id")
         if new_user_id:
