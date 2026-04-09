@@ -561,6 +561,9 @@ async def update_staff(
     request_notes: str | None = None,
     approval_notes: str | None = None,
     m365_last_sign_in: datetime | None = None,
+    offboarding_out_of_office: str | None = None,
+    offboarding_email_forward_to: str | None = None,
+    offboarding_mailbox_grant_emails: str | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
@@ -596,7 +599,10 @@ async def update_staff(
             approved_at = COALESCE(%s, approved_at),
             request_notes = COALESCE(%s, request_notes),
             approval_notes = COALESCE(%s, approval_notes),
-            m365_last_sign_in = COALESCE(%s, m365_last_sign_in)
+            m365_last_sign_in = COALESCE(%s, m365_last_sign_in),
+            offboarding_out_of_office = COALESCE(%s, offboarding_out_of_office),
+            offboarding_email_forward_to = COALESCE(%s, offboarding_email_forward_to),
+            offboarding_mailbox_grant_emails = COALESCE(%s, offboarding_mailbox_grant_emails)
         WHERE id = %s
         """,
         (
@@ -631,6 +637,9 @@ async def update_staff(
             request_notes,
             approval_notes,
             _coerce_datetime(m365_last_sign_in),
+            offboarding_out_of_office,
+            offboarding_email_forward_to,
+            offboarding_mailbox_grant_emails,
             staff_id,
         ),
     )
@@ -683,6 +692,31 @@ async def delete_m365_staff_not_in(company_id: int, keep_emails: set[str]) -> in
     for staff_id in to_delete:
         await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
     return len(to_delete)
+
+
+async def list_active_staff_for_offboarding(company_id: int, *, exclude_staff_id: int | None = None) -> list[dict[str, Any]]:
+    """Return enabled, non-ex-staff members for the given company.
+
+    Used to populate email-forwarding and mailbox-access dropdowns on the
+    offboarding request form. Optionally excludes the staff member being
+    offboarded.
+    """
+    conditions = ["s.company_id = %s", "s.enabled = 1", "s.is_ex_staff = 0"]
+    params: list[Any] = [company_id]
+    if exclude_staff_id is not None:
+        conditions.append("s.id != %s")
+        params.append(exclude_staff_id)
+    where = " AND ".join(conditions)
+    rows = await db.fetch_all(
+        f"""
+        SELECT s.id, s.first_name, s.last_name, s.email
+        FROM staff AS s
+        WHERE {where}
+        ORDER BY s.last_name, s.first_name, s.email
+        """,
+        tuple(params),
+    )
+    return [dict(row) for row in rows]
 
 
 async def set_enabled(staff_id: int, enabled: bool) -> None:

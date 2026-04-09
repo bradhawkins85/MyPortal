@@ -117,6 +117,19 @@
               <span>VIP pricing</span>
             </label>
           </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox" for="edit-company-offboarding-email-forwarding">
+              <input
+                id="edit-company-offboarding-email-forwarding"
+                type="checkbox"
+                name="offboardingEmailForwardingEnabled"
+                value="1"
+                {% if form_data.offboarding_email_forwarding_enabled %}checked{% endif %}
+              />
+              <span>Enable email forwarding on offboarding requests</span>
+            </label>
+            <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
+          </div>
           <div class="form-field">
             <label class="form-label">Payment method</label>
             <div class="form-checkbox-group">

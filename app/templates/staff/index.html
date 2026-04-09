@@ -453,6 +453,26 @@
         <label class="form-label" for="offboarding-reason-notes">Reason / notes</label>
         <textarea class="form-input" id="offboarding-reason-notes" rows="4" maxlength="2000" required></textarea>
       </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-out-of-office">Out of office message <span class="form-label__optional">(optional)</span></label>
+        <textarea class="form-input" id="offboarding-out-of-office" rows="3" maxlength="4000" placeholder="e.g. I have left the company. Please contact support@example.com for assistance."></textarea>
+        <p class="form-help">If provided, an automatic reply will be set on the mailbox during offboarding.</p>
+      </div>
+      {% if offboarding_email_forwarding_enabled %}
+      <div class="form-field form-field--full" id="offboarding-forward-field">
+        <label class="form-label" for="offboarding-email-forward-to">Forward emails to <span class="form-label__optional">(optional)</span></label>
+        <select class="form-input" id="offboarding-email-forward-to">
+          <option value="">— No forwarding —</option>
+        </select>
+        <p class="form-help">Select a staff member to forward the mailbox emails to after offboarding.</p>
+      </div>
+      {% endif %}
+      <div class="form-field form-field--full">
+        <label class="form-label" for="offboarding-mailbox-grant">Grant mailbox access to <span class="form-label__optional">(optional)</span></label>
+        <select class="form-input" id="offboarding-mailbox-grant" multiple size="4">
+        </select>
+        <p class="form-help">Hold Ctrl (or ⌘ on Mac) to select multiple staff members who should be granted access to this mailbox.</p>
+      </div>
       <p class="form-help form-help--error form-field--full" id="offboarding-form-error" hidden role="alert" aria-live="polite"></p>
       <div class="form-actions">
         <button type="submit" class="button">Submit request</button>
@@ -633,8 +653,10 @@
 <script type="application/json" id="staff-flags">{{ {
   'isSuperAdmin': is_super_admin,
   'isAdmin': is_admin,
-  'canApproveOnboarding': can_approve_onboarding
+  'canApproveOnboarding': can_approve_onboarding,
+  'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled
 } | tojson }}</script>
+<script type="application/json" id="active-staff-for-offboarding">{{ active_staff_for_offboarding | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}
