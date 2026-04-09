@@ -94,6 +94,19 @@ DEFAULT_NOTIFICATION_EVENTS: dict[str, dict[str, object]] = {
         "is_user_visible": True,
         "module_actions": [],
     },
+    "staff.offboarding.approval_requested": {
+        "display_name": "Staff offboarding approval requested",
+        "description": "Sent to offboarding approvers when a staff offboarding request needs approval.",
+        "message_template": "{{ message }}",
+        "allow_channel_in_app": True,
+        "allow_channel_email": True,
+        "allow_channel_sms": False,
+        "default_channel_in_app": True,
+        "default_channel_email": False,
+        "default_channel_sms": False,
+        "is_user_visible": True,
+        "module_actions": [],
+    },
 }
 
 DEFAULT_NOTIFICATION_EVENT_TYPES: list[str] = list(DEFAULT_NOTIFICATION_EVENTS.keys())
