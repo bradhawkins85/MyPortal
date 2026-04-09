@@ -1790,18 +1790,28 @@ async def _run_offboarding_step(
         steps_executed.append("set_out_of_office")
 
     if forwarding_address:
+        mailbox_settings_patch: dict[str, Any] = {
+            "forwardingSmtpAddress": forwarding_address,
+            "isForwardingEnabled": True,
+        }
+        if out_of_office_message:
+            # Include the OOO setting in the same PATCH to avoid overwriting it.
+            mailbox_settings_patch["automaticRepliesSetting"] = {
+                "status": "AlwaysEnabled",
+                "internalReplyMessage": out_of_office_message,
+                "externalReplyMessage": out_of_office_message,
+            }
         await _graph_patch(
             access_token,
             f"https://graph.microsoft.com/v1.0/users/{user_id}/mailboxSettings",
-            {
-                "automaticRepliesSetting": {},
-                "forwardingSmtpAddress": forwarding_address,
-                "isForwardingEnabled": True,
-            },
+            mailbox_settings_patch,
         )
         steps_executed.append("set_email_forwarding")
 
     if mailbox_grant_email_list and user_upn:
+        # Mailbox access delegation (e.g. FullAccess) requires Exchange Online PowerShell
+        # or Graph-based user consent flows. We record the request here so downstream
+        # workflow steps or manual processes can action it.
         steps_executed.append("mailbox_access_requested")
 
     return {
