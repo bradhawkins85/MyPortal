@@ -339,6 +339,9 @@ async def test_try_grant_missing_permissions_returns_false_when_all_grants_fail(
 # Constant checks – ensure mailbox permissions are present in _PROVISION_APP_ROLES
 # ---------------------------------------------------------------------------
 
+_USER_READWRITE_ALL_ROLE = "741f803b-c850-494e-b5df-cde7c675a1ca"  # User.ReadWrite.All
+_GROUP_MEMBER_READWRITE_ALL_ROLE = "dbaae8cf-10b5-4b86-a4a1-f871c94c6695"  # GroupMember.ReadWrite.All
+
 
 def test_provision_app_roles_includes_reports_read_all():
     """_PROVISION_APP_ROLES must include Reports.Read.All for mailbox sync."""
@@ -358,6 +361,22 @@ def test_provision_app_roles_includes_mail_readwrite():
     """_PROVISION_APP_ROLES must include Mail.ReadWrite for Office 365 mailbox import."""
     assert _MAIL_READWRITE_ROLE in _PROVISION_APP_ROLES, (
         "Mail.ReadWrite (e2a3a72e-5f79-4c64-b1b1-878b674786c9) must be in _PROVISION_APP_ROLES"
+    )
+
+
+def test_provision_app_roles_includes_user_readwrite_all():
+    """_PROVISION_APP_ROLES must include User.ReadWrite.All for staff onboarding (create/update users, assign licenses)."""
+    assert _USER_READWRITE_ALL_ROLE in _PROVISION_APP_ROLES, (
+        "User.ReadWrite.All (741f803b-c850-494e-b5df-cde7c675a1ca) must be in _PROVISION_APP_ROLES "
+        "to enable staff onboarding Graph API calls (create user, assign license, update user)"
+    )
+
+
+def test_provision_app_roles_includes_group_member_readwrite_all():
+    """_PROVISION_APP_ROLES must include GroupMember.ReadWrite.All for staff onboarding (add/remove group members)."""
+    assert _GROUP_MEMBER_READWRITE_ALL_ROLE in _PROVISION_APP_ROLES, (
+        "GroupMember.ReadWrite.All (dbaae8cf-10b5-4b86-a4a1-f871c94c6695) must be in _PROVISION_APP_ROLES "
+        "to enable staff onboarding Graph API calls (add/remove group members)"
     )
 
 
