@@ -498,6 +498,11 @@
       workflowForceComplete: container.querySelector('[data-edit-action="workflow-force-complete"]'),
       delete: container.querySelector('[data-edit-action="delete"]'),
     };
+
+    function isCurrentMemberOffboardingRequest() {
+      const member = staffById.get(currentEditStaffId);
+      return String(member && member.account_action || '').toLowerCase() === 'offboard requested';
+    }
     if (editCustomFieldsGrid && Array.isArray(customFieldDefinitions)) {
       const normalizeGroupLabel = (group) => {
         const raw = typeof group === 'string' ? group.trim() : '';
@@ -810,6 +815,25 @@
         throw new Error('A deny reason is required.');
       }
       await requestJson(`/api/staff/${staffId}/onboarding/deny`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      window.location.reload();
+    }
+
+    async function approveOffboarding(staffId, comment) {
+      await requestJson(`/api/staff/${staffId}/offboarding/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ comment: comment || '' }),
+      });
+      window.location.reload();
+    }
+
+    async function denyOffboarding(staffId, reason) {
+      if (!reason || !reason.trim()) {
+        throw new Error('A deny reason is required.');
+      }
+      await requestJson(`/api/staff/${staffId}/offboarding/deny`, {
         method: 'POST',
         body: JSON.stringify({ reason: reason.trim() }),
       });
@@ -1136,9 +1160,13 @@
         }
         try {
           setInlineError(editActionError, '');
-          await approveOnboarding(currentEditStaffId, getActionNote());
+          if (isCurrentMemberOffboardingRequest()) {
+            await approveOffboarding(currentEditStaffId, getActionNote());
+          } else {
+            await approveOnboarding(currentEditStaffId, getActionNote());
+          }
         } catch (error) {
-          setInlineError(editActionError, `Failed to approve onboarding request: ${error.message}`);
+          setInlineError(editActionError, `Failed to approve request: ${error.message}`);
         }
       });
     }
@@ -1149,9 +1177,13 @@
         }
         try {
           setInlineError(editActionError, '');
-          await denyOnboarding(currentEditStaffId, getActionNote({ required: true }) || '');
+          if (isCurrentMemberOffboardingRequest()) {
+            await denyOffboarding(currentEditStaffId, getActionNote({ required: true }) || '');
+          } else {
+            await denyOnboarding(currentEditStaffId, getActionNote({ required: true }) || '');
+          }
         } catch (error) {
-          setInlineError(editActionError, `Failed to deny onboarding request: ${error.message}`);
+          setInlineError(editActionError, `Failed to deny request: ${error.message}`);
         }
       });
     }
