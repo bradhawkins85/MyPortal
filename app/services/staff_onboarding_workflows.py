@@ -22,6 +22,7 @@ from app.repositories import users as user_repo
 from app.services import audit as audit_service
 from app.services import email as email_service
 from app.services import m365 as m365_service
+from app.services.m365 import M365Error
 from app.services import notifications as notifications_service
 from app.services import system_variables
 from app.services import tickets as tickets_service
@@ -1727,17 +1728,39 @@ async def _run_offboarding_step(
     if remove_groups:
         group_ids = configured_group_ids
         if not group_ids:
+            # Use the type-cast endpoint to return only groups (excludes directory roles,
+            # administrative units, and other non-group objects that also appear in memberOf).
+            # Include groupTypes so we can skip dynamic-membership groups below.
             membership_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf?$select=id",
+                f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf/microsoft.graph.group?$select=id,groupTypes",
             )
-            group_ids = [str(item.get("id")).strip() for item in (membership_payload.get("value") or []) if item.get("id")]
+            group_ids = [
+                str(item.get("id")).strip()
+                for item in (membership_payload.get("value") or [])
+                if item.get("id")
+                # Skip dynamic-membership groups — their members cannot be removed manually.
+                and "DynamicMembership" not in (item.get("groupTypes") or [])
+            ]
         for group_id in group_ids:
-            await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
-                access_token,
-                f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{user_id}/$ref",
-            )
-            removed_group_count += 1
+            try:
+                await m365_service._graph_delete(  # pyright: ignore[reportPrivateUsage]
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/groups/{group_id}/members/{user_id}/$ref",
+                )
+                removed_group_count += 1
+            except M365Error as exc:
+                # Some groups (e.g. role-assignable groups, Teams-provisioned groups with
+                # restricted membership) may return 403 or 400 even with broad Graph
+                # permissions.  Log a warning and continue so that the rest of the
+                # offboarding step can complete.
+                log_warning(
+                    "Offboarding: skipping group removal due to Graph API error",
+                    group_id=group_id,
+                    user_id=user_id,
+                    http_status=exc.http_status,
+                    error=str(exc),
+                )
         steps_executed.append("remove_groups")
 
     return {
