@@ -69,6 +69,7 @@ async def get_company_workflow_policy(
     company_id: int,
     *,
     default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
+    direction: str = "onboarding",
 ) -> dict[str, Any]:
     company = await db.fetch_one(
         "SELECT company_onboarding_workflow_id FROM companies WHERE id = %s",
@@ -78,11 +79,15 @@ async def get_company_workflow_policy(
         """
         SELECT *
         FROM company_onboarding_workflow_policies
-        WHERE company_id = %s
+        WHERE company_id = %s AND direction = %s
         """,
-        (company_id,),
+        (company_id, direction),
     )
-    workflow_key = str((company or {}).get("company_onboarding_workflow_id") or "").strip() or default_workflow_key
+    # Fall back to the legacy company_onboarding_workflow_id field only for onboarding
+    if direction == "onboarding":
+        workflow_key = str((company or {}).get("company_onboarding_workflow_id") or "").strip() or default_workflow_key
+    else:
+        workflow_key = default_workflow_key
     if not policy:
         return {
             "company_id": company_id,
@@ -108,23 +113,27 @@ async def upsert_company_workflow_policy(
     max_retries: int,
     config: dict[str, Any] | None,
     default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
+    direction: str = "onboarding",
 ) -> dict[str, Any]:
     clean_key = workflow_key.strip()
     if not clean_key:
         existing_policy = await get_company_workflow_policy(
             company_id,
             default_workflow_key=default_workflow_key,
+            direction=direction,
         )
         clean_key = str(existing_policy.get("workflow_key") or "").strip() or default_workflow_key
-    await db.execute(
-        "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
-        (clean_key, company_id),
-    )
+    # Update the legacy company_onboarding_workflow_id field only for onboarding direction
+    if direction == "onboarding":
+        await db.execute(
+            "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
+            (clean_key, company_id),
+        )
     await db.execute(
         """
         INSERT INTO company_onboarding_workflow_policies
-            (company_id, workflow_key, is_enabled, max_retries, config_json)
-        VALUES (%s, %s, %s, %s, %s)
+            (company_id, direction, workflow_key, is_enabled, max_retries, config_json)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             workflow_key = VALUES(workflow_key),
             is_enabled = VALUES(is_enabled),
@@ -133,6 +142,7 @@ async def upsert_company_workflow_policy(
         """,
         (
             company_id,
+            direction,
             clean_key,
             1 if is_enabled else 0,
             max(0, int(max_retries)),
@@ -142,6 +152,7 @@ async def upsert_company_workflow_policy(
     return await get_company_workflow_policy(
         company_id,
         default_workflow_key=default_workflow_key,
+        direction=direction,
     )
 
 
