@@ -132,6 +132,7 @@ from app.repositories import subscription_categories as subscription_categories_
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_onboarding_workflows as staff_workflow_repo
+from app.repositories import staff_requests as staff_requests_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_attachments as attachments_repo
@@ -9042,6 +9043,7 @@ async def staff_page(
     show_ex_staff_flag = show_ex_staff.strip() == "1"
 
     staff_members: list[dict[str, Any]] = []
+    staff_pending_requests: list[dict[str, Any]] = []
     departments: list[str] = []
     field_config: list[dict[str, Any]] = []
     custom_field_definitions: list[dict[str, Any]] = []
@@ -9060,6 +9062,10 @@ async def staff_page(
         offboarding_email_forwarding_enabled = bool(
             int((company_record or {}).get("offboarding_email_forwarding_enabled", 1) or 1)
         )
+        if can_approve_onboarding:
+            staff_pending_requests = await staff_requests_repo.list_requests(
+                company_id, status="pending"
+            )
         workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
             [int(member["id"]) for member in staff_members if member.get("id") is not None]
         )
@@ -9247,6 +9253,7 @@ async def staff_page(
         "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
         "staff_members": staff_members,
+        "staff_pending_requests": staff_pending_requests,
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
         "show_ex_staff": show_ex_staff_flag,
@@ -10575,36 +10582,8 @@ async def create_staff_member(request: Request):
         timezone_name=submitted_timezone,
         assume_midnight=True,
     )
-    enabled = bool(values.get("enabled", True))
     department = str(values.get("department") or "").strip() or None
 
-    created = await staff_repo.create_staff(
-        company_id=company_id,
-        first_name=first_name,
-        last_name=last_name,
-        email=email,
-        mobile_phone=mobile_phone,
-        date_onboarded=date_onboarded,
-        date_offboarded=None,
-        enabled=enabled,
-        street=None,
-        city=None,
-        state=None,
-        postcode=None,
-        country=None,
-        department=department,
-        job_title=None,
-        org_company=None,
-        manager_name=None,
-        account_action=None,
-        syncro_contact_id=None,
-        onboarding_status="awaiting_approval",
-        onboarding_complete=False,
-        onboarding_completed_at=None,
-        approval_status="pending",
-        requested_by_user_id=int(user["id"]) if user.get("id") is not None else None,
-        requested_at=datetime.now(tz=timezone.utc),
-    )
     custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
     custom_values: dict[str, Any] = {}
     for definition in custom_definitions:
@@ -10617,26 +10596,45 @@ async def create_staff_member(request: Request):
             custom_values[key] = str(raw_value or "").lower() in {"1", "true", "on", "yes"}
         else:
             custom_values[key] = str(raw_value or "").strip() or None
-    await staff_custom_fields_repo.set_staff_field_values_by_name(
+
+    requester_id = int(user["id"]) if user.get("id") is not None else None
+
+    created = await staff_requests_repo.create_request(
         company_id=company_id,
-        staff_id=int(created["id"]),
-        values=custom_values,
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        mobile_phone=mobile_phone,
+        date_onboarded=date_onboarded,
+        department=department,
+        job_title=None,
+        request_notes=None,
+        custom_fields=custom_values or None,
+        requested_by_user_id=requester_id,
+        requested_at=datetime.now(tz=timezone.utc),
     )
 
     approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
         company_id=company_id,
-        staff=created,
-        requester_user_id=int(user["id"]) if user.get("id") is not None else None,
+        staff={
+            "id": created["id"],
+            "company_id": company_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "onboarding_status": "awaiting_approval",
+            "approval_status": "pending",
+        },
+        requester_user_id=requester_id,
     )
     await audit_service.log_action(
-        user_id=int(user["id"]) if user.get("id") is not None else None,
+        user_id=requester_id,
         action="staff.onboarding.requested",
-        entity_type="staff",
+        entity_type="staff_request",
         entity_id=int(created["id"]),
         metadata={
             "company_id": company_id,
-            "onboarding_status": created.get("onboarding_status"),
-            "approval_status": created.get("approval_status"),
+            "approval_status": "pending",
             "approver_user_ids": approver_user_ids,
             "onboarding_input": {
                 "date_onboarded_local": raw_date_onboarded or None,

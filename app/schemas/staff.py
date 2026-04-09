@@ -129,6 +129,34 @@ class StaffWorkflowManualActionResponse(BaseModel):
     detail: Optional[str] = None
 
 
+class StaffRequestResponse(BaseModel):
+    id: int
+    company_id: int
+    first_name: str
+    last_name: str
+    email: Optional[str] = None
+    mobile_phone: Optional[str] = None
+    date_onboarded: Optional[datetime] = None
+    department: Optional[str] = None
+    job_title: Optional[str] = None
+    request_notes: Optional[str] = None
+    custom_fields: dict[str, Any] = Field(default_factory=dict)
+    status: str = "pending"
+    requested_by_user_id: Optional[int] = None
+    requested_at: Optional[datetime] = None
+    approved_by_user_id: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    approval_notes: Optional[str] = None
+    staff_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {
+        "from_attributes": True,
+        "populate_by_name": True,
+    }
+
+
 class StaffResponse(BaseModel):
     id: int
     company_id: int
