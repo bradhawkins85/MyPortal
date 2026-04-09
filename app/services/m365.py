@@ -63,6 +63,7 @@ _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 # re-provisioning.
 _PROVISION_APP_ROLES: list[str] = [
     "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
+    "741f803b-c850-494e-b5df-cde7c675a1ca",  # User.ReadWrite.All (staff onboarding: create/update users, assign licenses)
     "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
     "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
     # Additional permissions for CIS benchmark checks:
@@ -76,6 +77,8 @@ _PROVISION_APP_ROLES: list[str] = [
     "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
     # Permission for Office 365 Mailbox Import (m365-mail module):
     "e2a3a72e-5f79-4c64-b1b1-878b674786c9",  # Mail.ReadWrite
+    # Permissions for staff onboarding/offboarding group management:
+    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",  # GroupMember.ReadWrite.All (add/remove group members)
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
