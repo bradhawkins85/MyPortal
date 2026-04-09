@@ -12,6 +12,8 @@ from app.core.database import db
 
 DEFAULT_WORKFLOW_KEY = "staff_onboarding_m365"
 DEFAULT_OFFBOARDING_WORKFLOW_KEY = "staff_offboarding_m365"
+DIRECTION_ONBOARDING = "onboarding"
+DIRECTION_OFFBOARDING = "offboarding"
 
 
 def _utc_now_naive() -> datetime:
@@ -43,7 +45,7 @@ def _normalise_execution(row: dict[str, Any] | None) -> dict[str, Any] | None:
         if record.get(key) is not None:
             record[key] = int(record[key])
     if record.get("direction") is None:
-        record["direction"] = "onboarding"
+        record["direction"] = DIRECTION_ONBOARDING
     return record
 
 
@@ -69,6 +71,7 @@ async def get_company_workflow_policy(
     company_id: int,
     *,
     default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
+    direction: str = DIRECTION_ONBOARDING,
 ) -> dict[str, Any]:
     company = await db.fetch_one(
         "SELECT company_onboarding_workflow_id FROM companies WHERE id = %s",
@@ -78,11 +81,15 @@ async def get_company_workflow_policy(
         """
         SELECT *
         FROM company_onboarding_workflow_policies
-        WHERE company_id = %s
+        WHERE company_id = %s AND direction = %s
         """,
-        (company_id,),
+        (company_id, direction),
     )
-    workflow_key = str((company or {}).get("company_onboarding_workflow_id") or "").strip() or default_workflow_key
+    # Fall back to the legacy company_onboarding_workflow_id field only for onboarding
+    if direction == DIRECTION_ONBOARDING:
+        workflow_key = str((company or {}).get("company_onboarding_workflow_id") or "").strip() or default_workflow_key
+    else:
+        workflow_key = default_workflow_key
     if not policy:
         return {
             "company_id": company_id,
@@ -108,23 +115,27 @@ async def upsert_company_workflow_policy(
     max_retries: int,
     config: dict[str, Any] | None,
     default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
+    direction: str = DIRECTION_ONBOARDING,
 ) -> dict[str, Any]:
     clean_key = workflow_key.strip()
     if not clean_key:
         existing_policy = await get_company_workflow_policy(
             company_id,
             default_workflow_key=default_workflow_key,
+            direction=direction,
         )
         clean_key = str(existing_policy.get("workflow_key") or "").strip() or default_workflow_key
-    await db.execute(
-        "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
-        (clean_key, company_id),
-    )
+    # Update the legacy company_onboarding_workflow_id field only for onboarding direction
+    if direction == DIRECTION_ONBOARDING:
+        await db.execute(
+            "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
+            (clean_key, company_id),
+        )
     await db.execute(
         """
         INSERT INTO company_onboarding_workflow_policies
-            (company_id, workflow_key, is_enabled, max_retries, config_json)
-        VALUES (%s, %s, %s, %s, %s)
+            (company_id, direction, workflow_key, is_enabled, max_retries, config_json)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             workflow_key = VALUES(workflow_key),
             is_enabled = VALUES(is_enabled),
@@ -133,6 +144,7 @@ async def upsert_company_workflow_policy(
         """,
         (
             company_id,
+            direction,
             clean_key,
             1 if is_enabled else 0,
             max(0, int(max_retries)),
@@ -142,6 +154,7 @@ async def upsert_company_workflow_policy(
     return await get_company_workflow_policy(
         company_id,
         default_workflow_key=default_workflow_key,
+        direction=direction,
     )
 
 
@@ -150,7 +163,7 @@ async def create_or_reset_execution(
     company_id: int,
     staff_id: int,
     workflow_key: str,
-    direction: str = "onboarding",
+    direction: str = DIRECTION_ONBOARDING,
     scheduled_for_utc: datetime | None = None,
     requested_timezone: str | None = None,
 ) -> dict[str, Any]:
