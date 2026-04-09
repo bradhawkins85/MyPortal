@@ -180,6 +180,16 @@
                   Action
                 </button>
                 {% endif %}
+                {% if notification.event_type == 'staff.offboarding.approval_requested' and notification.raw_metadata.get('staff_id') %}
+                <button
+                  type="button"
+                  class="button button--primary button--small"
+                  data-offboarding-action="{{ notification.id }}"
+                  data-staff-id="{{ notification.raw_metadata.get('staff_id') }}"
+                >
+                  Action
+                </button>
+                {% endif %}
                 <button
                   type="button"
                   class="button button--ghost button--small"
@@ -281,6 +291,50 @@
         </div>
         <div class="form-actions">
           <button type="submit" class="button button--danger" id="onboarding-deny-btn">Deny</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="offboarding-action-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="offboarding-action-modal-title" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="offboarding-action-modal-title">Offboarding Approval</h2>
+    <p id="offboarding-action-description" class="modal__subtitle"></p>
+
+    <div id="offboarding-action-approve-section">
+      <h3>Approve request</h3>
+      <form id="offboarding-approve-form" novalidate>
+        <input type="hidden" id="offboarding-approve-staff-id" value="" />
+        <input type="hidden" id="offboarding-approve-notification-id" value="" />
+        <div class="form-group">
+          <label for="offboarding-approve-comment" class="form-label">Comment (optional)</label>
+          <textarea id="offboarding-approve-comment" name="comment" class="input" rows="3" placeholder="Optional approval comment"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" id="offboarding-approve-btn">Approve</button>
+        </div>
+      </form>
+    </div>
+
+    <hr />
+
+    <div id="offboarding-action-deny-section">
+      <h3>Deny request</h3>
+      <form id="offboarding-deny-form" novalidate>
+        <input type="hidden" id="offboarding-deny-staff-id" value="" />
+        <input type="hidden" id="offboarding-deny-notification-id" value="" />
+        <div class="form-group">
+          <label for="offboarding-deny-reason" class="form-label">Reason <span aria-hidden="true">*</span></label>
+          <textarea id="offboarding-deny-reason" name="reason" class="input" rows="3" placeholder="Required reason for denial" required></textarea>
+          <span id="offboarding-deny-reason-error" class="form-error" hidden>A reason is required to deny the request.</span>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--danger" id="offboarding-deny-btn">Deny</button>
         </div>
       </form>
     </div>
