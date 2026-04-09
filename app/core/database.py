@@ -459,8 +459,12 @@ class Database:
             await conn.commit()
         else:
             async with conn.cursor() as cursor:
-                for statement in statements:
-                    await cursor.execute(statement)
+                await cursor.execute("SET sql_notes = 0")
+                try:
+                    for statement in statements:
+                        await cursor.execute(statement)
+                finally:
+                    await cursor.execute("SET sql_notes = 1")
                 await cursor.execute(
                     "INSERT INTO migrations (name) VALUES (%s)",
                     (path.name,),
