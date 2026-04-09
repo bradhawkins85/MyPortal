@@ -667,6 +667,145 @@
     }
   }
 
+  function bindOffboardingActionButtons() {
+    const modal = document.getElementById('offboarding-action-modal');
+    if (!modal) {
+      return;
+    }
+
+    const approveForm = document.getElementById('offboarding-approve-form');
+    const denyForm = document.getElementById('offboarding-deny-form');
+    const description = document.getElementById('offboarding-action-description');
+
+    function openOffboardingModal(staffId, notificationId, staffName) {
+      document.getElementById('offboarding-approve-staff-id').value = staffId;
+      document.getElementById('offboarding-approve-notification-id').value = notificationId;
+      document.getElementById('offboarding-deny-staff-id').value = staffId;
+      document.getElementById('offboarding-deny-notification-id').value = notificationId;
+      if (description) {
+        description.textContent = staffName
+          ? `Review the offboarding request for ${staffName}.`
+          : 'Review the pending offboarding request.';
+      }
+      if (approveForm) {
+        approveForm.querySelector('#offboarding-approve-comment').value = '';
+      }
+      if (denyForm) {
+        denyForm.querySelector('#offboarding-deny-reason').value = '';
+        const errorEl = denyForm.querySelector('#offboarding-deny-reason-error');
+        if (errorEl) {
+          errorEl.hidden = true;
+        }
+      }
+      modal.hidden = false;
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeOffboardingModal() {
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    modal.querySelectorAll('[data-modal-close]').forEach((btn) => {
+      btn.addEventListener('click', closeOffboardingModal);
+    });
+
+    document.querySelectorAll('[data-offboarding-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const notificationId = button.getAttribute('data-offboarding-action');
+        const staffId = button.getAttribute('data-staff-id');
+        const row = document.querySelector(`[data-notification-row="${notificationId}"]`);
+        const messageCell = row ? row.querySelector('td[data-label="Message"] .notification-message') : null;
+        const staffName = messageCell ? messageCell.textContent.trim() : '';
+        openOffboardingModal(staffId, notificationId, staffName);
+      });
+    });
+
+    async function submitOffboardingDecision(action, staffId, body, notificationId) {
+      const response = await fetch(`/api/staff/${staffId}/offboarding/${action}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': getCsrfToken(),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(buildErrorMessage(detail, `Failed to ${action} offboarding request`));
+      }
+      try {
+        const record = await markNotification(notificationId);
+        const changed = applyNotificationUpdate(record);
+        if (changed) {
+          try {
+            await refreshNotificationSummary();
+          } catch (summaryError) {
+            console.warn(summaryError);
+          }
+        }
+      } catch (markError) {
+        console.warn('Could not mark notification as read:', markError);
+      }
+    }
+
+    if (approveForm) {
+      approveForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const staffId = document.getElementById('offboarding-approve-staff-id').value;
+        const notificationId = document.getElementById('offboarding-approve-notification-id').value;
+        const comment = document.getElementById('offboarding-approve-comment').value.trim();
+        const submitBtn = document.getElementById('offboarding-approve-btn');
+        submitBtn.disabled = true;
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Approving…';
+        try {
+          await submitOffboardingDecision('approve', staffId, { comment: comment || null }, notificationId);
+          closeOffboardingModal();
+          window.alert('Offboarding request approved successfully.');
+        } catch (error) {
+          window.alert(error.message || 'Unable to approve offboarding request');
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }
+      });
+    }
+
+    if (denyForm) {
+      denyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const staffId = document.getElementById('offboarding-deny-staff-id').value;
+        const notificationId = document.getElementById('offboarding-deny-notification-id').value;
+        const reason = document.getElementById('offboarding-deny-reason').value.trim();
+        const errorEl = document.getElementById('offboarding-deny-reason-error');
+        if (!reason) {
+          if (errorEl) {
+            errorEl.hidden = false;
+          }
+          document.getElementById('offboarding-deny-reason').focus();
+          return;
+        }
+        if (errorEl) {
+          errorEl.hidden = true;
+        }
+        const submitBtn = document.getElementById('offboarding-deny-btn');
+        submitBtn.disabled = true;
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Denying…';
+        try {
+          await submitOffboardingDecision('deny', staffId, { reason }, notificationId);
+          closeOffboardingModal();
+          window.alert('Offboarding request denied.');
+        } catch (error) {
+          window.alert(error.message || 'Unable to deny offboarding request');
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalText;
+        }
+      });
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     bindFilters();
     bindSelectionControls();
@@ -675,6 +814,7 @@
     bindDeleteActions();
     bindBulkDeleteActions();
     bindOnboardingActionButtons();
+    bindOffboardingActionButtons();
     updateSelectionState();
 
     const visibleCounter = document.querySelector(notificationSelectors.unreadVisible);
