@@ -10170,7 +10170,7 @@ async def staff_onboarding_workflow_policy(request: Request):
         return redirect
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
-    policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
+    policy = await staff_workflow_repo.get_company_workflow_policy(company_id, direction="onboarding")
     return JSONResponse(
         {
             "policy": _normalise_workflow_policy_response(policy),
@@ -10202,6 +10202,7 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
         is_enabled=bool(policy_input.enabled),
         max_retries=int(policy_input.max_retries),
         config=policy_input.config,
+        direction="onboarding",
     )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
@@ -10255,6 +10256,7 @@ async def staff_offboarding_workflow_policy(request: Request):
     policy = await staff_workflow_repo.get_company_workflow_policy(
         company_id,
         default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+        direction="offboarding",
     )
     return JSONResponse(
         {
@@ -10291,6 +10293,7 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
         max_retries=int(policy_input.max_retries),
         config=policy_input.config,
         default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+        direction="offboarding",
     )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
@@ -10830,6 +10833,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     policy = await staff_workflow_repo.get_company_workflow_policy(
         int(updated["company_id"]),
         default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
+        direction="offboarding",
     )
     scheduled_for_utc, normalized_timezone = staff_onboarding_workflow_service._compute_scheduled_execution(
         staff=updated,
