@@ -5991,68 +5991,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    if flow == "provision":
-        # ── Auto-provision flow ────────────────────────────────────────────
-        tenant_id = str(state_data.get("tenant_id", "")).strip()
-        return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = _build_m365_redirect_uri(request)
-
-        def _provision_error(msg: str) -> RedirectResponse:
-            if return_to_company_edit:
-                return _company_edit_redirect(company_id=company_id, error=msg)
-            encoded = urlencode({"error": msg})
-            return RedirectResponse(
-                url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
-            )
-
-        if not tenant_id:
-            return _provision_error("Missing tenant ID in provision state.")
-
-        # Always use PKCE for the provision flow so the customer's Global Admin
-        # can grant consent without requiring the app to have a service
-        # principal in the tenant (avoids AADSTS700016).
-        code_verifier = state_data.get("code_verifier")
-        token_endpoint = (
-            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
-        )
-        token_data = {
-            "client_id": _csp_cid,
-            "client_secret": _csp_csec,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "scope": m365_service.CSP_SCOPE,
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(token_endpoint, data=token_data)
-        if token_response.status_code != 200:
-            log_error(
-                "CSP sign-in token exchange failed",
-                status=token_response.status_code,
-                body=token_response.text,
-            )
-            return _csp_error("Sign-in failed. Please try again.")
-
-        token_payload = token_response.json()
-        access_token = token_payload.get("access_token", "")
-        refresh_token = token_payload.get("refresh_token")
-        expires_in = token_payload.get("expires_in")
-        expires_at = None
-        if isinstance(expires_in, (int, float)):
-            expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=float(expires_in))
-
-        if not access_token:
-            return _csp_error("No access token received during CSP sign-in.")
-
-        await csp_repo.upsert_session(
-            user_id=user_id,
-            access_token=encrypt_secret(access_token),
-            refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
-            expires_at=expires_at,
-        )
-        log_info("CSP session stored for user", user_id=user_id)
-        return RedirectResponse(url="/admin/csp/customers", status_code=status.HTTP_303_SEE_OTHER)
-
     if flow == "csp_admin_provision":
         # ── Auto-provision the CSP/Lighthouse admin app registration ──────
         # The admin signed in with PROVISION_SCOPE targeting /organizations,
