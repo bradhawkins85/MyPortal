@@ -197,10 +197,12 @@ class WorkflowStepError(RuntimeError):
         *,
         step_name: str | None = None,
         request_payload: dict[str, Any] | None = None,
+        http_status: int | None = None,
     ) -> None:
         super().__init__(message)
         self.step_name = step_name
         self.request_payload = request_payload or {}
+        self.http_status = http_status
 
 
 class LicenseExhaustionError(WorkflowStepError):
@@ -1680,22 +1682,39 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
         raise WorkflowStepError(
             f"Microsoft Graph PATCH failed ({response.status_code})",
             request_payload={"url": url, "payload": payload},
+            http_status=response.status_code,
         )
     if response.status_code == 204:
         return {}
     return response.json()
 
 
-async def _resolve_staff_m365_user(company_id: int, staff: dict[str, Any]) -> dict[str, Any]:
+async def _resolve_staff_m365_user(
+    company_id: int,
+    staff: dict[str, Any],
+    *,
+    access_token: str | None = None,
+) -> dict[str, Any]:
     email = str(staff.get("email") or "").strip().lower()
     if not email:
         raise WorkflowStepError("Staff email is required for offboarding")
-    # Use force_client_credentials=True so the token used for user lookup is
-    # consistent with the token used for subsequent write operations (PATCH,
-    # POST, DELETE).  Without this, a stale cached/delegated token for a
-    # different tenant could return user GUIDs that are unknown to the
-    # client-credentials token, causing 404 errors on PATCH.
-    users = await m365_service.get_all_users(company_id, force_client_credentials=True)
+    # When an access_token is provided use it directly so that the same tenant
+    # context is shared between this lookup and subsequent write operations
+    # (PATCH/POST/DELETE).  Acquiring a separate token internally could yield a
+    # token for a different effective tenant when CSP credentials are involved,
+    # causing the user IDs returned here to be unresolvable by the write token.
+    if access_token is not None:
+        users = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            "https://graph.microsoft.com/v1.0/users?$select=id,mail,userPrincipalName",
+        )
+    else:
+        # Use force_client_credentials=True so the token used for user lookup is
+        # consistent with the token used for subsequent write operations (PATCH,
+        # POST, DELETE).  Without this, a stale cached/delegated token for a
+        # different tenant could return user GUIDs that are unknown to the
+        # client-credentials token, causing 404 errors on PATCH.
+        users = await m365_service.get_all_users(company_id, force_client_credentials=True)
     matched = next(
         (
             user
@@ -1758,11 +1777,16 @@ async def _run_offboarding_step(
             e.strip() for e in str(resolved_mailbox_grant_raw).split(",") if e.strip()
         ]
 
-    user = await _resolve_staff_m365_user(company_id, staff)
+    # Acquire the access token ONCE and reuse it for every subsequent operation
+    # (user lookup AND all Graph writes).  Acquiring separate tokens for lookup
+    # vs. write could yield tokens for different effective tenants when CSP
+    # credentials are involved, making the user GUIDs from the lookup
+    # unresolvable by the write token and producing 404 errors on PATCH.
+    access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+    user = await _resolve_staff_m365_user(company_id, staff, access_token=access_token)
     user_id = str(user["id"]).strip()
     encoded_user_id = quote(user_id, safe="")
     user_upn = str(user.get("userPrincipalName") or staff.get("email") or "").strip()
-    access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
     steps_executed: list[str] = []
     removed_license_count = 0
     removed_group_count = 0
@@ -1774,6 +1798,45 @@ async def _run_offboarding_step(
             {"accountEnabled": False},
         )
         steps_executed.append("disable_sign_in")
+
+    # Apply mailbox settings (OOO reply and/or email forwarding) BEFORE removing
+    # licences.  Once the Exchange Online licence is revoked the /mailboxSettings
+    # endpoint returns 404.  Doing this while the mailbox is still active ensures
+    # the settings are applied.  A 404 here means the user has no Exchange Online
+    # mailbox at all; log a warning and continue rather than failing the step.
+    if out_of_office_message or forwarding_address:
+        mailbox_settings_patch: dict[str, Any] = {}
+        if out_of_office_message:
+            mailbox_settings_patch["automaticRepliesSetting"] = {
+                "status": "AlwaysEnabled",
+                "internalReplyMessage": out_of_office_message,
+                "externalReplyMessage": out_of_office_message,
+            }
+        if forwarding_address:
+            mailbox_settings_patch["forwardingSmtpAddress"] = forwarding_address
+            mailbox_settings_patch["isForwardingEnabled"] = True
+        try:
+            await _graph_patch(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailboxSettings",
+                mailbox_settings_patch,
+            )
+            if out_of_office_message:
+                steps_executed.append("set_out_of_office")
+            if forwarding_address:
+                steps_executed.append("set_email_forwarding")
+        except WorkflowStepError as exc:
+            if exc.http_status == 404:
+                # The user has no Exchange Online mailbox (or it has already been
+                # deprovisioned).  Log a warning and continue with the remaining
+                # offboarding operations.
+                log_warning(
+                    "Offboarding: mailboxSettings not available (no Exchange Online mailbox)",
+                    user_id=user_id,
+                    user_upn=user_upn,
+                )
+            else:
+                raise
 
     if remove_licenses:
         license_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
@@ -1828,39 +1891,6 @@ async def _run_offboarding_step(
                 )
         steps_executed.append("remove_groups")
 
-    if out_of_office_message:
-        await _graph_patch(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailboxSettings",
-            {
-                "automaticRepliesSetting": {
-                    "status": "AlwaysEnabled",
-                    "internalReplyMessage": out_of_office_message,
-                    "externalReplyMessage": out_of_office_message,
-                }
-            },
-        )
-        steps_executed.append("set_out_of_office")
-
-    if forwarding_address:
-        mailbox_settings_patch: dict[str, Any] = {
-            "forwardingSmtpAddress": forwarding_address,
-            "isForwardingEnabled": True,
-        }
-        if out_of_office_message:
-            # Include the OOO setting in the same PATCH to avoid overwriting it.
-            mailbox_settings_patch["automaticRepliesSetting"] = {
-                "status": "AlwaysEnabled",
-                "internalReplyMessage": out_of_office_message,
-                "externalReplyMessage": out_of_office_message,
-            }
-        await _graph_patch(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailboxSettings",
-            mailbox_settings_patch,
-        )
-        steps_executed.append("set_email_forwarding")
-
     if mailbox_grant_email_list and user_upn:
         # Mailbox access delegation (e.g. FullAccess) requires Exchange Online PowerShell
         # or Graph-based user consent flows. We record the request here so downstream
@@ -1875,8 +1905,8 @@ async def _run_offboarding_step(
         "steps_executed": steps_executed,
         "licenses_removed": removed_license_count,
         "groups_removed": removed_group_count,
-        "out_of_office_set": out_of_office_message is not None,
-        "email_forwarding_set": forwarding_address is not None,
+        "out_of_office_set": "set_out_of_office" in steps_executed,
+        "email_forwarding_set": "set_email_forwarding" in steps_executed,
         "mailbox_access_requested_for": mailbox_grant_email_list,
     }
 
