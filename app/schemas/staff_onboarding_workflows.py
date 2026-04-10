@@ -81,6 +81,15 @@ class CompanyWorkflowPolicyUpsertSchema(BaseModel):
         default=None,
         validation_alias=AliasChoices("workflow_name", "workflowName", "name"),
     )
+    delay_type: str = Field(
+        default="scheduled",
+        validation_alias=AliasChoices("delay_type", "delayType"),
+    )
+    sort_order: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("sort_order", "sortOrder"),
+    )
     enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices("enabled", "is_enabled", "isEnabled"),
@@ -96,6 +105,15 @@ class CompanyWorkflowPolicyUpsertSchema(BaseModel):
         validation_alias=AliasChoices("config", "config_json", "configJson"),
     )
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("delay_type", mode="before")
+    @classmethod
+    def validate_delay_type(cls, value: Any) -> str:
+        text = str(value or "scheduled").strip().lower()
+        allowed = {"scheduled", "immediate"}
+        if text not in allowed:
+            raise ValueError(f"delay_type must be one of: {', '.join(sorted(allowed))}.")
+        return text
 
     @field_validator("workflow_key", "workflow_name", mode="before")
     @classmethod

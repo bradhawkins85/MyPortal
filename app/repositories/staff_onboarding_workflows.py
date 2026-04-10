@@ -67,12 +67,104 @@ def _normalise_idempotency(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return record
 
 
+def _normalise_policy(row: dict[str, Any] | None, *, default_workflow_key: str = DEFAULT_WORKFLOW_KEY) -> dict[str, Any] | None:
+    if not row:
+        return None
+    return {
+        "id": int(row["id"]) if row.get("id") is not None else None,
+        "company_id": int(row["company_id"]),
+        "direction": str(row.get("direction") or DIRECTION_ONBOARDING),
+        "workflow_key": str(row.get("workflow_key") or default_workflow_key),
+        "workflow_name": str(row.get("workflow_name") or "").strip() or None,
+        "delay_type": str(row.get("delay_type") or "scheduled").strip().lower() or "scheduled",
+        "sort_order": int(row.get("sort_order") or 0),
+        "is_enabled": bool(int(row.get("is_enabled") or 0)),
+        "max_retries": max(0, int(row.get("max_retries") or 0)),
+        "config": _deserialise_json(row.get("config_json")),
+    }
+
+
+async def list_company_workflow_policies(
+    company_id: int,
+    *,
+    direction: str = DIRECTION_ONBOARDING,
+    enabled_only: bool = False,
+) -> list[dict[str, Any]]:
+    if enabled_only:
+        rows = await db.fetch_all(
+            """
+            SELECT *
+            FROM company_onboarding_workflow_policies
+            WHERE company_id = %s AND direction = %s AND is_enabled = 1
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (company_id, direction),
+        )
+    else:
+        rows = await db.fetch_all(
+            """
+            SELECT *
+            FROM company_onboarding_workflow_policies
+            WHERE company_id = %s AND direction = %s
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (company_id, direction),
+        )
+    default_key = DEFAULT_WORKFLOW_KEY if direction == DIRECTION_ONBOARDING else DEFAULT_OFFBOARDING_WORKFLOW_KEY
+    return [_normalise_policy(dict(row), default_workflow_key=default_key) for row in rows if row]  # type: ignore[misc]
+
+
+async def get_company_workflow_policy_by_id(
+    policy_id: int,
+    company_id: int,
+) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT *
+        FROM company_onboarding_workflow_policies
+        WHERE id = %s AND company_id = %s
+        LIMIT 1
+        """,
+        (policy_id, company_id),
+    )
+    if not row:
+        return None
+    default_key = DEFAULT_WORKFLOW_KEY if str(row.get("direction") or "") == DIRECTION_ONBOARDING else DEFAULT_OFFBOARDING_WORKFLOW_KEY
+    return _normalise_policy(dict(row), default_workflow_key=default_key)
+
+
+async def get_company_workflow_policy_by_key(
+    company_id: int,
+    workflow_key: str,
+    direction: str = DIRECTION_ONBOARDING,
+) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT *
+        FROM company_onboarding_workflow_policies
+        WHERE company_id = %s AND direction = %s AND workflow_key = %s
+        LIMIT 1
+        """,
+        (company_id, direction, workflow_key),
+    )
+    if not row:
+        return None
+    default_key = DEFAULT_WORKFLOW_KEY if direction == DIRECTION_ONBOARDING else DEFAULT_OFFBOARDING_WORKFLOW_KEY
+    return _normalise_policy(dict(row), default_workflow_key=default_key)
+
+
 async def get_company_workflow_policy(
     company_id: int,
     *,
     default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
     direction: str = DIRECTION_ONBOARDING,
 ) -> dict[str, Any]:
+    """Return the first (primary) workflow policy for a company and direction.
+
+    Falls back to a synthetic default policy when none is configured.
+    This function is retained for backward compatibility with callers that
+    expect a single policy dict.
+    """
     company = await db.fetch_one(
         "SELECT company_onboarding_workflow_id FROM companies WHERE id = %s",
         (company_id,),
@@ -82,6 +174,8 @@ async def get_company_workflow_policy(
         SELECT *
         FROM company_onboarding_workflow_policies
         WHERE company_id = %s AND direction = %s
+        ORDER BY sort_order ASC, id ASC
+        LIMIT 1
         """,
         (company_id, direction),
     )
@@ -94,17 +188,44 @@ async def get_company_workflow_policy(
         return {
             "company_id": company_id,
             "workflow_key": workflow_key,
+            "workflow_name": None,
+            "delay_type": "scheduled",
+            "sort_order": 0,
             "is_enabled": True,
             "max_retries": 2,
             "config": {},
         }
-    return {
-        "company_id": int(policy["company_id"]),
-        "workflow_key": str(policy.get("workflow_key") or workflow_key or default_workflow_key),
-        "is_enabled": bool(int(policy.get("is_enabled") or 0)),
-        "max_retries": max(0, int(policy.get("max_retries") or 0)),
-        "config": _deserialise_json(policy.get("config_json")),
+    normalised = _normalise_policy(dict(policy), default_workflow_key=default_workflow_key)
+    if normalised and not normalised.get("workflow_key"):
+        normalised["workflow_key"] = workflow_key
+    return normalised or {
+        "company_id": company_id,
+        "workflow_key": workflow_key,
+        "workflow_name": None,
+        "delay_type": "scheduled",
+        "sort_order": 0,
+        "is_enabled": True,
+        "max_retries": 2,
+        "config": {},
     }
+
+
+async def delete_company_workflow_policy(
+    policy_id: int,
+    company_id: int,
+) -> bool:
+    """Delete a workflow policy by ID. Returns True if a row was deleted."""
+    row = await db.fetch_one(
+        "SELECT id FROM company_onboarding_workflow_policies WHERE id = %s AND company_id = %s",
+        (policy_id, company_id),
+    )
+    if not row:
+        return False
+    await db.execute(
+        "DELETE FROM company_onboarding_workflow_policies WHERE id = %s AND company_id = %s",
+        (policy_id, company_id),
+    )
+    return True
 
 
 async def upsert_company_workflow_policy(
@@ -116,6 +237,9 @@ async def upsert_company_workflow_policy(
     config: dict[str, Any] | None,
     default_workflow_key: str = DEFAULT_WORKFLOW_KEY,
     direction: str = DIRECTION_ONBOARDING,
+    delay_type: str = "scheduled",
+    workflow_name: str | None = None,
+    sort_order: int = 0,
 ) -> dict[str, Any]:
     clean_key = workflow_key.strip()
     if not clean_key:
@@ -125,19 +249,27 @@ async def upsert_company_workflow_policy(
             direction=direction,
         )
         clean_key = str(existing_policy.get("workflow_key") or "").strip() or default_workflow_key
-    # Update the legacy company_onboarding_workflow_id field only for onboarding direction
+    clean_delay_type = str(delay_type or "scheduled").strip().lower()
+    if clean_delay_type not in ("scheduled", "immediate"):
+        clean_delay_type = "scheduled"
+    # Update the legacy company_onboarding_workflow_id field only for the primary (first) onboarding workflow
     if direction == DIRECTION_ONBOARDING:
-        await db.execute(
-            "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
-            (clean_key, company_id),
-        )
+        existing = await list_company_workflow_policies(company_id, direction=direction)
+        is_first = not existing or (len(existing) == 1 and str(existing[0].get("workflow_key") or "") == clean_key)
+        if is_first:
+            await db.execute(
+                "UPDATE companies SET company_onboarding_workflow_id = %s WHERE id = %s",
+                (clean_key, company_id),
+            )
     await db.execute(
         """
         INSERT INTO company_onboarding_workflow_policies
-            (company_id, direction, workflow_key, is_enabled, max_retries, config_json)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (company_id, direction, workflow_key, workflow_name, delay_type, sort_order, is_enabled, max_retries, config_json)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
-            workflow_key = VALUES(workflow_key),
+            workflow_name = VALUES(workflow_name),
+            delay_type = VALUES(delay_type),
+            sort_order = VALUES(sort_order),
             is_enabled = VALUES(is_enabled),
             max_retries = VALUES(max_retries),
             config_json = VALUES(config_json)
@@ -146,11 +278,17 @@ async def upsert_company_workflow_policy(
             company_id,
             direction,
             clean_key,
+            workflow_name or None,
+            clean_delay_type,
+            max(0, int(sort_order)),
             1 if is_enabled else 0,
             max(0, int(max_retries)),
             json.dumps(config or {}, default=_json_default, ensure_ascii=False),
         ),
     )
+    result = await get_company_workflow_policy_by_key(company_id, clean_key, direction)
+    if result:
+        return result
     return await get_company_workflow_policy(
         company_id,
         default_workflow_key=default_workflow_key,
