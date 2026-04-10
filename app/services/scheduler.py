@@ -41,7 +41,7 @@ _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
 COMMANDS_BY_MODULE: dict[str, set[str]] = {
-    "m365": {"sync_m365_data", "sync_o365"},
+    "m365": {"sync_m365_data", "sync_o365", "sync_m365_email_domains"},
     "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
     "call-recordings": {"sync_recordings", "queue_transcriptions", "process_transcription"},
     "unifi-talk": {"sync_unifi_talk_recordings"},
@@ -416,6 +416,14 @@ class SchedulerService:
                             },
                             default=str,
                         )
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
+                elif command == "sync_m365_email_domains":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        result = await m365_service.sync_email_domains(int(company_id))
+                        details = json.dumps(result, default=str)
                     else:
                         status = "skipped"
                         details = "Company context required"
