@@ -117,6 +117,12 @@ _M365_ADMIN_MODULE_SLUG = "m365-admin"
 # client app registration in your own tenant to avoid this issue.
 AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 
+# Microsoft Graph error code returned when a tenant does not have an Azure AD
+# Premium P1/P2 licence.  Endpoints that require premium (e.g. signInActivity
+# in $select) return 403 with this code.  Callers should detect this and retry
+# without the premium-only field rather than treating it as a permissions error.
+_NON_PREMIUM_ERROR_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant"
+
 
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
     """Return ``True`` when ``client_id`` matches the Azure CLI fallback app ID."""
@@ -415,11 +421,22 @@ class M365Error(RuntimeError):
     :param http_status: The HTTP status code from the Microsoft Graph API
         response that triggered this error, if applicable.  ``None`` for errors
         not associated with a specific HTTP response.
+    :param graph_error_code: The ``error.code`` string from the Graph API JSON
+        error body, when available.  Callers can use this to distinguish
+        specific failure modes (e.g. ``Authentication_RequestFromNonPremiumTenantOrB2CTenant``)
+        from generic permission errors.
     """
 
-    def __init__(self, message: str, *, http_status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        graph_error_code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.http_status: int | None = http_status
+        self.graph_error_code: str | None = graph_error_code
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -792,9 +809,15 @@ async def _graph_get(
             status=response.status_code,
             body=response.text,
         )
+        graph_error_code: str | None = None
+        try:
+            graph_error_code = (response.json().get("error") or {}).get("code") or None
+        except Exception:  # noqa: BLE001
+            pass
         raise M365Error(
             f"Microsoft Graph request failed ({response.status_code})",
             http_status=response.status_code,
+            graph_error_code=graph_error_code,
         )
     return response.json()
 
@@ -1627,62 +1650,132 @@ async def _sync_staff_assignments(
     )
     consistency_headers = {"ConsistencyLevel": "eventual"}
     assigned_emails: set[str] = set()
-    while url:
-        payload = await _graph_get(
-            access_token,
-            url,
-            extra_headers=consistency_headers,
-        )
-        for user in payload.get("value", []):
-            email = (
-                (user.get("mail") or user.get("userPrincipalName") or "")
-                .strip()
-                .lower()
+    try:
+        while url:
+            payload = await _graph_get(
+                access_token,
+                url,
+                extra_headers=consistency_headers,
             )
-            if not email:
-                continue
-            sign_in_activity = user.get("signInActivity") or {}
-            last_sign_in_str = sign_in_activity.get("lastSignInDateTime")
-            last_sign_in = parse_graph_datetime(last_sign_in_str)
-            account_enabled = bool(user.get("accountEnabled", True))
-            staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
-            if not staff:
-                first = (user.get("givenName") or "").strip() or "Unknown"
-                last = (
-                    (user.get("surname") or "").strip() or user.get("displayName") or ""
+            for user in payload.get("value", []):
+                email = (
+                    (user.get("mail") or user.get("userPrincipalName") or "")
+                    .strip()
+                    .lower()
                 )
-                created = await staff_repo.create_staff(
-                    company_id=company_id,
-                    first_name=first or "Unknown",
-                    last_name=last or "",
-                    email=email,
-                    mobile_phone=None,
-                    date_onboarded=None,
-                    date_offboarded=None,
-                    enabled=account_enabled,
-                    is_ex_staff=not account_enabled,
-                    street=None,
-                    city=None,
-                    state=None,
-                    postcode=None,
-                    country=None,
-                    department=None,
-                    job_title=None,
-                    org_company=None,
-                    manager_name=None,
-                    account_action="Onboarded" if account_enabled else "Offboarded",
-                    syncro_contact_id=None,
-                    source="m365",
-                    m365_last_sign_in=last_sign_in,
+                if not email:
+                    continue
+                sign_in_activity = user.get("signInActivity") or {}
+                last_sign_in_str = sign_in_activity.get("lastSignInDateTime")
+                last_sign_in = parse_graph_datetime(last_sign_in_str)
+                account_enabled = bool(user.get("accountEnabled", True))
+                staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
+                if not staff:
+                    first = (user.get("givenName") or "").strip() or "Unknown"
+                    last = (
+                        (user.get("surname") or "").strip() or user.get("displayName") or ""
+                    )
+                    created = await staff_repo.create_staff(
+                        company_id=company_id,
+                        first_name=first or "Unknown",
+                        last_name=last or "",
+                        email=email,
+                        mobile_phone=None,
+                        date_onboarded=None,
+                        date_offboarded=None,
+                        enabled=account_enabled,
+                        is_ex_staff=not account_enabled,
+                        street=None,
+                        city=None,
+                        state=None,
+                        postcode=None,
+                        country=None,
+                        department=None,
+                        job_title=None,
+                        org_company=None,
+                        manager_name=None,
+                        account_action="Onboarded" if account_enabled else "Offboarded",
+                        syncro_contact_id=None,
+                        source="m365",
+                        m365_last_sign_in=last_sign_in,
+                    )
+                    staff = created
+                elif last_sign_in is not None:
+                    await staff_repo.update_m365_last_sign_in(
+                        int(staff["id"]), last_sign_in
+                    )
+                assigned_emails.add(email)
+                await license_repo.link_staff_to_license(int(staff["id"]), license_id)
+            url = payload.get("@odata.nextLink")
+    except M365Error as exc:
+        if exc.http_status == 403 and exc.graph_error_code == _NON_PREMIUM_ERROR_CODE:
+            # signInActivity requires Azure AD Premium P1/P2.  Retry without it
+            # so that non-premium tenants can still sync licence assignments.
+            log_info(
+                "M365 tenant does not have premium licence; "
+                "retrying _sync_staff_assignments without signInActivity",
+                company_id=company_id,
+                license_id=license_id,
+                sku_id=sku_id,
+            )
+            url = (
+                "https://graph.microsoft.com/v1.0/users?"
+                f"$filter=assignedLicenses/any(x:x/skuId eq {sku_id})&"
+                "$select=id,displayName,mail,userPrincipalName,givenName,surname,accountEnabled&"
+                "$count=true"
+            )
+            assigned_emails = set()
+            while url:
+                payload = await _graph_get(
+                    access_token,
+                    url,
+                    extra_headers=consistency_headers,
                 )
-                staff = created
-            elif last_sign_in is not None:
-                await staff_repo.update_m365_last_sign_in(
-                    int(staff["id"]), last_sign_in
-                )
-            assigned_emails.add(email)
-            await license_repo.link_staff_to_license(int(staff["id"]), license_id)
-        url = payload.get("@odata.nextLink")
+                for user in payload.get("value", []):
+                    email = (
+                        (user.get("mail") or user.get("userPrincipalName") or "")
+                        .strip()
+                        .lower()
+                    )
+                    if not email:
+                        continue
+                    account_enabled = bool(user.get("accountEnabled", True))
+                    staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
+                    if not staff:
+                        first = (user.get("givenName") or "").strip() or "Unknown"
+                        last = (
+                            (user.get("surname") or "").strip() or user.get("displayName") or ""
+                        )
+                        created = await staff_repo.create_staff(
+                            company_id=company_id,
+                            first_name=first or "Unknown",
+                            last_name=last or "",
+                            email=email,
+                            mobile_phone=None,
+                            date_onboarded=None,
+                            date_offboarded=None,
+                            enabled=account_enabled,
+                            is_ex_staff=not account_enabled,
+                            street=None,
+                            city=None,
+                            state=None,
+                            postcode=None,
+                            country=None,
+                            department=None,
+                            job_title=None,
+                            org_company=None,
+                            manager_name=None,
+                            account_action="Onboarded" if account_enabled else "Offboarded",
+                            syncro_contact_id=None,
+                            source="m365",
+                            m365_last_sign_in=None,
+                        )
+                        staff = created
+                    assigned_emails.add(email)
+                    await license_repo.link_staff_to_license(int(staff["id"]), license_id)
+                url = payload.get("@odata.nextLink")
+        else:
+            raise
 
     current_staff = await license_repo.list_staff_for_license(license_id)
     to_unlink = [
@@ -1864,17 +1957,40 @@ async def get_all_users(
     token and therefore the same tenant context.
     """
     access_token = await acquire_access_token(company_id, force_client_credentials=force_client_credentials)
-    url = (
+    url: str | None = (
         "https://graph.microsoft.com/v1.0/users?"
         "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
         "mobilePhone,businessPhones,streetAddress,city,state,postalCode,country,"
         "department,jobTitle,signInActivity,accountEnabled"
     )
     users: list[dict[str, Any]] = []
-    while url:
-        payload = await _graph_get(access_token, url)
-        users.extend(payload.get("value", []))
-        url = payload.get("@odata.nextLink")
+    try:
+        while url:
+            payload = await _graph_get(access_token, url)
+            users.extend(payload.get("value", []))
+            url = payload.get("@odata.nextLink")
+    except M365Error as exc:
+        if exc.http_status == 403 and exc.graph_error_code == _NON_PREMIUM_ERROR_CODE:
+            # signInActivity requires Azure AD Premium P1/P2.  Retry without it
+            # so that non-premium tenants can still sync users.
+            log_info(
+                "M365 tenant does not have premium licence; "
+                "retrying get_all_users without signInActivity",
+                company_id=company_id,
+            )
+            url = (
+                "https://graph.microsoft.com/v1.0/users?"
+                "$select=id,displayName,mail,userPrincipalName,givenName,surname,"
+                "mobilePhone,businessPhones,streetAddress,city,state,postalCode,country,"
+                "department,jobTitle,accountEnabled"
+            )
+            users = []
+            while url:
+                payload = await _graph_get(access_token, url)
+                users.extend(payload.get("value", []))
+                url = payload.get("@odata.nextLink")
+        else:
+            raise
     return users
 
 
