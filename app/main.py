@@ -10095,7 +10095,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "name": "retrieval_step",
                 "label": "Require retrieval step",
                 "type": "checkbox",
-                "default": False,
+                "default": True,
                 "description": "Require the recipient to click through an extra confirmation step before viewing the secret.",
             },
             {
