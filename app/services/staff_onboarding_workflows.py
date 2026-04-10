@@ -1256,20 +1256,21 @@ async def _execute_policy_step(
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         current_display_name = str(user.get("displayName") or "").strip()
         current_upn = str(user.get("userPrincipalName") or user.get("mail") or "").strip()
-        upn_prefix = str(_resolve_template_value(step.get("upn_prefix"), vars_map=vars_map) or "former").strip()
+        upn_prefix_raw = _resolve_template_value(step.get("upn_prefix"), vars_map=vars_map)
+        upn_prefix = str(upn_prefix_raw).strip() if upn_prefix_raw else ""
         upn_local, _, upn_domain = current_upn.partition("@")
         next_upn = current_upn
-        if upn_domain and upn_local:
-            next_upn = f"{upn_prefix}.{upn_local}@{upn_domain}" if upn_prefix else current_upn
-        next_display_name = str(
-            _resolve_template_value(step.get("display_name"), vars_map=vars_map)
-            or f"{current_display_name} (Former Staff)"
-        ).strip()
-        patch_payload = {
-            "displayName": next_display_name,
-            "userPrincipalName": next_upn,
-        }
-        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
+        if upn_prefix and upn_domain and upn_local:
+            next_upn = f"{upn_prefix}.{upn_local}@{upn_domain}"
+        display_name_raw = _resolve_template_value(step.get("display_name"), vars_map=vars_map)
+        next_display_name = (str(display_name_raw).strip() if display_name_raw else "") or current_display_name
+        patch_payload = {}
+        if next_upn != current_upn:
+            patch_payload["userPrincipalName"] = next_upn
+        if next_display_name != current_display_name:
+            patch_payload["displayName"] = next_display_name
+        if patch_payload:
+            await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         return {
             "m365_user_id": user_id,
             "renamed": True,
@@ -1282,17 +1283,17 @@ async def _execute_policy_step(
         user_id = str(user["id"]).strip()
         encoded_user_id = quote(user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
-        next_department = str(
-            _resolve_template_value(step.get("department"), vars_map=vars_map) or step.get("department_value") or "Former Staff"
-        ).strip()
-        next_company = str(
-            _resolve_template_value(step.get("company_name"), vars_map=vars_map) or step.get("company_value") or "Former Staff"
-        ).strip()
-        patch_payload = {
-            "department": next_department,
-            "companyName": next_company,
-        }
-        await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
+        next_department_raw = _resolve_template_value(step.get("department"), vars_map=vars_map) or step.get("department_value")
+        next_company_raw = _resolve_template_value(step.get("company_name"), vars_map=vars_map) or step.get("company_value")
+        next_department = str(next_department_raw).strip() if next_department_raw else ""
+        next_company = str(next_company_raw).strip() if next_company_raw else ""
+        patch_payload = {}
+        if next_department:
+            patch_payload["department"] = next_department
+        if next_company:
+            patch_payload["companyName"] = next_company
+        if patch_payload:
+            await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         return {
             "m365_user_id": user_id,
             "updated": patch_payload,
@@ -1321,9 +1322,6 @@ async def _execute_policy_step(
         encoded_user_id = quote(user_id, safe="")
         access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
         hygiene_updates = step.get("hygiene_updates") if isinstance(step.get("hygiene_updates"), dict) else {
-            "officeLocation": "Offboarded",
-            "jobTitle": "Former Staff",
-            "mobilePhone": None,
             "businessPhones": [],
         }
         patch_payload = _resolve_template_value(hygiene_updates, vars_map=vars_map)
