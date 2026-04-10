@@ -377,3 +377,38 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
     assert result["operation"] == "remove"
     assert result["site_ids"] == ["site-a"]
     graph_delete.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_delete_staff_record(monkeypatch):
+    delete_staff = AsyncMock(return_value=None)
+    monkeypatch.setattr(workflows.staff_repo, "delete_staff", delete_staff)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "delete_staff_record"},
+        company_id=9,
+        staff={"id": 801, "email": "duplicate@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["deleted"] is True
+    assert result["staff_id"] == 801
+    delete_staff.assert_awaited_once_with(801)
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_delete_staff_record_missing_id(monkeypatch):
+    delete_staff = AsyncMock(return_value=None)
+    monkeypatch.setattr(workflows.staff_repo, "delete_staff", delete_staff)
+
+    with pytest.raises(workflows.WorkflowStepError, match="staff ID is not available"):
+        await workflows._execute_policy_step(
+            step={"type": "delete_staff_record"},
+            company_id=9,
+            staff={"email": "noid@example.com"},
+            policy_config={},
+            vars_map={},
+        )
+
+    delete_staff.assert_not_awaited()
