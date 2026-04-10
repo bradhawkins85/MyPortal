@@ -1,12 +1,14 @@
 """Tests for the sync_m365_email_domains feature."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
+import app.main as main_module
 import app.services.m365 as m365_service
 from app.repositories import companies as companies_repo
+from app.services.scheduler import COMMANDS_BY_MODULE
 
 
 @pytest.fixture
@@ -174,8 +176,6 @@ async def test_sync_email_domains_no_new_domains(monkeypatch):
 @pytest.mark.anyio
 async def test_best_effort_sync_does_not_raise_on_error(monkeypatch):
     """The helper swallows errors so the OAuth callback is never broken."""
-    import app.main as main_module
-
     monkeypatch.setattr(
         main_module.m365_service,
         "sync_email_domains",
@@ -189,8 +189,6 @@ async def test_best_effort_sync_does_not_raise_on_error(monkeypatch):
 @pytest.mark.anyio
 async def test_best_effort_sync_calls_sync_email_domains(monkeypatch):
     """The helper calls m365_service.sync_email_domains with the correct company_id."""
-    import app.main as main_module
-
     mock_sync = AsyncMock(return_value={"added": ["example.com"], "existing": []})
     monkeypatch.setattr(main_module.m365_service, "sync_email_domains", mock_sync)
 
@@ -205,6 +203,4 @@ async def test_best_effort_sync_calls_sync_email_domains(monkeypatch):
 
 def test_sync_m365_email_domains_in_commands_by_module():
     """sync_m365_email_domains is listed under the m365 module commands."""
-    from app.services.scheduler import COMMANDS_BY_MODULE
-
     assert "sync_m365_email_domains" in COMMANDS_BY_MODULE.get("m365", set())
