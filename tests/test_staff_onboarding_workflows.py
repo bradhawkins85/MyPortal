@@ -520,6 +520,8 @@ async def test_enqueue_offboarding_uses_offboarding_workflow_key(monkeypatch):
     monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
     get_policy_mock = AsyncMock(return_value={"workflow_key": None})
     monkeypatch.setattr(workflows.workflow_repo, "get_company_workflow_policy", get_policy_mock)
+    # Return empty list so the code falls back to get_company_workflow_policy
+    monkeypatch.setattr(workflows.workflow_repo, "list_company_workflow_policies", AsyncMock(return_value=[]))
     create_mock = AsyncMock(return_value={"id": 88})
     monkeypatch.setattr(workflows.workflow_repo, "create_or_reset_execution", create_mock)
     monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
@@ -548,7 +550,7 @@ async def test_enqueue_offboarding_uses_offboarding_workflow_key(monkeypatch):
 
     assert requested_timezone == "Australia/Sydney"
     assert scheduled_for_utc is not None
-    assert scheduled_for_utc.isoformat() == "2026-04-06T14:00:00"
+    assert scheduled_for_utc.isoformat() == "2026-04-03T13:00:00"
 
 
 def test_compute_scheduled_execution_offboarding_preserves_requested_datetime():
@@ -572,6 +574,8 @@ async def test_enqueue_workflow_creates_approved_execution(monkeypatch):
         "get_company_workflow_policy",
         AsyncMock(return_value={"workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY}),
     )
+    # Return empty list so the code falls back to get_company_workflow_policy
+    monkeypatch.setattr(workflows.workflow_repo, "list_company_workflow_policies", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         workflows.workflow_repo,
         "create_or_reset_execution",

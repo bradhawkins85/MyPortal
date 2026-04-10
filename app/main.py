@@ -10318,8 +10318,13 @@ def _normalise_workflow_policy_response(
 ) -> dict[str, Any]:
     config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
     return {
+        "id": policy.get("id"),
         "company_id": int(policy.get("company_id") or 0),
+        "direction": str(policy.get("direction") or staff_workflow_repo.DIRECTION_ONBOARDING),
         "workflow_key": str(policy.get("workflow_key") or default_workflow_key),
+        "workflow_name": policy.get("workflow_name"),
+        "delay_type": str(policy.get("delay_type") or "scheduled"),
+        "sort_order": int(policy.get("sort_order") or 0),
         "enabled": bool(policy.get("is_enabled", True)),
         "max_retries": max(0, int(policy.get("max_retries") or 0)),
         "config_json": _normalise_workflow_config(config),
@@ -10455,6 +10460,9 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
         max_retries=int(policy_input.max_retries),
         config=policy_input.config,
         direction=staff_workflow_repo.DIRECTION_ONBOARDING,
+        delay_type=str(policy_input.delay_type or "scheduled"),
+        workflow_name=policy_input.workflow_name,
+        sort_order=int(policy_input.sort_order or 0),
     )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
@@ -10546,6 +10554,9 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
         config=policy_input.config,
         default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
         direction=staff_workflow_repo.DIRECTION_OFFBOARDING,
+        delay_type=str(policy_input.delay_type or "scheduled"),
+        workflow_name=policy_input.workflow_name,
+        sort_order=int(policy_input.sort_order or 0),
     )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
@@ -10570,7 +10581,151 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
     )
 
 
-@app.get("/staff/workflows/history", response_class=HTMLResponse)
+@app.get("/staff/workflows/{direction}/policies")
+async def list_staff_workflow_policies(direction: str, request: Request):
+    (
+        _user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    direction = direction.strip().lower()
+    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
+    default_key = staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    policies = await staff_workflow_repo.list_company_workflow_policies(company_id, direction=direction)
+    catalog = _OFFBOARDING_STEP_CATALOG if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else _ONBOARDING_STEP_CATALOG
+    return JSONResponse(
+        {
+            "policies": [_normalise_workflow_policy_response(p, default_workflow_key=default_key) for p in policies],
+            "step_catalog": catalog,
+            "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
+        }
+    )
+
+
+@app.post("/staff/workflows/{direction}/policies")
+async def create_staff_workflow_policy(direction: str, request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    direction = direction.strip().lower()
+    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
+    default_key = staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    policy_input = await _extract_workflow_policy_payload(request)
+    updated = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=company_id,
+        workflow_key=policy_input.workflow_key or default_key,
+        is_enabled=bool(policy_input.enabled),
+        max_retries=int(policy_input.max_retries),
+        config=policy_input.config,
+        default_workflow_key=default_key,
+        direction=direction,
+        delay_type=str(policy_input.delay_type or "scheduled"),
+        workflow_name=policy_input.workflow_name,
+        sort_order=int(policy_input.sort_order or 0),
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action=f"staff.workflows.{direction}.policy.created",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)},
+    )
+    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)})
+
+
+@app.put("/staff/workflows/{direction}/policies/{policy_id}")
+async def update_staff_workflow_policy(direction: str, policy_id: int, request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    direction = direction.strip().lower()
+    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
+    existing = await staff_workflow_repo.get_company_workflow_policy_by_id(policy_id, company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found")
+    default_key = staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    policy_input = await _extract_workflow_policy_payload(request)
+    updated = await staff_workflow_repo.upsert_company_workflow_policy(
+        company_id=company_id,
+        workflow_key=policy_input.workflow_key or str(existing.get("workflow_key") or default_key),
+        is_enabled=bool(policy_input.enabled),
+        max_retries=int(policy_input.max_retries),
+        config=policy_input.config,
+        default_workflow_key=default_key,
+        direction=direction,
+        delay_type=str(policy_input.delay_type or "scheduled"),
+        workflow_name=policy_input.workflow_name,
+        sort_order=int(policy_input.sort_order or 0),
+    )
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action=f"staff.workflows.{direction}.policy.updated",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"policy_id": policy_id, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)},
+    )
+    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)})
+
+
+@app.delete("/staff/workflows/{direction}/policies/{policy_id}")
+async def delete_staff_workflow_policy(direction: str, policy_id: int, request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    direction = direction.strip().lower()
+    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
+    deleted = await staff_workflow_repo.delete_company_workflow_policy(policy_id, company_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found")
+    await audit_service.log_action(
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        action=f"staff.workflows.{direction}.policy.deleted",
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"policy_id": policy_id},
+    )
+    return JSONResponse({"success": True})
+
+
+
 async def staff_workflow_history_page(request: Request):
     (
         user,

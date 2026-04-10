@@ -53,59 +53,64 @@
       opacity: 0.5;
       text-decoration: line-through;
     }
+
+    .workflow-policy-card {
+      margin-bottom: 1rem;
+    }
+
+    .workflow-policy-card .card__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .workflow-policy-badge {
+      font-size: 0.75rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      background: var(--accent-color, #3b82f6);
+      color: #fff;
+    }
+
+    .workflow-policy-badge--immediate {
+      background: var(--warning-color, #f59e0b);
+    }
   </style>
 
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
-        <h2 class="card__title">Onboarding workflow</h2>
-        <p class="card__subtitle">Review and maintain onboarding workflow settings for {{ company.name if company else 'the active company' }}.</p>
+        <h2 class="card__title">Onboarding workflows</h2>
+        <p class="card__subtitle">
+          Manage onboarding workflows for {{ company.name if company else 'the active company' }}.
+          <strong>Scheduled</strong> workflows run 6 days before the onboarding date.
+          <strong>Immediate</strong> workflows run right away when approved.
+        </p>
+      </div>
+      <div>
+        <button id="add-workflow-btn" type="button" class="btn btn-primary">Add workflow</button>
       </div>
     </header>
-    <div class="card__body">
-      <form id="onboarding-workflow-form" class="stack-sm">
-        <label class="form-label" for="workflow-key">Workflow key</label>
-        <input id="workflow-key" name="workflow_key" class="form-input" required />
-
-        <label class="form-label" for="max-retries">Default max retries</label>
-        <input id="max-retries" name="max_retries" type="number" min="0" max="20" class="form-input" />
-
-        <label class="form-checkbox">
-          <input id="workflow-enabled" name="enabled" type="checkbox" checked />
-          <span>Enable onboarding workflow</span>
-        </label>
-
-        <div class="stack-xs">
-          <label class="form-label" for="step-type-select">Add onboarding step</label>
-          <div class="form-row">
-            <select id="step-type-select" class="form-input"></select>
-            <button id="add-step-btn" type="button" class="btn btn-secondary">Add step</button>
-          </div>
-        </div>
-
-        <div id="steps-container" class="stack-sm"></div>
-
-        <button type="submit" class="btn btn-primary">Save onboarding workflow</button>
-      </form>
-      <p id="onboarding-workflow-message" class="text-muted" role="status" aria-live="polite"></p>
-    </div>
   </section>
+
+  <div id="workflows-container" class="stack-sm"></div>
+  <p id="global-message" class="text-muted" role="status" aria-live="polite"></p>
 
   <script>
     (() => {
-      const form = document.getElementById('onboarding-workflow-form');
-      const message = document.getElementById('onboarding-workflow-message');
-      const stepTypeSelect = document.getElementById('step-type-select');
-      const addStepBtn = document.getElementById('add-step-btn');
-      const stepsContainer = document.getElementById('steps-container');
-      const workflowKeyInput = document.getElementById('workflow-key');
-      const maxRetriesInput = document.getElementById('max-retries');
-      const enabledInput = document.getElementById('workflow-enabled');
+      const DIRECTION = 'onboarding';
+      const DEFAULT_KEY = 'staff_onboarding_m365';
+      const STEP_LIST_KEY = 'steps';
 
       let stepCatalog = [];
-      let steps = [];
-      let existingConfig = {};
       let stepFormSchema = {};
+      let workflowCounter = 0;
+
+      const globalMessage = document.getElementById('global-message');
+      const workflowsContainer = document.getElementById('workflows-container');
+      const addWorkflowBtn = document.getElementById('add-workflow-btn');
+
       const formatFieldHelp = (field) => {
         const helpParts = [];
         if (field && field.description) helpParts.push(String(field.description));
@@ -138,11 +143,6 @@
           ],
         };
       };
-      const getFieldValue = (step, field) => {
-        const keyPath = field.target || field.name;
-        const value = getNested(step.config || {}, keyPath);
-        return value === undefined ? field.default : value;
-      };
       const readPolicies = (step) => {
         const fromConfigRetry = step.config && typeof step.config.retry_policy === 'object' ? step.config.retry_policy : {};
         const fromConfigFailure = step.config && typeof step.config.failure_policy === 'object' ? step.config.failure_policy : {};
@@ -157,16 +157,44 @@
         };
       };
 
-      const renderSteps = () => {
+      const makeLabel = (text) => {
+        const label = document.createElement('label');
+        label.className = 'form-label';
+        label.textContent = text;
+        return label;
+      };
+      const makeInput = (field, currentValue) => {
+        const elementType = field.type === 'select' ? 'select' : (field.type === 'textarea' ? 'textarea' : 'input');
+        const input = document.createElement(elementType);
+        if (elementType === 'input') {
+          if (field.type === 'checkbox' || field.type === 'boolean') input.type = 'checkbox';
+          else input.type = field.type === 'number' ? 'number' : 'text';
+        }
+        input.className = field.type === 'checkbox' ? '' : 'form-input';
+        if (field.type === 'number') input.value = String(Number(currentValue || 0));
+        else if (field.type === 'checkbox' || field.type === 'boolean') input.checked = Boolean(currentValue);
+        else if (field.type === 'select') {
+          (field.options || []).forEach((opt) => {
+            const option = document.createElement('option');
+            option.value = String(opt.value);
+            option.textContent = String(opt.label);
+            input.appendChild(option);
+          });
+          input.value = String(currentValue || '');
+        } else input.value = String(currentValue || '');
+        return input;
+      };
+
+      const renderStepsForWorkflow = (wf, stepsContainer) => {
         stepsContainer.innerHTML = '';
-        if (!steps.length) {
+        if (!wf.steps.length) {
           const empty = document.createElement('p');
           empty.className = 'text-muted';
           empty.textContent = 'No steps configured yet.';
           stepsContainer.appendChild(empty);
           return;
         }
-        steps.forEach((step, index) => {
+        wf.steps.forEach((step, index) => {
           const schema = getSchemaForType(step.type);
           const schemaFields = Array.isArray(schema.fields) ? schema.fields : [];
           const conditionFields = schemaFields.filter((field) => String(field.name || field.target || '').startsWith('conditions.'));
@@ -177,34 +205,6 @@
           details.className = 'card__body stack-xs';
           const body = document.createElement('div');
           body.className = 'stack-xs';
-
-          const makeLabel = (text) => {
-            const label = document.createElement('label');
-            label.className = 'form-label';
-            label.textContent = text;
-            return label;
-          };
-          const makeInput = (field, currentValue) => {
-            const elementType = field.type === 'select' ? 'select' : (field.type === 'textarea' ? 'textarea' : 'input');
-            const input = document.createElement(elementType);
-            if (elementType === 'input') {
-              if (field.type === 'checkbox' || field.type === 'boolean') input.type = 'checkbox';
-              else input.type = field.type === 'number' ? 'number' : 'text';
-            }
-            input.className = field.type === 'checkbox' ? '' : 'form-input';
-            if (field.type === 'number') input.value = String(Number(currentValue || 0));
-            else if (field.type === 'checkbox' || field.type === 'boolean') input.checked = Boolean(currentValue);
-            else if (field.type === 'select') {
-              (field.options || []).forEach((opt) => {
-                const option = document.createElement('option');
-                option.value = String(opt.value);
-                option.textContent = String(opt.label);
-                input.appendChild(option);
-              });
-              input.value = String(currentValue || '');
-            } else input.value = String(currentValue || '');
-            return input;
-          };
 
           const summary = document.createElement('summary');
           summary.className = 'card__header form-row';
@@ -221,7 +221,7 @@
           moveDownButton.type = 'button';
           moveDownButton.className = 'btn btn-secondary';
           moveDownButton.textContent = 'Move down';
-          if (index >= steps.length - 1) moveDownButton.disabled = true;
+          if (index >= wf.steps.length - 1) moveDownButton.disabled = true;
           const enabledWrap = document.createElement('label');
           enabledWrap.className = 'form-checkbox';
           enabledWrap.title = 'Enable or disable this step';
@@ -233,26 +233,27 @@
           enabledWrap.append(enabledToggle, enabledText);
           enabledToggle.addEventListener('change', (event) => {
             event.stopPropagation();
-            steps[index].enabled = enabledToggle.checked;
+            wf.steps[index].enabled = enabledToggle.checked;
             card.classList.toggle('workflow-step--disabled', !enabledToggle.checked);
           });
           headerActions.append(enabledWrap, moveUpButton, moveDownButton);
           summary.append(title, headerActions);
           details.appendChild(summary);
+
           const nameInput = makeInput({ type: 'text' }, step.name);
           body.append(makeLabel('Step name'), nameInput);
-          nameInput.addEventListener('change', () => { steps[index].name = nameInput.value.trim() || steps[index].name; });
+          nameInput.addEventListener('change', () => { wf.steps[index].name = nameInput.value.trim() || wf.steps[index].name; });
 
           const appendField = (field, targetContainer) => {
             const keyPath = field.target || field.name;
             if (field.type === 'checkbox' || field.type === 'boolean') {
               const wrap = document.createElement('label');
               wrap.className = 'form-checkbox';
-              const input = makeInput(field, getFieldValue(step, field));
+              const input = makeInput(field, getNested(step.config || {}, keyPath) !== undefined ? getNested(step.config || {}, keyPath) : field.default);
               const text = document.createElement('span');
               text.textContent = field.label;
               wrap.append(input, text);
-              input.addEventListener('change', () => setNested(steps[index].config, keyPath, input.checked));
+              input.addEventListener('change', () => setNested(wf.steps[index].config, keyPath, input.checked));
               targetContainer.appendChild(wrap);
               const helpText = formatFieldHelp(field);
               if (helpText) {
@@ -263,7 +264,8 @@
               }
               return;
             }
-            const input = makeInput(field, getFieldValue(step, field));
+            const fieldValue = getNested(step.config || {}, keyPath);
+            const input = makeInput(field, fieldValue !== undefined ? fieldValue : field.default);
             targetContainer.append(makeLabel(field.label), input);
             const helpText = formatFieldHelp(field);
             if (helpText) {
@@ -274,7 +276,7 @@
             }
             input.addEventListener('change', () => {
               const value = field.type === 'number' ? Number(input.value || 0) : input.value;
-              setNested(steps[index].config, keyPath, value);
+              setNested(wf.steps[index].config, keyPath, value);
             });
           };
 
@@ -282,14 +284,14 @@
 
           const retryInput = makeInput({ type: 'number' }, step.retry_policy.max_retries);
           body.append(makeLabel('Max retries'), retryInput);
-          retryInput.addEventListener('change', () => { steps[index].retry_policy.max_retries = Number(retryInput.value || 0); });
+          retryInput.addEventListener('change', () => { wf.steps[index].retry_policy.max_retries = Number(retryInput.value || 0); });
 
           const failureSelect = makeInput({
             type: 'select',
             options: [{ value: 'fail_fast', label: 'Fail fast' }, { value: 'continue', label: 'Continue' }],
           }, step.failure_policy.mode);
           body.append(makeLabel('Failure mode'), failureSelect);
-          failureSelect.addEventListener('change', () => { steps[index].failure_policy.mode = failureSelect.value; });
+          failureSelect.addEventListener('change', () => { wf.steps[index].failure_policy.mode = failureSelect.value; });
 
           const ticketWrap = document.createElement('label');
           ticketWrap.className = 'form-checkbox';
@@ -297,7 +299,7 @@
           const ticketText = document.createElement('span');
           ticketText.textContent = 'Create ticket on failure';
           ticketWrap.append(ticketInput, ticketText);
-          ticketInput.addEventListener('change', () => { steps[index].failure_policy.create_ticket_on_failure = ticketInput.checked; });
+          ticketInput.addEventListener('change', () => { wf.steps[index].failure_policy.create_ticket_on_failure = ticketInput.checked; });
           body.appendChild(ticketWrap);
 
           if (conditionFields.length) {
@@ -313,24 +315,24 @@
 
           const actions = document.createElement('div');
           actions.className = 'form-row';
-          actions.innerHTML = '<button type="button" class="btn btn-danger" data-action="delete">Remove</button>';
+          actions.innerHTML = '<button type="button" class="btn btn-danger" data-action="delete">Remove step</button>';
           moveUpButton.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             if (index === 0) return;
-            [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
-            renderSteps();
+            [wf.steps[index - 1], wf.steps[index]] = [wf.steps[index], wf.steps[index - 1]];
+            renderStepsForWorkflow(wf, stepsContainer);
           });
           moveDownButton.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (index >= steps.length - 1) return;
-            [steps[index + 1], steps[index]] = [steps[index], steps[index + 1]];
-            renderSteps();
+            if (index >= wf.steps.length - 1) return;
+            [wf.steps[index + 1], wf.steps[index]] = [wf.steps[index], wf.steps[index + 1]];
+            renderStepsForWorkflow(wf, stepsContainer);
           });
           actions.querySelector('[data-action="delete"]').addEventListener('click', () => {
-            steps.splice(index, 1);
-            renderSteps();
+            wf.steps.splice(index, 1);
+            renderStepsForWorkflow(wf, stepsContainer);
           });
           body.appendChild(actions);
           details.appendChild(body);
@@ -339,46 +341,23 @@
         });
       };
 
-      const addStep = () => {
-        const selectedType = stepTypeSelect.value;
-        if (!selectedType) return;
-        const selected = stepCatalog.find((item) => item.type === selectedType);
-        const schema = getSchemaForType(selectedType);
-        const config = { type: selectedType };
-        (schema.fields || []).forEach((field) => {
-          setNested(config, field.target || field.name, field.default);
-        });
-        steps.push({
-          name: selected ? selected.name : selectedType,
-          type: selectedType,
-          enabled: true,
-          config,
-          retry_policy: { ...(schema.retry_policy || { max_retries: 0 }) },
-          failure_policy: { ...(schema.failure_policy || { mode: 'fail_fast', create_ticket_on_failure: true }) },
-        });
-        renderSteps();
-      };
+      const createWorkflowCard = (policy) => {
+        workflowCounter += 1;
+        const localId = workflowCounter;
+        const wf = {
+          id: policy.id || null,
+          localId,
+          workflow_key: policy.workflow_key || DEFAULT_KEY,
+          workflow_name: policy.workflow_name || '',
+          delay_type: policy.delay_type || 'scheduled',
+          enabled: policy.enabled !== false,
+          max_retries: Number(policy.max_retries || 0),
+          existingConfig: policy.config_json || {},
+          steps: [],
+        };
 
-      const loadPolicy = async () => {
-        const response = await fetch('/staff/workflows/onboarding/policy', { headers: { Accept: 'application/json' } });
-        const payload = await response.json();
-        const policy = payload.policy || {};
-        const config = policy.config_json || {};
-        existingConfig = config;
-        workflowKeyInput.value = policy.workflow_key || 'staff_onboarding_m365';
-        maxRetriesInput.value = policy.max_retries || 0;
-        enabledInput.checked = Boolean(policy.enabled);
-        stepCatalog = Array.isArray(payload.step_catalog) ? payload.step_catalog : [];
-        stepFormSchema = payload.step_form_schema && typeof payload.step_form_schema === 'object' ? payload.step_form_schema : {};
-        stepTypeSelect.replaceChildren();
-        stepCatalog.forEach((item) => {
-          const option = document.createElement('option');
-          option.value = String(item.type || '');
-          option.textContent = String(item.name || item.type || 'step');
-          stepTypeSelect.appendChild(option);
-        });
-        const configuredSteps = Array.isArray(config.steps) ? config.steps : [];
-        steps = configuredSteps.map((step) => {
+        const configuredSteps = Array.isArray((policy.config_json || {})[STEP_LIST_KEY]) ? (policy.config_json || {})[STEP_LIST_KEY] : [];
+        wf.steps = configuredSteps.map((step) => {
           const stepType = step.type || step.key || 'create_user';
           const stepConfig = step.config && typeof step.config === 'object' ? { ...step.config } : { type: stepType };
           const parsedPolicies = readPolicies({ ...step, config: stepConfig });
@@ -391,47 +370,260 @@
             failure_policy: parsedPolicies.failure_policy,
           };
         });
-        renderSteps();
+
+        const card = document.createElement('article');
+        card.className = 'card card--panel workflow-policy-card';
+        card.dataset.localId = String(localId);
+
+        const badge = document.createElement('span');
+        badge.className = `workflow-policy-badge${wf.delay_type === 'immediate' ? ' workflow-policy-badge--immediate' : ''}`;
+        badge.textContent = wf.delay_type === 'immediate' ? 'Immediate' : 'Scheduled';
+
+        const header = document.createElement('header');
+        header.className = 'card__header';
+        const headerLeft = document.createElement('div');
+        headerLeft.style.display = 'flex';
+        headerLeft.style.alignItems = 'center';
+        headerLeft.style.gap = '0.5rem';
+        const titleEl = document.createElement('h3');
+        titleEl.className = 'card__title';
+        titleEl.textContent = wf.workflow_name || wf.workflow_key || 'Onboarding workflow';
+        headerLeft.append(titleEl, badge);
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'btn btn-danger';
+        deleteBtn.textContent = 'Delete workflow';
+        header.append(headerLeft, deleteBtn);
+        card.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'card__body';
+
+        const form = document.createElement('form');
+        form.className = 'stack-sm';
+
+        const messageEl = document.createElement('p');
+        messageEl.className = 'text-muted';
+        messageEl.setAttribute('role', 'status');
+        messageEl.setAttribute('aria-live', 'polite');
+
+        // Workflow name
+        const nameInput = makeInput({ type: 'text' }, wf.workflow_name);
+        nameInput.placeholder = 'My onboarding workflow';
+        form.append(makeLabel('Workflow name'), nameInput);
+        nameInput.addEventListener('change', () => {
+          wf.workflow_name = nameInput.value.trim();
+          titleEl.textContent = wf.workflow_name || wf.workflow_key || 'Onboarding workflow';
+        });
+
+        // Workflow key
+        const keyInput = makeInput({ type: 'text' }, wf.workflow_key);
+        form.append(makeLabel('Workflow key'), keyInput);
+        keyInput.addEventListener('change', () => { wf.workflow_key = keyInput.value.trim() || DEFAULT_KEY; });
+
+        // Delay type
+        const delaySelect = makeInput({
+          type: 'select',
+          options: [
+            { value: 'scheduled', label: 'Scheduled (6 days before onboarding date)' },
+            { value: 'immediate', label: 'Immediate (run straight away when approved)' },
+          ],
+        }, wf.delay_type);
+        form.append(makeLabel('Delay type'), delaySelect);
+        delaySelect.addEventListener('change', () => {
+          wf.delay_type = delaySelect.value;
+          badge.textContent = wf.delay_type === 'immediate' ? 'Immediate' : 'Scheduled';
+          badge.className = `workflow-policy-badge${wf.delay_type === 'immediate' ? ' workflow-policy-badge--immediate' : ''}`;
+        });
+
+        // Max retries
+        const maxRetriesInput = makeInput({ type: 'number' }, wf.max_retries);
+        form.append(makeLabel('Default max retries'), maxRetriesInput);
+        maxRetriesInput.addEventListener('change', () => { wf.max_retries = Number(maxRetriesInput.value || 0); });
+
+        // Enabled
+        const enabledWrap = document.createElement('label');
+        enabledWrap.className = 'form-checkbox';
+        const enabledInput = makeInput({ type: 'checkbox' }, wf.enabled);
+        const enabledText = document.createElement('span');
+        enabledText.textContent = 'Enable onboarding workflow';
+        enabledWrap.append(enabledInput, enabledText);
+        form.appendChild(enabledWrap);
+        enabledInput.addEventListener('change', () => { wf.enabled = enabledInput.checked; });
+
+        // Steps
+        const stepSection = document.createElement('div');
+        stepSection.className = 'workflow-section stack-xs';
+        const stepSectionTitle = document.createElement('h4');
+        stepSectionTitle.className = 'workflow-section__title';
+        stepSectionTitle.textContent = 'Steps';
+        const stepAddRow = document.createElement('div');
+        stepAddRow.className = 'form-row';
+        const stepTypeSelect = document.createElement('select');
+        stepTypeSelect.className = 'form-input';
+        stepCatalog.forEach((item) => {
+          const option = document.createElement('option');
+          option.value = String(item.type || '');
+          option.textContent = String(item.name || item.type || 'step');
+          stepTypeSelect.appendChild(option);
+        });
+        const addStepBtn = document.createElement('button');
+        addStepBtn.type = 'button';
+        addStepBtn.className = 'btn btn-secondary';
+        addStepBtn.textContent = 'Add step';
+        stepAddRow.append(stepTypeSelect, addStepBtn);
+        const stepsContainer = document.createElement('div');
+        stepsContainer.className = 'stack-sm';
+        stepSection.append(stepSectionTitle, stepAddRow, stepsContainer);
+        form.appendChild(stepSection);
+        renderStepsForWorkflow(wf, stepsContainer);
+
+        addStepBtn.addEventListener('click', () => {
+          const selectedType = stepTypeSelect.value;
+          if (!selectedType) return;
+          const selected = stepCatalog.find((item) => item.type === selectedType);
+          const schema = getSchemaForType(selectedType);
+          const config = { type: selectedType };
+          (schema.fields || []).forEach((field) => setNested(config, field.target || field.name, field.default));
+          wf.steps.push({
+            name: selected ? selected.name : selectedType,
+            type: selectedType,
+            enabled: true,
+            config,
+            retry_policy: { ...(schema.retry_policy || { max_retries: 0 }) },
+            failure_policy: { ...(schema.failure_policy || { mode: 'fail_fast', create_ticket_on_failure: true }) },
+          });
+          renderStepsForWorkflow(wf, stepsContainer);
+        });
+
+        // Save button
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'submit';
+        saveBtn.className = 'btn btn-primary';
+        saveBtn.textContent = 'Save workflow';
+        form.appendChild(saveBtn);
+        form.appendChild(messageEl);
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const builtSteps = wf.steps.map((step) => ({
+            key: step.type,
+            name: step.name,
+            enabled: step.enabled !== false,
+            config: {
+              ...(step.config || {}),
+              type: step.type,
+              retry_policy: step.retry_policy || { max_retries: 0 },
+              failure_policy: step.failure_policy || { mode: 'fail_fast' },
+            },
+          }));
+          const requestBody = {
+            workflow_key: wf.workflow_key || DEFAULT_KEY,
+            workflow_name: wf.workflow_name || null,
+            delay_type: wf.delay_type || 'scheduled',
+            enabled: wf.enabled,
+            max_retries: wf.max_retries,
+            config: {
+              ...wf.existingConfig,
+              version: Number((wf.existingConfig || {}).version || 1),
+              [STEP_LIST_KEY]: builtSteps,
+            },
+          };
+          const isNew = !wf.id;
+          const url = isNew
+            ? `/staff/workflows/${DIRECTION}/policies`
+            : `/staff/workflows/${DIRECTION}/policies/${wf.id}`;
+          const method = isNew ? 'POST' : 'PUT';
+          try {
+            const response = await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify(requestBody),
+            });
+            if (!response.ok) {
+              const err = await response.json().catch(() => ({}));
+              messageEl.textContent = (err.detail && (err.detail.message || JSON.stringify(err.detail))) || 'Failed to save workflow.';
+              return;
+            }
+            const result = await response.json();
+            wf.id = result.policy && result.policy.id;
+            titleEl.textContent = wf.workflow_name || wf.workflow_key || 'Onboarding workflow';
+            messageEl.textContent = 'Workflow saved.';
+          } catch {
+            messageEl.textContent = 'Failed to save workflow.';
+          }
+        });
+
+        deleteBtn.addEventListener('click', async () => {
+          if (!wf.id) {
+            card.remove();
+            return;
+          }
+          if (!confirm('Delete this workflow? This cannot be undone.')) return;
+          try {
+            const response = await fetch(`/staff/workflows/${DIRECTION}/policies/${wf.id}`, {
+              method: 'DELETE',
+              headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) {
+              globalMessage.textContent = 'Failed to delete workflow.';
+              return;
+            }
+            card.remove();
+            globalMessage.textContent = 'Workflow deleted.';
+          } catch {
+            globalMessage.textContent = 'Failed to delete workflow.';
+          }
+        });
+
+        body.appendChild(form);
+        card.appendChild(body);
+        return card;
       };
 
-      addStepBtn.addEventListener('click', addStep);
-      form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const onboardingSteps = steps.map((step) => ({
-          key: step.type,
-          name: step.name,
-          enabled: step.enabled !== false,
-          config: {
-            ...(step.config || {}),
-            type: step.type,
-            retry_policy: step.retry_policy || {"max_retries": 0},
-            failure_policy: step.failure_policy || {"mode": "fail_fast"},
-          },
-        }));
-        const body = {
-          workflow_key: workflowKeyInput.value.trim() || 'staff_onboarding_m365',
-          enabled: enabledInput.checked,
-          max_retries: Number(maxRetriesInput.value || 0),
-          config: {
-            ...existingConfig,
-            version: Number(existingConfig.version || 1),
-            steps: onboardingSteps,
-          },
-        };
-        const response = await fetch('/staff/workflows/onboarding/policy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(body),
-        });
+      const loadPolicies = async () => {
+        const response = await fetch(`/staff/workflows/${DIRECTION}/policies`, { headers: { Accept: 'application/json' } });
         if (!response.ok) {
-          message.textContent = 'Failed to save onboarding workflow policy.';
+          globalMessage.textContent = 'Failed to load onboarding workflows.';
           return;
         }
-        message.textContent = 'Onboarding workflow saved.';
+        const payload = await response.json();
+        stepCatalog = Array.isArray(payload.step_catalog) ? payload.step_catalog : [];
+        stepFormSchema = payload.step_form_schema && typeof payload.step_form_schema === 'object' ? payload.step_form_schema : {};
+        workflowsContainer.innerHTML = '';
+        const policies = Array.isArray(payload.policies) ? payload.policies : [];
+        if (!policies.length) {
+          const empty = document.createElement('p');
+          empty.className = 'text-muted';
+          empty.textContent = 'No onboarding workflows configured yet. Click "Add workflow" to create one.';
+          workflowsContainer.appendChild(empty);
+          return;
+        }
+        policies.forEach((policy) => {
+          workflowsContainer.appendChild(createWorkflowCard(policy));
+        });
+      };
+
+      addWorkflowBtn.addEventListener('click', () => {
+        if (!stepCatalog.length) {
+          globalMessage.textContent = 'Please wait while workflows are loading.';
+          return;
+        }
+        const card = createWorkflowCard({
+          id: null,
+          workflow_key: DEFAULT_KEY,
+          workflow_name: '',
+          delay_type: 'scheduled',
+          enabled: true,
+          max_retries: 2,
+          config_json: {},
+        });
+        workflowsContainer.appendChild(card);
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
 
-      loadPolicy().catch(() => {
-        message.textContent = 'Failed to load onboarding workflow policy.';
+      loadPolicies().catch(() => {
+        globalMessage.textContent = 'Failed to load onboarding workflows.';
       });
     })();
   </script>
