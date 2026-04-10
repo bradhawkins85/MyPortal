@@ -9800,27 +9800,6 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     "m365_identity_hygiene": {
         "fields": [
             {"name": "revoke_sign_in_sessions", "label": "Revoke sign-in sessions", "type": "checkbox", "default": True},
-            {
-                "name": "office_location",
-                "label": "Office location",
-                "type": "text",
-                "default": "Offboarded",
-                "target": "hygiene_updates.officeLocation",
-            },
-            {
-                "name": "job_title",
-                "label": "Job title",
-                "type": "text",
-                "default": "Former Staff",
-                "target": "hygiene_updates.jobTitle",
-            },
-            {
-                "name": "mobile_phone",
-                "label": "Mobile phone",
-                "type": "text",
-                "default": "",
-                "target": "hygiene_updates.mobilePhone",
-            },
         ],
     },
     "m365_add_teams_group_member": {
