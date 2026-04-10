@@ -1759,6 +1759,16 @@ async def _execute_policy_step(
             "hudu_password_name": name,
         }
 
+    if step_type == "delete_staff_record":
+        staff_id = int(staff.get("id") or 0)
+        if not staff_id:
+            raise WorkflowStepError("delete_staff_record: staff ID is not available in workflow context")
+        await staff_repo.delete_staff(staff_id)
+        return {
+            "deleted": True,
+            "staff_id": staff_id,
+        }
+
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
 
