@@ -98,10 +98,11 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
     company_id = 5
     company_name = "Acme Corp"
     m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
+    sync_staff_task_name = f"{company_name} - Sync staff directory" if company_name else "Sync staff directory"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
         ("sync_m365_data", m365_task_name),
-        ("sync_staff", "Sync staff directory"),
+        ("sync_staff", sync_staff_task_name),
     ):
         if command not in existing_commands:
             await scheduled_tasks_repo.create_task(
@@ -118,6 +119,8 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
     assert commands_created == {"sync_m365_data", "sync_staff"}
     m365_task = next(t for t in created if t["command"] == "sync_m365_data")
     assert m365_task["name"] == "Acme Corp - Sync Microsoft 365 data"
+    staff_task = next(t for t in created if t["command"] == "sync_staff")
+    assert staff_task["name"] == "Acme Corp - Sync staff directory"
     for task in created:
         assert task["company_id"] == company_id
         cron = task["cron"]
@@ -148,10 +151,11 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
     company_id = 5
     company_name = "Acme Corp"
     m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
+    sync_staff_task_name = f"{company_name} - Sync staff directory" if company_name else "Sync staff directory"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
         ("sync_m365_data", m365_task_name),
-        ("sync_staff", "Sync staff directory"),
+        ("sync_staff", sync_staff_task_name),
     ):
         if command not in existing_commands:
             await scheduled_tasks_repo.create_task(
@@ -188,10 +192,11 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
     company_id = 5
     company_name = "Acme Corp"
     m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
+    sync_staff_task_name = f"{company_name} - Sync staff directory" if company_name else "Sync staff directory"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
     for command, label in (
         ("sync_m365_data", m365_task_name),
-        ("sync_staff", "Sync staff directory"),
+        ("sync_staff", sync_staff_task_name),
     ):
         if command not in existing_commands:
             await scheduled_tasks_repo.create_task(
@@ -231,3 +236,25 @@ def test_m365_task_name_fallback_when_no_company_name():
         else "Sync Microsoft 365 data"
     )
     assert task_name == "Sync Microsoft 365 data"
+
+
+def test_sync_staff_task_name_includes_company_name():
+    """sync_staff task name is prefixed with the company name."""
+    company_name = "Widgets Inc"
+    task_name = (
+        f"{company_name} - Sync staff directory"
+        if company_name
+        else "Sync staff directory"
+    )
+    assert task_name == "Widgets Inc - Sync staff directory"
+
+
+def test_sync_staff_task_name_fallback_when_no_company_name():
+    """sync_staff task name falls back to default when company name is empty."""
+    company_name = ""
+    task_name = (
+        f"{company_name} - Sync staff directory"
+        if company_name
+        else "Sync staff directory"
+    )
+    assert task_name == "Sync staff directory"
