@@ -4582,6 +4582,10 @@ async def _invoke_password_pusher(
     - deletable_by_viewer: Override deletable_by_viewer
     - retrieval_step: Override retrieval_step
     - note: Optional note (shown to the viewer on some pwpush versions)
+
+    Note: Authentication headers (Authorization, X-User-Token) are excluded
+    from webhook event tracking to prevent credential leakage in audit logs.
+    The secret payload is never stored in event tracking – only expiry metadata.
     """
     base_url = str(settings.get("base_url") or "https://pwpush.com").strip().rstrip("/")
     api_key = str(settings.get("api_key") or "").strip()

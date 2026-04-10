@@ -1602,7 +1602,7 @@ async def _execute_policy_step(
 
         secret_text = str(
             _resolve_template_value(
-                step.get("payload") or step.get("text") or step.get("secret"),
+                step.get("payload"),
                 vars_map=vars_map,
             )
             or ""

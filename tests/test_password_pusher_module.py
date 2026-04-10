@@ -244,8 +244,8 @@ def test_invoke_password_pusher_success(monkeypatch):
     assert result["url_token"] == "abc123"
     assert captured_event["name"] == "module.password-pusher.push"
     assert captured_event["target_url"] == "https://pwpush.com/p.json"
-    # secret payload must NOT appear in webhook event tracking
-    assert "payload" not in str(captured_event.get("payload", ""))
+    # The secret text must NOT appear in webhook event tracking payload
+    assert "MySecretPassword123!" not in json.dumps(captured_event.get("payload", {}))
     # Verify the JSON body sent to pwpush
     assert client_factory.captured_kwargs["json"]["password"]["payload"] == "MySecretPassword123!"
     assert client_factory.captured_kwargs["json"]["password"]["expire_after_days"] == 7
