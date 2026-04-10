@@ -10194,8 +10194,23 @@ def _parse_json_list(value: Any, *, field_name: str) -> tuple[list[Any] | None, 
 
 
 def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, Any]:
+    config: dict[str, Any] = dict(raw_config or {})
+    # Backward compatibility: steps saved before WorkflowStepDefinition was introduced may
+    # not have a 'key' field.  Derive the key from 'type' so they pass schema validation
+    # without requiring a data migration.
+    for step_list_key in ("steps", "offboarding_steps"):
+        step_list = config.get(step_list_key)
+        if isinstance(step_list, list):
+            normalised: list[Any] = []
+            for step in step_list:
+                if isinstance(step, dict) and not step.get("key"):
+                    raw_type = str(step.get("type") or "").strip().lower()
+                    if raw_type:
+                        step = {**step, "key": raw_type}
+                normalised.append(step)
+            config[step_list_key] = normalised
     try:
-        validated = WorkflowConfigSchema.model_validate(raw_config or {})
+        validated = WorkflowConfigSchema.model_validate(config)
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
