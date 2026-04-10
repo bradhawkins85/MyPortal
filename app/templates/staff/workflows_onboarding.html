@@ -48,6 +48,11 @@
       margin-bottom: 0.5rem;
       line-height: 1.35;
     }
+
+    .workflow-step--disabled .card__header strong {
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
   </style>
 
   <section class="card card--panel">
@@ -167,7 +172,7 @@
           const conditionFields = schemaFields.filter((field) => String(field.name || field.target || '').startsWith('conditions.'));
           const actionFields = schemaFields.filter((field) => !String(field.name || field.target || '').startsWith('conditions.'));
           const card = document.createElement('section');
-          card.className = 'card card--panel';
+          card.className = 'card card--panel' + (step.enabled === false ? ' workflow-step--disabled' : '');
           const details = document.createElement('details');
           details.className = 'card__body stack-xs';
           const body = document.createElement('div');
@@ -217,7 +222,21 @@
           moveDownButton.className = 'btn btn-secondary';
           moveDownButton.textContent = 'Move down';
           if (index >= steps.length - 1) moveDownButton.disabled = true;
-          headerActions.append(moveUpButton, moveDownButton);
+          const enabledWrap = document.createElement('label');
+          enabledWrap.className = 'form-checkbox';
+          enabledWrap.title = 'Enable or disable this step';
+          const enabledToggle = document.createElement('input');
+          enabledToggle.type = 'checkbox';
+          enabledToggle.checked = step.enabled !== false;
+          const enabledText = document.createElement('span');
+          enabledText.textContent = 'Enabled';
+          enabledWrap.append(enabledToggle, enabledText);
+          enabledToggle.addEventListener('change', (event) => {
+            event.stopPropagation();
+            steps[index].enabled = enabledToggle.checked;
+            card.classList.toggle('workflow-step--disabled', !enabledToggle.checked);
+          });
+          headerActions.append(enabledWrap, moveUpButton, moveDownButton);
           summary.append(title, headerActions);
           details.appendChild(summary);
           const nameInput = makeInput({ type: 'text' }, step.name);
@@ -332,6 +351,7 @@
         steps.push({
           name: selected ? selected.name : selectedType,
           type: selectedType,
+          enabled: true,
           config,
           retry_policy: { ...(schema.retry_policy || { max_retries: 0 }) },
           failure_policy: { ...(schema.failure_policy || { mode: 'fail_fast', create_ticket_on_failure: true }) },
@@ -365,6 +385,7 @@
           return {
             name: step.name || stepType || 'onboarding-step',
             type: stepType,
+            enabled: step.enabled !== false,
             config: { ...stepConfig, type: stepType },
             retry_policy: parsedPolicies.retry_policy,
             failure_policy: parsedPolicies.failure_policy,
@@ -379,7 +400,7 @@
         const onboardingSteps = steps.map((step) => ({
           key: step.type,
           name: step.name,
-          enabled: true,
+          enabled: step.enabled !== false,
           config: {
             ...(step.config || {}),
             type: step.type,
