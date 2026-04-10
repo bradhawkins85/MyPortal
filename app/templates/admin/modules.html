@@ -490,6 +490,17 @@
                   <p class="form-help form-help--error">Configure the <code>M365_PKCE_CLIENT_ID</code> environment variable to use your own PKCE app.</p>
                 {% endif %}
               </div>
+            {% elif module.slug == 'hudu' %}
+              <div class="form-field">
+                <label class="form-label" for="hudu-base-url">Base URL</label>
+                <input id="hudu-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://your-subdomain.huducloud.com" />
+                <p class="form-help">Enter the base URL for your Hudu instance, without a trailing slash.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="hudu-api-key">API key</label>
+                <input id="hudu-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
+                <p class="form-help">Keys are stored securely. Leave blank to keep the existing value. Generate an API key from <strong>Admin → API Keys</strong> inside your Hudu instance.</p>
+              </div>
             {% else %}
               {% for key, value in settings.items() %}
                 <div class="form-field">

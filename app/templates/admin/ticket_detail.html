@@ -36,6 +36,23 @@
         </div>
         <div class="management__header-actions">
           <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
+          {% if hudu_company_url %}
+            <a
+              href="{{ hudu_company_url }}"
+              target="_blank"
+              rel="noreferrer noopener"
+              class="button button--ghost"
+              title="Open company in Hudu"
+              aria-label="Open company in Hudu"
+            >
+              <span class="button__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+                </svg>
+              </span>
+              Hudu
+            </a>
+          {% endif %}
           {% if can_delete_ticket %}
             <form
               action="/admin/tickets/{{ ticket.id }}/delete"

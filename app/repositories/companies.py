@@ -71,6 +71,18 @@ async def get_company_by_tactical_id(tactical_client_id: str) -> Optional[dict[s
     return company
 
 
+async def get_company_by_hudu_id(hudu_id: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM companies WHERE hudu_id = %s",
+        (hudu_id,),
+    )
+    if not row:
+        return None
+    company = _normalise_company(row)
+    company["email_domains"] = await get_email_domains_for_company(company["id"])
+    return company
+
+
 async def get_company_by_name(name: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM companies WHERE LOWER(name) = LOWER(%s) LIMIT 1",

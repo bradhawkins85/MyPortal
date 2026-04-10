@@ -1629,6 +1629,136 @@ async def _execute_policy_step(
         var_name = str(step.get("output_var") or "push_url").strip() or "push_url"
         return {"push_url": push_url, "url_token": url_token, var_name: push_url}
 
+    if step_type == "hudu_create_contact":
+        from app.services import hudu as hudu_service  # local import to avoid circular dependency
+        from app.repositories import companies as company_repo_local
+
+        company = await company_repo_local.get_company_by_id(company_id)
+        if not company:
+            raise WorkflowStepError(f"Company {company_id} not found for Hudu contact creation")
+        hudu_id = str(company.get("hudu_id") or "").strip()
+        if not hudu_id:
+            raise WorkflowStepError(
+                f"Company {company_id} does not have a Hudu ID configured. "
+                "Set the Hudu company ID on the company record before using this step."
+            )
+
+        first_name = str(
+            _resolve_template_value(step.get("first_name"), vars_map=vars_map)
+            or staff.get("first_name")
+            or ""
+        ).strip()
+        last_name = str(
+            _resolve_template_value(step.get("last_name"), vars_map=vars_map)
+            or staff.get("last_name")
+            or ""
+        ).strip()
+        if not first_name and not last_name:
+            raise WorkflowStepError("hudu_create_contact requires a first_name or last_name")
+
+        email = str(
+            _resolve_template_value(step.get("email"), vars_map=vars_map)
+            or staff.get("email")
+            or ""
+        ).strip() or None
+        job_title = str(
+            _resolve_template_value(step.get("job_title"), vars_map=vars_map)
+            or staff.get("job_title")
+            or ""
+        ).strip() or None
+        phone = str(
+            _resolve_template_value(step.get("phone"), vars_map=vars_map)
+            or staff.get("phone")
+            or ""
+        ).strip() or None
+        notes = str(
+            _resolve_template_value(step.get("notes"), vars_map=vars_map) or ""
+        ).strip() or None
+
+        try:
+            person = await hudu_service.create_person(
+                company_id=hudu_id,
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                job_title=job_title,
+                phone=phone,
+                notes=notes,
+            )
+        except hudu_service.HuduConfigurationError as exc:
+            raise WorkflowStepError(f"Hudu is not configured: {exc}") from exc
+        except Exception as exc:
+            raise WorkflowStepError(f"Failed to create Hudu contact: {exc}") from exc
+
+        person_id = str(person.get("id") or "")
+        return {
+            "hudu_person_id": person_id,
+            "hudu_person_name": f"{first_name} {last_name}".strip(),
+        }
+
+    if step_type == "hudu_push_password":
+        from app.services import hudu as hudu_service  # local import to avoid circular dependency
+        from app.repositories import companies as company_repo_local
+
+        company = await company_repo_local.get_company_by_id(company_id)
+        if not company:
+            raise WorkflowStepError(f"Company {company_id} not found for Hudu password push")
+        hudu_id = str(company.get("hudu_id") or "").strip()
+        if not hudu_id:
+            raise WorkflowStepError(
+                f"Company {company_id} does not have a Hudu ID configured. "
+                "Set the Hudu company ID on the company record before using this step."
+            )
+
+        name = str(
+            _resolve_template_value(step.get("name"), vars_map=vars_map) or ""
+        ).strip()
+        if not name:
+            full_name = " ".join(
+                p for p in [staff.get("first_name"), staff.get("last_name")] if p
+            ).strip()
+            name = f"{full_name} - Account Password" if full_name else "Account Password"
+
+        password_value = str(
+            _resolve_template_value(step.get("password"), vars_map=vars_map) or ""
+        ).strip()
+        if not password_value:
+            raise WorkflowStepError(
+                "hudu_push_password requires a 'password' field (use a variable from a previous generate_password step)"
+            )
+
+        username = str(
+            _resolve_template_value(step.get("username"), vars_map=vars_map)
+            or staff.get("email")
+            or ""
+        ).strip() or None
+        url_val = str(
+            _resolve_template_value(step.get("url"), vars_map=vars_map) or ""
+        ).strip() or None
+        description = str(
+            _resolve_template_value(step.get("description"), vars_map=vars_map) or ""
+        ).strip() or None
+
+        try:
+            asset_pw = await hudu_service.create_asset_password(
+                company_id=hudu_id,
+                name=name,
+                password=password_value,
+                username=username,
+                url=url_val,
+                description=description,
+            )
+        except hudu_service.HuduConfigurationError as exc:
+            raise WorkflowStepError(f"Hudu is not configured: {exc}") from exc
+        except Exception as exc:
+            raise WorkflowStepError(f"Failed to push password to Hudu: {exc}") from exc
+
+        asset_pw_id = str(asset_pw.get("id") or "")
+        return {
+            "hudu_asset_password_id": asset_pw_id,
+            "hudu_password_name": name,
+        }
+
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
 

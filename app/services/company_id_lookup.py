@@ -12,6 +12,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.services import modules as modules_service
 from app.services import syncro, tacticalrmm
+from app.services import hudu as hudu_service
 
 # Xero API returns 100 contacts per page by default
 XERO_CONTACTS_PER_PAGE = 100
@@ -71,7 +72,7 @@ def _normalize_company_name(name: str | None) -> str:
 
 async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
     """
-    Lookup missing external IDs for a company from Syncro, Tactical RMM, and Xero APIs.
+    Lookup missing external IDs for a company from Syncro, Tactical RMM, Xero, and Hudu APIs.
     
     Args:
         company_id: The internal company ID to lookup missing IDs for
@@ -95,6 +96,7 @@ async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
         "syncro_lookup": "skipped",
         "tactical_lookup": "skipped",
         "xero_lookup": "skipped",
+        "hudu_lookup": "skipped",
         "updates": {},
     }
     
@@ -157,6 +159,26 @@ async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
             )
             results["xero_lookup"] = "error"
             results["xero_error"] = str(exc)
+    
+    # Lookup Hudu company ID if missing
+    if not company.get("hudu_id"):
+        try:
+            hudu_id = await _lookup_hudu_company_id(company_name)
+            if hudu_id:
+                updates["hudu_id"] = hudu_id
+                results["hudu_lookup"] = "found"
+                results["updates"]["hudu_id"] = hudu_id
+            else:
+                results["hudu_lookup"] = "not_found"
+        except Exception as exc:
+            log_error(
+                "Failed to lookup Hudu company ID",
+                company_id=company_id,
+                company_name=company_name,
+                error=str(exc),
+            )
+            results["hudu_lookup"] = "error"
+            results["hudu_error"] = str(exc)
     
     # Apply updates if any IDs were found
     if updates:
@@ -360,6 +382,47 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
         return None
 
 
+async def _lookup_hudu_company_id(company_name: str) -> str | None:
+    """
+    Search for a Hudu company by name and return their ID.
+
+    Args:
+        company_name: The company name to search for
+
+    Returns:
+        The Hudu company ID if found, None otherwise
+    """
+    try:
+        companies = await hudu_service.search_companies(company_name)
+        if not companies:
+            log_info("No matching Hudu company found", company_name=company_name)
+            return None
+
+        search_name = _normalize_company_name(company_name)
+        for company in companies:
+            if not isinstance(company, dict):
+                continue
+            candidate_name = company.get("name") or ""
+            if _normalize_company_name(candidate_name) == search_name:
+                company_id = company.get("id")
+                if company_id:
+                    log_info(
+                        "Found matching Hudu company",
+                        company_name=company_name,
+                        hudu_id=company_id,
+                    )
+                    return str(company_id)
+
+        log_info("No exact-match Hudu company found", company_name=company_name)
+        return None
+    except hudu_service.HuduConfigurationError:
+        log_info("Hudu integration not configured, skipping lookup")
+        return None
+    except Exception as exc:
+        log_error("Error searching Hudu companies", company_name=company_name, error=str(exc))
+        return None
+
+
 async def refresh_all_missing_company_ids() -> dict[str, Any]:
     """
     Refresh missing external IDs for all companies in the system.
@@ -388,8 +451,9 @@ async def refresh_all_missing_company_ids() -> dict[str, Any]:
         has_syncro = bool(company.get("syncro_company_id"))
         has_tactical = bool(company.get("tacticalrmm_client_id"))
         has_xero = bool(company.get("xero_id"))
+        has_hudu = bool(company.get("hudu_id"))
         
-        if has_syncro and has_tactical and has_xero:
+        if has_syncro and has_tactical and has_xero and has_hudu:
             summary["skipped"] += 1
             continue
         
