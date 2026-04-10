@@ -1,0 +1,2 @@
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS hudu_id VARCHAR(255) DEFAULT NULL;
+ALTER TABLE companies ADD KEY IF NOT EXISTS companies_hudu_id (hudu_id);

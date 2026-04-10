@@ -655,6 +655,16 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "retrieval_step": False,
         },
     },
+    {
+        "slug": "hudu",
+        "name": "Hudu",
+        "description": "Hudu documentation and password management integration. Link companies to Hudu records and push onboarding/offboarding data.",
+        "icon": "📚",
+        "settings": {
+            "base_url": "",
+            "api_key": "",
+        },
+    },
 ]
 
 
@@ -1029,6 +1039,23 @@ def _coerce_settings(
                 "retrieval_step": _ensure_bool(merged.get("retrieval_step"), False),
             }
         )
+    elif slug == "hudu":
+        overrides = payload or {}
+        api_key_override = overrides.get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
+        merged.update(
+            {
+                "base_url": str(merged.get("base_url", "")).strip().rstrip("/"),
+                "api_key": api_key,
+            }
+        )
     return merged
 
 
@@ -1047,6 +1074,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "smtp2go": ("api_key", "webhook_secret"),
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
+        "hudu": ("api_key",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -1135,6 +1163,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
     "plausible",      # Plausible - email tracking config only
     "m365-admin",     # M365 Admin - configuration only, not an action module
+    "hudu",           # Hudu - documentation/password management, not a trigger action module
 }
 
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
@@ -1380,6 +1409,7 @@ async def trigger_module(
         "add-ticket-reply": _invoke_add_ticket_reply,
         "whisperx": _invoke_whisperx,
         "password-pusher": _invoke_password_pusher,
+        "hudu": _validate_hudu,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -4699,3 +4729,41 @@ async def _invoke_password_pusher(
         updated_event,
         extra={"push_url": html_url, "url_token": url_token},
     )
+
+
+async def _validate_hudu(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Validate Hudu module configuration by verifying connectivity."""
+    if event_future and not event_future.done():
+        event_future.set_result(None)
+
+    base_url = str(settings.get("base_url") or "").strip().rstrip("/")
+    api_key = str(settings.get("api_key") or "").strip()
+
+    if not base_url:
+        return {"status": "error", "message": "Hudu base URL is not configured"}
+    if not api_key:
+        return {"status": "error", "message": "Hudu API key is not configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{base_url}/api/v1/companies",
+                headers={"x-api-key": api_key, "Accept": "application/json"},
+                params={"page_size": 1},
+            )
+        if response.status_code == 401:
+            return {"status": "error", "message": "Invalid Hudu API key"}
+        response.raise_for_status()
+        return {"status": "ok", "message": "Hudu connection successful"}
+    except httpx.HTTPStatusError as exc:
+        return {
+            "status": "error",
+            "message": f"Hudu API returned HTTP {exc.response.status_code}",
+        }
+    except Exception as exc:
+        return {"status": "error", "message": f"Failed to connect to Hudu: {exc}"}
