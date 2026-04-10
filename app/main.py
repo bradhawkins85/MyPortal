@@ -9252,14 +9252,14 @@ async def staff_page(
         "staff_permission": staff_permission,
         "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
-        "staff_members": staff_members,
-        "staff_pending_requests": staff_pending_requests,
+        "staff_members": cast(list[dict[str, Any]], _serialise_for_json(staff_members)),
+        "staff_pending_requests": cast(list[dict[str, Any]], _serialise_for_json(staff_pending_requests)),
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
         "show_ex_staff": show_ex_staff_flag,
         "staff_field_config": field_config,
-        "staff_custom_field_definitions": custom_field_definitions,
-        "active_staff_for_offboarding": active_staff_for_offboarding,
+        "staff_custom_field_definitions": cast(list[dict[str, Any]], _serialise_for_json(custom_field_definitions)),
+        "active_staff_for_offboarding": cast(list[dict[str, Any]], _serialise_for_json(active_staff_for_offboarding)),
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
