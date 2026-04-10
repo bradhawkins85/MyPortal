@@ -664,6 +664,7 @@ async def reset_staff_onboarding_status(staff_id: int, *, onboarding_status: str
 
 
 async def delete_staff(staff_id: int) -> None:
+    await db.execute("DELETE FROM staff_licenses WHERE staff_id = %s", (staff_id,))
     await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 
 
@@ -690,6 +691,7 @@ async def delete_m365_staff_not_in(company_id: int, keep_emails: set[str]) -> in
         if (row.get("email") or "").lower() not in keep_emails
     ]
     for staff_id in to_delete:
+        await db.execute("DELETE FROM staff_licenses WHERE staff_id = %s", (staff_id,))
         await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
     return len(to_delete)
 
