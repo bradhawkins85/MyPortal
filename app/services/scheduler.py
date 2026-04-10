@@ -381,10 +381,19 @@ class SchedulerService:
                     company_id = task.get("company_id")
                     if company_id:
                         company_id_int = int(company_id)
-                        await m365_service.sync_company_licenses(company_id_int)
-                        staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
+                        licenses_sync_error: str | None = None
+                        staff_summary = None
+                        staff_sync_error: str | None = None
                         mailboxes_synced = 0
                         mailbox_sync_error: str | None = None
+                        try:
+                            await m365_service.sync_company_licenses(company_id_int)
+                        except Exception as exc:  # noqa: BLE001
+                            licenses_sync_error = str(exc)
+                        try:
+                            staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
+                        except Exception as exc:  # noqa: BLE001
+                            staff_sync_error = str(exc)
                         try:
                             mailboxes_synced = await m365_service.sync_mailboxes(company_id_int)
                         except Exception as exc:  # noqa: BLE001
@@ -392,14 +401,16 @@ class SchedulerService:
                         details = json.dumps(
                             {
                                 "company_id": company_id_int,
-                                "licenses_synced": True,
+                                "licenses_synced": licenses_sync_error is None,
+                                "licenses_sync_error": licenses_sync_error,
                                 "staff": {
                                     "created": staff_summary.created,
                                     "updated": staff_summary.updated,
                                     "skipped": staff_summary.skipped,
                                     "removed": staff_summary.removed,
                                     "total": staff_summary.total,
-                                },
+                                } if staff_summary is not None else None,
+                                "staff_sync_error": staff_sync_error,
                                 "mailboxes_synced": mailboxes_synced,
                                 "mailbox_sync_error": mailbox_sync_error,
                             },

@@ -1696,9 +1696,50 @@ async def _sync_staff_assignments(
 async def sync_company_licenses(company_id: int) -> None:
     log_info("M365 starting license synchronisation", company_id=company_id)
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
-    payload = await _graph_get(
-        access_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
-    )
+    try:
+        payload = await _graph_get(
+            access_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
+        )
+    except M365Error as exc:
+        if exc.http_status != 403:
+            raise
+        # Attempt to self-heal: use the stored delegated token (from the
+        # "Authorise portal access" connect flow) to re-apply any missing
+        # appRoleAssignments, then retry with a fresh client_credentials
+        # token.  This fixes cases where permissions were never granted
+        # (manual setup without admin consent) as well as cases where
+        # newly-provisioned grants haven't yet propagated across Azure AD.
+        delegated_token = await acquire_delegated_token(company_id)
+        if delegated_token:
+            await try_grant_missing_permissions(company_id, access_token=delegated_token)
+            # Re-acquire a fresh app-only token so the new grants are reflected.
+            access_token = await acquire_access_token(company_id, force_client_credentials=True)
+            try:
+                payload = await _graph_get(
+                    access_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
+                )
+            except M365Error as retry_exc:
+                if retry_exc.http_status == 403:
+                    raise M365Error(
+                        "License sync failed (403 Forbidden). Permissions have been "
+                        "re-applied but may not yet be effective due to Azure AD propagation "
+                        "delay. Please wait a few minutes and try again.",
+                        http_status=403,
+                    ) from retry_exc
+                raise
+        else:
+            # No delegated token means "Authorise portal access" hasn't been
+            # completed yet.  Instruct the admin to do so – this stores a
+            # refresh token and calls try_grant_missing_permissions which will
+            # apply the required appRoleAssignments.
+            raise M365Error(
+                "License sync failed (403 Forbidden). The enterprise app does not have the "
+                "required permissions. To fix this: on the M365 settings page, click "
+                "'Authorise portal access' to complete setup and grant the required "
+                "permissions. If the app was just provisioned, completing 'Authorise portal "
+                "access' will apply and confirm the required permissions.",
+                http_status=403,
+            ) from exc
     synced_skus: set[str] = set()
     for sku in payload.get("value", []):
         part_number = str(sku.get("skuPartNumber") or "").strip()
@@ -2881,14 +2922,32 @@ async def sync_mailboxes(company_id: int) -> int:
     try:
         report_items = await _fetch_mailbox_usage_report(access_token)
     except M365Error as exc:
-        if exc.http_status == 403:
+        if exc.http_status != 403:
+            raise
+        # Attempt to self-heal using the same pattern as sync_company_licenses.
+        delegated_token = await acquire_delegated_token(company_id)
+        if delegated_token:
+            await try_grant_missing_permissions(company_id, access_token=delegated_token)
+            access_token = await acquire_access_token(company_id, force_client_credentials=True)
+            try:
+                report_items = await _fetch_mailbox_usage_report(access_token)
+            except M365Error as retry_exc:
+                if retry_exc.http_status == 403:
+                    raise M365Error(
+                        "Mailbox sync failed (403 Forbidden). Permissions have been "
+                        "re-applied but may not yet be effective due to Azure AD propagation "
+                        "delay. Please wait a few minutes and try again.",
+                        http_status=403,
+                    ) from retry_exc
+                raise
+        else:
             raise M365Error(
-                "Mailbox sync failed (403 Forbidden). The enterprise app is missing the "
-                "Reports.Read.All permission. Re-provision the enterprise app to grant "
-                "the required permissions. If you have just re-provisioned, please wait "
-                "a few minutes for the permissions to take effect, then retry the sync."
+                "Mailbox sync failed (403 Forbidden). The enterprise app does not have the "
+                "required permissions (e.g. Reports.Read.All). To fix this: on the M365 "
+                "settings page, click 'Authorise portal access' to complete setup and grant "
+                "the required permissions.",
+                http_status=403,
             ) from exc
-        raise
 
     def _looks_obfuscated_identifier(value: str) -> bool:
         """Return True for report identifiers that look privacy-obfuscated.
