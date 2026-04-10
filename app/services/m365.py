@@ -1921,6 +1921,54 @@ async def sync_company_licenses(company_id: int) -> None:
     log_info("Microsoft 365 license synchronisation completed", company_id=company_id)
 
 
+async def sync_email_domains(company_id: int) -> dict[str, Any]:
+    """Fetch verified domains from Microsoft 365 and merge them into the company's email domains.
+
+    Only domains that are verified in the tenant are added.  The built-in
+    ``*.onmicrosoft.com`` domain is excluded because it is not a real
+    email-routing domain.  Existing company email domains are preserved;
+    new domains discovered in Microsoft 365 are appended.
+
+    Returns a summary dict with ``added`` (list of new domains) and
+    ``existing`` (domains already on the company record).
+    """
+    log_info("M365 starting email domain sync", company_id=company_id)
+    access_token = await acquire_access_token(company_id)
+    payload = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/domains?$select=id,isVerified",
+    )
+    tenant_domains: list[str] = []
+    for domain in payload.get("value", []):
+        domain_id = str(domain.get("id") or "").strip().lower()
+        if not domain_id:
+            continue
+        if domain_id.endswith(".onmicrosoft.com"):
+            continue
+        if domain.get("isVerified"):
+            tenant_domains.append(domain_id)
+
+    existing_domains = await companies_repo.get_email_domains_for_company(company_id)
+    existing_set = set(existing_domains)
+    new_domains = [d for d in tenant_domains if d not in existing_set]
+
+    if new_domains:
+        merged = list(existing_set | set(new_domains))
+        await companies_repo.replace_company_email_domains(company_id, merged)
+        log_info(
+            "M365 email domain sync added domains",
+            company_id=company_id,
+            added=new_domains,
+        )
+    else:
+        log_info(
+            "M365 email domain sync: no new domains to add",
+            company_id=company_id,
+        )
+
+    return {"added": new_domains, "existing": existing_domains}
+
+
 async def test_connectivity(company_id: int) -> dict[str, Any]:
     """Validate stored credentials can acquire a token and call Microsoft Graph."""
     access_token = await acquire_access_token(company_id)
