@@ -2941,18 +2941,21 @@ def _staff_member_matches_company_email_domains(
 ) -> bool:
     """Return whether a staff member should be visible for company domain filtering.
 
-    Staff without an email address are always visible. Staff with email addresses
-    are only visible when the email domain is present in the company's configured
-    email domain list.
+    Staff without an email address are always visible. When no email domains are
+    configured for the company, all staff are visible (no restriction). When domains
+    are configured, staff with email addresses are only visible when the email domain
+    is present in the company's configured email domain list.
     """
 
+    allowed_domains = {str(d).strip().lower() for d in company_email_domains if str(d).strip()}
+    if not allowed_domains:
+        return True
     email = str(staff_member.get("email") or "").strip().lower()
     if not email:
         return True
     if "@" not in email:
         return False
     _, domain = email.rsplit("@", 1)
-    allowed_domains = {str(domain).strip().lower() for domain in company_email_domains if str(domain).strip()}
     return domain in allowed_domains
 
 
