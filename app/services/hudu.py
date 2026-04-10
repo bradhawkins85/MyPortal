@@ -77,13 +77,17 @@ async def get_company_url(hudu_id: str) -> str | None:
         hudu_id: The Hudu company ID.
 
     Returns:
-        Full URL to the Hudu company page, or None if not found.
-    """
-    try:
-        settings = await _load_settings()
-        base_url = settings["base_url"]
-        api_key = settings["api_key"]
+        Full URL to the Hudu company page, or None if not found or not configured.
 
+    Raises:
+        HuduConfigurationError: If Hudu is not configured (caller may choose to handle
+            this differently from a lookup failure).
+    """
+    settings = await _load_settings()
+    base_url = settings["base_url"]
+    api_key = settings["api_key"]
+
+    try:
         url = f"{base_url}/api/v1/companies/{hudu_id}"
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, headers=_make_headers(api_key))
@@ -99,10 +103,11 @@ async def get_company_url(hudu_id: str) -> str | None:
         if slug:
             return f"{base_url}/companies/{slug}"
         return f"{base_url}/companies/{hudu_id}"
-    except HuduConfigurationError:
+    except httpx.HTTPError as exc:
+        log_error("Failed to get Hudu company URL", hudu_id=hudu_id, error=str(exc))
         return None
     except Exception as exc:
-        log_error("Failed to get Hudu company URL", hudu_id=hudu_id, error=str(exc))
+        log_error("Unexpected error getting Hudu company URL", hudu_id=hudu_id, error=str(exc))
         return None
 
 

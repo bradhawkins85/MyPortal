@@ -16744,9 +16744,19 @@ async def _render_ticket_detail(
             hudu_base_url = str(hudu_settings.get("base_url") or "").strip().rstrip("/")
         if hudu_base_url and company and company.get("hudu_id"):
             from app.services import hudu as hudu_service
+            from app.services.hudu import HuduConfigurationError
             try:
                 hudu_company_url = await hudu_service.get_company_url(str(company["hudu_id"])) or ""
-            except Exception:
+            except HuduConfigurationError:
+                # Hudu not configured - fall back to constructing URL from base_url
+                hudu_company_url = f"{hudu_base_url}/companies/{company['hudu_id']}"
+            except Exception as _exc:
+                log_error(
+                    "Failed to resolve Hudu company URL, using fallback",
+                    company_id=ticket_company_id,
+                    hudu_id=company.get("hudu_id"),
+                    error=str(_exc),
+                )
                 hudu_company_url = f"{hudu_base_url}/companies/{company['hudu_id']}"
 
     ordered_replies = list(reversed(replies))
