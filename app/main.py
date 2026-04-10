@@ -3614,6 +3614,7 @@ async def _render_company_edit_page(
             (company_record.get("tacticalrmm_client_id") or "").strip(),
         ),
         "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
+        "hudu_id": _string_value("hudu_id", (company_record.get("hudu_id") or "").strip()),
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
         "payment_method": _string_value(
@@ -9401,6 +9402,16 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "Push to Password Pusher",
         "description": "Pushes a secret (e.g. a generated password) to Password Pusher and stores the resulting share URL as a workflow variable.",
     },
+    {
+        "type": "hudu_create_contact",
+        "name": "Create Hudu contact",
+        "description": "Creates a person/contact record in Hudu under the company linked to this workflow, for documentation purposes.",
+    },
+    {
+        "type": "hudu_push_password",
+        "name": "Push password to Hudu",
+        "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
@@ -9478,6 +9489,16 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "push_to_password_pusher",
         "name": "Push to Password Pusher",
         "description": "Pushes a secret (e.g. a generated password) to Password Pusher and stores the resulting share URL as a workflow variable.",
+    },
+    {
+        "type": "hudu_create_contact",
+        "name": "Create Hudu contact",
+        "description": "Creates a person/contact record in Hudu under the company linked to this workflow, for documentation purposes.",
+    },
+    {
+        "type": "hudu_push_password",
+        "name": "Push password to Hudu",
+        "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
     },
 ]
 
@@ -10124,6 +10145,93 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "text",
                 "default": "push_url",
                 "description": "Workflow variable name used to reference the share URL in later steps, e.g. ${vars.push_url}.",
+            },
+        ],
+    },
+    "hudu_create_contact": {
+        "fields": [
+            {
+                "name": "first_name",
+                "label": "First name",
+                "type": "text",
+                "default": "${vars.staff.first_name}",
+                "description": "First name of the person to create in Hudu.",
+            },
+            {
+                "name": "last_name",
+                "label": "Last name",
+                "type": "text",
+                "default": "${vars.staff.last_name}",
+                "description": "Last name of the person to create in Hudu.",
+            },
+            {
+                "name": "email",
+                "label": "Email",
+                "type": "text",
+                "default": "${vars.staff.email}",
+                "description": "Email address of the person.",
+            },
+            {
+                "name": "job_title",
+                "label": "Job title",
+                "type": "text",
+                "default": "${vars.staff.job_title}",
+                "description": "Job title of the person.",
+            },
+            {
+                "name": "phone",
+                "label": "Phone",
+                "type": "text",
+                "default": "${vars.staff.phone}",
+                "description": "Phone number of the person.",
+            },
+            {
+                "name": "notes",
+                "label": "Notes",
+                "type": "text",
+                "default": "",
+                "description": "Optional notes to attach to the Hudu contact.",
+            },
+        ],
+    },
+    "hudu_push_password": {
+        "fields": [
+            {
+                "name": "name",
+                "label": "Password name / label",
+                "type": "text",
+                "default": "${vars.staff.full_name} - Account Password",
+                "description": "Display name for this credential in Hudu.",
+                "example": "${vars.staff.full_name} - Account Password",
+            },
+            {
+                "name": "password",
+                "label": "Password",
+                "type": "text",
+                "default": "${vars.generated_password}",
+                "description": "The password value to store. Supports workflow variables.",
+                "example": "${vars.generated_password}",
+            },
+            {
+                "name": "username",
+                "label": "Username",
+                "type": "text",
+                "default": "${vars.staff.email}",
+                "description": "Associated username for this credential.",
+            },
+            {
+                "name": "url",
+                "label": "URL",
+                "type": "text",
+                "default": "",
+                "description": "Optional URL associated with this credential (e.g. login page).",
+            },
+            {
+                "name": "description",
+                "label": "Description",
+                "type": "text",
+                "default": "",
+                "description": "Optional description for this credential entry.",
             },
         ],
     },
@@ -11609,6 +11717,7 @@ async def admin_create_company(request: Request):
     syncro_company_id = (str(form.get("syncroCompanyId", "")).strip() or None)
     tactical_client_id = (str(form.get("tacticalClientId", "")).strip() or None)
     xero_id = (str(form.get("xeroId", "")).strip() or None)
+    hudu_id = (str(form.get("huduId", "")).strip() or None)
     is_vip = _parse_bool(form.get("isVip"))
     raw_email_domains = form.get("emailDomains")
     try:
@@ -11642,6 +11751,8 @@ async def admin_create_company(request: Request):
         payload["xero_id"] = xero_id
     if tactical_client_id:
         payload["tacticalrmm_client_id"] = tactical_client_id
+    if hudu_id:
+        payload["hudu_id"] = hudu_id
     try:
         created = await company_repo.create_company(**payload)
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -11949,6 +12060,7 @@ async def admin_update_company(company_id: int, request: Request):
     syncro_company_raw = str(form.get("syncroCompanyId", "")).strip()
     tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
+    hudu_id_raw = str(form.get("huduId", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
     invoice_prepay_enabled = bool(form.get("invoicePrepay"))
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
@@ -11970,6 +12082,7 @@ async def admin_update_company(company_id: int, request: Request):
         "syncro_company_id": syncro_company_raw,
         "tacticalrmm_client_id": tactical_client_raw,
         "xero_id": xero_id_raw,
+        "hudu_id": hudu_id_raw,
         "email_domains": email_domains_text,
         "is_vip": is_vip,
         "payment_method": payment_method,
@@ -12002,12 +12115,14 @@ async def admin_update_company(company_id: int, request: Request):
     syncro_company_id = syncro_company_raw or None
     tactical_client_id = tactical_client_raw or None
     xero_id = xero_id_raw or None
+    hudu_id = hudu_id_raw or None
     updates: dict[str, Any] = {
         "name": name,
         "is_vip": 1 if is_vip else 0,
         "syncro_company_id": syncro_company_id,
         "tacticalrmm_client_id": tactical_client_id,
         "xero_id": xero_id,
+        "hudu_id": hudu_id,
         "email_domains": email_domains,
         "payment_method": payment_method,
         "require_po": 1 if require_po else 0,
@@ -16620,6 +16735,20 @@ async def _render_ticket_detail(
             if base_rmm_url:
                 tactical_base_url = base_rmm_url.rstrip("/")
 
+    hudu_module = next((module for module in modules if module.get("slug") == "hudu"), None)
+    hudu_base_url = ""
+    hudu_company_url = ""
+    if hudu_module and hudu_module.get("enabled"):
+        hudu_settings = hudu_module.get("settings") or {}
+        if isinstance(hudu_settings, Mapping):
+            hudu_base_url = str(hudu_settings.get("base_url") or "").strip().rstrip("/")
+        if hudu_base_url and company and company.get("hudu_id"):
+            from app.services import hudu as hudu_service
+            try:
+                hudu_company_url = await hudu_service.get_company_url(str(company["hudu_id"])) or ""
+            except Exception:
+                hudu_company_url = f"{hudu_base_url}/companies/{company['hudu_id']}"
+
     ordered_replies = list(reversed(replies))
     
     # Fetch call recordings linked to this ticket
@@ -16938,6 +17067,8 @@ async def _render_ticket_detail(
         "ticket_asset_selection": asset_selection,
         "ticket_asset_linked_data": serialisable_ticket_assets,
         "tacticalrmm_base_url": tactical_base_url,
+        "hudu_base_url": hudu_base_url,
+        "hudu_company_url": hudu_company_url,
         "can_delete_ticket": bool(user.get("is_super_admin")),
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,

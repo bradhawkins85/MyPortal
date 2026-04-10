@@ -381,3 +381,32 @@ async def lookup_xero_contact_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error looking up Xero contact ID: {str(exc)}"
         )
+
+
+@router.post("/{company_id}/lookup-hudu-id")
+async def lookup_hudu_company_id(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup Hudu company ID for a company by searching the API."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    company_name = company.get("name", "")
+    if not company_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name is required")
+
+    try:
+        hudu_id = await company_id_lookup._lookup_hudu_company_id(company_name)
+        if hudu_id:
+            await company_repo.update_company(company_id, hudu_id=hudu_id)
+            return {"status": "found", "id": hudu_id}
+        else:
+            return {"status": "not_found", "id": None}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error looking up Hudu company ID: {str(exc)}"
+        )
