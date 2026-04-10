@@ -640,6 +640,21 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "settings": {},
         "enabled": True,  # Internal action module - no external configuration required
     },
+    {
+        "slug": "password-pusher",
+        "name": "Password Pusher",
+        "description": "Securely share passwords and secrets via Password Pusher (pwpush). Generates a time-limited, view-limited share link for use in onboarding and offboarding workflows.",
+        "icon": "🔐",
+        "settings": {
+            "base_url": "https://pwpush.com",
+            "api_key": "",
+            "user_email": "",
+            "expire_after_days": 7,
+            "expire_after_views": 5,
+            "deletable_by_viewer": True,
+            "retrieval_step": False,
+        },
+    },
 ]
 
 
@@ -992,6 +1007,28 @@ def _coerce_settings(
                 "port": _coerce_int(merged.get("port"), minimum=1, maximum=65535) or 22,
             }
         )
+    elif slug == "password-pusher":
+        overrides = payload or {}
+        api_key_override = overrides.get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
+        merged.update(
+            {
+                "base_url": str(merged.get("base_url", "")).strip().rstrip("/") or "https://pwpush.com",
+                "api_key": api_key,
+                "user_email": str(merged.get("user_email", "")).strip(),
+                "expire_after_days": _coerce_int(merged.get("expire_after_days"), minimum=1, maximum=90) or 7,
+                "expire_after_views": _coerce_int(merged.get("expire_after_views"), minimum=1, maximum=100) or 5,
+                "deletable_by_viewer": _ensure_bool(merged.get("deletable_by_viewer"), True),
+                "retrieval_step": _ensure_bool(merged.get("retrieval_step"), False),
+            }
+        )
     return merged
 
 
@@ -1009,6 +1046,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "plausible": ("api_key", "pepper"),
         "smtp2go": ("api_key", "webhook_secret"),
         "m365-admin": ("client_secret",),
+        "password-pusher": ("api_key",),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -1182,6 +1220,16 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             {"name": "language", "label": "Language", "type": "string"},
         ],
     },
+    "password-pusher": {
+        "fields": [
+            {"name": "payload", "label": "Secret text", "type": "string", "required": True},
+            {"name": "expire_after_days", "label": "Expire after days", "type": "integer"},
+            {"name": "expire_after_views", "label": "Expire after views", "type": "integer"},
+            {"name": "deletable_by_viewer", "label": "Deletable by viewer", "type": "boolean"},
+            {"name": "retrieval_step", "label": "Add retrieval step", "type": "boolean"},
+            {"name": "note", "label": "Note", "type": "string"},
+        ],
+    },
 }
 
 
@@ -1331,6 +1379,7 @@ async def trigger_module(
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
         "whisperx": _invoke_whisperx,
+        "password-pusher": _invoke_password_pusher,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -4502,4 +4551,151 @@ async def _invoke_whisperx(
             "transcription_count": len(transcriptions),
             "reply_id": reply_id,
         },
+    )
+
+
+async def _invoke_password_pusher(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Push a secret to Password Pusher and return the share URL.
+
+    The generated ``push_url`` is included in the result so it can be
+    referenced as a variable (e.g. ``${vars.push_url}``) in subsequent
+    workflow steps.
+
+    Settings:
+    - base_url: Password Pusher instance URL (default: https://pwpush.com)
+    - api_key: API token for authenticated instances
+    - user_email: User email paired with api_key for authentication
+    - expire_after_days: Default expiry in days
+    - expire_after_views: Default view count expiry
+    - deletable_by_viewer: Allow viewer to delete the push
+    - retrieval_step: Add an extra confirmation step before revealing the secret
+
+    Payload (overrides settings defaults):
+    - payload: The secret text to push (required)
+    - expire_after_days: Override expiry in days
+    - expire_after_views: Override view count expiry
+    - deletable_by_viewer: Override deletable_by_viewer
+    - retrieval_step: Override retrieval_step
+    - note: Optional note (shown to the viewer on some pwpush versions)
+
+    Note: Authentication headers (Authorization, X-User-Token) are excluded
+    from webhook event tracking to prevent credential leakage in audit logs.
+    The secret payload is never stored in event tracking – only expiry metadata.
+    """
+    base_url = str(settings.get("base_url") or "https://pwpush.com").strip().rstrip("/")
+    api_key = str(settings.get("api_key") or "").strip()
+    user_email = str(settings.get("user_email") or "").strip()
+
+    secret_text = str(payload.get("payload") or "").strip()
+    if not secret_text:
+        raise ValueError("Password Pusher payload (secret text) is required")
+
+    expire_after_days = (
+        _coerce_int(payload.get("expire_after_days"), minimum=1, maximum=90)
+        or _coerce_int(settings.get("expire_after_days"), minimum=1, maximum=90)
+        or 7
+    )
+    expire_after_views = (
+        _coerce_int(payload.get("expire_after_views"), minimum=1, maximum=100)
+        or _coerce_int(settings.get("expire_after_views"), minimum=1, maximum=100)
+        or 5
+    )
+    deletable_by_viewer = _ensure_bool(
+        payload.get("deletable_by_viewer") if payload.get("deletable_by_viewer") is not None
+        else settings.get("deletable_by_viewer"),
+        True,
+    )
+    retrieval_step = _ensure_bool(
+        payload.get("retrieval_step") if payload.get("retrieval_step") is not None
+        else settings.get("retrieval_step"),
+        False,
+    )
+    note = str(payload.get("note") or "").strip() or None
+
+    push_body: dict[str, Any] = {
+        "payload": secret_text,
+        "expire_after_days": expire_after_days,
+        "expire_after_views": expire_after_views,
+        "deletable_by_viewer": deletable_by_viewer,
+        "retrieval_step": retrieval_step,
+    }
+    if note:
+        push_body["note"] = note
+
+    request_body = {"password": push_body}
+    target_url = f"{base_url}/p.json"
+
+    headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+    if api_key and user_email:
+        headers["X-User-Email"] = user_email
+        headers["X-User-Token"] = api_key
+    elif api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    event = await webhook_monitor.create_manual_event(
+        name="module.password-pusher.push",
+        target_url=target_url,
+        payload={"expire_after_days": expire_after_days, "expire_after_views": expire_after_views},
+        headers={k: v for k, v in headers.items() if k not in {"Authorization", "X-User-Token"}},
+        max_attempts=1,
+        backoff_seconds=60,
+    )
+    event_id = int(event.get("id")) if event.get("id") is not None else None
+    if event_id is None:
+        raise RuntimeError("Failed to create webhook event for Password Pusher request")
+    if event_future and not event_future.done():
+        event_future.set_result(event_id)
+
+    attempt_number = 1
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(target_url, json=request_body, headers=headers)
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        response_body = exc.response.text if exc.response is not None else None
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="failed",
+            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            response_status=exc.response.status_code if exc.response else None,
+            response_body=response_body,
+        )
+        return _build_event_result(updated_event, extra={"push_url": None, "url_token": None})
+    except Exception as exc:  # pragma: no cover - defensive
+        updated_event = await _record_failure(
+            event_id,
+            attempt_number=attempt_number,
+            status="error",
+            error_message=str(exc),
+            response_status=None,
+            response_body=None,
+        )
+        return _build_event_result(updated_event, extra={"push_url": None, "url_token": None})
+
+    response_text = response.text
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+
+    url_token = str(data.get("url_token") or "").strip()
+    html_url = str(data.get("html_url") or "").strip()
+    if not html_url and url_token:
+        html_url = f"{base_url}/p/{url_token}"
+
+    updated_event = await _record_success(
+        event_id,
+        attempt_number=attempt_number,
+        response_status=response.status_code,
+        response_body=response_text,
+    )
+    return _build_event_result(
+        updated_event,
+        extra={"push_url": html_url, "url_token": url_token},
     )
