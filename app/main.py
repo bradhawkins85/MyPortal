@@ -5615,6 +5615,32 @@ async def admin_company_m365_discover(company_id: int, request: Request):
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
     )
+
+    state_payload: dict = {
+        "company_id": company_id,
+        "user_id": current_user.get("id"),
+        "flow": "discover",
+        "return_to": "company_edit",
+        "code_verifier": code_verifier,
+    }
+
+    state = oauth_state_serializer.dumps(state_payload)
+    params: dict = {
+        "client_id": oauth_client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": m365_service.DISCOVER_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+
+    authorize_url = (
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize"
+        f"?{urlencode(params)}"
+    )
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -5874,6 +5900,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 return _csp_provision_error(
                     "Provisioning session expired. Please restart the CSP provisioning flow."
                 )
+        elif isinstance(state_data.get("code_verifier"), str) and state_data.get("code_verifier"):
+            # code_verifier stored directly in the signed state by the discover flow.
+            code_verifier = state_data["code_verifier"]
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
