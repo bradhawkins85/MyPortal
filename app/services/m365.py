@@ -811,7 +811,7 @@ async def _graph_get(
         )
         graph_error_code: str | None = None
         try:
-            graph_error_code = (response.json().get("error") or {}).get("code") or None
+            graph_error_code = (response.json().get("error") or {}).get("code")
         except Exception:  # noqa: BLE001
             pass
         raise M365Error(
