@@ -1599,6 +1599,36 @@ async def _execute_policy_step(
             )
         return {"m365_user_id": m365_user_id, "manager_id": manager_id, "manager_set": True}
 
+    if step_type == "push_to_password_pusher":
+        from app.services import modules as modules_service  # local import to avoid circular dependency
+
+        secret_text = str(
+            _resolve_template_value(
+                step.get("payload"),
+                vars_map=vars_map,
+            )
+            or ""
+        ).strip()
+        if not secret_text:
+            raise WorkflowStepError(
+                "push_to_password_pusher requires a 'payload' field with the secret text to push"
+            )
+        action_payload: dict[str, Any] = {"payload": secret_text}
+        for field in ("expire_after_days", "expire_after_views", "deletable_by_viewer", "retrieval_step", "note"):
+            val = _resolve_template_value(step.get(field), vars_map=vars_map)
+            if val is not None:
+                action_payload[field] = val
+        result = await modules_service.trigger_module("password-pusher", action_payload, background=False)
+        if result.get("status") in ("failed", "error"):
+            raise WorkflowStepError(
+                f"Password Pusher push failed: {result.get('last_error') or result.get('status')}",
+                request_payload={"secret_length": len(secret_text)},
+            )
+        push_url = str(result.get("push_url") or "")
+        url_token = str(result.get("url_token") or "")
+        var_name = str(step.get("output_var") or "push_url").strip() or "push_url"
+        return {"push_url": push_url, "url_token": url_token, var_name: push_url}
+
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
 
