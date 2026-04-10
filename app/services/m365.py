@@ -1696,9 +1696,21 @@ async def _sync_staff_assignments(
 async def sync_company_licenses(company_id: int) -> None:
     log_info("M365 starting license synchronisation", company_id=company_id)
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
-    payload = await _graph_get(
-        access_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
-    )
+    try:
+        payload = await _graph_get(
+            access_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "License sync failed (403 Forbidden). The enterprise app is missing the required "
+                "permissions (e.g. Organization.Read.All or Directory.Read.All). Re-provision the "
+                "enterprise app to grant the required permissions. If you have just provisioned or "
+                "re-provisioned, please wait a few minutes for the permissions to take effect, "
+                "then retry the sync.",
+                http_status=403,
+            ) from exc
+        raise
     synced_skus: set[str] = set()
     for sku in payload.get("value", []):
         part_number = str(sku.get("skuPartNumber") or "").strip()
