@@ -5724,6 +5724,27 @@ async def admin_csp_provision(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+async def _best_effort_sync_m365_email_domains(company_id: int) -> None:
+    """Fire-and-forget helper that syncs M365 tenant domains to the company's email domains list.
+
+    Failures are logged but never propagate so that the OAuth callback redirect
+    is not affected.
+    """
+    try:
+        result = await m365_service.sync_email_domains(company_id)
+        log_info(
+            "M365 email domain sync triggered from callback",
+            company_id=company_id,
+            added=result.get("added"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log_warning(
+            "M365 email domain sync failed (best-effort)",
+            company_id=company_id,
+            error=str(exc),
+        )
+
+
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
@@ -6300,6 +6321,11 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 )
         await scheduler_service.refresh()
 
+        asyncio.create_task(
+            _best_effort_sync_m365_email_domains(company_id),
+            name=f"sync_m365_email_domains_{company_id}",
+        )
+
         if return_to_company_edit:
             return _company_edit_redirect(
                 company_id=company_id,
@@ -6358,6 +6384,10 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 company_id=company_id,
             )
     log_info("Microsoft 365 OAuth callback processed", company_id=company_id)
+    asyncio.create_task(
+        _best_effort_sync_m365_email_domains(company_id),
+        name=f"sync_m365_email_domains_{company_id}",
+    )
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
