@@ -21,8 +21,8 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio("asyncio")
-async def test_sync_mailboxes_403_raises_actionable_error():
-    """A 403 from the getMailboxUsageDetail endpoint raises a clear re-provision message."""
+async def test_sync_mailboxes_403_no_delegated_token_raises_actionable_error():
+    """A 403 from the reports endpoint with no delegated token raises 'Authorise portal access' guidance."""
     with (
         patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
         patch.object(
@@ -30,18 +30,15 @@ async def test_sync_mailboxes_403_raises_actionable_error():
             "_fetch_mailbox_usage_report",
             AsyncMock(side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403)),
         ),
+        patch.object(m365_service, "acquire_delegated_token", AsyncMock(return_value=None)),
     ):
         with pytest.raises(M365Error) as exc_info:
             await m365_service.sync_mailboxes(1)
 
     error_message = str(exc_info.value)
     assert "Reports.Read.All" in error_message
-    assert "Re-provision" in error_message
+    assert "Authorise portal access" in error_message
     assert "403 Forbidden" in error_message
-    # The message should also mention waiting for permissions to propagate
-    assert "wait" in error_message.lower(), (
-        "Error message should mention waiting for permissions to propagate after re-provisioning"
-    )
 
 
 @pytest.mark.anyio("asyncio")

@@ -2,6 +2,9 @@
 
 Covers:
 - sync_company_licenses raises an actionable M365Error on 403 from subscribedSkus
+- sync_company_licenses auto-recovers when a delegated token is available and retry succeeds
+- sync_company_licenses points to 'Authorise portal access' when no delegated token
+- sync_company_licenses surfaces propagation-delay message when retry also fails with 403
 - sync_m365_data task records licenses_sync_error and continues when sync_company_licenses fails
 - sync_m365_data task records staff_sync_error and continues when import_m365_contacts_for_company fails
 - sync_m365_data task still reports status=succeeded when license/staff sync errors occur
@@ -47,8 +50,8 @@ def _make_staff_summary() -> Any:
 
 
 @pytest.mark.anyio("asyncio")
-async def test_sync_company_licenses_403_raises_actionable_error():
-    """A 403 from subscribedSkus raises a clear actionable error mentioning re-provisioning."""
+async def test_sync_company_licenses_403_no_delegated_token_raises_actionable_error():
+    """When 403 and no delegated token, raises with 'Authorise portal access' guidance."""
     with (
         patch.object(
             m365_service,
@@ -60,16 +63,91 @@ async def test_sync_company_licenses_403_raises_actionable_error():
             "_graph_get",
             AsyncMock(side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403)),
         ),
+        patch.object(
+            m365_service,
+            "acquire_delegated_token",
+            AsyncMock(return_value=None),
+        ),
     ):
         with pytest.raises(M365Error) as exc_info:
             await m365_service.sync_company_licenses(1)
 
     error_message = str(exc_info.value)
-    assert "403 Forbidden" in error_message
-    assert "Re-provision" in error_message
-    assert "wait" in error_message.lower(), (
-        "Error message should mention waiting for permissions to propagate"
-    )
+    assert "403" in error_message
+    assert "Authorise portal access" in error_message
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_licenses_403_with_delegated_token_retry_succeeds():
+    """When 403 and delegated token available, auto-recover: re-grant permissions and retry."""
+    call_count = 0
+
+    async def fake_graph_get(token, url):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+        # Retry succeeds
+        return {"value": []}
+
+    with (
+        patch.object(
+            m365_service,
+            "acquire_access_token",
+            AsyncMock(return_value="fake-token"),
+        ),
+        patch.object(m365_service, "_graph_get", side_effect=fake_graph_get),
+        patch.object(
+            m365_service,
+            "acquire_delegated_token",
+            AsyncMock(return_value="delegated-token"),
+        ),
+        patch.object(
+            m365_service,
+            "try_grant_missing_permissions",
+            AsyncMock(return_value=True),
+        ) as mock_grant,
+        # Mock DB calls reached after successful SKU fetch
+        patch("app.services.m365.license_repo.list_company_licenses", AsyncMock(return_value=[])),
+    ):
+        # Should NOT raise – retry succeeded
+        await m365_service.sync_company_licenses(1)
+
+    mock_grant.assert_awaited_once_with(1, access_token="delegated-token")
+    assert call_count == 2, "Graph should have been called twice (first 403, then retry)"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_licenses_403_with_delegated_token_retry_also_403():
+    """When retry also fails with 403, surface propagation-delay message."""
+    with (
+        patch.object(
+            m365_service,
+            "acquire_access_token",
+            AsyncMock(return_value="fake-token"),
+        ),
+        patch.object(
+            m365_service,
+            "_graph_get",
+            AsyncMock(side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403)),
+        ),
+        patch.object(
+            m365_service,
+            "acquire_delegated_token",
+            AsyncMock(return_value="delegated-token"),
+        ),
+        patch.object(
+            m365_service,
+            "try_grant_missing_permissions",
+            AsyncMock(return_value=False),
+        ),
+    ):
+        with pytest.raises(M365Error) as exc_info:
+            await m365_service.sync_company_licenses(1)
+
+    error_message = str(exc_info.value)
+    assert "403" in error_message
+    assert "propagation" in error_message.lower() or "wait" in error_message.lower()
 
 
 @pytest.mark.anyio("asyncio")
