@@ -6274,9 +6274,14 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             if company_name
             else "Sync Microsoft 365 data"
         )
+        sync_staff_task_name = (
+            f"{company_name} - Sync staff directory"
+            if company_name
+            else "Sync staff directory"
+        )
         for command, label in (
             ("sync_m365_data", m365_task_name),
-            ("sync_staff", "Sync staff directory"),
+            ("sync_staff", sync_staff_task_name),
         ):
             if command == "sync_m365_data" and has_m365_sync_task:
                 continue
