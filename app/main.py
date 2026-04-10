@@ -9412,6 +9412,15 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "Push password to Hudu",
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
     },
+    {
+        "type": "delete_staff_record",
+        "name": "Delete staff record",
+        "description": (
+            "Deletes the staff record that triggered this workflow. "
+            "Use this to remove duplicate entries, for example when the original onboarding request "
+            "should be superseded by a record synced from Office 365."
+        ),
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
@@ -9499,6 +9508,15 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "hudu_push_password",
         "name": "Push password to Hudu",
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
+    },
+    {
+        "type": "delete_staff_record",
+        "name": "Delete staff record",
+        "description": (
+            "Deletes the staff record that triggered this workflow. "
+            "Use this to remove duplicate entries, for example when the original onboarding request "
+            "should be superseded by a record synced from Office 365."
+        ),
     },
 ]
 
