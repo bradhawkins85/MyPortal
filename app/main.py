@@ -5900,9 +5900,9 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 return _csp_provision_error(
                     "Provisioning session expired. Please restart the CSP provisioning flow."
                 )
-        elif isinstance(state_data.get("code_verifier"), str) and state_data.get("code_verifier"):
+        elif state_verifier := state_data.get("code_verifier"):
             # code_verifier stored directly in the signed state by the discover flow.
-            code_verifier = state_data["code_verifier"]
+            code_verifier = str(state_verifier)
         token_endpoint = (
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         )
