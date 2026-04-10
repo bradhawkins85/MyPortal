@@ -1329,6 +1329,8 @@ async def _execute_policy_step(
         patch_payload = _resolve_template_value(hygiene_updates, vars_map=vars_map)
         if not isinstance(patch_payload, dict):
             raise WorkflowStepError("m365_identity_hygiene requires hygiene_updates object")
+        # Graph API rejects empty strings for most string fields; convert them to None (null) to clear the field.
+        patch_payload = {k: (None if v == "" else v) for k, v in patch_payload.items()}
         await _graph_patch(access_token, f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}", patch_payload)
         revoked_sessions = False
         if bool(step.get("revoke_sign_in_sessions", True)):
