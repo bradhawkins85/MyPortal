@@ -358,5 +358,6 @@ async def test_sync_staff_assignments_non_premium_retry_creates_staff_without_si
         )
 
     assert len(create_calls) == 1
-    # m365_last_sign_in must be None (not set) since signInActivity was not available
+    # m365_last_sign_in must be explicitly None since signInActivity was not
+    # available in the premium-free retry path
     assert create_calls[0]["m365_last_sign_in"] is None
