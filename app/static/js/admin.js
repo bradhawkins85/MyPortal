@@ -2805,8 +2805,10 @@
 
     const tacticalButton = document.querySelector('[data-lookup-tactical-id]');
     const xeroButton = document.querySelector('[data-lookup-xero-id]');
+    const huduButton = document.querySelector('[data-lookup-hudu-id]');
     const tacticalInput = document.getElementById('edit-company-tactical');
     const xeroInput = document.getElementById('edit-company-xero');
+    const huduInput = document.getElementById('edit-company-hudu');
 
     const spinnerHtml = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
 
@@ -2864,6 +2866,35 @@
         } finally {
           xeroButton.disabled = false;
           xeroButton.innerHTML = originalText;
+        }
+      });
+    }
+
+    if (huduButton && huduInput) {
+      huduButton.addEventListener('click', async () => {
+        const originalText = huduButton.innerHTML;
+        huduButton.disabled = true;
+        huduButton.innerHTML = spinnerHtml;
+
+        try {
+          const result = await requestJson(`/api/companies/${companyId}/lookup-hudu-id`, {
+            method: 'POST',
+          });
+
+          if (result.status === 'found' && result.id) {
+            huduInput.value = result.id;
+            huduInput.classList.add('form-input--success');
+            setTimeout(() => huduInput.classList.remove('form-input--success'), 2000);
+          } else {
+            alert('Hudu company ID not found. Please ensure the company name matches exactly in Hudu.');
+          }
+        } catch (error) {
+          console.error('Failed to lookup Hudu company ID:', error);
+          const message = error instanceof Error ? error.message : 'Failed to lookup ID. Please try again.';
+          alert(message);
+        } finally {
+          huduButton.disabled = false;
+          huduButton.innerHTML = originalText;
         }
       });
     }
