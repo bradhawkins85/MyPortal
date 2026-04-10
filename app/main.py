@@ -10174,8 +10174,10 @@ def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, A
         if isinstance(step_list, list):
             normalised: list[Any] = []
             for step in step_list:
-                if isinstance(step, dict) and not step.get("key") and step.get("type"):
-                    step = {**step, "key": str(step["type"]).strip().lower()}
+                if isinstance(step, dict) and not step.get("key"):
+                    raw_type = str(step.get("type") or "").strip().lower()
+                    if raw_type:
+                        step = {**step, "key": raw_type}
                 normalised.append(step)
             config[step_list_key] = normalised
     try:
