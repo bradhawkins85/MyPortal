@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services import staff_onboarding_workflows as workflows
+from app.main import _normalise_workflow_config
 
 
 @pytest.fixture
@@ -63,6 +64,93 @@ def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_directi
     assert len(steps) == 1
     assert steps[0]["name"] == "Hide from GAL"
     assert steps[0]["type"] == "m365_hide_from_gal"
+
+
+def test_normalise_workflow_steps_disabled_step_is_skipped():
+    policy_config = {
+        "steps": [
+            {"name": "Enabled step", "type": "provision_account", "enabled": True},
+            {"name": "Disabled step", "type": "m365_assign_license", "enabled": False},
+        ]
+    }
+
+    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+
+    assert len(steps) == 1
+    assert steps[0]["type"] == "provision_account"
+
+
+def test_normalise_workflow_steps_no_enabled_key_defaults_to_enabled():
+    # Steps without an 'enabled' key should be treated as enabled (backward compat)
+    policy_config = {
+        "steps": [
+            {"name": "Old format step", "type": "provision_account"},
+        ]
+    }
+
+    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+
+    assert len(steps) == 1
+    assert steps[0]["type"] == "provision_account"
+
+
+def test_normalise_workflow_steps_inner_config_enabled_false_does_not_skip_step():
+    # enabled in the inner config dict must NOT cause the step to be skipped;
+    # only the top-level 'enabled' field controls step execution.
+    policy_config = {
+        "steps": [
+            {
+                "name": "Step with config enabled false",
+                "type": "provision_account",
+                # No top-level 'enabled' key — must default to True
+                "config": {"type": "provision_account", "enabled": False},
+            }
+        ]
+    }
+
+    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+
+    assert len(steps) == 1, "Step should execute when only inner config has enabled=False"
+    assert steps[0]["type"] == "provision_account"
+
+
+
+def test_normalise_workflow_config_adds_key_from_type_for_old_format_steps():
+    # Old-format steps (saved before WorkflowStepDefinition required 'key') must not
+    # raise a validation error.  The key should be derived from 'type' automatically.
+    raw_config = {
+        "steps": [
+            {"name": "Provision account", "type": "provision_account"},
+            {"name": "Assign license", "type": "m365_assign_license"},
+        ],
+        "offboarding_steps": [
+            {"name": "Offboard account", "type": "offboard_account"},
+        ],
+    }
+
+    result = _normalise_workflow_config(raw_config)
+
+    assert len(result["steps"]) == 2
+    assert result["steps"][0]["key"] == "provision_account"
+    assert result["steps"][1]["key"] == "m365_assign_license"
+    assert len(result["offboarding_steps"]) == 1
+    assert result["offboarding_steps"][0]["key"] == "offboard_account"
+    # enabled must default to True so steps are not accidentally disabled
+    assert result["steps"][0]["enabled"] is True
+    assert result["offboarding_steps"][0]["enabled"] is True
+
+
+def test_normalise_workflow_config_preserves_existing_key():
+    # Steps that already have a 'key' should keep it unchanged.
+    raw_config = {
+        "steps": [
+            {"key": "my_custom_key", "name": "Step", "type": "provision_account"},
+        ]
+    }
+
+    result = _normalise_workflow_config(raw_config)
+
+    assert result["steps"][0]["key"] == "my_custom_key"
 
 
 def test_normalise_custom_field_group_mappings_supports_dict_and_list_inputs():

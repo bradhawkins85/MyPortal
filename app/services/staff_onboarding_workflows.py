@@ -845,7 +845,7 @@ def _normalise_workflow_steps(policy_config: dict[str, Any], *, direction: str) 
         if not isinstance(raw_step, dict):
             continue
         config = raw_step.get("config") if isinstance(raw_step.get("config"), dict) else raw_step
-        enabled = bool(raw_step.get("enabled", config.get("enabled", True)))
+        enabled = bool(raw_step.get("enabled", True))
         if not enabled:
             continue
         step_type = str(config.get("type") or raw_step.get("type") or raw_step.get("key") or "").strip().lower()
