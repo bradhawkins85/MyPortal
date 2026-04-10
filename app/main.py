@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import random
 import re
 import secrets
 from collections import Counter
@@ -324,6 +325,13 @@ _PWA_ICON_SOURCES = [
 OPNFORM_ALLOWED_HOST = extract_allowed_host(
     str(settings.opnform_base_url) if settings.opnform_base_url else None
 )
+
+
+def _random_daily_cron() -> str:
+    """Return a randomised daily cron expression (``MM HH * * *``)."""
+    minute = random.randint(0, 59)
+    hour = random.randint(0, 23)
+    return f"{minute} {hour} * * *"
 
 
 def _opnform_base_url() -> str | None:
