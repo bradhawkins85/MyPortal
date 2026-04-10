@@ -9383,6 +9383,11 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "Generate kid-friendly password",
         "description": "Generates a word-based password with capitalisation, number suffix and symbol substitutions, safe for children.",
     },
+    {
+        "type": "push_to_password_pusher",
+        "name": "Push to Password Pusher",
+        "description": "Pushes a secret (e.g. a generated password) to Password Pusher and stores the resulting share URL as a workflow variable.",
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
@@ -9455,6 +9460,11 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "generate_kid_friendly_password",
         "name": "Generate kid-friendly password",
         "description": "Generates a word-based password with capitalisation, number suffix and symbol substitutions, safe for children.",
+    },
+    {
+        "type": "push_to_password_pusher",
+        "name": "Push to Password Pusher",
+        "description": "Pushes a secret (e.g. a generated password) to Password Pusher and stores the resulting share URL as a workflow variable.",
     },
 ]
 
@@ -10047,6 +10057,60 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                     "e.g. ${vars.generated_password}. The password will also be available as "
                     "${vars.generated_password} automatically."
                 ),
+            },
+        ],
+    },
+    "push_to_password_pusher": {
+        "fields": [
+            {
+                "name": "payload",
+                "label": "Secret text",
+                "type": "text",
+                "default": "${vars.generated_password}",
+                "description": "The secret to push (e.g. a generated password). Supports workflow variables.",
+                "example": "${vars.generated_password}",
+            },
+            {
+                "name": "expire_after_days",
+                "label": "Expire after days",
+                "type": "number",
+                "default": 7,
+                "description": "Number of days before the push expires (leave blank to use the Password Pusher default).",
+            },
+            {
+                "name": "expire_after_views",
+                "label": "Expire after views",
+                "type": "number",
+                "default": 5,
+                "description": "Number of views before the push expires (leave blank to use the Password Pusher default).",
+            },
+            {
+                "name": "deletable_by_viewer",
+                "label": "Deletable by viewer",
+                "type": "checkbox",
+                "default": True,
+                "description": "Allow the recipient to delete the push before it expires.",
+            },
+            {
+                "name": "retrieval_step",
+                "label": "Require retrieval step",
+                "type": "checkbox",
+                "default": False,
+                "description": "Require the recipient to click through an extra confirmation step before viewing the secret.",
+            },
+            {
+                "name": "note",
+                "label": "Note",
+                "type": "text",
+                "default": "",
+                "description": "Optional note attached to the push (visible to the recipient).",
+            },
+            {
+                "name": "output_var",
+                "label": "Store push URL as variable",
+                "type": "text",
+                "default": "push_url",
+                "description": "Workflow variable name used to reference the share URL in later steps, e.g. ${vars.push_url}.",
             },
         ],
     },
