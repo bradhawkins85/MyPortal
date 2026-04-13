@@ -221,6 +221,10 @@ async def login(
         _log_login_failure(request, payload.email, "invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    if int(user.get("is_active", 1)) == 0:
+        _log_login_failure(request, payload.email, "account_disabled")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
+
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
     if totp_devices:
         if not payload.totp_code:

@@ -9421,6 +9421,14 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
             "should be superseded by a record synced from Office 365."
         ),
     },
+    {
+        "type": "disable_myportal_account",
+        "name": "Disable MyPortal account",
+        "description": (
+            "Disables the MyPortal portal account linked to this staff member's email address, "
+            "preventing them from signing in. Has no effect if the staff member has no portal account."
+        ),
+    },
 ]
 
 _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
