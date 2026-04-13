@@ -31,7 +31,7 @@ dependencies = [
     "mutagen",
     "phonenumbers",
     "python-docx>=1.1.0",
-    "weasyprint>=60.0",
+    "weasyprint>=68.1",
     "paramiko",
     "defusedxml",
     "apprise>=1.9.8",
