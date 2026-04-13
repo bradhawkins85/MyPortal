@@ -1769,6 +1769,28 @@ async def _execute_policy_step(
             "staff_id": staff_id,
         }
 
+    if step_type == "disable_myportal_account":
+        email = (staff.get("email") or "").strip().lower()
+        if not email:
+            raise WorkflowStepError("disable_myportal_account: staff email is not available in workflow context")
+        portal_user = await user_repo.get_user_by_email(email)
+        if not portal_user:
+            return {
+                "disabled": False,
+                "reason": "no_portal_account",
+                "email": email,
+            }
+        user_id = portal_user.get("id")
+        if not user_id:
+            raise WorkflowStepError("disable_myportal_account: portal user record is missing an ID")
+        user_id = int(user_id)
+        await user_repo.update_user(user_id, is_active=0)
+        return {
+            "disabled": True,
+            "user_id": user_id,
+            "email": email,
+        }
+
     raise WorkflowStepError(f"Unsupported workflow step type: {step_type}")
 
 

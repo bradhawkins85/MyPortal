@@ -412,3 +412,63 @@ async def test_execute_policy_step_delete_staff_record_missing_id(monkeypatch):
         )
 
     delete_staff.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_disable_myportal_account(monkeypatch):
+    portal_user = {"id": 55, "email": "leaver@example.com", "is_active": 1}
+    get_user = AsyncMock(return_value=portal_user)
+    update_user = AsyncMock(return_value={**portal_user, "is_active": 0})
+    monkeypatch.setattr(workflows.user_repo, "get_user_by_email", get_user)
+    monkeypatch.setattr(workflows.user_repo, "update_user", update_user)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "disable_myportal_account"},
+        company_id=9,
+        staff={"id": 801, "email": "leaver@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["disabled"] is True
+    assert result["user_id"] == 55
+    assert result["email"] == "leaver@example.com"
+    get_user.assert_awaited_once_with("leaver@example.com")
+    update_user.assert_awaited_once_with(55, is_active=0)
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_disable_myportal_account_no_portal_user(monkeypatch):
+    get_user = AsyncMock(return_value=None)
+    update_user = AsyncMock()
+    monkeypatch.setattr(workflows.user_repo, "get_user_by_email", get_user)
+    monkeypatch.setattr(workflows.user_repo, "update_user", update_user)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "disable_myportal_account"},
+        company_id=9,
+        staff={"id": 801, "email": "noportal@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["disabled"] is False
+    assert result["reason"] == "no_portal_account"
+    update_user.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_disable_myportal_account_missing_email(monkeypatch):
+    get_user = AsyncMock()
+    monkeypatch.setattr(workflows.user_repo, "get_user_by_email", get_user)
+
+    with pytest.raises(workflows.WorkflowStepError, match="staff email is not available"):
+        await workflows._execute_policy_step(
+            step={"type": "disable_myportal_account"},
+            company_id=9,
+            staff={"id": 801},
+            policy_config={},
+            vars_map={},
+        )
+
+    get_user.assert_not_awaited()
