@@ -24,7 +24,7 @@ dependencies = [
     "croniter>=1.4",
     "httpx",
     "loguru",
-    "cryptography>=46.0.5",
+    "cryptography>=46.0.7",
     "email-validator",
     "python-multipart",
     "bleach",
