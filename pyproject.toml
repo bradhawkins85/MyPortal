@@ -21,7 +21,7 @@ dependencies = [
     "itsdangerous",
     "pyotp",
     "apscheduler",
-    "croniter>=1.4",
+    "croniter>=6.2.2",
     "httpx",
     "loguru",
     "cryptography>=46.0.5",
