@@ -1780,7 +1780,10 @@ async def _execute_policy_step(
                 "reason": "no_portal_account",
                 "email": email,
             }
-        user_id = int(portal_user.get("id") or 0)
+        user_id = portal_user.get("id")
+        if not user_id:
+            raise WorkflowStepError("disable_myportal_account: portal user record is missing an ID")
+        user_id = int(user_id)
         await user_repo.update_user(user_id, is_active=0)
         return {
             "disabled": True,
