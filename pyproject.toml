@@ -11,7 +11,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "aiomysql",
     "aiosqlite",
-    "pydantic>=2.6",
+    "pydantic>=2.12.5",
     "pydantic-settings",
     "passlib[bcrypt]",
     "python-dotenv",
