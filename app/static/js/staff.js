@@ -1039,6 +1039,9 @@
           if (entry.wrapper && entry.wrapper.hidden) {
             return;
           }
+          if (entry.field.field_type !== 'multiselect' && entry.input.disabled) {
+            return;
+          }
           if (entry.field.field_type === 'checkbox') {
             payload.customFields[name] = Boolean(entry.input.checked);
           } else if (entry.field.field_type === 'multiselect') {
