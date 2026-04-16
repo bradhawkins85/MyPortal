@@ -144,7 +144,7 @@ def validate_staff_form_values(
         if field_type == "multiselect" and parsed:
             allowed_options = {str(option.get('value') or '') for option in field.get("options") or []}
             if allowed_options:
-                selected = [v for v in parsed.split(",") if v.strip()]
+                selected = [v.strip() for v in parsed.split(",") if v.strip()]
                 invalid = [v for v in selected if v not in allowed_options]
                 if invalid:
                     errors.append(f"{field['label']} has invalid option(s).")
