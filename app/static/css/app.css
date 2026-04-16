@@ -1006,6 +1006,10 @@ html {
   flex-wrap: wrap;
 }
 
+.staff-form > .staff-custom-field-row {
+  grid-column: 1 / -1;
+}
+
 .staff-custom-field-row > .form-field,
 .staff-custom-field-row > .form-field--checkbox {
   flex: 1 1 0;
