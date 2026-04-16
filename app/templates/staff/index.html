@@ -373,6 +373,18 @@
                   {% endfor %}
                 </select>
               </div>
+            {% elif field.type == 'multiselect' %}
+              <div class="form-field">
+                <label class="form-label">{{ field.label }}</label>
+                <div class="multiselect-checkboxes">
+                  {% for option in field.options %}
+                    <label class="checkbox">
+                      <input type="checkbox" name="{{ field.input_name }}" value="{{ option.value }}" />
+                      <span>{{ option.label }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </div>
             {% else %}
               <div class="form-field">
                 <label class="form-label" for="{{ field.input_id }}">{{ field.label }}</label>
@@ -439,6 +451,29 @@
                   <option value="{{ option.value }}">{{ option.label }}</option>
                 {% endfor %}
               </select>
+            </div>
+          {% elif field.field_type == 'multiselect' %}
+            <div
+              class="form-field"
+              data-custom-field-wrapper
+              data-custom-field-name="{{ field.name }}"
+              data-custom-field-group="{{ group_label }}"
+              data-condition-parent-name="{{ field.condition_parent_name or '' }}"
+              data-condition-operator="{{ field.condition_operator or '' }}"
+              data-condition-value="{{ field.condition_value or '' }}"
+            >
+              <label class="form-label">{{ field.display_name or field.name }}</label>
+              {% if field.help_text %}
+                <p class="form-help">{{ field.help_text }}</p>
+              {% endif %}
+              <div class="multiselect-checkboxes">
+                {% for option in field.options %}
+                  <label class="checkbox">
+                    <input type="checkbox" name="{{ field.name }}" value="{{ option.value }}" />
+                    <span>{{ option.label }}</span>
+                  </label>
+                {% endfor %}
+              </div>
             </div>
           {% else %}
             <div

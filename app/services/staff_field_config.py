@@ -13,6 +13,7 @@ _FIELD_TYPE_MAP = {
     "date": "date",
     "checkbox": "checkbox",
     "select": "select",
+    "multiselect": "multiselect",
 }
 
 
@@ -109,6 +110,12 @@ def validate_staff_form_values(
 
         if field_type == "checkbox":
             parsed = _parse_bool(raw)
+        elif field_type == "multiselect":
+            raw_list = form_data.get(key)
+            if isinstance(raw_list, list):
+                parsed = ",".join(v for v in (str(v).strip() for v in raw_list) if v)
+            else:
+                parsed = str(raw_list or "").strip()
         else:
             parsed = str(raw or "").strip()
 
@@ -133,6 +140,15 @@ def validate_staff_form_values(
             if allowed_options and parsed not in allowed_options:
                 errors.append(f"{field['label']} has an invalid option.")
                 continue
+
+        if field_type == "multiselect" and parsed:
+            allowed_options = {str(option.get('value') or '') for option in field.get("options") or []}
+            if allowed_options:
+                selected = [v for v in parsed.split(",") if v.strip()]
+                invalid = [v for v in selected if v not in allowed_options]
+                if invalid:
+                    errors.append(f"{field['label']} has invalid option(s).")
+                    continue
 
         validation_metadata = field.get("validation_metadata") or {}
         max_length = validation_metadata.get("max_length")
@@ -189,7 +205,7 @@ async def save_company_staff_field_admin_config(
         )
 
         effective_type = field_type_override or base_type
-        if effective_type == "select":
+        if effective_type in {"select", "multiselect"}:
             options_text = str(form_data.get(f"field_{key}_options") or "")
             options_by_definition[definition_id] = _parse_options_text(options_text)
 
