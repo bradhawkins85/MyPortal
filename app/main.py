@@ -10954,6 +10954,9 @@ async def create_staff_member(request: Request):
         raw_value = form.get(key)
         if field_type == "checkbox":
             custom_values[key] = str(raw_value or "").lower() in {"1", "true", "on", "yes"}
+        elif field_type == "multiselect":
+            raw_values = form.getlist(key)
+            custom_values[key] = ",".join(v for v in (str(v).strip() for v in raw_values) if v) or None
         else:
             custom_values[key] = str(raw_value or "").strip() or None
 
@@ -12423,7 +12426,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
     options = _parse_custom_field_options(str(form.get("options") or ""))
     if not name:
         return _company_edit_redirect(company_id=company_id, error="Custom field name is required.")
-    if field_type not in {"text", "checkbox", "date", "select"}:
+    if field_type not in {"text", "checkbox", "date", "select", "multiselect"}:
         return _company_edit_redirect(company_id=company_id, error="Invalid custom field type.")
     await staff_custom_fields_repo.create_company_definition(
         company_id=company_id,
