@@ -397,7 +397,7 @@
       });
       sections.forEach((section) => {
         const sectionWrappers = Array.from(section.querySelectorAll('[data-custom-field-wrapper]'));
-        const hasVisible = sectionWrappers.length > 0 && sectionWrappers.some((w) => !w.hidden);
+        const hasVisible = sectionWrappers.some((w) => !w.hidden);
         section.hidden = !hasVisible;
       });
     };
