@@ -347,8 +347,20 @@
       <form action="/staff" method="post" class="staff-form form-grid">
         {% include "partials/csrf.html" %}
         <input type="hidden" name="browser_timezone" value="" />
+        {% set ns = namespace(active_order=-1, row_open=False) %}
         {% for field in staff_field_config %}
           {% if field.visible %}
+            {% set field_order = field.sort_order %}
+            {% set needs_new_row = field_order != ns.active_order %}
+            {% if needs_new_row and ns.row_open %}
+                </div>
+              {% set ns.row_open = False %}
+            {% endif %}
+            {% if not ns.row_open %}
+              <div class="staff-custom-field-row">
+              {% set ns.active_order = field_order %}
+              {% set ns.row_open = True %}
+            {% endif %}
             {% if field.type == 'checkbox' %}
               <div class="form-field form-field--checkbox">
                 <label class="checkbox" for="{{ field.input_id }}">
@@ -399,6 +411,9 @@
             {% endif %}
           {% endif %}
         {% endfor %}
+        {% if ns.row_open %}
+            </div>
+        {% endif %}
         {% set ns = namespace(active_group='', group_open=False, active_order=-1, row_open=False) %}
         {% for field in staff_custom_field_definitions %}
           {% set group_label = (field.field_group or 'Additional details') %}
