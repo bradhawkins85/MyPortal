@@ -387,6 +387,19 @@
           input.disabled = !shouldShow;
         });
       });
+
+      const sections = new Set();
+      wrappers.forEach((wrapper) => {
+        const section = wrapper.closest('[data-custom-field-section], fieldset[data-custom-field-group]');
+        if (section) {
+          sections.add(section);
+        }
+      });
+      sections.forEach((section) => {
+        const sectionWrappers = Array.from(section.querySelectorAll('[data-custom-field-wrapper]'));
+        const hasVisible = sectionWrappers.length > 0 && sectionWrappers.some((w) => !w.hidden);
+        section.hidden = !hasVisible;
+      });
     };
 
     const parents = new Map();
