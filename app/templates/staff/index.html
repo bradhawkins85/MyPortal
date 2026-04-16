@@ -399,19 +399,32 @@
             {% endif %}
           {% endif %}
         {% endfor %}
-        {% set custom_sections = namespace(active='', open=False) %}
+        {% set ns = namespace(active_group='', group_open=False, active_order=-1, row_open=False) %}
         {% for field in staff_custom_field_definitions %}
           {% set group_label = (field.field_group or 'Additional details') %}
-          {% if group_label != custom_sections.active %}
-            {% if custom_sections.open %}
+          {% set field_order = (field.display_order if field.display_order is not none else 0) %}
+          {% if group_label != ns.active_group %}
+            {% if ns.row_open %}
                 </div>
+              {% set ns.row_open = False %}
+            {% endif %}
+            {% if ns.group_open %}
               </fieldset>
             {% endif %}
             <fieldset class="fieldset staff-form__section" data-custom-field-section="{{ group_label }}">
               <legend>{{ group_label }}</legend>
-              <div class="form-grid staff-form__section-grid">
-            {% set custom_sections.active = group_label %}
-            {% set custom_sections.open = True %}
+            {% set ns.active_group = group_label %}
+            {% set ns.group_open = True %}
+            {% set ns.active_order = field_order %}
+            <div class="staff-custom-field-row">
+            {% set ns.row_open = True %}
+          {% elif field_order != ns.active_order %}
+            {% if ns.row_open %}
+                </div>
+            {% endif %}
+            <div class="staff-custom-field-row">
+            {% set ns.active_order = field_order %}
+            {% set ns.row_open = True %}
           {% endif %}
           {% if field.field_type == 'checkbox' %}
             <div
@@ -493,9 +506,11 @@
             </div>
           {% endif %}
         {% endfor %}
-        {% if custom_sections.open %}
+        {% if ns.row_open %}
             </div>
-          </fieldset>
+        {% endif %}
+        {% if ns.group_open %}
+            </fieldset>
         {% endif %}
         <div class="form-actions staff-form__actions">
           <button type="submit" class="button">Add staff</button>

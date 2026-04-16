@@ -526,7 +526,9 @@
         return raw || 'Additional details';
       };
 
-      const ensureGroupContainer = (groupLabel) => {
+      const editCustomFieldRows = new Map();
+
+      const ensureGroupSection = (groupLabel) => {
         const normalized = normalizeGroupLabel(groupLabel);
         if (editCustomFieldGroups.has(normalized)) {
           return editCustomFieldGroups.get(normalized);
@@ -536,13 +538,24 @@
         section.dataset.customFieldGroup = normalized;
         const legend = document.createElement('legend');
         legend.textContent = normalized;
-        const grid = document.createElement('div');
-        grid.className = 'form-grid staff-modal-grid';
         section.appendChild(legend);
-        section.appendChild(grid);
         editCustomFieldsGrid.appendChild(section);
-        editCustomFieldGroups.set(normalized, grid);
-        return grid;
+        editCustomFieldGroups.set(normalized, section);
+        return section;
+      };
+
+      const ensureRowContainer = (groupLabel, displayOrder) => {
+        const normalized = normalizeGroupLabel(groupLabel);
+        const rowKey = `${normalized}::${displayOrder}`;
+        if (editCustomFieldRows.has(rowKey)) {
+          return editCustomFieldRows.get(rowKey);
+        }
+        const section = ensureGroupSection(normalized);
+        const row = document.createElement('div');
+        row.className = 'staff-custom-field-row';
+        section.appendChild(row);
+        editCustomFieldRows.set(rowKey, row);
+        return row;
       };
 
       customFieldDefinitions.forEach((field) => {
@@ -550,6 +563,7 @@
           return;
         }
         const groupLabel = normalizeGroupLabel(field.field_group);
+        const displayOrder = field.display_order != null ? field.display_order : 0;
         const wrapper = document.createElement('div');
         wrapper.className = field.field_type === 'checkbox' ? 'form-field form-field--checkbox' : 'form-field';
         wrapper.dataset.customFieldWrapper = '1';
@@ -596,7 +610,7 @@
             <input class="form-input" id="${inputId}" type="${field.field_type === 'date' ? 'date' : 'text'}" />
           `;
         }
-        ensureGroupContainer(groupLabel).appendChild(wrapper);
+        ensureRowContainer(groupLabel, displayOrder).appendChild(wrapper);
         editCustomFieldInputs.set(field.name, {
           field,
           wrapper,

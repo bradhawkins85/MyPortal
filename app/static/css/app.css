@@ -1000,6 +1000,22 @@ html {
   gap: var(--space-gap-base);
 }
 
+.staff-custom-field-row {
+  display: flex;
+  gap: var(--space-gap-base);
+  flex-wrap: wrap;
+}
+
+.staff-custom-field-row > .form-field,
+.staff-custom-field-row > .form-field--checkbox {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.staff-custom-field-row + .staff-custom-field-row {
+  margin-top: var(--space-gap-base);
+}
+
 .staff-form__actions {
   grid-column: 1 / -1;
   justify-content: flex-end;
