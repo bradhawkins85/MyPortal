@@ -12,6 +12,7 @@ class FieldType(str, Enum):
     CHECKBOX = "checkbox"
     DATE = "date"
     SELECT = "select"
+    MULTISELECT = "multiselect"
 
 
 class FieldDefinition(BaseModel):

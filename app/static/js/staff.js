@@ -564,6 +564,19 @@
               ${options}
             </select>
           `;
+        } else if (field.field_type === 'multiselect') {
+          const checkboxes = (field.options || [])
+            .map((option, idx) => {
+              const cbId = `${inputId}-opt-${idx}`;
+              return `<label class="checkbox" for="${cbId}"><input type="checkbox" id="${cbId}" value="${option.value}" /><span>${option.label || option.value}</span></label>`;
+            })
+            .join('');
+          wrapper.innerHTML = `
+            <label class="form-label">${field.display_name || field.name}</label>
+            <div class="multiselect-checkboxes" id="${inputId}" data-multiselect-group>
+              ${checkboxes}
+            </div>
+          `;
         } else {
           wrapper.innerHTML = `
             <label class="form-label" for="${inputId}">${field.display_name || field.name}</label>
@@ -803,6 +816,13 @@
         const value = existingCustom[name];
         if (entry.field.field_type === 'checkbox') {
           entry.input.checked = Boolean(value);
+        } else if (entry.field.field_type === 'multiselect') {
+          const selectedValues = new Set(
+            String(value || '').split(',').map((v) => v.trim()).filter(Boolean)
+          );
+          entry.wrapper.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            cb.checked = selectedValues.has(cb.value);
+          });
         } else {
           entry.input.value = value ?? '';
         }
@@ -1016,11 +1036,16 @@
           if (!entry || !entry.input) {
             return;
           }
-          if (entry.input.disabled) {
+          if (entry.wrapper && entry.wrapper.hidden) {
             return;
           }
           if (entry.field.field_type === 'checkbox') {
             payload.customFields[name] = Boolean(entry.input.checked);
+          } else if (entry.field.field_type === 'multiselect') {
+            const checked = Array.from(entry.wrapper.querySelectorAll('input[type="checkbox"]:checked'))
+              .map((cb) => cb.value)
+              .filter(Boolean);
+            payload.customFields[name] = checked.length > 0 ? checked.join(',') : null;
           } else {
             payload.customFields[name] = entry.input.value || null;
           }
