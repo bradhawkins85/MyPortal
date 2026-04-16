@@ -403,11 +403,12 @@
         {% for field in staff_custom_field_definitions %}
           {% set group_label = (field.field_group or 'Additional details') %}
           {% set field_order = (field.display_order if field.display_order is not none else 0) %}
-          {% if group_label != ns.active_group %}
-            {% if ns.row_open %}
+          {% set needs_new_row = (group_label != ns.active_group or field_order != ns.active_order) %}
+          {% if needs_new_row and ns.row_open %}
                 </div>
-              {% set ns.row_open = False %}
-            {% endif %}
+            {% set ns.row_open = False %}
+          {% endif %}
+          {% if group_label != ns.active_group %}
             {% if ns.group_open %}
               </fieldset>
             {% endif %}
@@ -415,13 +416,8 @@
               <legend>{{ group_label }}</legend>
             {% set ns.active_group = group_label %}
             {% set ns.group_open = True %}
-            {% set ns.active_order = field_order %}
-            <div class="staff-custom-field-row">
-            {% set ns.row_open = True %}
-          {% elif field_order != ns.active_order %}
-            {% if ns.row_open %}
-                </div>
-            {% endif %}
+          {% endif %}
+          {% if not ns.row_open %}
             <div class="staff-custom-field-row">
             {% set ns.active_order = field_order %}
             {% set ns.row_open = True %}
