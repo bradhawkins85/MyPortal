@@ -306,6 +306,69 @@
                 <label class="form-label" for="chatgpt-system-user">Default reply author (user ID)</label>
                 <input id="chatgpt-system-user" name="settings.system_user_id" class="form-input" value="{{ settings.system_user_id or '' }}" placeholder="123" />
               </div>
+            {% elif module.slug == 'ollama-mcp' %}
+              <div class="form-field">
+                <label class="form-label" for="ollama-mcp-endpoint">MCP endpoint URL</label>
+                <input id="ollama-mcp-endpoint" class="form-input" value="{{ request.url_for('ollama_mcp_endpoint') }}" readonly />
+                <p class="form-help">Configure your Ollama MCP client to POST JSON-RPC requests to this URL with an <code>Authorization: Bearer &lt;shared secret&gt;</code> header.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-mcp-secret">Shared secret</label>
+                <input id="ollama-mcp-secret" name="settings.shared_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new shared secret" />
+                <p class="form-help">Secrets are stored as SHA-256 hashes. Leave blank to keep the existing value.</p>
+              </div>
+              <fieldset class="form-field">
+                <legend class="form-label">Enabled tools</legend>
+                <div class="form-field__group form-field__group--stacked">
+                  {% set ollama_tools = ['search_tickets', 'list_tickets', 'get_ticket', 'list_ticket_statuses', 'create_ticket_reply', 'update_ticket'] %}
+                  {% for tool in ollama_tools %}
+                    <label class="checkbox">
+                      <input type="checkbox" name="settings.allowed_actions" value="{{ tool }}" {% if settings.allowed_actions and tool in settings.allowed_actions %}checked{% endif %} />
+                      <span>{{ tool }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+                <p class="form-help">Read-only ticket query tools are recommended. Reply / update tools also require the toggles below.</p>
+              </fieldset>
+              <div class="form-field">
+                <label class="form-label" for="ollama-max-results">Maximum tickets returned</label>
+                <input id="ollama-max-results" name="settings.max_results" class="form-input" type="number" min="1" max="200" value="{{ settings.max_results or 25 }}" />
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="toggle">
+                  <input type="checkbox" name="settings.allow_ticket_replies" value="true" {% if settings.allow_ticket_replies %}checked{% endif %} />
+                  <span>Allow Ollama to post ticket replies</span>
+                </label>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="toggle">
+                  <input type="checkbox" name="settings.allow_ticket_updates" value="true" {% if settings.allow_ticket_updates %}checked{% endif %} />
+                  <span>Allow Ollama to update tickets</span>
+                </label>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="toggle">
+                  <input type="checkbox" name="settings.include_internal_replies" value="true" {% if settings.include_internal_replies %}checked{% endif %} />
+                  <span>Include internal replies in ticket detail responses</span>
+                </label>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-statuses">Allowed ticket statuses</label>
+                <input id="ollama-statuses" name="settings.allowed_statuses" class="form-input" value="{{ settings.allowed_statuses|join(', ') if settings.allowed_statuses else '' }}" placeholder="open, pending, in_progress" />
+                <p class="form-help">Comma-separated list used to validate update requests.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-system-user">Default reply author (user ID)</label>
+                <input id="ollama-system-user" name="settings.system_user_id" class="form-input" value="{{ settings.system_user_id or '' }}" placeholder="123" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-server-name">Server name</label>
+                <input id="ollama-server-name" name="settings.server_name" class="form-input" value="{{ settings.server_name or 'MyPortal Ollama MCP' }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="ollama-server-version">Server version</label>
+                <input id="ollama-server-version" name="settings.server_version" class="form-input" value="{{ settings.server_version or '1.0.0' }}" />
+              </div>
             {% elif module.slug == 'xero' %}
               <div class="form-field">
                 <label class="form-label" for="xero-callback-url">Callback URL</label>

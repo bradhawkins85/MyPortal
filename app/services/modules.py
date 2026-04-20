@@ -377,6 +377,69 @@ def _default_uptimekuma_settings() -> dict[str, Any]:
     }
 
 
+# Tools available to the Ollama MCP server. Read-only by default; write tools
+# (``create_ticket_reply``, ``update_ticket``) must be enabled explicitly via
+# the ``allow_ticket_replies`` / ``allow_ticket_updates`` toggles.
+DEFAULT_OLLAMA_MCP_TOOLS = [
+    "search_tickets",
+    "list_tickets",
+    "get_ticket",
+    "list_ticket_statuses",
+]
+OPTIONAL_OLLAMA_MCP_TOOLS = [
+    "create_ticket_reply",
+    "update_ticket",
+]
+ALL_OLLAMA_MCP_TOOLS = DEFAULT_OLLAMA_MCP_TOOLS + OPTIONAL_OLLAMA_MCP_TOOLS
+
+
+def _normalise_ollama_tool_names(value: Any) -> list[str]:
+    requested = _ensure_list(value)
+    if not requested:
+        return list(DEFAULT_OLLAMA_MCP_TOOLS)
+    normalised: list[str] = []
+    for name in requested:
+        candidate = name.strip()
+        if not candidate or candidate not in ALL_OLLAMA_MCP_TOOLS:
+            continue
+        if candidate not in normalised:
+            normalised.append(candidate)
+    return normalised or list(DEFAULT_OLLAMA_MCP_TOOLS)
+
+
+def _default_ollama_mcp_settings() -> dict[str, Any]:
+    shared_secret = str(os.getenv("OLLAMA_MCP_SHARED_SECRET", "")).strip()
+    shared_secret_hash = _hash_secret(shared_secret) if shared_secret else ""
+    allowed_actions = _normalise_ollama_tool_names(
+        os.getenv("OLLAMA_MCP_ALLOWED_ACTIONS")
+    )
+    max_results = (
+        _coerce_int(os.getenv("OLLAMA_MCP_MAX_RESULTS"), minimum=1, maximum=200)
+        or 25
+    )
+    allow_replies = _ensure_bool(os.getenv("OLLAMA_MCP_ALLOW_REPLIES"), False)
+    allow_updates = _ensure_bool(os.getenv("OLLAMA_MCP_ALLOW_UPDATES"), False)
+    allowed_statuses = _normalise_statuses(os.getenv("OLLAMA_MCP_ALLOWED_STATUSES"))
+    system_user_id = _coerce_int(os.getenv("OLLAMA_MCP_SYSTEM_USER_ID"))
+    include_internal = _ensure_bool(
+        os.getenv("OLLAMA_MCP_INCLUDE_INTERNAL_REPLIES"), False
+    )
+    return {
+        "shared_secret_hash": shared_secret_hash,
+        "allowed_actions": allowed_actions,
+        "max_results": max_results,
+        "allow_ticket_replies": allow_replies,
+        "allow_ticket_updates": allow_updates,
+        "allowed_statuses": allowed_statuses,
+        "system_user_id": system_user_id,
+        "include_internal_replies": include_internal,
+        "server_name": str(os.getenv("OLLAMA_MCP_SERVER_NAME", "")).strip()
+        or "MyPortal Ollama MCP",
+        "server_version": str(os.getenv("OLLAMA_MCP_SERVER_VERSION", "")).strip()
+        or "1.0.0",
+    }
+
+
 def _default_xero_settings() -> dict[str, Any]:
     def _clean_env(key: str) -> str:
         return str(os.getenv(key, "")).strip()
@@ -537,6 +600,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Expose ticketing tools to ChatGPT via the Model Context Protocol.",
         "icon": "🤖",
         "settings": _default_chatgpt_settings(),
+    },
+    {
+        "slug": "ollama-mcp",
+        "name": "Ollama MCP",
+        "description": "Expose ticket search and lookup tools to Ollama via the Model Context Protocol.",
+        "icon": "🦙",
+        "settings": _default_ollama_mcp_settings(),
     },
     {
         "slug": "xero",
@@ -873,6 +943,50 @@ def _coerce_settings(
         merged["allowed_statuses"] = _normalise_statuses(merged.get("allowed_statuses"))
         merged["system_user_id"] = _coerce_int(merged.get("system_user_id"))
         merged.pop("shared_secret", None)
+    elif slug == "ollama-mcp":
+        overrides = payload or {}
+        shared_secret_override = overrides.get("shared_secret")
+        shared_secret_hash_override = overrides.get("shared_secret_hash")
+        if shared_secret_override is not None or shared_secret_hash_override is not None:
+            candidate = shared_secret_override
+            if candidate in (None, ""):
+                candidate = shared_secret_hash_override
+            candidate_str = str(candidate or "").strip()
+            if not candidate_str:
+                merged["shared_secret_hash"] = ""
+            elif (
+                len(candidate_str) == 64
+                and all(char in string.hexdigits for char in candidate_str)
+                and shared_secret_override in (None, "")
+            ):
+                merged["shared_secret_hash"] = candidate_str.lower()
+            else:
+                merged["shared_secret_hash"] = _hash_secret(candidate_str)
+        merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
+        merged["allowed_actions"] = _normalise_ollama_tool_names(
+            merged.get("allowed_actions")
+        )
+        merged["max_results"] = (
+            _coerce_int(merged.get("max_results"), minimum=1, maximum=200) or 25
+        )
+        merged["allow_ticket_replies"] = _ensure_bool(
+            merged.get("allow_ticket_replies"), False
+        )
+        merged["allow_ticket_updates"] = _ensure_bool(
+            merged.get("allow_ticket_updates"), False
+        )
+        merged["allowed_statuses"] = _normalise_statuses(merged.get("allowed_statuses"))
+        merged["system_user_id"] = _coerce_int(merged.get("system_user_id"))
+        merged["include_internal_replies"] = _ensure_bool(
+            merged.get("include_internal_replies"), False
+        )
+        merged["server_name"] = (
+            str(merged.get("server_name") or "").strip() or "MyPortal Ollama MCP"
+        )
+        merged["server_version"] = (
+            str(merged.get("server_version") or "").strip() or "1.0.0"
+        )
+        merged.pop("shared_secret", None)
     elif slug == "uptimekuma":
         overrides = payload or {}
         shared_secret_override = overrides.get("shared_secret")
@@ -1063,6 +1177,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
     slug = module.get("slug")
     fields_to_redact: dict[str, tuple[str, ...]] = {
         "chatgpt-mcp": ("shared_secret_hash",),
+        "ollama-mcp": ("shared_secret_hash",),
         "syncro": ("api_key",),
         "uptimekuma": ("shared_secret_hash",),
         "tacticalrmm": ("api_key",),
@@ -1159,6 +1274,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "uptimekuma",     # Uptime Kuma - removed from trigger actions  
     "syncro",         # Syncro - removed from trigger actions
     "chatgpt-mcp",    # ChatGPT MCP - removed from trigger actions
+    "ollama-mcp",     # Ollama MCP - inbound query surface, not an action module
     "call-recordings", # Call Recordings - configuration only, not an action module
     "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
     "plausible",      # Plausible - email tracking config only
