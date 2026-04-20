@@ -651,11 +651,7 @@ async def handle_rpc_request(
     try:
         if method == "initialize":
             params = body.get("params") if isinstance(body.get("params"), Mapping) else {}
-            client_protocol = (
-                str(params.get("protocolVersion") or PROTOCOL_VERSION)
-                if isinstance(params, Mapping)
-                else PROTOCOL_VERSION
-            )
+            client_protocol = str(params.get("protocolVersion") or PROTOCOL_VERSION)
             result = {
                 "protocolVersion": client_protocol or PROTOCOL_VERSION,
                 "serverInfo": {
