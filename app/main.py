@@ -4822,6 +4822,7 @@ async def subscriptions_page(request: Request):
         "subscriptions": formatted,
         "company": company,
         "can_request_changes": can_request_changes,
+        "is_super_admin": is_super_admin,
     }
     return await _render_template("subscriptions/index.html", request, user, extra=extra)
 
