@@ -15258,6 +15258,7 @@ async def admin_shop_product_create_page(request: Request):
         "categories": categories,
         "products": products,
         "subscription_categories": subscription_categories,
+        "product_restrictions": [],
     }
     return await _render_template(
         "admin/shop_product_create.html", request, current_user, extra=extra
