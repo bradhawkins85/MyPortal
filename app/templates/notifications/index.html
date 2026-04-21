@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/mobile.html' import mobile_collapsible %}
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/counters.html" import counter_strip %}
 
@@ -27,6 +28,7 @@
     total_attrs={"data-total-notifications": "", "data-label": "Total"}
   ) }}
 
+    {% call mobile_collapsible('Filters', open=False) %}
   <section class="card card--panel">
     <form id="notification-filters" class="filters filters--compact" method="get">
       <div class="filters__group filters__group--wide">
@@ -107,6 +109,7 @@
         <button type="button" class="button button--ghost" data-notification-reset {% if not filters_active %}disabled{% endif %}>Reset</button>
       </div>
     </form>
+    {% endcall %}
 
     {% if notifications %}
     <div class="table-wrapper">
