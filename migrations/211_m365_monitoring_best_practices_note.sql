@@ -1,0 +1,27 @@
+-- Microsoft 365 Best Practices: monitoring category
+--
+-- This migration is informational only and contains no schema changes.
+-- The existing m365_best_practice_settings and m365_best_practice_results
+-- tables (created in migration 209) already support arbitrary check_id
+-- values, so the new bp_monitor_* checks added in
+-- app/services/m365_best_practices.py work without further DDL.
+--
+-- New monitoring check IDs introduced:
+--   bp_monitor_sign_in_logs
+--   bp_monitor_risky_users
+--   bp_monitor_sign_in_risk_policy
+--   bp_monitor_user_risk_policy
+--   bp_monitor_named_locations
+--   bp_monitor_ca_report_only_policies
+--   bp_monitor_app_credential_expiry
+--   bp_monitor_cloud_admin_accounts
+--   bp_monitor_secure_score
+--   bp_monitor_mfa_registration_policy
+--
+-- New Microsoft Graph application permissions required by these checks
+-- (granted via the existing M365 provisioning flow):
+--   IdentityRiskyUser.Read.All  (dc5007c0-2d7d-4c42-879c-2dab87571379)
+--   Application.Read.All        (9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30)
+--   SecurityEvents.Read.All     (bf394140-e372-4bf9-a898-299cfc7564e5)
+
+SELECT 1;
