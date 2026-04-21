@@ -113,15 +113,15 @@
 
         <!-- Recordings Table -->
         <div class="data-table-wrapper">
-          <table class="data-table" id="recordings-table" data-table>
+          <table class="data-table" id="recordings-table" data-table data-table-id="recordings">
             <thead>
               <tr>
-                <th data-sort="date">Date/Time</th>
-                <th data-sort="string">Phone Number</th>
-                <th data-sort="number">Duration</th>
-                <th data-sort="string">Transcription Status</th>
-                <th data-sort="string">Linked Ticket</th>
-                <th>Actions</th>
+                <th data-sort="date" data-column-key="datetime">Date/Time</th>
+                <th data-sort="string" data-column-key="phone_number">Phone Number</th>
+                <th data-sort="number" data-column-key="duration">Duration</th>
+                <th data-sort="string" data-column-key="transcription_status">Transcription Status</th>
+                <th data-sort="string" data-column-key="linked_ticket">Linked Ticket</th>
+                <th data-column-key="actions">Actions</th>
               </tr>
             </thead>
             <tbody id="recordings-tbody">

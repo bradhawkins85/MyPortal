@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block header_title %}Audit logs{% endblock %}
 
 {% block content %}
 <div class="admin-grid">
@@ -61,31 +62,31 @@
       </form>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="audit-log-table" data-table>
+      <table class="table" id="audit-log-table" data-table data-table-id="audit-log">
         <thead>
           <tr>
-            <th scope="col" data-sort="date">Timestamp</th>
-            <th scope="col" data-sort="string">Actor</th>
-            <th scope="col" data-sort="string">Action</th>
-            <th scope="col" data-sort="string">Entity</th>
-            <th scope="col" data-sort="string">IP / Request</th>
-            <th scope="col" data-sort="string">Changes</th>
+            <th scope="col" data-sort="date" data-column-key="timestamp">Timestamp</th>
+            <th scope="col" data-sort="string" data-column-key="actor">Actor</th>
+            <th scope="col" data-sort="string" data-column-key="action">Action</th>
+            <th scope="col" data-sort="string" data-column-key="entity">Entity</th>
+            <th scope="col" data-sort="string" data-column-key="ip-request">IP / Request</th>
+            <th scope="col" data-sort="string" data-column-key="changes">Changes</th>
           </tr>
         </thead>
         <tbody>
           {% if logs %}
             {% for log in logs %}
               <tr>
-                <td data-label="Timestamp" data-utc="{{ log.created_at_iso or '' }}" data-value="{{ log.created_at_iso or '' }}">{{ log.created_at_iso or '—' }}</td>
-                <td data-label="Actor">
+                <td data-label="Timestamp" data-utc="{{ log.created_at_iso or '' }}" data-value="{{ log.created_at_iso or '' }}" data-column-key="timestamp">{{ log.created_at_iso or '—' }}</td>
+                <td data-label="Actor" data-column-key="actor">
                   {% if log.user_email %}
                     <span class="stacked"><strong>{{ log.user_email }}</strong><span class="text-muted">User #{{ log.user_id }}</span></span>
                   {% else %}
                     <span class="text-muted">System</span>
                   {% endif %}
                 </td>
-                <td data-label="Action"><code>{{ log.action }}</code></td>
-                <td data-label="Entity">
+                <td data-label="Action" data-column-key="action"><code>{{ log.action }}</code></td>
+                <td data-label="Entity" data-column-key="entity">
                   {% if log.entity_type %}
                     <span class="tag">{{ log.entity_type }}</span>
                     {% if log.entity_id %}
@@ -95,7 +96,7 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td data-label="IP / Request">
+                <td data-label="IP / Request" data-column-key="ip-request">
                   <span class="stacked">
                     <span>{{ log.ip_address or '—' }}</span>
                     {% if log.request_id %}
@@ -103,7 +104,7 @@
                     {% endif %}
                   </span>
                 </td>
-                <td data-label="Changes">
+                <td data-label="Changes" data-column-key="changes">
                   <details class="details">
                     <summary>{{ log.diff_rows | length }} field{% if log.diff_rows | length != 1 %}s{% endif %}</summary>
                     {% if log.diff_rows %}

@@ -1,0 +1,62 @@
+{# Counter / KPI strip — see docs/ui_layout_standards.md.
+
+   Renders a horizontal strip of KPI tiles using the same visual
+   treatment as the Service Status dashboard.
+
+   items: list of {"label": str, "value": int|str, "variant": str | None,
+                   "href": str | None, "title": str | None}
+
+   variants (Service Status palette + generic):
+     total | operational | maintenance | degraded | partial_outage | outage |
+     success | warning | danger | info | neutral
+#}
+
+{% macro _stat_attrs(item) -%}
+  {%- if item.get('title') %} title="{{ item.title }}"{% endif -%}
+  {%- if item.get('id') %} id="{{ item.id }}"{% endif -%}
+{%- endmacro %}
+
+{% macro _render_extra_attrs(attrs) -%}
+  {%- if attrs -%}
+    {%- for k, v in attrs.items() -%}
+      {%- if v == '' or v is sameas true -%}
+        {{ ' ' }}{{ k }}
+      {%- elif v is not sameas false and v is not none -%}
+        {{ ' ' }}{{ k }}="{{ v }}"
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro _stat_tile(label, value, variant='neutral', href=None, title=None, extra_class='', attrs=None) -%}
+  {%- set tag = 'a' if href else 'div' -%}
+  <{{ tag }} class="stat-strip__stat stat-strip__stat--{{ variant }}{% if extra_class %} {{ extra_class }}{% endif %}"
+    {%- if href %} href="{{ href }}"{% endif -%}
+    {%- if title %} title="{{ title }}"{% endif -%}
+    {{- _render_extra_attrs(attrs) -}}
+  >
+    <span class="stat-strip__stat-label">{{ label }}</span>
+    <span class="stat-strip__stat-value">{{ value }}</span>
+  </{{ tag }}>
+{%- endmacro %}
+
+{# counter_strip(items, total=None, total_label='Total', total_attrs=None, class='')
+   items shape: {"label", "value", "variant", "href", "title", "attrs": {"data-*": ...}}
+#}
+{% macro counter_strip(items=None, total=None, total_label='Total', total_attrs=None, class='') -%}
+  <div class="stat-strip{% if class %} {{ class }}{% endif %}" data-stat-strip>
+    {%- if total is not none -%}
+      {{ _stat_tile(total_label, total, 'total', attrs=total_attrs) }}
+    {%- endif -%}
+    {%- for item in (items or []) -%}
+      {{ _stat_tile(
+          item.label,
+          item.get('value', 0),
+          item.get('variant', 'neutral'),
+          item.get('href'),
+          item.get('title'),
+          attrs=item.get('attrs'),
+      ) }}
+    {%- endfor -%}
+  </div>
+{%- endmacro %}

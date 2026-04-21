@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+
+{% block header_title %}Cart{% endblock %}
 {% import "partials/stock_status.html" as stock_helpers %}
 
 {% block header_actions %}
@@ -41,7 +43,7 @@
     <form action="/cart/update" method="post" class="cart-items-form">
       {% include "partials/csrf.html" %}
       <div class="table-wrapper">
-        <table class="table" id="cart-table" data-table>
+        <table class="table" id="cart-table" data-table data-table-id="cart">
           <thead>
             <tr>
               <th scope="col" data-mobile-priority="supporting">Remove</th>

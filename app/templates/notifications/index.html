@@ -1,30 +1,33 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block title %}Notifications{% endblock %}
 
 {% block header_actions %}
-  <a href="/notifications/settings" class="button button--ghost">Configure notifications</a>
+  {{ page_header_actions([
+    {"label": "Configure notifications", "type": "link", "href": "/notifications/settings"},
+    {"label": "Mark selected as read", "type": "button",
+     "attrs": {"data-notification-mark-selected": "", "disabled": ""}},
+    {"label": "Delete selected", "type": "button", "variant": "danger",
+     "attrs": {"data-notification-delete-selected": "", "disabled": ""}},
+  ], menu_id="notifications-actions-menu") }}
 {% endblock %}
 
 {% block content %}
 <div class="page-grid">
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Notification feed</h2>
-        <p class="card__subtitle">
-          Monitor recent alerts and acknowledgements across your company, filtering and sorting as needed.
-        </p>
-      </div>
-      <div class="card__controls notification-summary">
-        <span class="tag" data-total-notifications data-label="Total">Total: {{ total_count }}</span>
-        <span class="tag tag--info" data-unread-visible data-label="Unread in view">Unread in view: {{ filtered_unread_count }}</span>
-        <span class="tag tag--muted" data-unread-total data-label="Unread overall">Unread overall: {{ notification_unread_count }}</span>
-        <button type="button" class="button button--ghost" data-notification-mark-selected disabled>Mark selected as read</button>
-        <button type="button" class="button button--ghost button--danger" data-notification-delete-selected disabled>Delete selected</button>
-      </div>
-    </header>
+  {{ counter_strip(
+    [
+      {"label": "Unread in view",  "value": filtered_unread_count,    "variant": "info",
+       "attrs": {"data-unread-visible": "", "data-label": "Unread in view"}},
+      {"label": "Unread overall",  "value": notification_unread_count, "variant": "neutral",
+       "attrs": {"data-unread-total": "", "data-label": "Unread overall"}},
+    ],
+    total=total_count, total_label="Total",
+    total_attrs={"data-total-notifications": "", "data-label": "Total"}
+  ) }}
 
+  <section class="card card--panel">
     <form id="notification-filters" class="filters filters--compact" method="get">
       <div class="filters__group filters__group--wide">
         <label for="notifications-search">Search</label>
@@ -107,18 +110,18 @@
 
     {% if notifications %}
     <div class="table-wrapper">
-      <table class="table table--notifications" id="notifications-table" data-table>
+      <table class="table table--notifications" id="notifications-table" data-table data-table-id="notifications">
         <thead>
           <tr>
             <th scope="col" class="table__checkbox" data-mobile-priority="supporting">
               <label class="visually-hidden" for="notifications-select-all">Select all notifications</label>
               <input type="checkbox" id="notifications-select-all" data-notification-select-all />
             </th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Event</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Message</th>
-            <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
-            <th scope="col" data-sort="date" data-mobile-priority="supporting">Read at</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-column-key="event" data-sort="string" data-mobile-priority="essential">Event</th>
+            <th scope="col" data-column-key="message" data-sort="string" data-mobile-priority="essential">Message</th>
+            <th scope="col" data-column-key="created" data-sort="date" data-mobile-priority="essential">Created</th>
+            <th scope="col" data-column-key="read_at" data-sort="date" data-mobile-priority="supporting">Read at</th>
+            <th scope="col" data-column-key="status" data-sort="string" data-mobile-priority="essential">Status</th>
             <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
           </tr>
         </thead>
@@ -139,10 +142,10 @@
                 value="{{ notification.id }}"
               />
             </td>
-            <td data-label="Event" data-value="{{ notification.event_type or '' }}">
+            <td data-column-key="event" data-label="Event" data-value="{{ notification.event_type or '' }}">
               <span class="notification-event">{{ notification.event_type or 'General' }}</span>
             </td>
-            <td data-label="Message">
+            <td data-column-key="message" data-label="Message">
               <div class="notification-message">{{ notification.message }}</div>
               {% if notification.metadata_items %}
               <dl class="notification-metadata">
@@ -155,17 +158,17 @@
               </dl>
               {% endif %}
             </td>
-            <td data-label="Created" data-value="{{ notification.created_iso }}">
+            <td data-column-key="created" data-label="Created" data-value="{{ notification.created_iso }}">
               <span data-utc="{{ notification.created_iso }}">{{ notification.created_iso }}</span>
             </td>
-            <td data-label="Read at" data-value="{{ notification.read_iso or '' }}">
+            <td data-column-key="read_at" data-label="Read at" data-value="{{ notification.read_iso or '' }}">
               {% if notification.read_iso %}
                 <span data-utc="{{ notification.read_iso }}">{{ notification.read_iso }}</span>
               {% else %}
                 <span class="text-muted">Not read</span>
               {% endif %}
             </td>
-            <td data-label="Status" data-value="{{ 'unread' if notification.is_unread else 'read' }}">
+            <td data-column-key="status" data-label="Status" data-value="{{ 'unread' if notification.is_unread else 'read' }}">
               <span class="{{ notification.status_class }}">{{ notification.status_label }}</span>
             </td>
             <td class="table__actions">
@@ -213,28 +216,9 @@
       </table>
     </div>
 
-    <div class="notification-pagination">
-      <div class="notification-pagination__info">
-        {% if pagination.total_count %}
-          Showing {{ pagination.start }} - {{ pagination.end }} of {{ pagination.total_count }} notifications
-        {% else %}
-          No notifications to display
-        {% endif %}
-      </div>
-      <div class="notification-pagination__controls">
-        {% if pagination.has_previous %}
-          <a class="button button--ghost button--small" href="{{ pagination.previous_url }}">Previous</a>
-        {% else %}
-          <span class="button button--ghost button--small button--disabled" aria-disabled="true">Previous</span>
-        {% endif %}
-        <span class="notification-pagination__page">Page {{ pagination.page }} of {{ pagination.total_pages }}</span>
-        {% if pagination.has_next %}
-          <a class="button button--ghost button--small" href="{{ pagination.next_url }}">Next</a>
-        {% else %}
-          <span class="button button--ghost button--small button--disabled" aria-disabled="true">Next</span>
-        {% endif %}
-      </div>
-    </div>
+{% from "macros/tables.html" import pagination as render_pagination %}
+    {{ render_pagination(pagination.page, pagination.total_pages, filters.page_size,
+       base_url='/notifications', preserve={'q': filters.query or '', 'event_type': filters.event_type or '', 'read_state': filters.read_state or '', 'sort_by': filters.sort_by or '', 'sort_order': filters.sort_order or ''}) }}
     {% else %}
     <div class="empty-state">
       <h3 class="empty-state__title">You're all caught up</h3>

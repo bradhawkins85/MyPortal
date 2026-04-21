@@ -1,5 +1,7 @@
 {% extends "bcp/layout.html" %}
 
+
+{% block header_title %}BCP — Contacts{% endblock %}
 {% block bcp_content %}
 <div class="bcp-page page-container">
   {% if request.query_params.get('success') %}

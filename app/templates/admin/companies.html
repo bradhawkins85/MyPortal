@@ -1,18 +1,12 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}
-  <div class="header__title-content">
-    <span class="header__title-text">Companies</span>
-    <button
-      type="button"
-      class="button button--primary button--small header__title-button"
-      data-add-company-modal-open
-      aria-haspopup="dialog"
-      aria-controls="add-company-modal"
-    >
-      Add Company
-    </button>
-  </div>
+{% block header_title %}<span class="header__title-text">Companies</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Add Company", "type": "button", "variant": "primary", "attrs": {"data-add-company-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "add-company-modal"}}
+  ]) }}
 {% endblock %}
 
 {% block content %}
@@ -20,10 +14,6 @@
     {% if is_super_admin %}
       <section class="card card--panel admin-grid__full">
         <header class="card__header">
-          <div class="stacked">
-            <h2 class="card__title">Companies</h2>
-            <p class="card__subtitle">Review the customer directory and open a company to edit identifiers or VIP status.</p>
-          </div>
           <div class="card__controls">
             <div class="form-field form-field--checkbox" style="margin-right: 1rem;">
               <label class="checkbox" for="show-archived">
@@ -46,38 +36,38 @@
           </div>
         </header>
         <div class="table-wrapper">
-          <table class="table" id="companies-table" data-table data-page-size-max="25">
+          <table class="table" id="companies-table" data-table data-table-id="companies" data-page-size-max="25">
             <thead>
               <tr>
-                <th scope="col" data-sort="string">Name</th>
-                <th scope="col" data-sort="string">Syncro ID</th>
-                <th scope="col" data-sort="string">Xero ID</th>
-                <th scope="col" data-sort="string">Email domains</th>
-                <th scope="col" data-sort="number">VIP</th>
-                <th scope="col" data-sort="string">Status</th>
-                <th scope="col" class="table__actions">Actions</th>
+                <th scope="col" data-sort="string" data-column-key="name">Name</th>
+                <th scope="col" data-sort="string" data-column-key="syncro_id">Syncro ID</th>
+                <th scope="col" data-sort="string" data-column-key="xero_id">Xero ID</th>
+                <th scope="col" data-sort="string" data-column-key="email_domains">Email domains</th>
+                <th scope="col" data-sort="number" data-column-key="vip">VIP</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
               </tr>
             </thead>
             <tbody>
               {% if managed_companies %}
                 {% for company in managed_companies %}
                   <tr>
-                    <td data-label="Name">{{ company.name }}</td>
-                    <td data-label="Syncro ID" data-value="{{ company.syncro_company_id or '' }}">
+                    <td data-label="Name" data-column-key="name">{{ company.name }}</td>
+                    <td data-label="Syncro ID" data-value="{{ company.syncro_company_id or '' }}" data-column-key="syncro_id">
                       {% if company.syncro_company_id %}
                         {{ company.syncro_company_id }}
                       {% else %}
                         <span class="text-muted">—</span>
                       {% endif %}
                     </td>
-                    <td data-label="Xero ID" data-value="{{ company.xero_id or '' }}">
+                    <td data-label="Xero ID" data-value="{{ company.xero_id or '' }}" data-column-key="xero_id">
                       {% if company.xero_id %}
                         {{ company.xero_id }}
                       {% else %}
                         <span class="text-muted">—</span>
                       {% endif %}
                     </td>
-                    <td data-label="Email domains" data-value="{{ company.email_domains | join(', ') }}">
+                    <td data-label="Email domains" data-value="{{ company.email_domains | join(', ') }}" data-column-key="email_domains">
                       {% if company.email_domains %}
                         {{ company.email_domains | join(', ') }}
                       {% else %}
@@ -85,7 +75,7 @@
                       {% endif %}
                     </td>
                     {% set is_vip = 1 if company.is_vip else 0 %}
-                    <td data-label="VIP" data-value="{{ is_vip }}">
+                    <td data-label="VIP" data-value="{{ is_vip }}" data-column-key="vip">
                       {% if company.is_vip %}
                         <span class="tag tag--success">VIP</span>
                       {% else %}
@@ -93,14 +83,14 @@
                       {% endif %}
                     </td>
                     {% set is_archived = 1 if company.archived else 0 %}
-                    <td data-label="Status" data-value="{{ is_archived }}">
+                    <td data-label="Status" data-value="{{ is_archived }}" data-column-key="status">
                       {% if company.archived %}
                         <span class="tag tag--muted">Archived</span>
                       {% else %}
                         <span class="tag tag--success">Active</span>
                       {% endif %}
                     </td>
-                    <td class="table__actions">
+                    <td class="table__actions" data-column-key="actions">
                       <div class="table__action-buttons">
                         <a class="button button--ghost" href="/admin/companies/{{ company.id }}/edit">
                           Edit
