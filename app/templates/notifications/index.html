@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/mobile.html' import mobile_collapsible %}
 
 {% block title %}Notifications{% endblock %}
 
@@ -25,6 +26,7 @@
       </div>
     </header>
 
+    {% call mobile_collapsible('Filters', open=False) %}
     <form id="notification-filters" class="filters filters--compact" method="get">
       <div class="filters__group filters__group--wide">
         <label for="notifications-search">Search</label>
@@ -104,6 +106,7 @@
         <button type="button" class="button button--ghost" data-notification-reset {% if not filters_active %}disabled{% endif %}>Reset</button>
       </div>
     </form>
+    {% endcall %}
 
     {% if notifications %}
     <div class="table-wrapper">
