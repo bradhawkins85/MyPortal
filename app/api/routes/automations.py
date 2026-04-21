@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.repositories import automations as automation_repo
@@ -11,6 +11,7 @@ from app.schemas.automations import (
     AutomationRunResponse,
     AutomationUpdate,
 )
+from app.services import audit as audit_service
 from app.services import automations as automation_service
 
 router = APIRouter(prefix="/api/automations", tags=["Automations"])
@@ -36,6 +37,7 @@ async def list_automations(
 @router.post("/", response_model=AutomationResponse, status_code=status.HTTP_201_CREATED)
 async def create_automation(
     payload: AutomationCreate,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> AutomationResponse:
     data = payload.model_dump()
@@ -62,6 +64,15 @@ async def create_automation(
         refreshed = await automation_service.refresh_schedule(int(record["id"]))
         if refreshed:
             record = refreshed
+    await audit_service.record(
+        action="automation.create",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="automation",
+        entity_id=int(record["id"]) if record.get("id") is not None else None,
+        before=None,
+        after=record,
+    )
     return AutomationResponse(**record)
 
 
@@ -77,6 +88,7 @@ async def get_automation(automation_id: int, current_user: dict = Depends(requir
 async def update_automation(
     automation_id: int,
     payload: AutomationUpdate,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> AutomationResponse:
     existing = await automation_repo.get_automation(automation_id)
@@ -89,15 +101,44 @@ async def update_automation(
     record = refreshed or await automation_repo.get_automation(automation_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+    audit_action = "automation.update"
+    if "status" in data:
+        new_status = (data.get("status") or "").lower()
+        if new_status == "active" and (existing.get("status") or "").lower() != "active":
+            audit_action = "automation.enable"
+        elif new_status in {"inactive", "paused"} and (existing.get("status") or "").lower() == "active":
+            audit_action = "automation.disable"
+    await audit_service.record(
+        action=audit_action,
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="automation",
+        entity_id=automation_id,
+        before=existing,
+        after=record,
+    )
     return AutomationResponse(**record)
 
 
 @router.delete("/{automation_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_automation(automation_id: int, current_user: dict = Depends(require_super_admin)) -> None:
+async def delete_automation(
+    automation_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> None:
     existing = await automation_repo.get_automation(automation_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
     await automation_repo.delete_automation(automation_id)
+    await audit_service.record(
+        action="automation.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="automation",
+        entity_id=automation_id,
+        before=existing,
+        after=None,
+    )
 
 
 @router.get("/{automation_id}/runs", response_model=list[AutomationRunResponse])
