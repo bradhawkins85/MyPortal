@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Orders{% endblock %}
+
 {% block header_actions %}
   <a class="button button--ghost" href="/shop">Browse products</a>
 {% endblock %}
@@ -101,7 +103,7 @@
       <div class="alert alert--info" role="status">No orders match the selected filters. Try adjusting the status or shipping options.</div>
     {% endif %}
     <div class="table-wrapper">
-      <table class="table" id="orders-table" data-table>
+      <table class="table" id="orders-table" data-table data-table-id="orders">
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Order</th>

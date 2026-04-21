@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Syncro ticket import{% endblock %}
+
 {% block content %}
   {% set module = syncro_module or {} %}
   {% set base_url = module.base_url or '' %}

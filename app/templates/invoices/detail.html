@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Invoice{% endblock %}
+
 {% block title %}{{ title }}{% endblock %}
 
 {% block header_actions %}
@@ -34,7 +36,7 @@
 
     {% if has_lines %}
     <div class="table-wrapper">
-      <table class="table" id="lines-table" data-table>
+      <table class="table" id="lines-table" data-table data-table-id="lines">
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Description</th>

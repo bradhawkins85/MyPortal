@@ -3108,7 +3108,7 @@ def _sanitize_local_redirect_target(
         return fallback
 
     parsed = URL(target)
-    if parsed.is_absolute_url or parsed.netloc:
+    if parsed.scheme or parsed.netloc:
         return fallback
 
     if not target.startswith("/") or target.startswith("//") or "\\" in target:
