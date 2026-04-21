@@ -2,9 +2,60 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-from pydantic import AnyHttpUrl, AliasChoices, BaseModel, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    AliasChoices,
+    BaseModel,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Placeholder values that must be replaced before running in production. These
+# match the defaults distributed in ``.env.example`` and other template files.
+_PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
+    {
+        "change-me",
+        "changeme",
+        "change_me",
+        "please-change",
+        "replace-me",
+        "secret",
+        "password",
+    }
+)
+
+# Minimum byte length required for cryptographic secrets used in production.
+_MIN_PRODUCTION_SECRET_LENGTH: int = 32
+
+
+def _is_weak_secret(value: str | None) -> tuple[bool, str]:
+    """Return ``(is_weak, reason)`` for a secret value.
+
+    The check is intentionally simple: it flags empty/placeholder values, short
+    secrets, and values that have almost no unique characters (e.g. ``aaaaaa``).
+    """
+
+    if value is None or not value.strip():
+        return True, "is empty"
+    stripped = value.strip()
+    if stripped.lower() in _PLACEHOLDER_SECRETS:
+        return True, "uses a placeholder default"
+    if len(stripped) < _MIN_PRODUCTION_SECRET_LENGTH:
+        return True, (
+            f"is shorter than the required {_MIN_PRODUCTION_SECRET_LENGTH} characters"
+        )
+    # Entropy sanity check – reject values with only a handful of unique
+    # characters (e.g. ``aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa``).
+    if len(set(stripped)) < 8:
+        return True, "has too few unique characters (low entropy)"
+    return False, ""
 
 
 class Settings(BaseSettings):
@@ -200,6 +251,54 @@ class Settings(BaseSettings):
         validation_alias="IP_WHITELIST_ADMIN_ONLY",
     )
 
+    # Comma-separated list of trusted proxy IP/CIDR ranges. When set, the
+    # application will honour ``X-Forwarded-For`` and ``X-Real-IP`` headers
+    # only when the direct peer is one of these addresses. When empty, proxy
+    # headers are ignored and the direct socket peer is used as the client IP.
+    trusted_proxies: str = Field(
+        default="",
+        validation_alias="TRUSTED_PROXIES",
+    )
+
+    @model_validator(mode="after")
+    def _enforce_production_secret_strength(self) -> "Settings":
+        """Refuse to boot in production with weak or placeholder secrets.
+
+        In non-production environments (``development``, ``test``) these checks
+        are skipped so tests and local work are not disrupted. The same
+        validation is applied to ``SESSION_SECRET`` and ``TOTP_ENCRYPTION_KEY``
+        because both are used for authenticated encryption / signing.
+        """
+
+        environment = (self.environment or "").strip().lower()
+        if environment != "production":
+            return self
+
+        errors: list[str] = []
+        for name, value in (
+            ("SESSION_SECRET", self.secret_key),
+            ("TOTP_ENCRYPTION_KEY", self.totp_encryption_key),
+        ):
+            weak, reason = _is_weak_secret(value)
+            if weak:
+                errors.append(f"{name} {reason}")
+
+        # Feature-gated secrets: only required when the related feature is on.
+        if self.mcp_enabled:
+            weak, reason = _is_weak_secret(self.mcp_token)
+            if weak:
+                errors.append(f"MCP_TOKEN {reason} (required when MCP_ENABLED=true)")
+
+        if errors:
+            raise ValueError(
+                "Refusing to start in production with weak secrets: "
+                + "; ".join(errors)
+                + ". Generate strong values with "
+                + '`python -c "import secrets; print(secrets.token_urlsafe(48))"` '
+                + "and update your .env file."
+            )
+        return self
+
     @field_validator(
         "smtp_use_tls",
         "enable_csrf",
@@ -266,6 +365,46 @@ class Settings(BaseSettings):
                 raise ValueError(f"Invalid CORS origin in ALLOWED_ORIGINS: {origin}") from exc
 
         return value
+
+    def is_production(self) -> bool:
+        """Return True when the application is running in production mode."""
+
+        return (self.environment or "").strip().lower() == "production"
+
+    def hsts_effective(self) -> bool:
+        """Whether the HSTS header should be sent.
+
+        Defaults to ``True`` in production and to the explicit ``enable_hsts``
+        setting everywhere else. Operators can still force-disable HSTS in
+        production by setting ``ENABLE_HSTS=false``.
+        """
+
+        if self.enable_hsts:
+            return True
+        # In production, default to on unless explicitly disabled. We detect
+        # an explicit disable by checking whether the raw env var was set.
+        import os
+
+        raw = os.environ.get("ENABLE_HSTS")
+        if self.is_production() and (raw is None or raw.strip() == ""):
+            return True
+        return self.enable_hsts
+
+    def trusted_proxy_networks(self) -> list[Any]:
+        """Parse the TRUSTED_PROXIES setting into a list of ``ip_network`` objects."""
+
+        from ipaddress import ip_network
+
+        entries: list[Any] = []
+        for entry in self.trusted_proxies.split(","):
+            value = entry.strip()
+            if not value:
+                continue
+            try:
+                entries.append(ip_network(value, strict=False))
+            except ValueError:  # pragma: no cover - logged in middleware layer
+                continue
+        return entries
 
     model_config = SettingsConfigDict(
         env_file=(Path(__file__).resolve().parent.parent.parent / ".env"),

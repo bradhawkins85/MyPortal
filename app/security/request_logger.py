@@ -14,6 +14,9 @@ from app.core.logging import (
     reset_request_context,
     set_request_context,
 )
+from app.core.log_redaction import redact_headers
+from app.core.logging import log_debug, log_error, log_info
+from app.security.client_ip import get_client_ip
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -44,13 +47,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = request_id
             return response
 
-        # Get client IP
-        client_ip = request.headers.get("x-forwarded-for")
-        if client_ip:
-            client_ip = client_ip.split(",")[0].strip()
-        else:
-            client = request.client
-            client_ip = client.host if client else "unknown"
+        # Get client IP in a proxy-aware way that honours TRUSTED_PROXIES.
+        client_ip = get_client_ip(request, default="unknown")
 
         # Bind contextvars so every log line emitted while processing this
         # request is automatically tagged with request_id, route and IP.
@@ -61,11 +59,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         )
 
         # Log incoming request
+        # Log incoming request with redacted headers to avoid leaking
+        # Authorization/Cookie/X-API-Key values into log aggregation systems.
         start_time = time.time()
         log_debug(
             "Incoming request",
             method=request.method,
             user_agent=request.headers.get("user-agent", "unknown"),
+            headers=redact_headers(dict(request.headers)),
         )
 
         # Process request

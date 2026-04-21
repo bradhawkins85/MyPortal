@@ -146,16 +146,44 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         ]
         response.headers["Permissions-Policy"] = ", ".join(permissions)
 
-        # Strict-Transport-Security: Enforce HTTPS for 1 year (only if TLS is enabled)
-        # This header should only be sent over HTTPS connections
-        if self._settings.enable_hsts and request.url.scheme == "https":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Strict-Transport-Security: Enforce HTTPS.
+        # Sends HSTS when either ``ENABLE_HSTS=true`` is configured OR the
+        # application is running in production (unless explicitly disabled).
+        # The header is only emitted over HTTPS so unencrypted connections
+        # are not told to upgrade (which would create an MITM opportunity).
+        should_send_hsts = (
+            self._settings.hsts_effective()
+            and self._is_request_https(request)
+        )
+        if should_send_hsts:
+            # ``includeSubDomains`` covers any portal subdomain; ``preload`` is
+            # opt-in for the HSTS preload list, appropriate for production
+            # hosts with TLS for all subdomains.
+            hsts_value = "max-age=31536000; includeSubDomains"
+            if self._settings.is_production():
+                hsts_value += "; preload"
+            response.headers["Strict-Transport-Security"] = hsts_value
 
         # X-XSS-Protection: Legacy header for older browsers
         # Modern browsers use CSP instead, but this provides defense in depth
         response.headers["X-XSS-Protection"] = "1; mode=block"
 
         return response
+
+    def _is_request_https(self, request: Request) -> bool:
+        """Return True when the incoming request is (or was proxied as) HTTPS.
+
+        Honours ``X-Forwarded-Proto`` because production deployments terminate
+        TLS at a reverse proxy and forward plain HTTP to the ASGI server.
+        """
+
+        try:
+            if (request.url.scheme or "").lower() == "https":
+                return True
+            forwarded = request.headers.get("x-forwarded-proto", "")
+            return forwarded.split(",")[0].strip().lower() == "https"
+        except Exception:  # pragma: no cover - defensive
+            return False
 
     def _is_valid_csp_source(self, source: str) -> bool:
         """Validate that a CSP source is safe to include.

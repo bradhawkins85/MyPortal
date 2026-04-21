@@ -570,7 +570,25 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
+    # Restrict to the specific headers the portal actually uses. Using ``*``
+    # together with ``allow_credentials=True`` is permissive and hides bugs
+    # where the browser would otherwise reject a cross-origin request.
+    allow_headers=[
+        "Accept",
+        "Accept-Language",
+        "Authorization",
+        "Cache-Control",
+        "Content-Language",
+        "Content-Type",
+        "If-Match",
+        "If-None-Match",
+        "X-API-Key",
+        "X-CSRF-Token",
+        "X-CSRFToken",
+        "X-Requested-With",
+        "X-Request-ID",
+    ],
+    expose_headers=["X-Request-ID"],
 )
 
 # Add IP whitelisting middleware for sensitive endpoints
