@@ -105,6 +105,17 @@ following are in use today; please reuse them when adding new audit calls:
 | Automations | `automation.create`, `automation.update`, `automation.enable`, `automation.disable`, `automation.delete` |
 | Message templates | `message_template.create`, `message_template.update`, `message_template.delete` |
 | Integrations | `imap.account.create`, `imap.account.update`, `imap.account.delete` |
+| Shop products | `shop.product.create`, `shop.product.update`, `shop.product.delete`, `shop.product.archive`, `shop.product.unarchive`, `shop.product.visibility_change`, `shop.product.import` |
+| Shop categories | `shop.category.create`, `shop.category.update`, `shop.category.delete` |
+| Shop subscription categories | `shop.subscription_category.create`, `shop.subscription_category.update`, `shop.subscription_category.delete` |
+| Shop packages | `shop.package.create`, `shop.package.update`, `shop.package.archive`, `shop.package.unarchive`, `shop.package.delete`, `shop.package.item.add`, `shop.package.item.update`, `shop.package.item.remove`, `shop.package.item.alternate.add`, `shop.package.item.alternate.remove` |
+| Shop optional accessories | `shop.optional_accessory.sync`, `shop.optional_accessory.import`, `shop.optional_accessory.dismiss`, `shop.optional_accessory.bulk_dismiss`, `shop.optional_accessory.restore` |
+
+> Convenience wrappers `audit_service.record_create(...)` and
+> `audit_service.record_delete(...)` are available for the common
+> "before is None" / "after is None" cases — they make the intent obvious at
+> the call site and route through `record(...)` so the same diff and
+> redaction logic applies.
 
 ### Redaction rules
 

@@ -14535,6 +14535,18 @@ async def admin_create_shop_package(
         name=cleaned_name,
         created_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record_create(
+        action="shop.package.create",
+        request=request,
+        entity_type="shop.package",
+        entity_id=int(package_id) if package_id else None,
+        after={
+            "id": package_id,
+            "sku": cleaned_sku,
+            "name": cleaned_name,
+            "description": cleaned_description,
+        },
+    )
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -14555,6 +14567,10 @@ async def admin_update_shop_package(
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+
+    existing_package = await shop_repo.get_package(package_id, include_archived=True)
+    if not existing_package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
 
     cleaned_name = name.strip()
     cleaned_sku = sku.strip()
@@ -14591,6 +14607,24 @@ async def admin_update_shop_package(
         archived=archived_flag,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.update",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        before={
+            "sku": existing_package.get("sku"),
+            "name": existing_package.get("name"),
+            "description": existing_package.get("description"),
+            "archived": bool(existing_package.get("archived")),
+        },
+        after={
+            "sku": cleaned_sku,
+            "name": cleaned_name,
+            "description": cleaned_description,
+            "archived": archived_flag,
+        },
+    )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14624,6 +14658,14 @@ async def admin_archive_shop_package(
         package_id=package_id,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.archive" if archived_flag else "shop.package.unarchive",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        before={"archived": bool(package.get("archived"))},
+        after={"archived": archived_flag},
+    )
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -14650,6 +14692,13 @@ async def admin_delete_shop_package(request: Request, package_id: int):
         "Shop package deleted",
         package_id=package_id,
         deleted_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.package.delete",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        before=package,
     )
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -14696,6 +14745,13 @@ async def admin_add_package_item(
         quantity=quantity_value,
         added_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.item.add",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={"product_id": product_identifier, "quantity": quantity_value},
+    )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14738,6 +14794,13 @@ async def admin_update_package_item(
         product_id=product_id,
         quantity=quantity_value,
         updated_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.package.item.update",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={"product_id": product_id, "quantity": quantity_value},
     )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14803,6 +14866,17 @@ async def admin_add_package_item_alternate(
         priority=priority_value,
         added_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.item.alternate.add",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={
+            "product_id": primary_id,
+            "alternate_product_id": alternate_id,
+            "priority": priority_value,
+        },
+    )
 
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14841,6 +14915,16 @@ async def admin_remove_package_item_alternate(
         alternate_product_id=alternate_product_id,
         removed_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.item.alternate.remove",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={
+            "product_id": product_id,
+            "alternate_product_id": alternate_product_id,
+        },
+    )
 
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14870,6 +14954,13 @@ async def admin_remove_package_item(
         package_id=package_id,
         product_id=product_id,
         removed_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.package.item.remove",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={"product_id": product_id},
     )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14993,6 +15084,11 @@ async def admin_sync_optional_accessories(request: Request):
         return redirect
 
     await shop_repo.sync_pending_optional_accessories()
+    await audit_service.record(
+        action="shop.optional_accessory.sync",
+        request=request,
+        entity_type="shop.optional_accessory",
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -15024,6 +15120,13 @@ async def admin_import_optional_accessory(
     if imported:
         await shop_repo.dismiss_pending_optional_accessory(accessory_id)
 
+    await audit_service.record(
+        action="shop.optional_accessory.import",
+        request=request,
+        entity_type="shop.optional_accessory",
+        entity_id=accessory_id,
+        metadata={"vendor_sku": accessory["sku"], "imported": bool(imported)},
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -15045,6 +15148,12 @@ async def admin_dismiss_optional_accessory(
         return redirect
 
     await shop_repo.dismiss_pending_optional_accessory(accessory_id)
+    await audit_service.record(
+        action="shop.optional_accessory.dismiss",
+        request=request,
+        entity_type="shop.optional_accessory",
+        entity_id=accessory_id,
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -15074,6 +15183,12 @@ async def admin_bulk_dismiss_optional_accessories(request: Request):
 
     if ids:
         await shop_repo.bulk_dismiss_pending_optional_accessories(ids)
+    await audit_service.record(
+        action="shop.optional_accessory.bulk_dismiss",
+        request=request,
+        entity_type="shop.optional_accessory",
+        metadata={"accessory_ids": ids, "count": len(ids)},
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -15095,6 +15210,12 @@ async def admin_restore_optional_accessory(
         return redirect
 
     await shop_repo.restore_dismissed_optional_accessory(accessory_id)
+    await audit_service.record(
+        action="shop.optional_accessory.restore",
+        request=request,
+        entity_type="shop.optional_accessory",
+        entity_id=accessory_id,
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories?show=dismissed",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -15186,6 +15307,13 @@ async def admin_create_shop_category(
         parent_id=parsed_parent_id,
         created_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record_create(
+        action="shop.category.create",
+        request=request,
+        entity_type="shop.category",
+        entity_id=int(category_id) if category_id else None,
+        after={"id": category_id, "name": cleaned_name, "parent_id": parsed_parent_id},
+    )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15212,6 +15340,13 @@ async def admin_delete_shop_category(request: Request, category_id: int):
         "Shop category deleted",
         category_id=category_id,
         deleted_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.category.delete",
+        request=request,
+        entity_type="shop.category",
+        entity_id=category_id,
+        before=category,
     )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15309,6 +15444,14 @@ async def admin_update_shop_category(
         parent_id=parsed_parent_id,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.category.update",
+        request=request,
+        entity_type="shop.category",
+        entity_id=category_id,
+        before={"name": category.get("name"), "parent_id": category.get("parent_id")},
+        after={"name": cleaned_name, "parent_id": parsed_parent_id},
+    )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15363,6 +15506,12 @@ async def admin_create_subscription_category(
         description=cleaned_description,
         created_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record_create(
+        action="shop.subscription_category.create",
+        request=request,
+        entity_type="shop.subscription_category",
+        after={"name": cleaned_name, "description": cleaned_description},
+    )
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15387,6 +15536,13 @@ async def admin_delete_subscription_category(request: Request, category_id: int)
         "Subscription category deleted",
         category_id=category_id,
         deleted_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.subscription_category.delete",
+        request=request,
+        entity_type="shop.subscription_category",
+        entity_id=category_id,
+        before=category,
     )
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15437,6 +15593,14 @@ async def admin_update_subscription_category(
         description=cleaned_description,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.subscription_category.update",
+        request=request,
+        entity_type="shop.subscription_category",
+        entity_id=category_id,
+        before={"name": category.get("name"), "description": category.get("description")},
+        after={"name": cleaned_name, "description": cleaned_description},
+    )
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15465,6 +15629,12 @@ async def admin_import_shop_product(
 
     await products_service.import_product_by_vendor_sku(cleaned_vendor_sku)
 
+    await audit_service.record(
+        action="shop.product.import",
+        request=request,
+        entity_type="shop.product",
+        metadata={"vendor_sku": cleaned_vendor_sku},
+    )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15650,6 +15820,14 @@ async def admin_create_shop_product(
         sku=product["sku"],
         vendor_sku=product["vendor_sku"],
         created_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_create(
+        action="shop.product.create",
+        request=request,
+        entity_type="shop.product",
+        entity_id=int(product["id"]),
+        after=product,
+        sensitive_extra_keys=("buy_price",),
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15980,6 +16158,15 @@ async def admin_update_shop_product(
         product_id=product_id,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.product.update",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before=product,
+        after=updated,
+        sensitive_extra_keys=("buy_price",),
+    )
     redirect_params: dict[str, str] = {}
     try:
         # request.query_params accesses scope["query_string"] which may be absent
@@ -16024,6 +16211,14 @@ async def _handle_shop_product_archive(
         "Shop product archived" if archived else "Shop product unarchived",
         product_id=product_id,
         updated_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.product.archive" if archived else "shop.product.unarchive",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before={"archived": bool(product.get("archived"))},
+        after={"archived": archived},
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -16090,6 +16285,14 @@ async def admin_update_shop_product_visibility(
         excluded_companies=sorted(excluded_ids),
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.product.visibility_change",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before={"excluded_company_ids": sorted(int(cid) for cid in (product.get("excluded_company_ids") or []))},
+        after={"excluded_company_ids": sorted(excluded_ids)},
+    )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -16133,6 +16336,14 @@ async def admin_delete_shop_product(request: Request, product_id: int):
         "Shop product deleted",
         product_id=product_id,
         deleted_by=current_user.get("id") if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.product.delete",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before=product,
+        sensitive_extra_keys=("buy_price",),
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
