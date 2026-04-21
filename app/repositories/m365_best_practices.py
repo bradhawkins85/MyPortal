@@ -75,11 +75,11 @@ async def upsert_setting(*, check_id: str, enabled: bool) -> None:
     """Create or update the global enabled flag for a single check."""
     await db.execute(
         """
-        INSERT INTO m365_best_practice_settings (check_id, enabled)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), updated_at = CURRENT_TIMESTAMP
+        INSERT INTO m365_best_practice_settings (check_id, enabled, updated_at)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), updated_at = VALUES(updated_at)
         """,
-        (check_id, 1 if enabled else 0),
+        (check_id, 1 if enabled else 0, datetime.utcnow()),
     )
 
 
