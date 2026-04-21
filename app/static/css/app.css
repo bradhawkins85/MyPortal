@@ -7340,6 +7340,8 @@ a.service-card__ai-icon:hover {
   border: 1px solid rgba(56, 189, 248, 0.28);
   border-radius: 0.85rem;
   padding: 0.9rem 1rem;
+}
+
 /* Compliance pages */
 .compliance .card--panel {
   gap: 1.25rem;
@@ -7440,6 +7442,8 @@ a.service-card__ai-icon:hover {
 }
 
 .ack-pending__user {
+}
+
 .compliance-summary__item--accent {
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(59, 130, 246, 0.1));
   border-color: rgba(56, 189, 248, 0.35);
@@ -7891,6 +7895,8 @@ a.service-card__ai-icon:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-gap-base);
+}
+
 .compliance-summary__hint,
 .compliance-summary__value small {
   font-size: 0.85rem;
