@@ -8,6 +8,7 @@ from fastapi import Request, Response
 
 from app.core.config import get_settings
 from app.repositories import auth as auth_repo
+from app.security.client_ip import get_client_ip
 from app.security.encryption import decrypt_secret, encrypt_secret
 
 
@@ -52,11 +53,7 @@ class SessionManager:
         expires_at = now + self.session_ttl
         session_token = secrets_token()
         csrf_token = secrets_token()
-        ip_address = request.headers.get("x-forwarded-for")
-        if ip_address:
-            ip_address = ip_address.split(",")[0].strip()
-        elif request.client:
-            ip_address = request.client.host
+        ip_address = get_client_ip(request, default=None)
         user_agent = request.headers.get("user-agent")
         record = await auth_repo.create_session(
             user_id=user_id,
@@ -138,9 +135,19 @@ class SessionManager:
         """Create session data from a database record without mutating state."""
         return self._map_session(record)
 
-    def apply_session_cookies(self, response: Response, session: SessionData) -> None:
+    def apply_session_cookies(self, response: Response, session: SessionData, request: Request | None = None) -> None:
         max_age = int(self.session_ttl.total_seconds())
+        # Always mark cookies Secure in production, and also when the current
+        # request is served over HTTPS regardless of environment. This ensures
+        # staging / HTTPS-enabled dev deployments still get the secure flag.
         secure = self._is_secure()
+        if request is not None:
+            try:
+                scheme = (request.url.scheme or "").lower()
+                if scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
+                    secure = True
+            except Exception:  # pragma: no cover - defensive
+                pass
         response.set_cookie(
             self.session_cookie_name,
             session.session_token,
