@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, status
 
+from app.core.logging import set_request_context
 from app.repositories import company_memberships as membership_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
@@ -22,6 +23,12 @@ async def get_current_user(
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Bind the user id into the logging context so every log line and audit
+    # event emitted while handling this request is automatically tagged with
+    # the acting user.
+    user_id = user.get("id")
+    if isinstance(user_id, int):
+        set_request_context(user_id=user_id)
     return user
 
 
@@ -87,6 +94,9 @@ async def get_optional_user(request: Request) -> dict | None:
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None
+    user_id = user.get("id")
+    if isinstance(user_id, int):
+        set_request_context(user_id=user_id)
     request.state.active_company_id = session.active_company_id
     if session.active_company_id is not None:
         try:

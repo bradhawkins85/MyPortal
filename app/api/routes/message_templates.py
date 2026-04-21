@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.schemas.message_templates import (
@@ -8,9 +8,31 @@ from app.schemas.message_templates import (
     MessageTemplateResponse,
     MessageTemplateUpdate,
 )
+from app.services import audit as audit_service
 from app.services import message_templates as message_templates_service
 
 router = APIRouter(prefix="/api/message-templates", tags=["Message Templates"])
+
+
+# Message template bodies can be long-form HTML; capture only metadata in
+# audit rows to keep them readable and avoid duplicating template content.
+_AUDIT_TEMPLATE_FIELDS: tuple[str, ...] = (
+    "id",
+    "slug",
+    "name",
+    "description",
+    "content_type",
+    "subject",
+    "from_address",
+    "is_active",
+    "updated_at",
+)
+
+
+def _audit_template_summary(template: dict | None) -> dict | None:
+    if not template:
+        return None
+    return {key: template.get(key) for key in _AUDIT_TEMPLATE_FIELDS}
 
 
 @router.get("/", response_model=list[MessageTemplateResponse])
@@ -33,12 +55,22 @@ async def list_message_templates(
 @router.post("/", response_model=MessageTemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_message_template(
     payload: MessageTemplateCreate,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> MessageTemplateResponse:
     try:
         record = await message_templates_service.create_template(**payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    await audit_service.record(
+        action="message_template.create",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="message_template",
+        entity_id=int(record["id"]) if record.get("id") is not None else None,
+        before=None,
+        after=_audit_template_summary(record),
+    )
     return MessageTemplateResponse(**record)
 
 
@@ -68,6 +100,7 @@ async def get_message_template_by_slug(
 async def update_message_template(
     template_id: int,
     payload: MessageTemplateUpdate,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> MessageTemplateResponse:
     existing = await message_templates_service.get_template(template_id)
@@ -79,15 +112,34 @@ async def update_message_template(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    await audit_service.record(
+        action="message_template.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="message_template",
+        entity_id=template_id,
+        before=_audit_template_summary(existing),
+        after=_audit_template_summary(record),
+    )
     return MessageTemplateResponse(**record)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_message_template(
     template_id: int,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> None:
     existing = await message_templates_service.get_template(template_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
     await message_templates_service.delete_template(template_id)
+    await audit_service.record(
+        action="message_template.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="message_template",
+        entity_id=template_id,
+        before=_audit_template_summary(existing),
+        after=None,
+    )
