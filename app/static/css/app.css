@@ -3982,10 +3982,11 @@ dialog.modal:not([open]) {
   border-radius: 1rem;
   padding: calc(var(--space-gap-roomy) * 2.5);
   position: relative;
-  width: 75vw;
-  max-width: 75vw;
-  height: 75vh;
-  max-height: 75vh;
+  width: 90vw;
+  max-width: 90vw;
+  height: 90vh;
+  max-height: 90vh;
+  overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgba(148, 163, 184, 0.25);
   box-shadow: 0 24px 50px -20px rgba(15, 23, 42, 0.85);
@@ -5698,6 +5699,8 @@ dialog.modal:not([open]) {
   font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
   font-size: 0.8rem;
   line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 @media (prefers-reduced-motion: reduce) {
