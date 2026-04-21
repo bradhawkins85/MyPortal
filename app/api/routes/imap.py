@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
@@ -11,9 +11,37 @@ from app.schemas.imap import (
     IMAPAccountUpdate,
     IMAPSyncResponse,
 )
+from app.services import audit as audit_service
 from app.services import imap as imap_service
 
 router = APIRouter(prefix="/imap", tags=["IMAP"])
+
+
+# Audit IMAP account snapshots intentionally exclude any field that could
+# carry the mailbox password. The diff helper masks fields whose name matches
+# 'password', but we also feed it through this whitelist so a future schema
+# change cannot accidentally leak credentials.
+_IMAP_AUDIT_FIELDS: tuple[str, ...] = (
+    "id",
+    "name",
+    "email_address",
+    "host",
+    "port",
+    "use_ssl",
+    "use_starttls",
+    "username",
+    "is_active",
+    "company_id",
+    "default_assignee_id",
+    "default_status",
+    "updated_at",
+)
+
+
+def _audit_imap_view(account: dict | None) -> dict | None:
+    if not account:
+        return None
+    return {key: account.get(key) for key in _IMAP_AUDIT_FIELDS}
 
 
 @router.get("/accounts", response_model=list[IMAPAccountResponse])
@@ -28,8 +56,9 @@ async def list_accounts(
 @router.post("/accounts", response_model=IMAPAccountResponse, status_code=status.HTTP_201_CREATED)
 async def create_account(
     payload: IMAPAccountCreate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ) -> IMAPAccountResponse:
     data = payload.model_dump()
     data["password"] = payload.password.get_secret_value()
@@ -43,6 +72,16 @@ async def create_account(
             "Unable to create IMAP account. Please verify the account details and try again.",
             error_id=error_id,
         ) from exc
+    await audit_service.record(
+        action="imap.account.create",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="imap_account",
+        entity_id=int(account["id"]) if account.get("id") is not None else None,
+        before=None,
+        after=_audit_imap_view(account),
+        sensitive_extra_keys=("password",),
+    )
     return IMAPAccountResponse.model_validate(account)
 
 
@@ -62,9 +101,11 @@ async def get_account(
 async def update_account(
     account_id: int,
     payload: IMAPAccountUpdate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ) -> IMAPAccountResponse:
+    existing = await imap_service.get_account(account_id)
     data = payload.model_dump(exclude_unset=True)
     if "password" in data and data["password"] is not None:
         if payload.password is None:
@@ -86,16 +127,39 @@ async def update_account(
             "Unable to update IMAP account. Please verify the account details and try again.",
             error_id=error_id,
         ) from exc
+    await audit_service.record(
+        action="imap.account.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="imap_account",
+        entity_id=account_id,
+        before=_audit_imap_view(existing),
+        after=_audit_imap_view(account),
+        metadata={"password_changed": True} if "password" in data else None,
+        sensitive_extra_keys=("password",),
+    )
     return IMAPAccountResponse.model_validate(account)
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(
     account_id: int,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ) -> None:
+    existing = await imap_service.get_account(account_id)
     await imap_service.delete_account(account_id)
+    await audit_service.record(
+        action="imap.account.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="imap_account",
+        entity_id=account_id,
+        before=_audit_imap_view(existing),
+        after=None,
+        sensitive_extra_keys=("password",),
+    )
     return None
 
 

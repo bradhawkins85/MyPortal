@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.dependencies.auth import get_current_user, require_helpdesk_technician, require_super_admin
 from app.api.dependencies.database import require_database
@@ -19,6 +19,7 @@ from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemUpdate,
 )
 from app.schemas.users import UserResponse
+from app.services import audit as audit_service
 from app.services import company_id_lookup
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
@@ -37,8 +38,9 @@ async def list_companies(
 @router.post("", response_model=CompanyResponse, status_code=status.HTTP_201_CREATED)
 async def create_company(
     payload: CompanyCreate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     created = await company_repo.create_company(**payload.model_dump())
     company_id = created.get("id")
@@ -50,11 +52,20 @@ async def create_company(
             # Fetch the updated company to return with any newly found IDs
             updated = await company_repo.get_company_by_id(company_id)
             if updated:
-                return updated
+                created = updated
         except Exception:
             # If lookup fails, still return the created company
             pass
-    
+
+    await audit_service.record(
+        action="company.create",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="company",
+        entity_id=int(created["id"]) if created.get("id") is not None else None,
+        before=None,
+        after=created,
+    )
     return created
 
 
@@ -74,8 +85,9 @@ async def get_company(
 async def update_company(
     company_id: int,
     payload: CompanyUpdate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     company = await company_repo.get_company_by_id(company_id)
     if not company:
@@ -90,58 +102,98 @@ async def update_company(
         not updated.get("xero_id")
     )
     
+    final_record: dict[str, Any] = updated
     if has_missing_ids:
         try:
             await company_id_lookup.lookup_missing_company_ids(company_id)
             # Fetch the updated company to return with any newly found IDs
             refreshed = await company_repo.get_company_by_id(company_id)
             if refreshed:
-                return refreshed
+                final_record = refreshed
         except Exception:
             # If lookup fails, still return the updated company
             pass
-    
-    return updated
+
+    await audit_service.record(
+        action="company.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        before=company,
+        after=final_record,
+    )
+    return final_record
 
 
 @router.delete("/{company_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_company(
     company_id: int,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     await company_repo.delete_company(company_id)
+    await audit_service.record(
+        action="company.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        before=company,
+        after=None,
+    )
     return None
 
 
 @router.post("/{company_id}/archive", response_model=CompanyResponse)
 async def archive_company(
     company_id: int,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     """Archive a company. Archived companies are hidden throughout the platform."""
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     updated = await company_repo.archive_company(company_id)
+    await audit_service.record(
+        action="company.archive",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        before=company,
+        after=updated,
+    )
     return updated
 
 
 @router.post("/{company_id}/unarchive", response_model=CompanyResponse)
 async def unarchive_company(
     company_id: int,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     """Unarchive a company."""
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     updated = await company_repo.unarchive_company(company_id)
+    await audit_service.record(
+        action="company.unarchive",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        before=company,
+        after=updated,
+    )
     return updated
 
 

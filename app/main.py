@@ -13840,31 +13840,139 @@ async def admin_audit_logs(
     entity_type: str | None = None,
     entity_id: int | None = None,
     user_id: int | None = None,
+    action: str | None = None,
+    request_id: str | None = None,
+    ip_address: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    search: str | None = None,
     limit: int = 100,
+    offset: int = 0,
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     limit = max(1, min(limit, 500))
-    logs = await audit_repo.list_audit_logs(
-        entity_type=entity_type,
+    offset = max(0, int(offset))
+
+    def _parse_filter_dt(value: str | None):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    since_dt = _parse_filter_dt(since)
+    until_dt = _parse_filter_dt(until)
+
+    filter_kwargs = dict(
+        entity_type=entity_type or None,
         entity_id=entity_id,
         user_id=user_id,
-        limit=limit,
+        action=(action or "").strip() or None,
+        request_id=(request_id or "").strip() or None,
+        ip_address=(ip_address or "").strip() or None,
+        since=since_dt,
+        until=until_dt,
+        search=(search or "").strip() or None,
     )
+    logs = await audit_repo.list_audit_logs(
+        **filter_kwargs,
+        limit=limit,
+        offset=offset,
+    )
+    total = await audit_repo.count_audit_logs(**filter_kwargs)
+    available_actions = await audit_repo.list_distinct_actions()
+
     for log in logs:
         log["created_at_iso"] = _to_iso(log.get("created_at"))
+        log["diff_rows"] = _build_audit_diff_rows(
+            log.get("previous_value"), log.get("new_value")
+        )
+
     extra = {
         "title": "Audit trail",
         "logs": logs,
+        "available_actions": available_actions,
+        "total": total,
         "filters": {
             "entity_type": entity_type or "",
             "entity_id": entity_id or "",
             "user_id": user_id or "",
+            "action": action or "",
+            "request_id": request_id or "",
+            "ip_address": ip_address or "",
+            "since": since or "",
+            "until": until or "",
+            "search": search or "",
             "limit": limit,
+            "offset": offset,
+        },
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "has_prev": offset > 0,
+            "has_next": (offset + limit) < total,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
         },
     }
     return await _render_template("admin/audit_logs.html", request, current_user, extra=extra)
+
+
+def _build_audit_diff_rows(previous: Any, current: Any) -> list[dict[str, Any]]:
+    """Convert previous/new JSON snapshots into a per-field table for the UI.
+
+    Returns a list of ``{"field", "previous", "current", "changed"}`` entries
+    sorted by field name. The diff helper already filtered to changed fields
+    when callers used ``audit.record``, but we still flag rows so legacy
+    entries (which stored full snapshots) render with a visual hint.
+    """
+
+    if isinstance(previous, str):
+        try:
+            previous = json.loads(previous)
+        except (TypeError, ValueError):
+            previous = {"value": previous}
+    if isinstance(current, str):
+        try:
+            current = json.loads(current)
+        except (TypeError, ValueError):
+            current = {"value": current}
+
+    if not isinstance(previous, dict) and not isinstance(current, dict):
+        if previous is None and current is None:
+            return []
+        return [
+            {
+                "field": "value",
+                "previous": previous,
+                "current": current,
+                "changed": previous != current,
+            }
+        ]
+
+    keys: set[str] = set()
+    if isinstance(previous, dict):
+        keys.update(str(k) for k in previous.keys())
+    if isinstance(current, dict):
+        keys.update(str(k) for k in current.keys())
+
+    rows: list[dict[str, Any]] = []
+    for key in sorted(keys):
+        prev_value = previous.get(key) if isinstance(previous, dict) else None
+        curr_value = current.get(key) if isinstance(current, dict) else None
+        rows.append(
+            {
+                "field": key,
+                "previous": prev_value,
+                "current": curr_value,
+                "changed": prev_value != curr_value,
+            }
+        )
+    return rows
 
 
 @app.get("/admin/change-log", response_class=HTMLResponse)
