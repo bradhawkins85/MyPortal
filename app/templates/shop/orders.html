@@ -8,12 +8,6 @@
 
 {% block content %}
   <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Order overview</h2>
-        <p class="card__subtitle">Review recent purchases and fulfilment progress for your active company.</p>
-      </div>
-    </header>
     {% if orders_total_all == 0 %}
       <p class="text-muted">No orders have been placed yet. Once you complete a checkout the details will appear here.</p>
     {% else %}
