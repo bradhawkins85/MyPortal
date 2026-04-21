@@ -1,24 +1,18 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}
-  <div class="header__title-content header__title-content--spread">
-    <span class="header__title-text">Message templates</span>
-    <a class="button button--primary button--small header__title-button" href="/admin/message-templates/new">
-      New template
-    </a>
-  </div>
+{% block header_title %}<span class="header__title-text">Message templates</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New template", "type": "link", "variant": "primary", "href": "/admin/message-templates/new"}
+  ]) }}
 {% endblock %}
 
 {% block content %}
   <div class="admin-grid">
-    <section class="card card--panel" aria-labelledby="message-templates-heading">
+    <section class="card card--panel">
       <header class="card__header card__header--actions">
-        <div>
-          <h2 class="card__title" id="message-templates-heading">Message templates</h2>
-          <p class="card__subtitle">
-            Maintain reusable email and notification bodies for automations, integrations, and bulk messaging.
-          </p>
-        </div>
         <form method="get" class="card__controls card__controls--compact" aria-label="Filter message templates">
           <input type="search" class="form-input" name="search" value="{{ filters.search or '' }}" placeholder="Search templates" aria-label="Search templates" />
           <label class="visually-hidden" for="content-type-filter">Content type</label>
@@ -32,15 +26,15 @@
         </form>
       </header>
       <div class="table-wrapper">
-        <table class="table" id="message-templates-table" data-table>
+        <table class="table" id="message-templates-table" data-table data-table-id="message-templates">
           <thead>
             <tr>
-              <th scope="col" data-sort="string">Slug</th>
-              <th scope="col" data-sort="string">Name</th>
-              <th scope="col" data-sort="string">Description</th>
-              <th scope="col" data-sort="string">Content type</th>
-              <th scope="col" data-sort="date">Updated</th>
-              <th scope="col" class="table__actions">Actions</th>
+              <th scope="col" data-sort="string" data-column-key="slug">Slug</th>
+              <th scope="col" data-sort="string" data-column-key="name">Name</th>
+              <th scope="col" data-sort="string" data-column-key="description">Description</th>
+              <th scope="col" data-sort="string" data-column-key="content_type">Content type</th>
+              <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -49,18 +43,18 @@
                 data-template-id="{{ template.id }}"
                 data-template-json="message-template-{{ template.id }}-data"
               >
-                <td data-label="Slug">{{ template.slug }}</td>
-                <td data-label="Name">{{ template.name }}</td>
-                <td data-label="Description">{{ template.description or '—' }}</td>
-                <td data-label="Content type">{{ template.content_type }}</td>
-                <td data-label="Updated" data-value="{{ template.updated_at_iso or '' }}">
+                <td data-label="Slug" data-column-key="slug">{{ template.slug }}</td>
+                <td data-label="Name" data-column-key="name">{{ template.name }}</td>
+                <td data-label="Description" data-column-key="description">{{ template.description or '—' }}</td>
+                <td data-label="Content type" data-column-key="content_type">{{ template.content_type }}</td>
+                <td data-label="Updated" data-value="{{ template.updated_at_iso or '' }}" data-column-key="updated">
                   {% if template.updated_at_iso %}
                     <span data-utc="{{ template.updated_at_iso }}"></span>
                   {% else %}
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td class="table__actions">
+                <td class="table__actions" data-column-key="actions">
                   <div class="table__action-buttons">
                     <a class="button button--ghost" href="/admin/message-templates/{{ template.id }}/edit">Edit</a>
                     <button type="button" class="button button--danger" data-template-delete>Delete</button>

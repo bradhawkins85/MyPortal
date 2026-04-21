@@ -1,29 +1,13 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}
-  <div class="header__title-content header__title-content--spread">
-    <span class="header__title-text">{{ title | default('API credentials') }}</span>
-    <button
-      type="button"
-      class="button button--primary button--small header__title-button"
-      data-create-api-key-modal-open
-      aria-haspopup="dialog"
-      aria-controls="create-api-key-modal"
-    >
-      Create key
-    </button>
-  </div>
-{% endblock %}
+{% block header_title %}<span class="header__title-text">{{ title | default('API credentials') }}</span>{% endblock %}
 
 {% block header_actions %}
-  <a
-    class="button button--ghost button--small"
-    href="/docs"
-    target="_blank"
-    rel="noopener noreferrer"
-  >
-    Swagger UI
-  </a>
+  {{ page_header_actions([
+    {"label": "Create key", "type": "button", "variant": "primary", "attrs": {"data-create-api-key-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-api-key-modal"}},
+    {"label": "Swagger UI", "type": "link", "variant": "ghost", "href": "/docs"}
+  ]) }}
 {% endblock %}
 
 {% block content %}
@@ -172,24 +156,24 @@
     </div>
 
     <div class="table-wrapper">
-      <table class="table" id="api-keys-table" data-table>
+      <table class="table" id="api-keys-table" data-table data-table-id="api-keys">
         <thead>
           <tr>
-            <th scope="col" data-sort="string">Description</th>
-            <th scope="col" data-sort="string">Preview</th>
-            <th scope="col" data-sort="string">Access scope</th>
-            <th scope="col" data-sort="date">Created</th>
-            <th scope="col" data-sort="date">Expiry</th>
-            <th scope="col" data-sort="date">Last seen</th>
-            <th scope="col" data-sort="number">Usage</th>
-            <th scope="col" class="table__actions">Actions</th>
+            <th scope="col" data-sort="string" data-column-key="description">Description</th>
+            <th scope="col" data-sort="string" data-column-key="preview">Preview</th>
+            <th scope="col" data-sort="string" data-column-key="access_scope">Access scope</th>
+            <th scope="col" data-sort="date" data-column-key="created">Created</th>
+            <th scope="col" data-sort="date" data-column-key="expiry">Expiry</th>
+            <th scope="col" data-sort="date" data-column-key="last_seen">Last seen</th>
+            <th scope="col" data-sort="number" data-column-key="usage">Usage</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
           {% if api_keys %}
             {% for key in api_keys %}
               <tr>
-                <td data-label="Description">
+                <td data-label="Description" data-column-key="description">
                   {% if key.description %}
                     {{ key.description }}
                   {% else %}
@@ -199,18 +183,18 @@
                     <span class="badge badge--warning">Disabled</span>
                   {% endif %}
                 </td>
-                <td data-label="Preview">{{ key.key_preview }}</td>
-                <td data-label="Access scope" data-value="{{ key.access_summary }}">
+                <td data-label="Preview" data-column-key="preview">{{ key.key_preview }}</td>
+                <td data-label="Access scope" data-value="{{ key.access_summary }}" data-column-key="access_scope">
                   <div>{{ key.endpoint_summary or 'All endpoints' }}</div>
                   <div class="text-muted">IPs: {{ key.ip_summary or 'Any IP address' }}</div>
                   {% if not key.is_restricted %}
                     <span class="badge badge--muted">Unrestricted</span>
                   {% endif %}
                 </td>
-                <td data-label="Created" data-utc="{{ key.created_iso or '' }}" data-value="{{ key.created_iso or '' }}">
+                <td data-label="Created" data-utc="{{ key.created_iso or '' }}" data-value="{{ key.created_iso or '' }}" data-column-key="created">
                   {{ key.created_iso or '—' }}
                 </td>
-                <td data-label="Expiry" data-value="{{ key.expiry_iso or '' }}">
+                <td data-label="Expiry" data-value="{{ key.expiry_iso or '' }}" data-column-key="expiry">
                   {% if key.expiry_iso %}
                     <span data-utc="{{ key.expiry_iso }}"></span>
                     {% if key.is_expired %}
@@ -220,16 +204,15 @@
                     <span class="badge badge--muted">No expiry</span>
                   {% endif %}
                 </td>
-                <td data-label="Last seen" data-value="{{ key.last_seen_iso or '' }}">
+                <td data-label="Last seen" data-value="{{ key.last_seen_iso or '' }}" data-column-key="last_seen">
                   {% if key.last_seen_iso %}
                     <span data-utc="{{ key.last_seen_iso }}"></span>
                   {% else %}
                     <span class="text-muted">Never</span>
                   {% endif %}
                 </td>
-                <td data-label="Usage" data-value="{{ key.usage_count }}">{{ key.usage_count }}</td>
-                <td class="table__actions">
-                  {% set modal_payload = {
+                <td data-label="Usage" data-value="{{ key.usage_count }}" data-column-key="usage">{{ key.usage_count }}</td>
+                <td class="table__actions" data-column-key="actions">
                     "id": key.id,
                     "description": key.description or "",
                     "key_preview": key.key_preview,

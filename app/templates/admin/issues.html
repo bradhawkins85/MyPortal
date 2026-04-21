@@ -1,18 +1,12 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}
-  <div class="header__title-content">
-    <span class="header__title-text">Issue tracker</span>
-    <button
-      type="button"
-      class="button button--primary button--small header__title-button"
-      data-create-issue-modal-open
-      aria-haspopup="dialog"
-      aria-controls="create-issue-modal"
-    >
-      Create issue
-    </button>
-  </div>
+{% block header_title %}<span class="header__title-text">Issue tracker</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Create issue", "type": "button", "variant": "primary", "attrs": {"data-create-issue-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-issue-modal"}}
+  ]) }}
 {% endblock %}
 
 {% block content %}
@@ -88,12 +82,6 @@
 
     <section class="card card--panel admin-grid__full">
       <header class="card__header card__header--stacked">
-        <div>
-          <h2 class="card__title">Issue tracker</h2>
-          <p class="card__subtitle">
-            Track shared issues across companies, update statuses, and coordinate technician progress from a single workspace.
-          </p>
-        </div>
         <form method="get" class="filter-grid">
           <div class="form-field">
             <label class="form-label" for="issue-filter-status">Filter by status</label>
@@ -143,14 +131,14 @@
         </div>
 
         <div class="table-wrapper">
-          <table class="table" id="issues-table" data-table>
+          <table class="table" id="issues-table" data-table data-table-id="issues">
             <thead>
               <tr>
-                <th scope="col" data-sort="string">Issue</th>
-                <th scope="col" data-sort="string">Company</th>
-                <th scope="col" data-sort="string">Status</th>
-                <th scope="col" data-sort="string">Updated</th>
-                <th scope="col" class="table__actions">Actions</th>
+                <th scope="col" data-sort="string" data-column-key="issue">Issue</th>
+                <th scope="col" data-sort="string" data-column-key="company">Company</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" data-sort="string" data-column-key="updated">Updated</th>
+                <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -159,20 +147,20 @@
                   {% if issue.assignments %}
                     {% for assignment in issue.assignments %}
                       <tr>
-                        <td data-label="Issue" data-value="{{ issue.name|lower }}">
+                        <td data-label="Issue" data-value="{{ issue.name|lower }}" data-column-key="issue">
                           <strong>{{ issue.name }}</strong>
                           {% if issue.description %}
                             <div class="table__meta">{{ issue.description }}</div>
                           {% endif %}
                         </td>
-                        <td data-label="Company" data-value="{{ assignment.company_name or '' }}">
+                        <td data-label="Company" data-value="{{ assignment.company_name or '' }}" data-column-key="company">
                           {% if assignment.company_name %}
                             {{ assignment.company_name }}
                           {% else %}
                             <span class="text-muted">Unassigned</span>
                           {% endif %}
                         </td>
-                        <td data-label="Status" data-value="{{ assignment.status }}">
+                        <td data-label="Status" data-value="{{ assignment.status }}" data-column-key="status">
                           <form
                             action="/admin/issues/{{ issue.issue_id }}/assignments/{{ assignment.assignment_id }}/status"
                             method="post"
@@ -194,14 +182,14 @@
                             </select>
                           </form>
                         </td>
-                        <td data-label="Updated">
+                        <td data-label="Updated" data-column-key="updated">
                           {% if assignment.updated_at_iso %}
                             <span data-utc="{{ assignment.updated_at_iso }}">{{ assignment.updated_at_iso }}</span>
                           {% else %}
                             <span class="text-muted">—</span>
                           {% endif %}
                         </td>
-                        <td class="table__actions">
+                        <td class="table__actions" data-column-key="actions">
                           <div class="table__action-buttons">
                             <a class="button button--ghost" href="/admin/issues?issueId={{ issue.issue_id }}">Edit</a>
                             {% if assignment.assignment_id %}
@@ -221,16 +209,16 @@
                     {% endfor %}
                   {% else %}
                     <tr>
-                      <td data-label="Issue" data-value="{{ issue.name|lower }}">
+                      <td data-label="Issue" data-value="{{ issue.name|lower }}" data-column-key="issue">
                         <strong>{{ issue.name }}</strong>
                         {% if issue.description %}
                           <div class="table__meta">{{ issue.description }}</div>
                         {% endif %}
                       </td>
-                      <td data-label="Company"><span class="text-muted">No companies assigned</span></td>
-                      <td data-label="Status"><span class="tag tag--muted">N/A</span></td>
-                      <td data-label="Updated"><span class="text-muted">—</span></td>
-                      <td class="table__actions">
+                      <td data-label="Company" data-column-key="company"><span class="text-muted">No companies assigned</span></td>
+                      <td data-label="Status" data-column-key="status"><span class="tag tag--muted">N/A</span></td>
+                      <td data-label="Updated" data-column-key="updated"><span class="text-muted">—</span></td>
+                      <td class="table__actions" data-column-key="actions">
                         <div class="table__action-buttons">
                           <a class="button button--ghost" href="/admin/issues?issueId={{ issue.issue_id }}">Edit</a>
                         </div>

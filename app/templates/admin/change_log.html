@@ -1,15 +1,11 @@
 {% extends "base.html" %}
 
+{% block header_title %}Change log{% endblock %}
+
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Change log</h2>
-        <p class="card__subtitle">
-          Review recent features and fixes synced from the repository's <code>changes</code> directory. Timestamps display in your local timezone.
-        </p>
-      </div>
       <form method="get" class="filter-grid">
         <div class="form-field">
           <label class="form-label" for="filter-change-type">Change type</label>
@@ -53,33 +49,33 @@
       />
     </div>
     <div class="table-wrapper">
-      <table class="table" id="change-log-table" data-table>
+      <table class="table" id="change-log-table" data-table data-table-id="change-log">
         <thead>
           <tr>
-            <th scope="col" data-sort="date">Occurred</th>
-            <th scope="col" data-sort="string">Type</th>
-            <th scope="col" data-sort="string">File</th>
-            <th scope="col" data-sort="string">Summary</th>
+            <th scope="col" data-sort="date" data-column-key="occurred">Occurred</th>
+            <th scope="col" data-sort="string" data-column-key="type">Type</th>
+            <th scope="col" data-sort="string" data-column-key="file">File</th>
+            <th scope="col" data-sort="string" data-column-key="summary">Summary</th>
           </tr>
         </thead>
         <tbody>
           {% if change_entries %}
             {% for entry in change_entries %}
               <tr>
-                <td data-label="Occurred" data-utc="{{ entry.occurred_at_iso or '' }}" data-value="{{ entry.occurred_at_iso or '' }}">
+                <td data-label="Occurred" data-utc="{{ entry.occurred_at_iso or '' }}" data-value="{{ entry.occurred_at_iso or '' }}" data-column-key="occurred">
                   {{ entry.occurred_at_iso or '—' }}
                 </td>
-                <td data-label="Type">
+                <td data-label="Type" data-column-key="type">
                   <span class="tag">{{ entry.change_type }}</span>
                 </td>
-                <td data-label="File">
+                <td data-label="File" data-column-key="file">
                   {% if entry.source_file %}
                     <code>{{ entry.source_file }}</code>
                   {% else %}
                     —
                   {% endif %}
                 </td>
-                <td data-label="Summary">{{ entry.summary }}</td>
+                <td data-label="Summary" data-column-key="summary">{{ entry.summary }}</td>
               </tr>
             {% endfor %}
           {% else %}
