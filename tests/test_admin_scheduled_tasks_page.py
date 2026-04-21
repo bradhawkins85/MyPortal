@@ -183,6 +183,41 @@ def test_scheduled_tasks_page_requires_super_admin(monkeypatch):
     assert response.status_code == 302
 
 
+def test_scheduled_tasks_page_run_now_button_present(super_admin_context, monkeypatch):
+    """Test that the Run now button is rendered in the actions column for each task."""
+
+    async def fake_list_tasks(include_inactive=False):
+        return [
+            {
+                "id": 1,
+                "name": "Sync M365 data",
+                "command": "sync_m365_data",
+                "cron": "0 2 * * *",
+                "company_id": None,
+                "active": True,
+                "last_run_at": None,
+                "last_status": None,
+                "last_error": None,
+                "description": None,
+                "max_retries": 12,
+                "retry_backoff_seconds": 300,
+            }
+        ]
+
+    async def fake_list_companies():
+        return []
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/scheduled-tasks")
+
+    assert response.status_code == 200
+    assert 'data-task-run' in response.text
+    assert 'Run now' in response.text
+
+
 def test_scheduled_tasks_page_failed_task_status(super_admin_context, monkeypatch):
     """Test that a failed task status is shown in the rendered table."""
 
