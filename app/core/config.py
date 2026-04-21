@@ -110,6 +110,46 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="FAIL2BAN_LOG_PATH",
     )
+    log_rotation: str | None = Field(
+        default="50 MB",
+        validation_alias="LOG_ROTATION",
+        description=(
+            "Loguru rotation policy for the disk log sink. Accepts a size (e.g. '50 MB'), "
+            "an interval (e.g. '1 day'), or a clock time (e.g. '00:00'). Set empty to disable."
+        ),
+    )
+    log_retention: str | None = Field(
+        default="30 days",
+        validation_alias="LOG_RETENTION",
+        description=(
+            "Loguru retention policy controlling how long old rotated log files are kept "
+            "(e.g. '30 days', '4 weeks'). Set empty to keep indefinitely."
+        ),
+    )
+    log_compression: str | None = Field(
+        default="gz",
+        validation_alias="LOG_COMPRESSION",
+        description=(
+            "Compression format applied to rotated log files (e.g. 'gz', 'zip'). "
+            "Set empty to keep rotated files uncompressed."
+        ),
+    )
+    error_log_path: Path | None = Field(
+        default=None,
+        validation_alias="ERROR_LOG_PATH",
+        description=(
+            "Optional dedicated log file that receives WARNING and above only. "
+            "Useful for tailing 'just the bad stuff' for troubleshooting."
+        ),
+    )
+    audit_retention_days: int = Field(
+        default=365,
+        validation_alias="AUDIT_RETENTION_DAYS",
+        ge=0,
+        description=(
+            "Number of days of audit_logs history to retain. Set to 0 to disable pruning."
+        ),
+    )
     ai_tag_threshold: int = Field(
         default=1,
         validation_alias="AI_TAG_THRESHOLD",
