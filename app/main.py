@@ -181,6 +181,7 @@ from app.services import m365_mail as m365_mail_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
+from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
 from app.services import notification_event_settings as event_settings_service
 from app.services import message_templates as message_templates_service
@@ -1713,6 +1714,7 @@ async def _build_base_context(
         "can_view_compliance": is_super_admin or _has_permission("can_view_compliance"),
         "can_view_bcp": can_view_bcp,
         "can_edit_bcp": can_edit_bcp,
+        "can_view_m365_best_practices": is_super_admin or _has_permission("can_view_m365_best_practices"),
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1894,6 +1896,7 @@ async def _build_public_context(
         "can_manage_invoices": False,
         "can_manage_staff": False,
         "can_view_compliance": False,
+        "can_view_m365_best_practices": False,
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
@@ -5106,6 +5109,143 @@ async def remove_benchmark_exclusion(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.remove_exclusion(company_id, check_id)
     return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+
+
+# ---------------------------------------------------------------------------
+# Microsoft 365 Best Practices
+# ---------------------------------------------------------------------------
+
+
+async def _load_m365_best_practices_context(request: Request, *, super_admin_only: bool = False):
+    """Load context for the M365 Best Practices pages.
+
+    A user may view the page if they are a super admin or if their company
+    membership grants ``can_view_m365_best_practices``.  Pass
+    ``super_admin_only=True`` for endpoints that mutate global settings or
+    trigger evaluations.
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_view = bool(membership and membership.get("can_view_m365_best_practices"))
+    if super_admin_only:
+        if not is_super_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    elif not (is_super_admin or can_view):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
+@app.get("/m365/best-practices", response_class=HTMLResponse)
+async def m365_best_practices_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    results = await m365_best_practices_service.get_last_results(company_id)
+    catalog = m365_best_practices_service.list_best_practices()
+    enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
+    enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    extra = {
+        "title": "M365 Best Practices",
+        "company": company,
+        "results": results,
+        "catalog": enabled_catalog,
+        "has_credentials": bool(credentials),
+        "is_super_admin": bool(user.get("is_super_admin")),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/best_practices.html", request, user, extra=extra)
+
+
+@app.post("/m365/best-practices/run", response_class=RedirectResponse)
+async def run_m365_best_practices(request: Request):
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    try:
+        await m365_best_practices_service.run_best_practices(company_id)
+        log_info("M365 best practices run", company_id=company_id, user_id=user.get("id"))
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365/best-practices?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/m365/best-practices?success=Best+practices+evaluated",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/m365/best-practices/settings", response_class=HTMLResponse)
+async def m365_best_practices_settings_page(
+    request: Request,
+    error: str | None = None,
+    success: str | None = None,
+):
+    user, membership, company, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    catalog_with_settings = await m365_best_practices_service.list_settings_with_catalog()
+    extra = {
+        "title": "M365 Best Practices Settings",
+        "company": company,
+        "catalog": catalog_with_settings,
+        "is_super_admin": True,
+        "error": error,
+        "success": success,
+    }
+    return await _render_template(
+        "m365/best_practices_settings.html",
+        request,
+        user,
+        extra=extra,
+    )
+
+
+@app.post("/m365/best-practices/settings", response_class=RedirectResponse)
+async def save_m365_best_practices_settings(request: Request):
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    form = await request.form()
+    enabled_ids = {value for value in form.getlist("enabled")}
+    await m365_best_practices_service.set_enabled_checks(enabled_ids)
+    log_info(
+        "M365 best practice settings updated",
+        user_id=user.get("id"),
+        enabled_count=len(enabled_ids),
+    )
+    return RedirectResponse(
+        url="/m365/best-practices/settings?success=Settings+saved",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/m365/mailboxes/users", response_class=HTMLResponse)
