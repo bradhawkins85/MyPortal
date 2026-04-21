@@ -190,7 +190,7 @@ async def register(
         content=response_model.model_dump(mode="json"),
         status_code=status.HTTP_201_CREATED,
     )
-    session_manager.apply_session_cookies(response, session)
+    session_manager.apply_session_cookies(response, session, request)
     return response
 
 
@@ -250,7 +250,7 @@ async def login(
         user["company_id"] = active_company_id
     response_model = _build_login_response(user, session)
     response = JSONResponse(content=response_model.model_dump(mode="json"))
-    session_manager.apply_session_cookies(response, session)
+    session_manager.apply_session_cookies(response, session, request)
     _log_login_success(request, user)
     return response
 
@@ -291,7 +291,7 @@ async def impersonate_user(
 
     response_model = _build_login_response(target_user, impersonated_session)
     response = JSONResponse(content=response_model.model_dump(mode="json"))
-    session_manager.apply_session_cookies(response, impersonated_session)
+    session_manager.apply_session_cookies(response, impersonated_session, request)
     request.state.session = impersonated_session
     request.state.active_company_id = impersonated_session.active_company_id
     request.state.impersonator_user_id = impersonated_session.impersonator_user_id
@@ -338,7 +338,7 @@ async def exit_impersonation(
     else:
         response_model = _build_login_response(restored_user, restored_session)
         response = JSONResponse(content=response_model.model_dump(mode="json"))
-    session_manager.apply_session_cookies(response, restored_session)
+    session_manager.apply_session_cookies(response, restored_session, request)
     request.state.session = restored_session
     request.state.active_company_id = restored_session.active_company_id
     if hasattr(request.state, "impersonator_user_id"):

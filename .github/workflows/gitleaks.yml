@@ -1,0 +1,44 @@
+# Scan the repository for committed secrets using gitleaks.
+# Runs on every PR (against the diff) and weekly against the full history.
+# Docs: https://github.com/gitleaks/gitleaks
+
+name: "Secret Scanning (gitleaks)"
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  schedule:
+    # Run full-history scan weekly on Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          # A full history is required for the scheduled scan to inspect
+          # every commit; shallow clones are sufficient for PR/push runs.
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # GITLEAKS_LICENSE is only required for private organisations that
+          # use the paid SaaS integration. For public usage this is optional.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Report findings but do not fail the workflow hard — the job
+          # summary will still surface any detections, and scheduled runs
+          # will upload SARIF for the Security tab.
+          config-path: .gitleaks.toml

@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% from 'macros/mobile.html' import mobile_collapsible %}
 
+{% block title %}Dashboard{% endblock %}
+
+{% block header_title %}
+  <span class="header__title-text">Dashboard</span>
+{% endblock %}
+
 {% block content %}
 {% set overview = overview or {} %}
 <div class="dashboard">

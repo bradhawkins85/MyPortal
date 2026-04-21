@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block header_title %}Best Practices{% endblock %}
+
+{% block title %}Best Practices – Office 365{% endblock %}
+
+{% block header_actions %}
+  {% if is_super_admin %}
+  <a href="/m365/best-practices/settings" class="button button--ghost">Manage best practices</a>
+  {% if has_credentials and catalog %}
+  <form method="post" action="/m365/best-practices/run" style="display:inline">
+    {% if csrf_token %}
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+    {% endif %}
+    <button type="submit" class="button">Evaluate now</button>
+  </form>
+  {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">{{ error }}</div>
+  {% endif %}
+  {% if success %}
+  <div class="alert alert--success" role="alert">{{ success }}</div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">Microsoft 365 Best Practices</h2>
+        <p class="panel__subtitle">
+          Microsoft 365 Best Practice checks are enabled globally by your provider and
+          evaluated individually against this company's tenant configuration.
+        </p>
+      </div>
+      {% if results %}
+      {% set pass_count = results | selectattr("status", "equalto", "pass") | list | length %}
+      {% set fail_count = results | selectattr("status", "equalto", "fail") | list | length %}
+      {% set unknown_count = results | selectattr("status", "equalto", "unknown") | list | length %}
+      {% set na_count = results | selectattr("status", "equalto", "not_applicable") | list | length %}
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
+        {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
+        {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
+        {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
+        {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
+      </div>
+      {% endif %}
+    </header>
+    <div class="panel__body">
+      {% if not catalog %}
+        <p class="text-muted">No best practices are currently enabled.
+          {% if is_super_admin %}
+            Visit <a href="/m365/best-practices/settings">Manage best practices</a> to enable checks.
+          {% else %}
+            Please contact your administrator to enable Microsoft 365 best practice checks.
+          {% endif %}
+        </p>
+      {% elif not has_credentials %}
+        <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before running best-practice checks.</p>
+      {% elif not results %}
+        <p class="text-muted">No best-practice results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to perform the first scan.{% endif %}</p>
+      {% endif %}
+    </div>
+
+    {% if results %}
+    <div class="panel__body" style="padding:0">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:3rem"></th>
+            <th>Best Practice</th>
+            <th>Details</th>
+            <th style="white-space:nowrap">Last evaluated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for check in results %}
+          <tr>
+            <td style="text-align:center">
+              {% if check.status == "pass" %}
+                <span title="Pass" style="color:var(--color-success,#16a34a);font-size:1.25rem">✓</span>
+              {% elif check.status == "fail" %}
+                <span title="Fail" style="color:var(--color-error,#dc2626);font-size:1.25rem">✗</span>
+              {% elif check.status == "not_applicable" %}
+                <span title="Not applicable" style="color:var(--color-muted,#6b7280);font-size:1.25rem">–</span>
+              {% else %}
+                <span title="Unknown" style="color:var(--color-warning,#d97706);font-size:1.25rem">?</span>
+              {% endif %}
+            </td>
+            <td>
+              <strong>{{ check.check_name }}</strong>
+              {% if check.description %}
+              <br /><small class="text-muted">{{ check.description }}</small>
+              {% endif %}
+            </td>
+            <td>
+              <span>{{ check.details or '' }}</span>
+              {% if check.remediation %}
+              <details style="margin-top:0.5rem">
+                <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">Remediation guidance</summary>
+                <p style="margin-top:0.5rem;font-size:0.875rem">{{ check.remediation }}</p>
+              </details>
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap">
+              {% if check.run_at %}
+              <small class="text-muted">{{ check.run_at.strftime('%d %b %Y %H:%M') }}</small>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  {% if catalog and not results %}
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">Enabled best practices</h3>
+    </header>
+    <div class="panel__body" style="padding:0">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Best Practice</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for bp in catalog %}
+          <tr>
+            <td><strong>{{ bp.name }}</strong><br /><small class="text-muted">{{ bp.id }}</small></td>
+            <td>{{ bp.description }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+{% endblock %}

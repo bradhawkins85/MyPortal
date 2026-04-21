@@ -40,12 +40,20 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # API clients that authenticate with bearer tokens or API keys are not
         # vulnerable to CSRF because browsers will not automatically attach
-        # those credentials. Skip CSRF validation when an explicit auth header
-        # is present to avoid rejecting legitimate token-based API requests.
+        # those credentials. Skip CSRF validation ONLY when no session cookie
+        # is present; if a session cookie is also present (for example because
+        # the user is logged in in the same browser), require CSRF regardless
+        # of any attacker-controlled Authorization/X-API-Key header – this
+        # prevents a CSRF bypass where the attacker supplies a spoofed header
+        # to opt themselves out of the check.
+        session_cookie_name = self._settings.session_cookie_name
+        has_session_cookie = bool(request.cookies.get(session_cookie_name))
         authorization_header = request.headers.get("authorization", "")
-        if authorization_header.lower().startswith("bearer ") or request.headers.get(
-            "x-api-key"
-        ):
+        has_token_auth = (
+            authorization_header.lower().startswith("bearer ")
+            or bool(request.headers.get("x-api-key"))
+        )
+        if has_token_auth and not has_session_cookie:
             return await call_next(request)
 
         if request.method.upper() in SAFE_METHODS:

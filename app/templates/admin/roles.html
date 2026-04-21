@@ -1,13 +1,11 @@
 {% extends "base.html" %}
 
+{% block header_title %}Roles{% endblock %}
+
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header">
-      <div>
-        <h2 class="card__title">Defined roles</h2>
-        <p class="card__subtitle">Manage reusable permission sets for company memberships.</p>
-      </div>
       <input
         type="search"
         class="form-input"
@@ -17,14 +15,14 @@
       />
     </header>
     <div class="table-wrapper">
-      <table class="table" id="roles-table" data-table>
+      <table class="table" id="roles-table" data-table data-table-id="roles">
         <thead>
           <tr>
-            <th scope="col" data-sort="string">Name</th>
-            <th scope="col" data-sort="string">Description</th>
-            <th scope="col" data-sort="string">Permissions</th>
-            <th scope="col" data-sort="string">System</th>
-            <th scope="col" class="table__actions">Actions</th>
+            <th scope="col" data-sort="string" data-column-key="name">Name</th>
+            <th scope="col" data-sort="string" data-column-key="description">Description</th>
+            <th scope="col" data-sort="string" data-column-key="permissions">Permissions</th>
+            <th scope="col" data-sort="string" data-column-key="system">System</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -36,9 +34,9 @@
               data-role-permissions='{{ role.permissions | tojson }}'
               data-role-system="{{ 'true' if role.is_system else 'false' }}"
             >
-              <td data-label="Name">{{ role.name }}</td>
-              <td data-label="Description">{{ role.description or '—' }}</td>
-              <td data-label="Permissions">
+              <td data-label="Name" data-column-key="name">{{ role.name }}</td>
+              <td data-label="Description" data-column-key="description">{{ role.description or '—' }}</td>
+              <td data-label="Permissions" data-column-key="permissions">
                 {% if role.permissions %}
                   <span class="tag-list">
                     {% for perm in role.permissions %}
@@ -49,8 +47,8 @@
                   <span class="text-muted">None</span>
                 {% endif %}
               </td>
-              <td data-label="System">{{ 'Yes' if role.is_system else 'No' }}</td>
-              <td class="table__actions">
+              <td data-label="System" data-column-key="system">{{ 'Yes' if role.is_system else 'No' }}</td>
+              <td class="table__actions" data-column-key="actions">
                 <div class="table__action-buttons">
                   <button type="button" class="button button--ghost" data-role-edit>Edit</button>
                   {% if not role.is_system %}

@@ -327,7 +327,7 @@
           <table
             class="table tickets-table"
             id="tickets-table"
-            data-table
+            data-table data-table-id="tickets"
             data-bulk-delete-table
             data-table-refresh-url="{{ ticket_dashboard_endpoint or '' }}"
             data-table-refresh-topics="{{ (ticket_refresh_topics or []) | join(',') }}"

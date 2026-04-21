@@ -1,30 +1,29 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Integration modules{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Show disabled modules", "type": "button", "variant": "ghost", "attrs": {"id": "show-disabled-modules"}}
+  ]) }}
+{% endblock %}
 
 {% block content %}
   <div class="management management--single" data-layout>
     <section class="management__content">
       <header class="management__header">
-        <div>
-          <h1 class="management__title">Integration modules</h1>
-          <p class="management__subtitle">Synchronise credentials and delivery endpoints for Syncro, Ollama, SMTP, TacticalRMM, ntfy, Apprise, Uptime Kuma, ChatGPT, and SMS Gateway.</p>
-        </div>
-        <div class="management__actions">
-          <label class="form-checkbox" for="show-disabled-modules">
-            <input type="checkbox" id="show-disabled-modules" />
-            Show disabled modules
-          </label>
-        </div>
       </header>
 
       <section class="card card--panel">
         <div class="table-wrapper">
-          <table class="table" id="modules-table" data-table>
+          <table class="table" id="modules-table" data-table data-table-id="modules">
             <thead>
               <tr>
-                <th scope="col" data-sort="string">Module</th>
-                <th scope="col" data-sort="string" data-mobile-hidden="true">Description</th>
-                <th scope="col" data-sort="string">Status</th>
-                <th scope="col" class="table__actions">Actions</th>
+                <th scope="col" data-sort="string" data-column-key="module">Module</th>
+                <th scope="col" data-sort="string" data-mobile-hidden="true" data-column-key="description">Description</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -33,17 +32,17 @@
                 {% set is_internal = module.slug in internal_slugs %}
                 {% if not is_internal %}
                 <tr data-enabled="{{ 'true' if module.enabled else 'false' }}"{% if not module.enabled %} hidden{% endif %}>
-                  <td data-label="Module">
+                  <td data-label="Module" data-column-key="module">
                     <span aria-hidden="true">{{ module.icon or '🔌' }}</span>
                     <strong>{{ module.name }}</strong>
                   </td>
-                  <td data-label="Description" data-mobile-hidden="true">{{ module.description }}</td>
-                  <td data-label="Status">
+                  <td data-label="Description" data-mobile-hidden="true" data-column-key="description">{{ module.description }}</td>
+                  <td data-label="Status" data-column-key="status">
                     <span class="badge {{ 'badge--success' if module.enabled else 'badge--danger' }}">
                       {{ 'Enabled' if module.enabled else 'Disabled' }}
                     </span>
                   </td>
-                  <td class="table__actions">
+                  <td class="table__actions" data-column-key="actions">
                     <div class="table__action-buttons">
                       <form action="/admin/modules/{{ module.slug }}" method="post" class="inline-form">
                           {% if csrf_token %}
@@ -658,13 +657,16 @@
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script>
     (function () {
-      var checkbox = document.getElementById('show-disabled-modules');
-      if (!checkbox) return;
-      checkbox.addEventListener('change', function () {
+      var btn = document.getElementById('show-disabled-modules');
+      if (!btn) return;
+      var showingDisabled = false;
+      btn.addEventListener('click', function () {
+        showingDisabled = !showingDisabled;
         var rows = document.querySelectorAll('#modules-table tbody tr[data-enabled="false"]');
         rows.forEach(function (row) {
-          row.hidden = !checkbox.checked;
+          row.hidden = !showingDisabled;
         });
+        btn.textContent = showingDisabled ? 'Hide disabled modules' : 'Show disabled modules';
       });
     })();
   </script>

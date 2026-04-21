@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Profile{% endblock %}
+
 {% block content %}
 <div
   class="management management--single"
@@ -238,7 +240,7 @@
               <button type="button" class="button" data-totp-add>Set up new authenticator</button>
             </div>
             <div class="table-wrapper">
-              <table class="table" id="totp-table" data-table>
+              <table class="table" id="totp-table" data-table data-table-id="totp">
                 <thead>
                   <tr>
                     <th scope="col" data-sort="string">Name</th>
