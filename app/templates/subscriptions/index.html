@@ -12,17 +12,13 @@
 
 {% block content %}
 <section class="panel">
+  {% if company %}
   <header class="panel__header">
-    <div>
-      <h2 class="panel__title">Active subscriptions</h2>
-      <p class="panel__subtitle">View your subscriptions and request changes to quantities.</p>
-    </div>
-    {% if company %}
     <div class="panel__meta">
       <span class="tag">{{ company.name }}</span>
     </div>
-    {% endif %}
   </header>
+  {% endif %}
   <div class="panel__body">
     <div class="table-responsive">
       <table class="table" data-subscription-table>

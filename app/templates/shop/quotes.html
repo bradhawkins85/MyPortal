@@ -8,12 +8,6 @@
 
 {% block content %}
   <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Quote overview</h2>
-        <p class="card__subtitle">Review saved quotes and load them to your cart for quick ordering.</p>
-      </div>
-    </header>
     {% if quotes_total_all == 0 %}
       <p class="text-muted">No quotes have been created yet. Save items from your cart as a quote to see them here.</p>
     {% else %}

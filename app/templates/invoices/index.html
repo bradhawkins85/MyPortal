@@ -28,19 +28,13 @@
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Company invoices</h2>
-        <p class="card__subtitle">
-          Track billing history, payment status, and due dates for your organisation.
-        </p>
-      </div>
-      {% if company %}
+    {% if company %}
+    <header class="card__header">
       <div class="card__controls">
         <span class="tag">{{ company.name }}</span>
       </div>
-      {% endif %}
     </header>
+    {% endif %}
     <div class="invoice-summary">
       <div class="invoice-summary__item">
         <span class="invoice-summary__label">Total billed</span>
