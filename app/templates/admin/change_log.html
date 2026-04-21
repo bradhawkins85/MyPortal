@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/tables.html" import pagination %}
 
 {% block header_title %}Change log{% endblock %}
 
@@ -86,6 +87,13 @@
         </tbody>
       </table>
     </div>
+    {{ pagination(
+        pagination_meta.page if pagination_meta else None,
+        pagination_meta.total_pages if pagination_meta else None,
+        page_size=pagination_meta.page_size if pagination_meta else None,
+        base_url='/admin/change-log',
+        preserve={'change_type': filters.selected_change_type or ''}
+    ) }}
   </section>
 </div>
 {% endblock %}
