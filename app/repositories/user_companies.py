@@ -22,6 +22,7 @@ _BOOLEAN_FIELDS = {
     "can_access_forms",
     "can_view_compliance",
     "can_view_bcp",
+    "can_view_m365_best_practices",
     "is_admin",
 }
 
@@ -38,6 +39,7 @@ _PERMISSION_FIELDS = {
     "can_access_forms",
     "can_view_compliance",
     "can_view_bcp",
+    "can_view_m365_best_practices",
     "is_admin",
 }
 
@@ -57,6 +59,7 @@ _PERMISSION_MAPPING = {
     "company.admin": "is_admin",
     "compliance.access": "can_view_compliance",
     "continuity.access": "can_view_bcp",
+    "m365_best_practices.access": "can_view_m365_best_practices",
 }
 
 
