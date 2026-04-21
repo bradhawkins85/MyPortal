@@ -104,6 +104,88 @@ else:
 PY
 }
 
+ensure_env_secret() {
+  # Replace weak or placeholder values for the given key with a freshly
+  # generated cryptographically-random string. Existing non-placeholder
+  # values are left untouched so redeploying never rotates live secrets.
+  local key="$1"
+  local byte_length="${2:-48}"
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return
+  fi
+
+  ENV_SECRET_KEY="$key" \
+    ENV_SECRET_BYTES="$byte_length" \
+    ENV_SECRET_FILE="$ENV_FILE" \
+    "$SYSTEM_PYTHON" - <<'PY'
+from __future__ import annotations
+
+import os
+import secrets
+from pathlib import Path
+
+env_path = Path(os.environ["ENV_SECRET_FILE"])
+key = os.environ["ENV_SECRET_KEY"]
+byte_length = int(os.environ.get("ENV_SECRET_BYTES", "48"))
+
+PLACEHOLDER = {
+    "",
+    "change-me",
+    "changeme",
+    "change_me",
+    "please-change",
+    "replace-me",
+    "secret",
+    "password",
+}
+
+
+def looks_weak(value: str) -> bool:
+    stripped = value.strip().strip('"').strip("'")
+    if stripped.lower() in PLACEHOLDER:
+        return True
+    if len(stripped) < 24:
+        return True
+    return False
+
+
+content = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+lines = content.splitlines()
+updated = False
+found = False
+for index, raw_line in enumerate(lines):
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in raw_line:
+        continue
+    name, value = raw_line.split("=", 1)
+    if name.strip() != key:
+        continue
+    found = True
+    if looks_weak(value):
+        new_value = secrets.token_urlsafe(byte_length)
+        lines[index] = f"{key}={new_value}"
+        updated = True
+        print(f"Generated new value for {key}.")
+    break
+
+if not found:
+    new_value = secrets.token_urlsafe(byte_length)
+    suffix = "" if not content or content.endswith("\n") else "\n"
+    env_path.write_text(content + f"{suffix}{key}={new_value}\n", encoding="utf-8")
+    print(f"Appended new value for {key}.")
+elif updated:
+    trailing = "\n" if content.endswith("\n") else ""
+    env_path.write_text("\n".join(lines) + trailing, encoding="utf-8")
+PY
+}
+
+secure_env_file_permissions() {
+  if [[ -f "$ENV_FILE" ]]; then
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+  fi
+}
+
 ensure_virtualenv() {
   if [[ -d "$VENV_DIR" ]]; then
     return
@@ -253,6 +335,29 @@ ensure_env_default "ENABLE_AUTO_REFRESH" "false"
 ensure_env_default "UVICORN_AUTO_UPDATE_ENABLED" "true"
 ensure_env_default "UVICORN_AUTO_UPDATE_ATTEMPTS" "2"
 ensure_env_default "UVICORN_AUTO_UPDATE_RETRY_DELAY" "5"
+
+# Security: replace placeholder secrets with cryptographically random values.
+# Existing non-placeholder values are preserved, so running the installer on an
+# already-provisioned host never rotates live keys.
+ensure_env_secret "SESSION_SECRET" 48
+ensure_env_secret "TOTP_ENCRYPTION_KEY" 48
+ensure_env_secret "SMTP2GO_WEBHOOK_SECRET" 32
+ensure_env_secret "PLAUSIBLE_PEPPER" 32
+ensure_env_secret "MCP_TOKEN" 32
+secure_env_file_permissions
+
+cat <<'REMINDER'
+
+SECURITY REMINDER:
+  - Your .env file has been set to mode 0600 (owner-only).
+  - If fresh secrets were generated above, store a secure backup. Losing
+    TOTP_ENCRYPTION_KEY will make stored TOTP secrets and encrypted
+    integration credentials unrecoverable.
+  - Rotate SESSION_SECRET and TOTP_ENCRYPTION_KEY at least annually and
+    whenever an operator with access to the server leaves.
+
+REMINDER
+
 install_pwsh
 install_exo_module
 ensure_virtualenv

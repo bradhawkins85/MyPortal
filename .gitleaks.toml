@@ -1,0 +1,31 @@
+# Gitleaks configuration for the MyPortal repository.
+# Extends the bundled default rule set (which covers common cloud/API
+# provider token patterns) and adds allow-list entries for test fixtures
+# and documentation examples that intentionally contain placeholder
+# credentials.
+#
+# Docs: https://github.com/gitleaks/gitleaks#configuration
+
+title = "MyPortal gitleaks configuration"
+
+[extend]
+# Use the project's default rules as the baseline.
+useDefault = true
+
+[allowlist]
+description = "Allow-list for test fixtures and documentation placeholders"
+paths = [
+  '''(?i)^\.env\.example$''',
+  '''(?i)^docs/.*''',
+  '''(?i)^tests/.*''',
+  '''(?i)^changes/.*''',
+]
+
+regexes = [
+  # Obvious placeholder values shipped in examples.
+  '''(?i)change[-_]?me''',
+  '''(?i)your[-_]?(api|secret|token)[-_]?here''',
+  '''(?i)example[-_]?(secret|token|key)''',
+  # Test fixtures often embed the literal string "test-session-secret".
+  '''(?i)test[-_]?(session|secret|token)''',
+]
