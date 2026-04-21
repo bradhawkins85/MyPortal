@@ -10770,7 +10770,7 @@ async def delete_staff_workflow_policy(direction: str, policy_id: int, request: 
     return JSONResponse({"success": True})
 
 
-
+@app.get("/staff/workflows/history", response_class=HTMLResponse)
 async def staff_workflow_history_page(request: Request):
     (
         user,
