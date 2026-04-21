@@ -213,6 +213,7 @@
                 </td>
                 <td data-label="Usage" data-value="{{ key.usage_count }}" data-column-key="usage">{{ key.usage_count }}</td>
                 <td class="table__actions" data-column-key="actions">
+                  {% set modal_payload = {
                     "id": key.id,
                     "description": key.description or "",
                     "key_preview": key.key_preview,
