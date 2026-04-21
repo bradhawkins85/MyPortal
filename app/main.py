@@ -181,6 +181,7 @@ from app.services import m365_mail as m365_mail_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
+from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
 from app.services import notification_event_settings as event_settings_service
 from app.services import message_templates as message_templates_service
@@ -570,7 +571,25 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["*"],
+    # Restrict to the specific headers the portal actually uses. Using ``*``
+    # together with ``allow_credentials=True`` is permissive and hides bugs
+    # where the browser would otherwise reject a cross-origin request.
+    allow_headers=[
+        "Accept",
+        "Accept-Language",
+        "Authorization",
+        "Cache-Control",
+        "Content-Language",
+        "Content-Type",
+        "If-Match",
+        "If-None-Match",
+        "X-API-Key",
+        "X-CSRF-Token",
+        "X-CSRFToken",
+        "X-Requested-With",
+        "X-Request-ID",
+    ],
+    expose_headers=["X-Request-ID"],
 )
 
 # Add IP whitelisting middleware for sensitive endpoints
@@ -1695,6 +1714,7 @@ async def _build_base_context(
         "can_view_compliance": is_super_admin or _has_permission("can_view_compliance"),
         "can_view_bcp": can_view_bcp,
         "can_edit_bcp": can_edit_bcp,
+        "can_view_m365_best_practices": is_super_admin or _has_permission("can_view_m365_best_practices"),
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1876,6 +1896,7 @@ async def _build_public_context(
         "can_manage_invoices": False,
         "can_manage_staff": False,
         "can_view_compliance": False,
+        "can_view_m365_best_practices": False,
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
@@ -3090,7 +3111,7 @@ def _sanitize_local_redirect_target(
         return fallback
 
     parsed = URL(target)
-    if parsed.is_absolute_url or parsed.netloc:
+    if parsed.scheme or parsed.netloc:
         return fallback
 
     if not target.startswith("/") or target.startswith("//") or "\\" in target:
@@ -5088,6 +5109,143 @@ async def remove_benchmark_exclusion(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.remove_exclusion(company_id, check_id)
     return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+
+
+# ---------------------------------------------------------------------------
+# Microsoft 365 Best Practices
+# ---------------------------------------------------------------------------
+
+
+async def _load_m365_best_practices_context(request: Request, *, super_admin_only: bool = False):
+    """Load context for the M365 Best Practices pages.
+
+    A user may view the page if they are a super admin or if their company
+    membership grants ``can_view_m365_best_practices``.  Pass
+    ``super_admin_only=True`` for endpoints that mutate global settings or
+    trigger evaluations.
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_view = bool(membership and membership.get("can_view_m365_best_practices"))
+    if super_admin_only:
+        if not is_super_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    elif not (is_super_admin or can_view):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
+@app.get("/m365/best-practices", response_class=HTMLResponse)
+async def m365_best_practices_page(request: Request, error: str | None = None, success: str | None = None):
+    user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    credentials = await m365_service.get_credentials(company_id)
+    results = await m365_best_practices_service.get_last_results(company_id)
+    catalog = m365_best_practices_service.list_best_practices()
+    enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
+    enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    extra = {
+        "title": "M365 Best Practices",
+        "company": company,
+        "results": results,
+        "catalog": enabled_catalog,
+        "has_credentials": bool(credentials),
+        "is_super_admin": bool(user.get("is_super_admin")),
+        "error": error,
+        "success": success,
+    }
+    return await _render_template("m365/best_practices.html", request, user, extra=extra)
+
+
+@app.post("/m365/best-practices/run", response_class=RedirectResponse)
+async def run_m365_best_practices(request: Request):
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    try:
+        await m365_best_practices_service.run_best_practices(company_id)
+        log_info("M365 best practices run", company_id=company_id, user_id=user.get("id"))
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365/best-practices?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/m365/best-practices?success=Best+practices+evaluated",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/m365/best-practices/settings", response_class=HTMLResponse)
+async def m365_best_practices_settings_page(
+    request: Request,
+    error: str | None = None,
+    success: str | None = None,
+):
+    user, membership, company, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    catalog_with_settings = await m365_best_practices_service.list_settings_with_catalog()
+    extra = {
+        "title": "M365 Best Practices Settings",
+        "company": company,
+        "catalog": catalog_with_settings,
+        "is_super_admin": True,
+        "error": error,
+        "success": success,
+    }
+    return await _render_template(
+        "m365/best_practices_settings.html",
+        request,
+        user,
+        extra=extra,
+    )
+
+
+@app.post("/m365/best-practices/settings", response_class=RedirectResponse)
+async def save_m365_best_practices_settings(request: Request):
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    form = await request.form()
+    enabled_ids = {value for value in form.getlist("enabled")}
+    await m365_best_practices_service.set_enabled_checks(enabled_ids)
+    log_info(
+        "M365 best practice settings updated",
+        user_id=user.get("id"),
+        enabled_count=len(enabled_ids),
+    )
+    return RedirectResponse(
+        url="/m365/best-practices/settings?success=Settings+saved",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/m365/mailboxes/users", response_class=HTMLResponse)
@@ -10752,7 +10910,7 @@ async def delete_staff_workflow_policy(direction: str, policy_id: int, request: 
     return JSONResponse({"success": True})
 
 
-
+@app.get("/staff/workflows/history", response_class=HTMLResponse)
 async def staff_workflow_history_page(request: Request):
     (
         user,
@@ -13822,31 +13980,139 @@ async def admin_audit_logs(
     entity_type: str | None = None,
     entity_id: int | None = None,
     user_id: int | None = None,
+    action: str | None = None,
+    request_id: str | None = None,
+    ip_address: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    search: str | None = None,
     limit: int = 100,
+    offset: int = 0,
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     limit = max(1, min(limit, 500))
-    logs = await audit_repo.list_audit_logs(
-        entity_type=entity_type,
+    offset = max(0, int(offset))
+
+    def _parse_filter_dt(value: str | None):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    since_dt = _parse_filter_dt(since)
+    until_dt = _parse_filter_dt(until)
+
+    filter_kwargs = dict(
+        entity_type=entity_type or None,
         entity_id=entity_id,
         user_id=user_id,
-        limit=limit,
+        action=(action or "").strip() or None,
+        request_id=(request_id or "").strip() or None,
+        ip_address=(ip_address or "").strip() or None,
+        since=since_dt,
+        until=until_dt,
+        search=(search or "").strip() or None,
     )
+    logs = await audit_repo.list_audit_logs(
+        **filter_kwargs,
+        limit=limit,
+        offset=offset,
+    )
+    total = await audit_repo.count_audit_logs(**filter_kwargs)
+    available_actions = await audit_repo.list_distinct_actions()
+
     for log in logs:
         log["created_at_iso"] = _to_iso(log.get("created_at"))
+        log["diff_rows"] = _build_audit_diff_rows(
+            log.get("previous_value"), log.get("new_value")
+        )
+
     extra = {
         "title": "Audit trail",
         "logs": logs,
+        "available_actions": available_actions,
+        "total": total,
         "filters": {
             "entity_type": entity_type or "",
             "entity_id": entity_id or "",
             "user_id": user_id or "",
+            "action": action or "",
+            "request_id": request_id or "",
+            "ip_address": ip_address or "",
+            "since": since or "",
+            "until": until or "",
+            "search": search or "",
             "limit": limit,
+            "offset": offset,
+        },
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "has_prev": offset > 0,
+            "has_next": (offset + limit) < total,
+            "prev_offset": max(0, offset - limit),
+            "next_offset": offset + limit,
         },
     }
     return await _render_template("admin/audit_logs.html", request, current_user, extra=extra)
+
+
+def _build_audit_diff_rows(previous: Any, current: Any) -> list[dict[str, Any]]:
+    """Convert previous/new JSON snapshots into a per-field table for the UI.
+
+    Returns a list of ``{"field", "previous", "current", "changed"}`` entries
+    sorted by field name. The diff helper already filtered to changed fields
+    when callers used ``audit.record``, but we still flag rows so legacy
+    entries (which stored full snapshots) render with a visual hint.
+    """
+
+    if isinstance(previous, str):
+        try:
+            previous = json.loads(previous)
+        except (TypeError, ValueError):
+            previous = {"value": previous}
+    if isinstance(current, str):
+        try:
+            current = json.loads(current)
+        except (TypeError, ValueError):
+            current = {"value": current}
+
+    if not isinstance(previous, dict) and not isinstance(current, dict):
+        if previous is None and current is None:
+            return []
+        return [
+            {
+                "field": "value",
+                "previous": previous,
+                "current": current,
+                "changed": previous != current,
+            }
+        ]
+
+    keys: set[str] = set()
+    if isinstance(previous, dict):
+        keys.update(str(k) for k in previous.keys())
+    if isinstance(current, dict):
+        keys.update(str(k) for k in current.keys())
+
+    rows: list[dict[str, Any]] = []
+    for key in sorted(keys):
+        prev_value = previous.get(key) if isinstance(previous, dict) else None
+        curr_value = current.get(key) if isinstance(current, dict) else None
+        rows.append(
+            {
+                "field": key,
+                "previous": prev_value,
+                "current": curr_value,
+                "changed": prev_value != curr_value,
+            }
+        )
+    return rows
 
 
 @app.get("/admin/change-log", response_class=HTMLResponse)
@@ -14409,6 +14675,18 @@ async def admin_create_shop_package(
         name=cleaned_name,
         created_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record_create(
+        action="shop.package.create",
+        request=request,
+        entity_type="shop.package",
+        entity_id=int(package_id) if package_id else None,
+        after={
+            "id": package_id,
+            "sku": cleaned_sku,
+            "name": cleaned_name,
+            "description": cleaned_description,
+        },
+    )
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -14429,6 +14707,10 @@ async def admin_update_shop_package(
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+
+    existing_package = await shop_repo.get_package(package_id, include_archived=True)
+    if not existing_package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
 
     cleaned_name = name.strip()
     cleaned_sku = sku.strip()
@@ -14465,6 +14747,24 @@ async def admin_update_shop_package(
         archived=archived_flag,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.update",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        before={
+            "sku": existing_package.get("sku"),
+            "name": existing_package.get("name"),
+            "description": existing_package.get("description"),
+            "archived": bool(existing_package.get("archived")),
+        },
+        after={
+            "sku": cleaned_sku,
+            "name": cleaned_name,
+            "description": cleaned_description,
+            "archived": archived_flag,
+        },
+    )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14498,6 +14798,14 @@ async def admin_archive_shop_package(
         package_id=package_id,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.archive" if archived_flag else "shop.package.unarchive",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        before={"archived": bool(package.get("archived"))},
+        after={"archived": archived_flag},
+    )
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -14524,6 +14832,13 @@ async def admin_delete_shop_package(request: Request, package_id: int):
         "Shop package deleted",
         package_id=package_id,
         deleted_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.package.delete",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        before=package,
     )
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -14570,6 +14885,13 @@ async def admin_add_package_item(
         quantity=quantity_value,
         added_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.item.add",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={"product_id": product_identifier, "quantity": quantity_value},
+    )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14612,6 +14934,13 @@ async def admin_update_package_item(
         product_id=product_id,
         quantity=quantity_value,
         updated_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.package.item.update",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={"product_id": product_id, "quantity": quantity_value},
     )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14677,6 +15006,17 @@ async def admin_add_package_item_alternate(
         priority=priority_value,
         added_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.item.alternate.add",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={
+            "product_id": primary_id,
+            "alternate_product_id": alternate_id,
+            "priority": priority_value,
+        },
+    )
 
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14715,6 +15055,16 @@ async def admin_remove_package_item_alternate(
         alternate_product_id=alternate_product_id,
         removed_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.package.item.alternate.remove",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={
+            "product_id": product_id,
+            "alternate_product_id": alternate_product_id,
+        },
+    )
 
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14744,6 +15094,13 @@ async def admin_remove_package_item(
         package_id=package_id,
         product_id=product_id,
         removed_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.package.item.remove",
+        request=request,
+        entity_type="shop.package",
+        entity_id=package_id,
+        metadata={"product_id": product_id},
     )
     return RedirectResponse(
         url=f"/admin/shop/packages/{package_id}",
@@ -14867,6 +15224,11 @@ async def admin_sync_optional_accessories(request: Request):
         return redirect
 
     await shop_repo.sync_pending_optional_accessories()
+    await audit_service.record(
+        action="shop.optional_accessory.sync",
+        request=request,
+        entity_type="shop.optional_accessory",
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14898,6 +15260,13 @@ async def admin_import_optional_accessory(
     if imported:
         await shop_repo.dismiss_pending_optional_accessory(accessory_id)
 
+    await audit_service.record(
+        action="shop.optional_accessory.import",
+        request=request,
+        entity_type="shop.optional_accessory",
+        entity_id=accessory_id,
+        metadata={"vendor_sku": accessory["sku"], "imported": bool(imported)},
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14919,6 +15288,12 @@ async def admin_dismiss_optional_accessory(
         return redirect
 
     await shop_repo.dismiss_pending_optional_accessory(accessory_id)
+    await audit_service.record(
+        action="shop.optional_accessory.dismiss",
+        request=request,
+        entity_type="shop.optional_accessory",
+        entity_id=accessory_id,
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14948,6 +15323,12 @@ async def admin_bulk_dismiss_optional_accessories(request: Request):
 
     if ids:
         await shop_repo.bulk_dismiss_pending_optional_accessories(ids)
+    await audit_service.record(
+        action="shop.optional_accessory.bulk_dismiss",
+        request=request,
+        entity_type="shop.optional_accessory",
+        metadata={"accessory_ids": ids, "count": len(ids)},
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -14969,6 +15350,12 @@ async def admin_restore_optional_accessory(
         return redirect
 
     await shop_repo.restore_dismissed_optional_accessory(accessory_id)
+    await audit_service.record(
+        action="shop.optional_accessory.restore",
+        request=request,
+        entity_type="shop.optional_accessory",
+        entity_id=accessory_id,
+    )
     return RedirectResponse(
         url="/admin/shop/optional-accessories?show=dismissed",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -15011,6 +15398,7 @@ async def admin_shop_product_create_page(request: Request):
         "categories": categories,
         "products": products,
         "subscription_categories": subscription_categories,
+        "product_restrictions": [],
     }
     return await _render_template(
         "admin/shop_product_create.html", request, current_user, extra=extra
@@ -15060,6 +15448,13 @@ async def admin_create_shop_category(
         parent_id=parsed_parent_id,
         created_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record_create(
+        action="shop.category.create",
+        request=request,
+        entity_type="shop.category",
+        entity_id=int(category_id) if category_id else None,
+        after={"id": category_id, "name": cleaned_name, "parent_id": parsed_parent_id},
+    )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15086,6 +15481,13 @@ async def admin_delete_shop_category(request: Request, category_id: int):
         "Shop category deleted",
         category_id=category_id,
         deleted_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.category.delete",
+        request=request,
+        entity_type="shop.category",
+        entity_id=category_id,
+        before=category,
     )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15183,6 +15585,14 @@ async def admin_update_shop_category(
         parent_id=parsed_parent_id,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.category.update",
+        request=request,
+        entity_type="shop.category",
+        entity_id=category_id,
+        before={"name": category.get("name"), "parent_id": category.get("parent_id")},
+        after={"name": cleaned_name, "parent_id": parsed_parent_id},
+    )
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15237,6 +15647,12 @@ async def admin_create_subscription_category(
         description=cleaned_description,
         created_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record_create(
+        action="shop.subscription_category.create",
+        request=request,
+        entity_type="shop.subscription_category",
+        after={"name": cleaned_name, "description": cleaned_description},
+    )
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15261,6 +15677,13 @@ async def admin_delete_subscription_category(request: Request, category_id: int)
         "Subscription category deleted",
         category_id=category_id,
         deleted_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.subscription_category.delete",
+        request=request,
+        entity_type="shop.subscription_category",
+        entity_id=category_id,
+        before=category,
     )
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15311,6 +15734,14 @@ async def admin_update_subscription_category(
         description=cleaned_description,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.subscription_category.update",
+        request=request,
+        entity_type="shop.subscription_category",
+        entity_id=category_id,
+        before={"name": category.get("name"), "description": category.get("description")},
+        after={"name": cleaned_name, "description": cleaned_description},
+    )
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15339,6 +15770,12 @@ async def admin_import_shop_product(
 
     await products_service.import_product_by_vendor_sku(cleaned_vendor_sku)
 
+    await audit_service.record(
+        action="shop.product.import",
+        request=request,
+        entity_type="shop.product",
+        metadata={"vendor_sku": cleaned_vendor_sku},
+    )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -15524,6 +15961,14 @@ async def admin_create_shop_product(
         sku=product["sku"],
         vendor_sku=product["vendor_sku"],
         created_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record_create(
+        action="shop.product.create",
+        request=request,
+        entity_type="shop.product",
+        entity_id=int(product["id"]),
+        after=product,
+        sensitive_extra_keys=("buy_price",),
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15854,6 +16299,15 @@ async def admin_update_shop_product(
         product_id=product_id,
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.product.update",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before=product,
+        after=updated,
+        sensitive_extra_keys=("buy_price",),
+    )
     redirect_params: dict[str, str] = {}
     try:
         # request.query_params accesses scope["query_string"] which may be absent
@@ -15898,6 +16352,14 @@ async def _handle_shop_product_archive(
         "Shop product archived" if archived else "Shop product unarchived",
         product_id=product_id,
         updated_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.product.archive" if archived else "shop.product.unarchive",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before={"archived": bool(product.get("archived"))},
+        after={"archived": archived},
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -15964,6 +16426,14 @@ async def admin_update_shop_product_visibility(
         excluded_companies=sorted(excluded_ids),
         updated_by=current_user["id"] if current_user else None,
     )
+    await audit_service.record(
+        action="shop.product.visibility_change",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before={"excluded_company_ids": sorted(int(cid) for cid in (product.get("excluded_company_ids") or []))},
+        after={"excluded_company_ids": sorted(excluded_ids)},
+    )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -16007,6 +16477,14 @@ async def admin_delete_shop_product(request: Request, product_id: int):
         "Shop product deleted",
         product_id=product_id,
         deleted_by=current_user.get("id") if current_user else None,
+    )
+    await audit_service.record_delete(
+        action="shop.product.delete",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before=product,
+        sensitive_extra_keys=("buy_price",),
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 

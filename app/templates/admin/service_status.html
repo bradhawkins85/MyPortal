@@ -43,14 +43,14 @@
       <span class="text-muted">{{ service_status_entries|length }} entries</span>
     </div>
     <div class="table-wrapper">
-      <table class="table" id="service-status-table" data-table>
+      <table class="table" id="service-status-table" data-table data-table-id="service-status">
         <thead>
           <tr>
-            <th scope="col" data-sort="string">Service</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" data-sort="string">Visibility</th>
-            <th scope="col" data-sort="string">Updated</th>
-            <th scope="col" class="table__actions">Actions</th>
+            <th scope="col" data-sort="string" data-column-key="service">Service</th>
+            <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="string" data-column-key="visibility">Visibility</th>
+            <th scope="col" data-sort="string" data-column-key="updated">Updated</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -59,16 +59,16 @@
             {% set status_label = status_meta.label if status_meta else service.status|title %}
             {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
             <tr>
-              <td data-label="Service">
+              <td data-label="Service" data-column-key="service">
                 <div class="service-status-admin__name">{{ service.name }}</div>
                 {% if service.description %}
                   <div class="table__meta">{{ service.description }}</div>
                 {% endif %}
               </td>
-              <td data-label="Status">
+              <td data-label="Status" data-column-key="status">
                 <span class="status {{ variant }}">{{ status_label }}</span>
               </td>
-              <td data-label="Visibility">
+              <td data-label="Visibility" data-column-key="visibility">
                 {% if service.company_ids %}
                   <ul class="service-status-admin__companies">
                     {% for company_id in service.company_ids %}
@@ -79,14 +79,14 @@
                   <span class="text-muted">All companies</span>
                 {% endif %}
               </td>
-              <td data-label="Updated">
+              <td data-label="Updated" data-column-key="updated">
                 {% if service.updated_at %}
                   {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}
                 {% else %}
                   —
                 {% endif %}
               </td>
-              <td class="table__actions">
+              <td class="table__actions" data-column-key="actions">
                 <div class="action-menu">
                   <a class="button button--ghost button--small" href="/admin/service-status?serviceId={{ service.id }}">Edit</a>
                   <form action="/admin/service-status/{{ service.id }}/delete" method="post" class="inline-form" data-confirm="Delete this service?">

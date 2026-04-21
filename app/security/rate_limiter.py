@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.logging import log_warning
+from app.security.client_ip import get_client_ip
 from app.services import rate_limit_store
 
 
@@ -103,14 +104,8 @@ class EndpointRateLimiter:
 
     @staticmethod
     def _default_key_func(request: Request) -> str:
-        """Extract client IP from request."""
-        client_ip = request.headers.get("x-forwarded-for")
-        if client_ip:
-            client_ip = client_ip.split(",")[0].strip()
-        else:
-            client = request.client
-            client_ip = client.host if client else "anonymous"
-        return client_ip or "anonymous"
+        """Extract client IP from request, honouring TRUSTED_PROXIES."""
+        return get_client_ip(request, default="anonymous") or "anonymous"
 
     async def check(self, request: Request) -> tuple[bool, float | None, str | None]:
         """Check if request is allowed.
@@ -149,12 +144,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(prefix) for prefix in self.exempt_paths):
             return await call_next(request)
 
-        client_ip = request.headers.get("x-forwarded-for")
-        if client_ip:
-            client_ip = client_ip.split(",")[0].strip()
-        else:
-            client = request.client
-            client_ip = client.host if client else "anonymous"
+        client_ip = get_client_ip(request, default="anonymous")
 
         allowed, retry_after = await self.rate_limiter.check(client_ip or "anonymous")
         if not allowed:

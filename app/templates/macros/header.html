@@ -1,0 +1,134 @@
+{# Page header action macros — see docs/ui_layout_standards.md.
+
+   Render page-level actions (primary button + overflow menu) in a
+   consistent way for the {% block header_actions %} slot of base.html.
+
+   Action shape (dict):
+     {
+       "label":   "New ticket",            # required
+       "type":    "button" | "link" | "form",   # default "button"
+       "variant": "primary" | "ghost" | "danger" | None,
+       "href":    "/path",                  # for type="link"
+       "action":  "/path",                  # for type="form"
+       "method":  "post",                   # for type="form" (default "post")
+       "icon":    "<svg ...>",              # raw HTML (must be safe)
+       "confirm": "Are you sure?",          # optional confirmation prompt
+       "attrs":   {"data-x": "y", ...},     # extra attributes
+     }
+#}
+
+{% macro _render_attrs(attrs) -%}
+  {%- if attrs -%}
+    {%- for name, value in attrs.items() -%}
+      {%- if value is sameas true -%}
+        {{ ' ' }}{{ name }}
+      {%- elif value is sameas false or value is none -%}
+      {%- else -%}
+        {{ ' ' }}{{ name }}="{{ value }}"
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro _action_classes(action, default_variant='ghost') -%}
+  button
+  {%- set variant = action.get('variant') or default_variant -%}
+  {%- if variant == 'primary' %} button--primary{% endif -%}
+  {%- if variant == 'ghost' %} button--ghost{% endif -%}
+  {%- if variant == 'danger' %} button--danger{% endif -%}
+  {%- if action.get('size') == 'small' %} button--small{% endif -%}
+{%- endmacro %}
+
+{% macro render_action(action, in_menu=False) -%}
+  {%- set kind = action.get('type', 'button') -%}
+  {%- set classes = _action_classes(action, 'ghost' if in_menu else 'ghost') | trim -%}
+  {%- if in_menu -%}
+    {%- set classes = 'header-menu__item' + (' header-menu__item--danger' if action.get('variant') == 'danger' else '') -%}
+  {%- endif -%}
+  {%- if kind == 'link' -%}
+    <a class="{{ classes }}" href="{{ action.get('href', '#') }}"
+       {%- if action.get('target') %} target="{{ action.target }}" rel="noopener"{% endif -%}
+       {{ _render_attrs(action.get('attrs')) -}}
+    >
+      {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
+      <span>{{ action.label }}</span>
+    </a>
+  {%- elif kind == 'form' -%}
+    <form method="{{ action.get('method', 'post') }}" action="{{ action.get('action', '#') }}"
+          class="header-menu__form"
+          {%- if action.get('confirm') %} data-confirm="{{ action.confirm }}" onsubmit="return confirm({{ action.confirm | tojson }});"{% endif -%}>
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+      <button type="submit" class="{{ classes }}"{{ _render_attrs(action.get('attrs')) }}>
+        {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
+        <span>{{ action.label }}</span>
+      </button>
+    </form>
+  {%- else -%}
+    <button type="button" class="{{ classes }}"{{ _render_attrs(action.get('attrs')) }}>
+      {%- if action.get('icon') %}<span class="header-menu__icon" aria-hidden="true">{{ action.icon | safe }}</span>{% endif -%}
+      <span>{{ action.label }}</span>
+    </button>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Render a list of actions as: optional primary button + "Actions ▾" overflow menu.
+
+   - The first action with variant="primary" is promoted next to the menu.
+   - All other actions land in the dropdown.
+   - With a single action and no primary, it renders inline (no menu).
+#}
+{% macro page_header_actions(actions, menu_label='Actions', menu_id=None) -%}
+  {%- set actions = actions or [] -%}
+  {%- set primary = namespace(action=None) -%}
+  {%- set menu_actions = [] -%}
+  {%- for action in actions -%}
+    {%- if primary.action is none and action.get('variant') == 'primary' -%}
+      {%- set primary.action = action -%}
+    {%- else -%}
+      {%- set _ = menu_actions.append(action) -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- set mid = menu_id or ('page-actions-menu-' ~ (range(1, 999999) | random)) -%}
+
+  {%- if menu_actions | length == 0 and primary.action is none -%}
+    {# no actions, render nothing #}
+  {%- elif menu_actions | length == 0 -%}
+    {{ render_action(primary.action) }}
+  {%- elif menu_actions | length == 1 and primary.action is none -%}
+    {{ render_action(menu_actions[0]) }}
+  {%- else -%}
+    <div class="header-actions">
+      {%- if primary.action -%}
+        {{ render_action(primary.action) }}
+      {%- endif -%}
+      {{ page_header_overflow(mid, menu_label, menu_actions) }}
+    </div>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Standalone overflow menu — useful when callers want to bring their own
+   primary button and only need the dropdown. #}
+{% macro page_header_overflow(menu_id, label='Actions', actions=[]) -%}
+  <div class="header-menu" data-header-menu>
+    <button type="button"
+            class="button button--ghost header-menu__button"
+            data-header-menu-toggle
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="{{ menu_id }}">
+      <span>{{ label }}</span>
+      <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+        <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+      </svg>
+    </button>
+    <div id="{{ menu_id }}"
+         class="header-menu__panel"
+         role="menu"
+         data-header-menu-panel
+         hidden>
+      {%- for action in actions -%}
+        {{ render_action(action, in_menu=True) }}
+      {%- endfor -%}
+    </div>
+  </div>
+{%- endmacro %}

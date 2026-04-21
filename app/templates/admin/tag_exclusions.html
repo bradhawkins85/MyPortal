@@ -1,19 +1,11 @@
 {% extends "base.html" %}
 
-{% block header_title %}
-  <div class="header-title-menu">
-    <span class="header-title-menu__label">AI Tag Exclusions</span>
-  </div>
-{% endblock %}
+{% block header_title %}<span class="header__title-text">AI Tag Exclusions</span>{% endblock %}
 
 {% block content %}
   <div class="admin-grid">
     <section class="card card--panel">
       <header class="card__header">
-        <div>
-          <h2 class="card__title">Tag Exclusions</h2>
-          <p class="card__subtitle">Manage tags that should be excluded from AI-generated tags for tickets and knowledge base articles.</p>
-        </div>
         <input
           type="search"
           class="form-input"
@@ -23,12 +15,12 @@
         />
       </header>
       <div class="table-wrapper">
-        <table class="table" id="exclusions-table" data-table>
+        <table class="table" id="exclusions-table" data-table data-table-id="tag-exclusions">
           <thead>
             <tr>
-              <th scope="col" data-sort="string">Tag Slug</th>
-              <th scope="col" data-sort="date">Created At</th>
-              <th scope="col" class="table__actions">Actions</th>
+              <th scope="col" data-sort="string" data-column-key="tag_slug">Tag Slug</th>
+              <th scope="col" data-sort="date" data-column-key="created_at">Created At</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
             </tr>
           </thead>
           <tbody id="exclusions-tbody">

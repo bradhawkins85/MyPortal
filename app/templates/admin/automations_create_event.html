@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+
+{% block header_title %}Create event automation{% endblock %}
 {% block content %}
   {% set values = form_values or {} %}
   {% set trigger_select = values.get('triggerSelectValue', '') %}

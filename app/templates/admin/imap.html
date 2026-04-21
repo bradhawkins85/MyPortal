@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}IMAP mailboxes{% endblock %}
+
 {% block content %}
   {% set is_editing = editing_account is not none %}
   {% set form_action = '/admin/modules/imap/accounts' %}
@@ -112,55 +114,54 @@
 
       <div class="management__body">
         <div class="table-wrapper">
-          <table class="table" id="imap-accounts-table" data-table>
+          <table class="table" id="imap-accounts-table" data-table data-table-id="imap-accounts">
             <thead>
               <tr>
-                <th scope="col" data-sort="number">Priority</th>
-                <th scope="col" data-sort="string">Name</th>
-                <th scope="col" data-sort="string">Host</th>
-                <th scope="col" data-sort="string">Folder</th>
-                <th scope="col" data-sort="string">Schedule</th>
-                <th scope="col" data-sort="string">Company</th>
-                <th scope="col" data-sort="string">Last synced</th>
-                <th scope="col" data-sort="string">Status</th>
-                <th scope="col" class="table__actions">Actions</th>
+                <th scope="col" data-sort="number" data-column-key="priority">Priority</th>
+                <th scope="col" data-sort="string" data-column-key="name">Name</th>
+                <th scope="col" data-sort="string" data-column-key="host">Host</th>
+                <th scope="col" data-sort="string" data-column-key="folder">Folder</th>
+                <th scope="col" data-sort="string" data-column-key="schedule">Schedule</th>
+                <th scope="col" data-sort="string" data-column-key="company">Company</th>
+                <th scope="col" data-sort="string" data-column-key="last_synced">Last synced</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
               </tr>
             </thead>
             <tbody>
               {% if accounts %}
                 {% for account in accounts %}
                   <tr>
-                    <td data-value="{{ account.priority }}">
+                    <td data-value="{{ account.priority }}" data-column-key="priority">
                       <code>{{ account.priority }}</code>
                     </td>
-                    <td data-value="{{ account.name|lower }}">
+                    <td data-value="{{ account.name|lower }}" data-column-key="name">
                       <strong>{{ account.name }}</strong>
                       <div class="table__meta">{{ account.username }}</div>
                       {% if account.filter_query %}
                         <div class="table__meta">Filter active</div>
                       {% endif %}
                     </td>
-                    <td>{{ account.host }}:{{ account.port }}</td>
-                    <td>{{ account.folder }}</td>
-                    <td><code>{{ account.schedule_cron }}</code></td>
-                    <td>
+                    <td data-column-key="host">{{ account.host }}:{{ account.port }}</td>
+                    <td data-column-key="folder">{{ account.folder }}</td>
+                    <td data-column-key="schedule"><code>{{ account.schedule_cron }}</code></td>
+                    <td data-column-key="company">
                       {% set company = companies | selectattr('id', 'equalto', account.company_id) | first %}
                       {{ company.name if company else '—' }}
                     </td>
-                    <td>
+                    <td data-column-key="last_synced">
                       {% if account.last_synced_at %}
                         {{ account.last_synced_at.isoformat() }}
                       {% else %}
                         Never
                       {% endif %}
                     </td>
-                    <td>
+                    <td data-column-key="status">
                       <span class="badge {{ 'badge--success' if account.active else 'badge--secondary' }}">
                         {{ 'Active' if account.active else 'Paused' }}
                       </span>
                     </td>
-                    <td class="table__actions">
-                      <div class="button-group">
+                    <td class="table__actions" data-column-key="actions">
                         <form action="/admin/modules/imap/accounts/{{ account.id }}/clone" method="post" class="inline-form">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />

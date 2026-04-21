@@ -11,7 +11,11 @@ from app.schemas.users import UserResponse
 
 class RegistrationRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    # Unified password policy: minimum 12 characters (matches change/reset),
+    # with a generous maximum of 128 to prevent DoS on the bcrypt pre-hash and
+    # to give a sensible upper UX bound. The code hashes with SHA-256 before
+    # bcrypt so the 72-byte bcrypt limit is not a correctness issue.
+    password: str = Field(min_length=12, max_length=128)
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     mobile_phone: Optional[str] = None
@@ -88,7 +92,7 @@ class PasswordResetRequest(BaseModel):
 
 class PasswordResetConfirm(BaseModel):
     token: str
-    password: str = Field(min_length=12)
+    password: str = Field(min_length=12, max_length=128)
 
 
 class PasswordResetStatus(BaseModel):
@@ -96,9 +100,10 @@ class PasswordResetStatus(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: str = Field(min_length=1)
+    current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(
         min_length=12,
+        max_length=128,
         description="New password. Must differ from the current password and contain at least 12 characters.",
     )
 

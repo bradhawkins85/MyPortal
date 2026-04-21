@@ -18,6 +18,7 @@ class AuditLogResponse(BaseModel):
     metadata: Optional[Any] = None
     api_key: Optional[str] = None
     ip_address: Optional[str] = None
+    request_id: Optional[str] = None
     created_at: datetime
 
     class Config:

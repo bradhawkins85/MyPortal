@@ -12,7 +12,7 @@ return meaningful results.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.logging import log_error, log_info
@@ -200,6 +200,57 @@ _REMEDIATION: dict[str, str] = {
     "intune_macos_gatekeeper": (
         "Require Gatekeeper in the macOS compliance policy: "
         "Intune → Compliance policies → macOS policy → System Security → Gatekeeper."
+    ),
+    # M365 monitoring best practices
+    "bp_monitor_sign_in_logs": (
+        "Ensure the Microsoft Graph sign-in logs API is accessible: "
+        "grant the application AuditLog.Read.All permission and verify the tenant "
+        "has an Azure AD Premium P1 or P2 license to view sign-in activity."
+    ),
+    "bp_monitor_risky_users": (
+        "Investigate and remediate risky users in Microsoft Entra ID Protection: "
+        "Entra portal → Protection → Identity Protection → Risky users → "
+        "confirm compromise or dismiss false positives."
+    ),
+    "bp_monitor_sign_in_risk_policy": (
+        "Enable the sign-in risk policy in Microsoft Entra ID Protection: "
+        "Entra portal → Protection → Identity Protection → Sign-in risk policy → "
+        "assign to All users, set risk level to Medium and above, and require MFA."
+    ),
+    "bp_monitor_user_risk_policy": (
+        "Enable the user risk policy in Microsoft Entra ID Protection: "
+        "Entra portal → Protection → Identity Protection → User risk policy → "
+        "assign to All users, set risk level to High, and require secure password change."
+    ),
+    "bp_monitor_named_locations": (
+        "Define named locations for Conditional Access: "
+        "Entra portal → Protection → Conditional Access → Named locations → "
+        "add trusted IP ranges or country lists for use in CA policies."
+    ),
+    "bp_monitor_ca_report_only_policies": (
+        "Move security-critical Conditional Access policies out of report-only mode: "
+        "Entra portal → Protection → Conditional Access → policy → set state to 'On' "
+        "after reviewing impact in the report-only insights."
+    ),
+    "bp_monitor_app_credential_expiry": (
+        "Rotate Azure AD application credentials before they expire: "
+        "Entra portal → App registrations → application → Certificates & secrets → "
+        "create a new secret/certificate and update dependent services before the existing one expires."
+    ),
+    "bp_monitor_cloud_admin_accounts": (
+        "Ensure Global Administrator accounts are cloud-only (not synced from on-premises AD): "
+        "create dedicated cloud admin accounts in Entra ID and remove the Global Administrator "
+        "role from any synced accounts."
+    ),
+    "bp_monitor_secure_score": (
+        "Improve the Microsoft Secure Score: "
+        "Microsoft 365 Defender portal → Secure Score → review and implement "
+        "recommended improvement actions to raise the score above 50% of the maximum."
+    ),
+    "bp_monitor_mfa_registration_policy": (
+        "Configure the authentication methods policy: "
+        "Entra portal → Protection → Authentication methods → Policies → enable "
+        "modern methods such as Microsoft Authenticator and FIDO2 security keys."
     ),
 }
 
@@ -481,6 +532,333 @@ async def _check_admin_mfa(token: str) -> dict[str, Any]:
         return _fail(check_id, check_name, "No enabled Conditional Access policy found that enforces MFA for administrative roles.")
     except M365Error as exc:
         return _unknown(check_id, check_name, f"Unable to retrieve Conditional Access policies: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# M365 Monitoring best-practice checks
+# ---------------------------------------------------------------------------
+#
+# These checks back the "Monitoring" entries in the M365 Best Practices
+# catalog (see ``app/services/m365_best_practices.py``).  Each function
+# returns a result dict whose ``check_id`` is the ``bp_monitor_*`` identifier
+# used by the Best Practices service.
+
+async def _check_monitor_sign_in_logs(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_sign_in_logs"
+    check_name = "Sign-in audit logs accessible"
+    try:
+        await _graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/auditLogs/signIns?$top=1",
+        )
+        return _pass(check_id, check_name, "Sign-in logs endpoint is accessible.")
+    except M365Error as exc:
+        err = str(exc)
+        if "403" in err or "Forbidden" in err or "Authorization" in err:
+            return _fail(
+                check_id,
+                check_name,
+                "Sign-in logs endpoint returned 403 – AuditLog.Read.All may be missing "
+                "or the tenant lacks an Azure AD Premium license.",
+            )
+        return _unknown(check_id, check_name, f"Unable to query sign-in logs: {exc}")
+
+
+async def _check_monitor_risky_users(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_risky_users"
+    check_name = "No active high-risk users in Identity Protection"
+    try:
+        users = await _graph_get_all(
+            token,
+            "https://graph.microsoft.com/v1.0/identityProtection/riskyUsers"
+            "?$filter=riskState eq 'atRisk'&$select=id,userPrincipalName,riskLevel",
+        )
+        if not users:
+            return _pass(check_id, check_name, "No users currently in the 'atRisk' state.")
+        sample = ", ".join(
+            (u.get("userPrincipalName") or u.get("id") or "?") for u in users[:5]
+        )
+        more = "" if len(users) <= 5 else f" (and {len(users) - 5} more)"
+        return _fail(
+            check_id,
+            check_name,
+            f"{len(users)} risky user(s) need investigation: {sample}{more}.",
+        )
+    except M365Error as exc:
+        return _unknown(check_id, check_name, f"Unable to query risky users: {exc}")
+
+
+async def _check_monitor_sign_in_risk_policy(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_sign_in_risk_policy"
+    check_name = "Sign-in risk policy enabled"
+    try:
+        data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/beta/identityProtection/riskPolicies/signInRiskPolicy",
+        )
+        is_enabled = bool(data.get("isEnabled"))
+        risk_level = str(data.get("riskLevel") or "").lower()
+        if is_enabled and risk_level and risk_level != "none":
+            return _pass(
+                check_id,
+                check_name,
+                f"Sign-in risk policy is enabled at risk level '{risk_level}'.",
+            )
+        if not is_enabled:
+            return _fail(check_id, check_name, "Sign-in risk policy is disabled.")
+        return _fail(
+            check_id,
+            check_name,
+            f"Sign-in risk policy is enabled but the risk level is '{risk_level or 'none'}'.",
+        )
+    except M365Error as exc:
+        return _unknown(check_id, check_name, f"Unable to retrieve sign-in risk policy: {exc}")
+
+
+async def _check_monitor_user_risk_policy(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_user_risk_policy"
+    check_name = "User risk policy enabled"
+    try:
+        data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/beta/identityProtection/riskPolicies/userRiskPolicy",
+        )
+        if bool(data.get("isEnabled")):
+            return _pass(check_id, check_name, "User risk policy is enabled.")
+        return _fail(check_id, check_name, "User risk policy is disabled.")
+    except M365Error as exc:
+        return _unknown(check_id, check_name, f"Unable to retrieve user risk policy: {exc}")
+
+
+async def _check_monitor_named_locations(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_named_locations"
+    check_name = "Named locations configured for Conditional Access"
+    try:
+        locations = await _graph_get_all(
+            token,
+            "https://graph.microsoft.com/v1.0/identity/conditionalAccess/namedLocations"
+            "?$select=id,displayName",
+        )
+        if locations:
+            return _pass(
+                check_id,
+                check_name,
+                f"{len(locations)} named location(s) configured.",
+            )
+        return _fail(check_id, check_name, "No named locations are configured.")
+    except M365Error as exc:
+        return _unknown(check_id, check_name, f"Unable to retrieve named locations: {exc}")
+
+
+async def _check_monitor_ca_report_only_policies(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_ca_report_only_policies"
+    check_name = "No core security CA policies stuck in report-only"
+    try:
+        policies = await _graph_get_all(
+            token,
+            "https://graph.microsoft.com/v1.0/policies/conditionalAccessPolicies"
+            "?$select=id,displayName,state,conditions,grantControls",
+        )
+        report_only_security: list[str] = []
+        for policy in policies:
+            if policy.get("state") != "enabledForReportingButNotEnforced":
+                continue
+            grant = policy.get("grantControls") or {}
+            built_in = set(grant.get("builtInControls") or [])
+            conditions = policy.get("conditions") or {}
+            client_apps = set(conditions.get("clientAppTypes") or [])
+            is_mfa = "mfa" in built_in
+            blocks_legacy = "block" in built_in and {"exchangeActiveSync", "other"}.issubset(client_apps)
+            if is_mfa or blocks_legacy:
+                report_only_security.append(policy.get("displayName") or policy.get("id") or "?")
+        if not report_only_security:
+            return _pass(
+                check_id,
+                check_name,
+                "No security-critical Conditional Access policies are in report-only mode.",
+            )
+        return _fail(
+            check_id,
+            check_name,
+            "Security-critical CA policies in report-only mode: "
+            + ", ".join(report_only_security)
+            + ".",
+        )
+    except M365Error as exc:
+        return _unknown(
+            check_id,
+            check_name,
+            f"Unable to retrieve Conditional Access policies: {exc}",
+        )
+
+
+async def _check_monitor_app_credential_expiry(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_app_credential_expiry"
+    check_name = "No app registration credentials expiring within 30 days"
+    try:
+        apps = await _graph_get_all(
+            token,
+            "https://graph.microsoft.com/v1.0/applications"
+            "?$select=id,displayName,passwordCredentials,keyCredentials",
+        )
+    except M365Error as exc:
+        return _unknown(check_id, check_name, f"Unable to retrieve applications: {exc}")
+
+    now = datetime.now(timezone.utc)
+    threshold = now + timedelta(days=30)
+    expiring: list[str] = []
+
+    for app in apps:
+        name = app.get("displayName") or app.get("id") or "?"
+        for cred in (app.get("passwordCredentials") or []) + (app.get("keyCredentials") or []):
+            end_raw = cred.get("endDateTime")
+            if not end_raw:
+                continue
+            try:
+                end_dt = datetime.fromisoformat(str(end_raw).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if now <= end_dt <= threshold:
+                expiring.append(f"{name} (expires {end_dt.date().isoformat()})")
+                break
+
+    if not expiring:
+        return _pass(
+            check_id,
+            check_name,
+            "No application credentials expire within the next 30 days.",
+        )
+    sample = "; ".join(expiring[:5])
+    more = "" if len(expiring) <= 5 else f" (and {len(expiring) - 5} more)"
+    return _fail(
+        check_id,
+        check_name,
+        f"{len(expiring)} application(s) have credentials expiring within 30 days: {sample}{more}.",
+    )
+
+
+async def _check_monitor_cloud_admin_accounts(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_cloud_admin_accounts"
+    check_name = "Privileged accounts are cloud-only (not hybrid-synced)"
+    try:
+        roles_data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/directoryRoles"
+            "?$filter=displayName eq 'Global Administrator'&$select=id,displayName",
+        )
+        roles = roles_data.get("value", [])
+        if not roles:
+            return _unknown(
+                check_id,
+                check_name,
+                "Global Administrator directory role not found.",
+            )
+        role_id = roles[0]["id"]
+        members = await _graph_get_all(
+            token,
+            f"https://graph.microsoft.com/v1.0/directoryRoles/{role_id}/members"
+            "?$select=id,userPrincipalName,onPremisesSyncEnabled",
+        )
+        synced: list[str] = []
+        for member in members:
+            if member.get("onPremisesSyncEnabled"):
+                synced.append(
+                    member.get("userPrincipalName") or member.get("id") or "?"
+                )
+        if not synced:
+            return _pass(
+                check_id,
+                check_name,
+                f"All {len(members)} Global Administrator account(s) are cloud-only.",
+            )
+        return _fail(
+            check_id,
+            check_name,
+            f"{len(synced)} Global Administrator account(s) are synced from on-premises AD: "
+            + ", ".join(synced)
+            + ".",
+        )
+    except M365Error as exc:
+        return _unknown(
+            check_id,
+            check_name,
+            f"Unable to retrieve Global Administrator role members: {exc}",
+        )
+
+
+async def _check_monitor_secure_score(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_secure_score"
+    check_name = "Microsoft Secure Score is at or above 50%"
+    try:
+        data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/security/secureScores?$top=1",
+        )
+        scores = data.get("value", [])
+        if not scores:
+            return _unknown(
+                check_id,
+                check_name,
+                "No Microsoft Secure Score data available for this tenant.",
+            )
+        latest = scores[0]
+        try:
+            current = float(latest.get("currentScore") or 0)
+            maximum = float(latest.get("maxScore") or 0)
+        except (TypeError, ValueError):
+            return _unknown(check_id, check_name, "Secure Score values are not numeric.")
+        if maximum <= 0:
+            return _unknown(check_id, check_name, "Secure Score maxScore is zero or missing.")
+        ratio = current / maximum
+        pct = round(ratio * 100, 1)
+        if ratio >= 0.50:
+            return _pass(
+                check_id,
+                check_name,
+                f"Secure Score is {current:g}/{maximum:g} ({pct}% of maximum).",
+            )
+        return _fail(
+            check_id,
+            check_name,
+            f"Secure Score is {current:g}/{maximum:g} ({pct}% of maximum) – below the 50% threshold.",
+        )
+    except M365Error as exc:
+        return _unknown(check_id, check_name, f"Unable to retrieve Secure Score: {exc}")
+
+
+async def _check_monitor_mfa_registration_policy(token: str) -> dict[str, Any]:
+    check_id = "bp_monitor_mfa_registration_policy"
+    check_name = "Authentication methods policy is configured"
+    try:
+        data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy",
+        )
+        configurations = data.get("authenticationMethodConfigurations") or []
+        enabled_methods: list[str] = []
+        for cfg in configurations:
+            state = str(cfg.get("state") or "").lower()
+            if state == "enabled":
+                enabled_methods.append(str(cfg.get("id") or "?"))
+        if enabled_methods:
+            return _pass(
+                check_id,
+                check_name,
+                "Enabled authentication methods: " + ", ".join(enabled_methods) + ".",
+            )
+        return _fail(
+            check_id,
+            check_name,
+            "No authentication methods are enabled in the authentication methods policy.",
+        )
+    except M365Error as exc:
+        return _unknown(
+            check_id,
+            check_name,
+            f"Unable to retrieve authentication methods policy: {exc}",
+        )
 
 
 async def run_m365_benchmarks(token: str) -> list[dict[str, Any]]:

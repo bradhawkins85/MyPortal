@@ -59,12 +59,6 @@
 {% block content %}
 <div class="knowledge-base">
   <section class="card card--panel knowledge-base__list">
-    <header class="card__header">
-      <div>
-        <h2 class="card__title">Knowledge base articles</h2>
-        <p class="card__subtitle">Browse curated documentation with scoped visibility.</p>
-      </div>
-    </header>
     <div class="knowledge-base__filters">
       <label for="knowledge-base-filter" class="visually-hidden">Filter articles</label>
       <input
@@ -78,35 +72,35 @@
     </div>
     {% if kb_articles %}
     <div class="table-wrapper table-wrapper--short">
-      <table class="table table--compact" id="knowledge-base-table" data-table>
+      <table class="table table--compact" id="knowledge-base-table" data-table data-table-id="knowledge-base">
         <thead>
           <tr>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Title</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Scope</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
-            <th scope="col" data-sort="date" data-mobile-priority="essential">Updated</th>
+            <th scope="col" data-column-key="title" data-sort="string" data-mobile-priority="essential">Title</th>
+            <th scope="col" data-column-key="scope" data-sort="string" data-mobile-priority="essential">Scope</th>
+            <th scope="col" data-column-key="status" data-sort="string" data-mobile-priority="essential">Status</th>
+            <th scope="col" data-column-key="updated" data-sort="date" data-mobile-priority="essential">Updated</th>
           </tr>
         </thead>
         <tbody>
           {% for article in kb_articles %}
           <tr data-article-row data-article-slug="{{ article.slug }}">
-            <td data-label="Title">
+            <td data-column-key="title" data-label="Title">
               <a href="/knowledge-base/articles/{{ article.slug }}" class="knowledge-base__link">{{ article.title }}</a>
               {% if article.summary %}
                 <p class="knowledge-base__summary">{{ article.summary }}</p>
               {% endif %}
             </td>
-            <td data-label="Scope" data-value="{{ article.permission_scope }}">
+            <td data-column-key="scope" data-label="Scope" data-value="{{ article.permission_scope }}">
               <span class="tag">{{ scope_labels.get(article.permission_scope, article.permission_scope|title) }}</span>
             </td>
-            <td data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}">
+            <td data-column-key="status" data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}">
               {% if article.is_published %}
                 <span class="status status--success">Published</span>
               {% else %}
                 <span class="status status--warning">Draft</span>
               {% endif %}
             </td>
-            <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}">
+            <td data-column-key="updated" data-label="Updated" data-value="{{ article.updated_at_iso or '' }}">
               <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>
             </td>
           </tr>
@@ -115,7 +109,10 @@
       </table>
     </div>
     {% else %}
-    <p class="knowledge-base__empty">No knowledge base articles are available yet.</p>
+    <div class="empty-state">
+      <h3 class="empty-state__title">No articles yet</h3>
+      <p class="empty-state__subtitle">No knowledge base articles are available yet.</p>
+    </div>
     {% endif %}
   </section>
 </div>
