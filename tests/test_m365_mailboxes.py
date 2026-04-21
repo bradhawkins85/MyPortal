@@ -960,6 +960,133 @@ async def test_sync_mailboxes_has_archive_fallback_from_bytes():
     assert upserted[0]["archive_storage_used_bytes"] == 200
 
 
+@pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_archive_status_active():
+    """'Archive Status' column set to 'Active' causes hasArchive=True even when
+    'Has Archive' column is absent and archive storage is zero.
+
+    Microsoft 365 includes an 'Archive Status' column in the
+    getMailboxUsageDetail CSV export.  When its value is 'Active', the archive
+    is provisioned regardless of whether the 'Has Archive' boolean column is
+    present or whether any archive storage has been consumed yet."""
+
+    class _FakeResponse:
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
+            # CSV includes Archive Status column but no Has Archive column.
+            # Alice has Active archive, Bob has no archive.
+            csv_text = (
+                "Report Refresh Date,User Principal Name,Display Name,Is Deleted,"
+                "Storage Used (Byte),Archive Storage Used (Byte),Archive Status\n"
+                "2024-01-01,alice@example.com,Alice,false,1073741824,0,Active\n"
+                "2024-01-01,bob@example.com,Bob,false,524288000,0,\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert len(rows) == 2
+    alice = next(r for r in rows if r["userPrincipalName"] == "alice@example.com")
+    bob = next(r for r in rows if r["userPrincipalName"] == "bob@example.com")
+    # Alice has Archive Status = Active so hasArchive must be True
+    assert alice["hasArchive"] is True
+    assert alice["archiveMailboxStorageUsedInBytes"] == 0
+    # Bob has no archive status so hasArchive should be False
+    assert bob["hasArchive"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_has_archive_from_archive_status_column():
+    """has_archive is set True for both user and shared mailboxes when the report
+    contains 'Archive Status: Active', even when Has Archive is False and archive
+    storage bytes is zero."""
+    # Report entries where Archive Status is Active but Has Archive is False
+    # and archive_bytes is 0 – this is the pattern that caused the bug where
+    # archive size always showed '-'.
+    report = [
+        {
+            "userPrincipalName": "user@example.com",
+            "displayName": "Alice",
+            "storageUsedInBytes": 500,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "hasArchive": True,  # set True via Archive Status = Active
+            "isDeleted": False,
+        },
+        {
+            "userPrincipalName": "shared@example.com",
+            "displayName": "Shared Box",
+            "storageUsedInBytes": 200,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "hasArchive": True,  # set True via Archive Status = Active
+            "isDeleted": False,
+        },
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    with (
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    by_upn = {r["user_principal_name"]: r for r in upserted}
+    # Both user mailbox and shared mailbox should have has_archive=True
+    assert by_upn["user@example.com"]["has_archive"] is True
+    assert by_upn["user@example.com"]["archive_storage_used_bytes"] == 0
+    assert by_upn["shared@example.com"]["has_archive"] is True
+    assert by_upn["shared@example.com"]["archive_storage_used_bytes"] == 0
+
+
 # ---------------------------------------------------------------------------
 # sync_mailboxes – mailbox member sync (m365_mailbox_members table)
 # ---------------------------------------------------------------------------

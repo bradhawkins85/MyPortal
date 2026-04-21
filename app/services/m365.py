@@ -2533,12 +2533,28 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             .strip()
             .lower()
         )
+        # "Archive Status" is an additional column Microsoft includes in the
+        # getMailboxUsageDetail CSV.  Values include "Active", "Inactive", and
+        # empty.  When present and "active", this confirms that an archive is
+        # provisioned even when the "Has Archive" boolean column is absent or
+        # returns False (which can occur for shared mailboxes or when the
+        # archive is empty).
+        archive_status_raw = (
+            str(
+                item.get("archiveStatus")
+                if "archiveStatus" in item
+                else normalised_item.get("archive status") or ""
+            )
+            .strip()
+            .lower()
+        )
+        has_archive = has_archive_raw in {"true", "1", "yes"} or archive_status_raw == "active"
         return {
             "userPrincipalName": upn,
             "displayName": display_name,
             "storageUsedInBytes": storage_bytes,
             "archiveMailboxStorageUsedInBytes": archive_bytes,
-            "hasArchive": has_archive_raw in {"true", "1", "yes"},
+            "hasArchive": has_archive,
             "isDeleted": is_deleted_raw in {"true", "1", "yes"},
         }
 
