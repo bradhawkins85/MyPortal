@@ -150,6 +150,8 @@
                     {% endif %}
                   </td>
                   <td class="table__actions" data-column-key="actions">
+                    <div class="table__action-buttons">
+                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
                       <button type="button" class="button button--ghost" data-task-logs>View logs</button>
                       {% if task.company_edit_url %}
                         <a class="button button--ghost" href="{{ task.company_edit_url }}">Source</a>

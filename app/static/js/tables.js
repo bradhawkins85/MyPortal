@@ -97,7 +97,7 @@
       };
 
       this.mobileQuery = (typeof window !== 'undefined' && window.matchMedia)
-        ? window.matchMedia('(max-width: 720px) and (orientation: portrait)')
+        ? window.matchMedia('(max-width: 640px)')
         : null;
       this.mobileResizeListener = () => {
         this.applyMobileLayout();

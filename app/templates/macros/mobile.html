@@ -1,0 +1,54 @@
+{# Mobile UX primitives — see docs/MOBILE_UX_GUIDELINES.md.
+
+   These macros are vanilla Jinja + plain HTML/CSS — they do not require any
+   new JavaScript on the page. The CSS lives in app/static/css/app.css under
+   the "Mobile primitives" section. #}
+
+{# header_actions_overflow(primary, secondary)
+
+   Render header-action buttons with a "More" overflow on phones (≤640px).
+   Both arguments are caller-rendered blocks of buttons/links/forms.
+
+     {% from 'macros/mobile.html' import header_actions_overflow %}
+     {% call(slot) header_actions_overflow() %}
+       {% if slot == 'primary' %}
+         <button class="button button--primary">New ticket</button>
+       {% elif slot == 'secondary' %}
+         <a class="button button--ghost" href="...">Export</a>
+         <a class="button button--ghost" href="...">Import</a>
+       {% endif %}
+     {% endcall %}
+#}
+{% macro header_actions_overflow() %}
+  <div class="header__actions header__actions--overflow" data-header-overflow>
+    {{ caller('primary') }}
+    <button
+      type="button"
+      class="header__actions-overflow-toggle"
+      aria-label="More actions"
+      aria-expanded="false"
+      data-header-overflow-toggle
+    >&#x22EF;</button>
+    <div class="header__actions-secondary" data-header-overflow-secondary>
+      {{ caller('secondary') }}
+    </div>
+  </div>
+{% endmacro %}
+
+{# mobile_collapsible(title, open=False, id=None)
+
+   Render a panel that is always expanded on desktop and collapses to a
+   tap-to-expand on phones (≤640px). Uses a native <details>/<summary>; no
+   JavaScript required.
+
+     {% from 'macros/mobile.html' import mobile_collapsible %}
+     {% call mobile_collapsible('Ticket details', open=False) %}
+       <p>...content...</p>
+     {% endcall %}
+#}
+{% macro mobile_collapsible(title, open=False, id=None) %}
+  <details class="mobile-collapsible"{% if open %} open{% endif %}{% if id %} id="{{ id }}"{% endif %}>
+    <summary>{{ title }}</summary>
+    {{ caller() }}
+  </details>
+{% endmacro %}

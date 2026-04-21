@@ -8,6 +8,68 @@
   box-sizing: inherit;
 }
 
+/* ============================================================================
+ * MyPortal responsive breakpoints — see docs/MOBILE_UX_GUIDELINES.md
+ *   mobile  : max-width 640px  (phones)
+ *   tablet  : max-width 1024px (tablets, sidebar still off-canvas)
+ *   desktop : min-width 1025px (full layout)
+ * Use the utility classes below in templates instead of inventing new media
+ * queries so that mobile behaviour stays consistent across the app.
+ * ============================================================================ */
+
+/* Hide on mobile only (≤640px) */
+.u-hide-mobile {
+}
+@media (max-width: 640px) {
+  .u-hide-mobile {
+    display: none !important;
+  }
+}
+
+/* Show on mobile only (hidden ≥641px) */
+.u-only-mobile {
+}
+@media (min-width: 641px) {
+  .u-only-mobile {
+    display: none !important;
+  }
+}
+
+/* Hide on tablet and below (≤1024px) — desktop-only flourishes */
+@media (max-width: 1024px) {
+  .u-hide-tablet {
+    display: none !important;
+  }
+}
+
+/* Hide low-priority content on phones */
+@media (max-width: 640px) {
+  .u-priority-low {
+    display: none !important;
+  }
+}
+
+/* Hide secondary content on small phones (≤480px) */
+@media (max-width: 480px) {
+  .u-priority-secondary {
+    display: none !important;
+  }
+}
+
+/* Standardised data-mobile-hidden — fires at ≤640px in any orientation. */
+@media (max-width: 640px) {
+  [data-mobile-hidden='true'] {
+    display: none !important;
+  }
+}
+
+/* Opt-in portrait-only variant for the rare cases that need it. */
+@media (max-width: 720px) and (orientation: portrait) {
+  [data-mobile-hidden='portrait'] {
+    display: none !important;
+  }
+}
+
 :root {
   color-scheme: light dark;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -2375,11 +2437,9 @@ button.header-title-menu__link {
   }
 }
 
-@media (max-width: 720px) and (orientation: portrait) {
-  .table [data-mobile-hidden='true'] {
-    display: none !important;
-  }
-}
+/* Note: [data-mobile-hidden='true'] is defined globally near the top of this
+ * file (≤640px, any orientation). The rare portrait-only variant uses
+ * [data-mobile-hidden='portrait']. */
 
 .table th {
   font-weight: 600;
@@ -3420,6 +3480,53 @@ button.header-title-menu__link {
 
 .orders-toolbar__search {
   min-width: 220px;
+}
+
+.tickets-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  width: 100%;
+}
+
+.tickets-toolbar__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-base);
+  align-items: flex-end;
+}
+
+.tickets-toolbar__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  min-width: 160px;
+}
+
+.tickets-toolbar__actions {
+  display: flex;
+  gap: var(--space-gap-tight);
+  align-items: center;
+}
+
+.tickets-toolbar__search {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+@media (max-width: 1024px) {
+  .tickets-toolbar {
+    align-items: stretch;
+  }
+
+  .tickets-toolbar__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .tickets-toolbar__search {
+    width: 100%;
+  }
 }
 
 .checkbox--table {
@@ -8718,6 +8825,199 @@ textarea:focus-visible,
   max-width: 100%;
 }
 
+/* ============================================================================
+ * Mobile primitives — .table--stack-mobile, mobile-collapsible, header
+ * action overflow, tap-target sizing. See docs/MOBILE_UX_GUIDELINES.md.
+ * ============================================================================ */
+
+/* Card-stack table pattern: any <table class="table table--stack-mobile">
+ * automatically reflows into stacked cards under 640px, using the
+ * data-label="…" attribute already present on most <td>s. */
+@media (max-width: 640px) {
+  .table--stack-mobile,
+  .table--stack-mobile thead,
+  .table--stack-mobile tbody,
+  .table--stack-mobile tfoot,
+  .table--stack-mobile tr,
+  .table--stack-mobile th,
+  .table--stack-mobile td {
+    display: block;
+    width: 100%;
+  }
+
+  .table--stack-mobile thead {
+    position: absolute;
+    left: -9999px;
+    top: -9999px;
+    height: 0;
+    overflow: hidden;
+  }
+
+  .table--stack-mobile tr {
+    margin: 0 0 var(--space-gap-base);
+    padding: var(--space-gap-tight) var(--space-gap-base);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 0.85rem;
+    background: rgba(15, 23, 42, 0.45);
+  }
+
+  .table--stack-mobile td {
+    border: none;
+    padding: 0.25rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-gap-tight);
+    text-align: right;
+  }
+
+  .table--stack-mobile td[data-label]::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: rgba(226, 232, 240, 0.75);
+    text-align: left;
+    flex: 0 0 40%;
+    word-break: break-word;
+  }
+
+  .table--stack-mobile td:not([data-label]) {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .table--stack-mobile td.table__actions,
+  .table--stack-mobile td.table__checkbox {
+    justify-content: flex-end;
+  }
+}
+
+/* Mobile-collapsible: <details class="mobile-collapsible"> stays expanded on
+ * desktop and collapses to a tap-to-expand on phones. */
+.mobile-collapsible {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mobile-collapsible > summary {
+  list-style: none;
+  cursor: default;
+  display: block;
+}
+
+.mobile-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (min-width: 641px) {
+  .mobile-collapsible[open],
+  .mobile-collapsible {
+    /* Always show contents on desktop regardless of open state. */
+  }
+  .mobile-collapsible > summary {
+    cursor: default;
+  }
+  /* Hide the visual toggle chip on desktop — content is always visible. */
+  .mobile-collapsible__toggle {
+    display: none;
+  }
+  /* Always render content on desktop, even when <details> is closed. */
+  .mobile-collapsible:not([open]) > *:not(summary) {
+    display: revert;
+  }
+}
+
+@media (max-width: 640px) {
+  .mobile-collapsible > summary {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-gap-tight);
+    padding: var(--space-gap-tight) var(--space-gap-base);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.4);
+    color: rgba(248, 250, 252, 0.92);
+    font-weight: 600;
+    user-select: none;
+  }
+  .mobile-collapsible > summary::after {
+    content: '▾';
+    font-size: 0.75rem;
+    color: rgba(148, 163, 184, 0.85);
+    transition: transform 0.2s ease;
+  }
+  .mobile-collapsible[open] > summary::after {
+    transform: rotate(180deg);
+  }
+  .mobile-collapsible[open] > *:not(summary) {
+    margin-top: var(--space-gap-tight);
+  }
+}
+
+/* Header actions overflow — collapses 3+ inline buttons into a "More" menu
+ * on phones. Pages opt-in by adding the .header__actions--overflow modifier
+ * and wrapping secondary buttons in .header__actions-secondary. */
+.header__actions--overflow .header__actions-overflow-toggle {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .header__actions--overflow {
+    position: relative;
+  }
+  .header__actions--overflow .header__actions-secondary {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.35rem);
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-gap-tight);
+    padding: var(--space-gap-tight);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 0.75rem;
+    background: rgba(15, 23, 42, 0.96);
+    box-shadow: 0 18px 36px -22px rgba(15, 23, 42, 0.95);
+    min-width: 200px;
+    z-index: 950;
+  }
+  .header__actions--overflow.is-open .header__actions-secondary {
+    display: flex;
+  }
+  .header__actions--overflow .header__actions-overflow-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 0.65rem;
+    border-radius: 0.7rem;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    background: rgba(15, 23, 42, 0.55);
+    color: #e2e8f0;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .header__actions--overflow .header__actions-overflow-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35);
+  }
+}
+
+/* Tap-target sizing — ensure interactive controls inside data tables and
+ * action bars meet the 44×44 minimum on phones. */
+@media (max-width: 640px) {
+  .table .button,
+  .table__actions .button,
+  .header__actions .button,
+  .header-actions .button {
+    min-height: 44px;
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
 /* ===========================================================================
  * Standardised page-layout primitives.
  * See docs/ui_layout_standards.md and templates/macros/{header,counters,tables}.html.
