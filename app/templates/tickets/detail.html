@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/mobile.html' import mobile_collapsible %}
 
 {% block header_title %}Ticket{% endblock %}
 
@@ -24,10 +25,11 @@
       <div class="management__body management__body--columns">
         <div class="management__column management__column--details">
           <article class="card card--panel">
-            <header class="card__header">
+            <header class="card__header u-hide-mobile">
               <h2 class="card__title">Ticket details</h2>
             </header>
             <div class="card__body">
+              {% call mobile_collapsible('Ticket details', open=False) %}
               <dl class="description-list">
                 <div class="description-list__row">
                   <dt>Status</dt>
@@ -102,6 +104,7 @@
                   </div>
                 {% endif %}
               </dl>
+              {% endcall %}
             </div>
           </article>
 
