@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
 from app.api.dependencies.auth import (
@@ -64,12 +64,41 @@ from app.schemas.tickets import (
     TicketMergeResponse,
 )
 from app.security.session import SessionData
+from app.services import audit as audit_service
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import ticket_importer, tickets as tickets_service
+from app.services.audit_diff import summarise_reply_body
 from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(prefix="/api/tickets", tags=["Tickets"])
+
+
+# Audit ticket snapshots intentionally exclude the long-form description field
+# - we capture metadata only (status, priority, assignment, etc.) and rely on
+# the ticket record itself for the body. This keeps audit rows compact and
+# avoids duplicating customer-supplied content.
+_TICKET_AUDIT_FIELDS: tuple[str, ...] = (
+    "id",
+    "subject",
+    "status",
+    "priority",
+    "assigned_user_id",
+    "requester_id",
+    "company_id",
+    "category",
+    "module_slug",
+    "external_reference",
+    "merged_into_ticket_id",
+    "xero_invoice_number",
+    "updated_at",
+)
+
+
+def _audit_ticket_view(ticket: dict | None) -> dict | None:
+    if not ticket:
+        return None
+    return {key: ticket.get(key) for key in _TICKET_AUDIT_FIELDS}
 
 
 async def _has_helpdesk_permission(current_user: dict) -> bool:
@@ -436,6 +465,7 @@ async def delete_ticket_view(
 @router.post("/", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     payload: TicketCreate,
+    request: Request,
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
     current_user: dict | None = actor.get("user")
@@ -528,6 +558,16 @@ async def create_ticket(
     await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     # For API key requests, pass a minimal user dict for building ticket detail
     detail_user = current_user or {"id": requester_id, "is_super_admin": False}
+    await audit_service.record(
+        action="ticket.create",
+        request=request,
+        user_id=int(current_user["id"]) if current_user else None,
+        entity_type="ticket",
+        entity_id=int(ticket["id"]) if ticket.get("id") is not None else None,
+        before=None,
+        after=_audit_ticket_view(ticket),
+        api_key=str(api_key_record.get("name") or api_key_record.get("id")) if api_key_record else None,
+    )
     return await _build_ticket_detail(ticket["id"], detail_user)
 
 
@@ -540,6 +580,7 @@ async def get_ticket(ticket_id: int, current_user: dict = Depends(get_current_us
 async def update_ticket(
     ticket_id: int,
     payload: TicketUpdate,
+    request: Request,
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     existing = await tickets_repo.get_ticket(ticket_id)
@@ -580,16 +621,46 @@ async def update_ticket(
         actor_type="technician",
         actor=current_user,
     )
+    updated_ticket = await tickets_repo.get_ticket(ticket_id)
+    # Determine the most descriptive audit action: prefer status_change /
+    # assign over the generic update so the audit log reflects intent.
+    audit_action = "ticket.update"
+    if "status" in fields and existing.get("status") != fields.get("status"):
+        audit_action = "ticket.status_change"
+    elif "assigned_user_id" in fields and existing.get("assigned_user_id") != fields.get("assigned_user_id"):
+        audit_action = "ticket.assign"
+    await audit_service.record(
+        action=audit_action,
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=_audit_ticket_view(existing),
+        after=_audit_ticket_view(updated_ticket or existing),
+    )
     return await _build_ticket_detail(ticket_id, current_user)
 
 
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_ticket(ticket_id: int, current_user: dict = Depends(require_super_admin)) -> None:
+async def delete_ticket(
+    ticket_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> None:
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.delete_ticket(ticket_id)
     await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
+    await audit_service.record(
+        action="ticket.deleted",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=_audit_ticket_view(existing),
+        after=None,
+    )
 
 
 @router.post(
@@ -627,6 +698,7 @@ async def import_syncro_tickets_endpoint(
 async def add_reply(
     ticket_id: int,
     payload: TicketReplyCreate,
+    request: Request,
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TicketReplyResponse:
@@ -702,6 +774,32 @@ async def add_reply(
     if time_summary:
         reply_payload["time_summary"] = time_summary
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
+    # IMPORTANT: never store the reply body in the audit log. We capture only
+    # metadata (id, author, visibility, length) so admins can confirm a reply
+    # was made without the audit_logs table mirroring potentially sensitive
+    # customer correspondence. The "body" key is included in
+    # sensitive_extra_keys so the redaction helper masks it even if a future
+    # change accidentally adds it to the snapshot.
+    reply_metadata: dict[str, object] = {
+        "reply_id": reply.get("id"),
+        "author_id": session.user_id,
+        "is_internal": bool(reply.get("is_internal")),
+        "channel": "internal" if reply.get("is_internal") else "public",
+        "minutes_spent": reply.get("minutes_spent"),
+        "is_billable": bool(reply.get("is_billable")),
+    }
+    reply_metadata.update(summarise_reply_body(sanitised_body.html))
+    await audit_service.record(
+        action="ticket.replied",
+        request=request,
+        user_id=int(session.user_id),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after=None,
+        metadata=reply_metadata,
+        sensitive_extra_keys=("body", "html", "text", "content"),
+    )
     return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply_payload))
 
 
@@ -796,6 +894,7 @@ async def update_watchers(
 async def add_watcher(
     ticket_id: int,
     user_id: int,
+    request: Request,
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
@@ -807,12 +906,23 @@ async def add_watcher(
         actor_type="technician",
         actor=current_user,
     )
+    await audit_service.record(
+        action="ticket.watcher.add",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after=None,
+        metadata={"watcher_user_id": user_id},
+    )
     return await _build_ticket_detail(ticket_id, current_user)
 
 
 @router.post("/{ticket_id}/watchers/email", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 async def add_watcher_by_email(
     ticket_id: int,
+    request: Request,
     email: str = Query(..., description="Email address of the watcher"),
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDetail:
@@ -834,6 +944,16 @@ async def add_watcher_by_email(
         actor_type="technician",
         actor=current_user,
     )
+    await audit_service.record(
+        action="ticket.watcher.add",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after=None,
+        metadata={"watcher_email": email_normalized},
+    )
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -841,6 +961,7 @@ async def add_watcher_by_email(
 async def remove_watcher(
     ticket_id: int,
     user_id: int,
+    request: Request,
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> None:
     ticket = await tickets_repo.get_ticket(ticket_id)
@@ -852,12 +973,23 @@ async def remove_watcher(
         actor_type="technician",
         actor=current_user,
     )
+    await audit_service.record(
+        action="ticket.watcher.remove",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after=None,
+        metadata={"watcher_user_id": user_id},
+    )
 
 
 @router.delete("/{ticket_id}/watchers/email/{email:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_watcher_by_email(
     ticket_id: int,
     email: str,
+    request: Request,
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> None:
     """Remove a watcher from a ticket by email address."""
@@ -871,6 +1003,16 @@ async def remove_watcher_by_email(
         ticket_id,
         actor_type="technician",
         actor=current_user,
+    )
+    await audit_service.record(
+        action="ticket.watcher.remove",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after=None,
+        metadata={"watcher_email": email_normalized},
     )
 
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
 
 from app.api.dependencies.auth import get_optional_user, require_super_admin
+from app.repositories import knowledge_base as kb_repo
 from app.schemas.knowledge_base import (
     KnowledgeBaseArticleCreate,
     KnowledgeBaseArticleListItem,
@@ -13,6 +14,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
 )
+from app.services import audit as audit_service
 from app.services import knowledge_base as kb_service
 from app.services import file_storage
 
@@ -21,6 +23,30 @@ router = APIRouter(prefix="/api/knowledge-base", tags=["Knowledge Base"])
 # Define uploads path at module level
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PRIVATE_UPLOADS_PATH = _PROJECT_ROOT / "private_uploads"
+
+
+# Knowledge base articles can contain very long HTML bodies; capturing only
+# metadata + small fields keeps the audit log readable and avoids storing
+# duplicate content alongside the source-of-truth article record.
+_AUDIT_ARTICLE_FIELDS: tuple[str, ...] = (
+    "id",
+    "slug",
+    "title",
+    "summary",
+    "permission_scope",
+    "is_published",
+    "ai_tags",
+    "excluded_ai_tags",
+    "allowed_user_ids",
+    "allowed_company_ids",
+    "company_admin_ids",
+)
+
+
+def _audit_article_summary(article: dict | None) -> dict | None:
+    if not article:
+        return None
+    return {key: article.get(key) for key in _AUDIT_ARTICLE_FIELDS}
 
 
 async def get_access_context(
@@ -108,6 +134,7 @@ async def get_article(
 @router.post("/articles", response_model=KnowledgeBaseArticleResponse, status_code=status.HTTP_201_CREATED)
 async def create_article(
     payload: KnowledgeBaseArticleCreate,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> KnowledgeBaseArticleResponse:
     author_id = current_user.get("id")
@@ -128,6 +155,15 @@ async def create_article(
     )
     if not article:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load created article")
+    await audit_service.record(
+        action="knowledge_base.article.create",
+        request=request,
+        user_id=author_id_int,
+        entity_type="knowledge_base_article",
+        entity_id=int(article["id"]) if article.get("id") is not None else None,
+        before=None,
+        after=_audit_article_summary(article),
+    )
     return KnowledgeBaseArticleResponse(
         id=article["id"],
         slug=article["slug"],
@@ -154,8 +190,10 @@ async def create_article(
 async def update_article(
     article_id: int,
     payload: KnowledgeBaseArticleUpdate,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> KnowledgeBaseArticleResponse:
+    existing_article = await kb_repo.get_article_by_id(article_id)
     try:
         updated = await kb_service.update_article(article_id, payload.dict(exclude_unset=True))
     except ValueError as exc:
@@ -169,6 +207,15 @@ async def update_article(
     )
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    await audit_service.record(
+        action="knowledge_base.article.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="knowledge_base_article",
+        entity_id=article_id,
+        before=_audit_article_summary(existing_article),
+        after=_audit_article_summary(article),
+    )
     return KnowledgeBaseArticleResponse(
         id=article["id"],
         slug=article["slug"],
@@ -194,9 +241,20 @@ async def update_article(
 @router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_article(
     article_id: int,
+    request: Request,
     current_user: dict = Depends(require_super_admin),
 ) -> None:
+    existing_article = await kb_repo.get_article_by_id(article_id)
     await kb_service.delete_article(article_id)
+    await audit_service.record(
+        action="knowledge_base.article.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="knowledge_base_article",
+        entity_id=article_id,
+        before=_audit_article_summary(existing_article),
+        after=None,
+    )
 
 
 @router.post("/articles/{article_id}/refresh-ai-tags", status_code=status.HTTP_200_OK)
