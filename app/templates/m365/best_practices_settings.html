@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block header_title %}Best Practices Settings{% endblock %}
+
+{% block title %}Best Practices Settings – Office 365{% endblock %}
+
+{% block header_actions %}
+  <a href="/m365/best-practices" class="button button--ghost">Back to Best Practices</a>
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">{{ error }}</div>
+  {% endif %}
+  {% if success %}
+  <div class="alert alert--success" role="alert">{{ success }}</div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">Manage Microsoft 365 Best Practices</h2>
+        <p class="panel__subtitle">
+          Best Practice checks are enabled or disabled <strong>globally</strong> across every company in MyPortal.
+          Disabled checks are removed from per-company reports until re-enabled.
+        </p>
+      </div>
+    </header>
+    <form method="post" action="/m365/best-practices/settings">
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <div class="panel__body" style="padding:0">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:6rem;text-align:center">Enabled</th>
+              <th>Best Practice</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bp in catalog %}
+            <tr>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="bp-{{ bp.id }}">Enable {{ bp.name }}</label>
+                <input
+                  type="checkbox"
+                  id="bp-{{ bp.id }}"
+                  name="enabled"
+                  value="{{ bp.id }}"
+                  {% if bp.enabled %}checked{% endif %}
+                />
+              </td>
+              <td>
+                <strong>{{ bp.name }}</strong>
+                <br /><small class="text-muted">{{ bp.id }}</small>
+              </td>
+              <td>{{ bp.description }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel__footer" style="display:flex;justify-content:flex-end;gap:0.5rem;padding:1rem">
+        <button type="submit" class="button">Save settings</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}
