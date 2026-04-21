@@ -1,24 +1,18 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}
-  <div class="header__title-content">
-    <span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>
-  </div>
+{% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Manage tasks", "type": "link", "variant": "ghost", "href": "/admin/automation"}
+  ]) }}
 {% endblock %}
 
 {% block content %}
 <div class="management management--single" data-layout>
   <section class="management__content">
     <header class="management__header">
-      <div>
-        <h1 class="management__title">Scheduled Tasks</h1>
-        <p class="management__subtitle">Monitor and run all background scheduled tasks across every company and module.</p>
-      </div>
-      <div class="management__header-actions">
-        <a class="button button--ghost" href="/admin/automation">
-          Manage tasks
-        </a>
-      </div>
       <form method="get" class="management__filters">
         <label class="form-checkbox-label">
           <input
@@ -103,50 +97,50 @@
       </div>
 
       <div class="table-wrapper">
-        <table class="table" id="scheduled-tasks-table" data-table>
+        <table class="table" id="scheduled-tasks-table" data-table data-table-id="scheduled-tasks">
           <thead>
             <tr>
-              <th scope="col" data-sort="int" data-column="id">ID</th>
-              <th scope="col" data-sort="string" data-column="name">Name</th>
-              <th scope="col" data-sort="string" data-column="command">Command</th>
-              <th scope="col" data-sort="string" data-column="company">Company</th>
-              <th scope="col" data-sort="string" data-column="cron">Schedule</th>
-              <th scope="col" data-sort="string" data-column="active">Active</th>
-              <th scope="col" data-sort="date" data-column="last-run">Last run</th>
-              <th scope="col" data-sort="string" data-column="status">Status</th>
-              <th scope="col" class="table__actions">Actions</th>
+              <th scope="col" data-sort="int" data-column="id" data-column-key="id">ID</th>
+              <th scope="col" data-sort="string" data-column="name" data-column-key="name">Name</th>
+              <th scope="col" data-sort="string" data-column="command" data-column-key="command">Command</th>
+              <th scope="col" data-sort="string" data-column="company" data-column-key="company">Company</th>
+              <th scope="col" data-sort="string" data-column="cron" data-column-key="schedule">Schedule</th>
+              <th scope="col" data-sort="string" data-column="active" data-column-key="active">Active</th>
+              <th scope="col" data-sort="date" data-column="last-run" data-column-key="last_run">Last run</th>
+              <th scope="col" data-sort="string" data-column="status" data-column-key="status">Status</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
             </tr>
           </thead>
           <tbody>
             {% if tasks %}
               {% for task in tasks %}
                 <tr data-task='{{ task | tojson }}'>
-                  <td data-label="ID" data-column="id">{{ task.id }}</td>
-                  <td data-label="Name" data-column="name">{{ task.name }}</td>
-                  <td data-label="Command" data-column="command">
+                  <td data-label="ID" data-column="id" data-column-key="id">{{ task.id }}</td>
+                  <td data-label="Name" data-column="name" data-column-key="name">{{ task.name }}</td>
+                  <td data-label="Command" data-column="command" data-column-key="command">
                     <code>{{ task.command }}</code>
                   </td>
-                  <td data-label="Company" data-column="company" data-value="{{ task.company_name }}">
+                  <td data-label="Company" data-column="company" data-value="{{ task.company_name }}" data-column-key="company">
                     {% if task.company_edit_url %}
                       <a href="{{ task.company_edit_url }}">{{ task.company_name }}</a>
                     {% else %}
                       {{ task.company_name }}
                     {% endif %}
                   </td>
-                  <td data-label="Schedule" data-column="cron">
+                  <td data-label="Schedule" data-column="cron" data-column-key="schedule">
                     <code>{{ task.cron }}</code>
                   </td>
-                  <td data-label="Active" data-column="active">
+                  <td data-label="Active" data-column="active" data-column-key="active">
                     <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
                   </td>
-                  <td data-label="Last run" data-column="last-run" data-value="{{ task.last_run_iso or '' }}">
+                  <td data-label="Last run" data-column="last-run" data-value="{{ task.last_run_iso or '' }}" data-column-key="last_run">
                     {% if task.last_run_iso %}
                       <span data-utc="{{ task.last_run_iso }}"></span>
                     {% else %}
                       <span class="text-muted">Never</span>
                     {% endif %}
                   </td>
-                  <td data-label="Status" data-column="status">
+                  <td data-label="Status" data-column="status" data-column-key="status">
                     {% if task.last_status %}
                       <span class="tag {{ 'tag--success' if task.last_status == 'succeeded' else ('tag--danger' if task.last_status == 'failed' else 'tag--warning') }}">
                         {{ task.last_status }}
@@ -155,9 +149,7 @@
                       <span class="text-muted">—</span>
                     {% endif %}
                   </td>
-                  <td class="table__actions">
-                    <div class="table__action-buttons">
-                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
+                  <td class="table__actions" data-column-key="actions">
                       <button type="button" class="button button--ghost" data-task-logs>View logs</button>
                       {% if task.company_edit_url %}
                         <a class="button button--ghost" href="{{ task.company_edit_url }}">Source</a>
@@ -206,7 +198,7 @@
         />
       </div>
       <div class="table-wrapper">
-        <table class="table" id="task-logs-table" data-table>
+        <table class="table" id="task-logs-table" data-table data-table-id="task-logs">
           <thead>
             <tr>
               <th scope="col" data-sort="string">Status</th>

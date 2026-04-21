@@ -1,59 +1,51 @@
 {% extends "base.html" %}
 
+{% block header_title %}Licenses{% endblock %}
+
 {% block title %}Licenses{% endblock %}
 
+{% from "macros/header.html" import page_header_actions %}
+
 {% block header_actions %}
-  <div class="header-actions">
-    <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
-    <div class="header-title-menu">
-      <details class="header-title-menu__dropdown" data-header-menu>
-        <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-            <path d="M12 5.5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Zm0 8.25a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Zm0 8.25a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5Z"></path>
-          </svg>
-          <span class="visually-hidden">Toggle license tools menu</span>
-        </summary>
-        <ul class="header-title-menu__list" role="menu">
-          {% if has_m365_credentials %}
-          <li class="header-title-menu__item" role="none">
-            <button type="button" class="header-title-menu__link" role="menuitem" data-sync-licenses>Sync from Microsoft 365</button>
-          </li>
-          {% endif %}
-          {% if can_manage_sku_mappings %}
-          <li class="header-title-menu__item" role="none">
-            <button type="button" class="header-title-menu__link" role="menuitem" data-manage-sku-mappings>Manage SKU display names</button>
-          </li>
-          {% endif %}
-        </ul>
-      </details>
-    </div>
-  </div>
+  {% set lic_actions = [] %}
+  {% if has_m365_credentials %}
+    {% set _ = lic_actions.append({"label": "Sync from Microsoft 365", "type": "button",
+       "attrs": {"data-sync-licenses": ""}}) %}
+  {% endif %}
+  {% if can_manage_sku_mappings %}
+    {% set _ = lic_actions.append({"label": "Manage SKU display names", "type": "button",
+       "attrs": {"data-manage-sku-mappings": ""}}) %}
+  {% endif %}
+  {{ page_header_actions(lic_actions) }}
 {% endblock %}
 
 {% block content %}
 <section class="panel">
   <header class="panel__header">
-    <div>
-      <h2 class="panel__title">Software licenses</h2>
-      <p class="panel__subtitle">Track allocations, available counts, and request entitlement changes.</p>
-    </div>
     {% if company %}
     <div class="panel__meta">
+      <label class="visually-hidden" for="license-filter">Filter licenses</label>
+      <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
       <span class="tag">{{ company.name }}</span>
+    </div>
+    {% else %}
+    <div class="panel__meta">
+      <label class="visually-hidden" for="license-filter">Filter licenses</label>
+      <input type="search" id="license-filter" class="input" placeholder="Filter licenses" aria-label="Filter licenses" />
     </div>
     {% endif %}
   </header>
   <div class="panel__body">
     <div class="table-responsive">
-      <table class="table" data-license-table>
+      <table class="table" id="licenses-table" data-table data-table-id="licenses" data-license-table>
         <thead>
           <tr>
-            <th scope="col" data-sort-key="display_name">Name</th>
-            <th scope="col" data-sort-key="sku">SKU</th>
-            <th scope="col" data-sort-key="count">Total</th>
-            <th scope="col" data-sort-key="allocated">Allocated</th>
-            <th scope="col" data-sort-key="expiry_display">Expiry</th>
-            <th scope="col" data-sort-key="contract_term">Contract term</th>
+            <th scope="col" data-column-key="name" data-sort-key="display_name">Name</th>
+            <th scope="col" data-column-key="sku" data-sort-key="sku">SKU</th>
+            <th scope="col" data-column-key="total" data-sort-key="count">Total</th>
+            <th scope="col" data-column-key="allocated" data-sort-key="allocated">Allocated</th>
+            <th scope="col" data-column-key="expiry" data-sort-key="expiry_display">Expiry</th>
+            <th scope="col" data-column-key="contract_term" data-sort-key="contract_term">Contract term</th>
             {% if can_order_licenses %}<th scope="col">Actions</th>{% endif %}
           </tr>
         </thead>
