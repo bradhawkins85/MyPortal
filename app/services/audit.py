@@ -169,3 +169,67 @@ async def record(
         request=request,
         api_key=api_key,
     )
+
+
+async def record_create(
+    *,
+    action: str,
+    after: Any,
+    request: Request | None = None,
+    user_id: int | None = None,
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    sensitive_extra_keys: tuple[str, ...] = (),
+) -> None:
+    """Record a creation event. Convenience wrapper around :func:`record`.
+
+    Equivalent to calling ``record(..., before=None, after=after)`` but makes
+    the intent explicit at the call site and removes the chance of accidentally
+    passing a stale ``before`` snapshot.
+    """
+
+    await record(
+        action=action,
+        request=request,
+        user_id=user_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        before=None,
+        after=after,
+        metadata=metadata,
+        api_key=api_key,
+        sensitive_extra_keys=sensitive_extra_keys,
+    )
+
+
+async def record_delete(
+    *,
+    action: str,
+    before: Any,
+    request: Request | None = None,
+    user_id: int | None = None,
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    sensitive_extra_keys: tuple[str, ...] = (),
+) -> None:
+    """Record a deletion event. Convenience wrapper around :func:`record`.
+
+    Equivalent to calling ``record(..., before=before, after=None)``.
+    """
+
+    await record(
+        action=action,
+        request=request,
+        user_id=user_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        before=before,
+        after=None,
+        metadata=metadata,
+        api_key=api_key,
+        sensitive_extra_keys=sensitive_extra_keys,
+    )
