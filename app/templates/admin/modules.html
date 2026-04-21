@@ -657,13 +657,16 @@
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script>
     (function () {
-      var checkbox = document.getElementById('show-disabled-modules');
-      if (!checkbox) return;
-      checkbox.addEventListener('change', function () {
+      var btn = document.getElementById('show-disabled-modules');
+      if (!btn) return;
+      var showingDisabled = false;
+      btn.addEventListener('click', function () {
+        showingDisabled = !showingDisabled;
         var rows = document.querySelectorAll('#modules-table tbody tr[data-enabled="false"]');
         rows.forEach(function (row) {
-          row.hidden = !checkbox.checked;
+          row.hidden = !showingDisabled;
         });
+        btn.textContent = showingDisabled ? 'Hide disabled modules' : 'Show disabled modules';
       });
     })();
   </script>
