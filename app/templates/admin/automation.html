@@ -18,12 +18,6 @@
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Scheduled tasks</h2>
-        <p class="card__subtitle">Create, monitor, and control background automation jobs.</p>
-      </div>
-    </header>
     {% set global_tasks = global_tasks | default([], true) %}
     {% set company_tasks = company_tasks | default([], true) %}
     {% set show_inactive_tasks = show_inactive_tasks | default(false, true) %}
