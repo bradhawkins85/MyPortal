@@ -48,11 +48,16 @@
     if (menu.__headerMenuBound) {
       return;
     }
-    menu.__headerMenuBound = true;
     var toggle = menu.querySelector('[data-header-menu-toggle]');
-    if (!toggle) {
+    var panel = menu.querySelector('[data-header-menu-panel]');
+    // Only manage menus that follow the button + panel disclosure contract.
+    // Legacy <details>/<summary> title menus (no panel marker) rely on the
+    // native disclosure behaviour and are wired up elsewhere; if we bound
+    // here we'd preventDefault() the summary click and they'd never open.
+    if (!toggle || !panel) {
       return;
     }
+    menu.__headerMenuBound = true;
     toggle.addEventListener('click', function (event) {
       event.preventDefault();
       event.stopPropagation();
