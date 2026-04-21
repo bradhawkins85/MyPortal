@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
@@ -10,6 +10,7 @@ from app.repositories import companies as company_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse, InvoiceUpdate
+from app.services import audit as audit_service
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 
@@ -45,8 +46,9 @@ async def list_invoices(
 @router.post("", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED)
 async def create_invoice(
     payload: InvoiceCreate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     company = await company_repo.get_company_by_id(payload.company_id)
     if not company:
@@ -57,6 +59,16 @@ async def create_invoice(
         amount=payload.amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
         due_date=payload.due_date,
         status=payload.status,
+    )
+    await audit_service.record(
+        action="invoice.create",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="invoice",
+        entity_id=int(created["id"]) if created.get("id") is not None else None,
+        before=None,
+        after=created,
+        metadata={"company_id": payload.company_id},
     )
     return InvoiceResponse.model_validate(created)
 
@@ -78,8 +90,9 @@ async def get_invoice(
 async def update_invoice(
     invoice_id: int,
     payload: InvoiceUpdate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     existing = await invoice_repo.get_invoice_by_id(invoice_id)
     if not existing:
@@ -102,6 +115,16 @@ async def update_invoice(
         due_date=merged.get("due_date"),
         status=merged.get("status"),
     )
+    await audit_service.record(
+        action="invoice.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="invoice",
+        entity_id=invoice_id,
+        before=existing,
+        after=updated,
+        metadata={"company_id": int(merged["company_id"])},
+    )
     return InvoiceResponse.model_validate(updated)
 
 
@@ -109,8 +132,9 @@ async def update_invoice(
 async def patch_invoice(
     invoice_id: int,
     payload: InvoiceUpdate,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     existing = await invoice_repo.get_invoice_by_id(invoice_id)
     if not existing:
@@ -125,17 +149,38 @@ async def patch_invoice(
         amount_decimal = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value))
         data["amount"] = amount_decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     updated = await invoice_repo.patch_invoice(invoice_id, **data)
+    await audit_service.record(
+        action="invoice.update",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="invoice",
+        entity_id=invoice_id,
+        before=existing,
+        after=updated,
+        metadata={"company_id": int(updated.get("company_id", existing.get("company_id")))} if (updated.get("company_id") or existing.get("company_id")) is not None else None,
+    )
     return InvoiceResponse.model_validate(updated)
 
 
 @router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_invoice(
     invoice_id: int,
+    request: Request,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict = Depends(require_super_admin),
 ):
     existing = await invoice_repo.get_invoice_by_id(invoice_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     await invoice_repo.delete_invoice(invoice_id)
+    await audit_service.record(
+        action="invoice.delete",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="invoice",
+        entity_id=invoice_id,
+        before=existing,
+        after=None,
+        metadata={"company_id": int(existing.get("company_id"))} if existing.get("company_id") is not None else None,
+    )
     return None
