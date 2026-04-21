@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Shared mailboxes{% endblock %}
+
 {% block title %}Shared Mailboxes – Office 365{% endblock %}
 
 {% block header_actions %}
@@ -39,7 +41,7 @@
       {% elif not mailboxes %}
       <p class="text-muted">No shared mailbox data found. Click <strong>Sync mailboxes</strong> to fetch the latest data from Microsoft 365.</p>
       {% else %}
-      <table class="table" data-table>
+      <table class="table" data-table data-table-id="m365-shared-mailboxes">
         <thead>
           <tr>
             <th data-sort="string">Display Name</th>

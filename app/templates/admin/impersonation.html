@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Impersonation{% endblock %}
+
 {% block content %}
   <div class="admin-grid admin-grid--columns">
     <section class="card card--panel admin-grid__full">
@@ -21,13 +23,13 @@
         </div>
       </header>
       <div class="table-wrapper">
-        <table class="table" id="impersonation-table" data-table>
+        <table class="table" id="impersonation-table" data-table data-table-id="impersonation">
           <thead>
             <tr>
-              <th scope="col" data-sort="string">Name</th>
-              <th scope="col" data-sort="string">Email</th>
-              <th scope="col" data-sort="string">Access summary</th>
-              <th scope="col" class="table__actions">Actions</th>
+              <th scope="col" data-sort="string" data-column-key="name">Name</th>
+              <th scope="col" data-sort="string" data-column-key="email">Email</th>
+              <th scope="col" data-sort="string" data-column-key="access_summary">Access summary</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -43,7 +45,7 @@
               {% set display_name = " ".join(name_parts) if name_parts else None %}
               {% set memberships = candidate.memberships or [] %}
               <tr data-candidate-id="{{ candidate.id }}">
-                <td data-label="Name" data-sort-value="{{ display_name or candidate.email }}">
+                <td data-label="Name" data-sort-value="{{ display_name or candidate.email }}" data-column-key="name">
                   {% if display_name %}
                     {{ display_name }}
                   {% else %}
@@ -53,10 +55,10 @@
                     <span class="tag tag--muted" style="margin-left: 0.35rem;">Super admin</span>
                   {% endif %}
                 </td>
-                <td data-label="Email" data-sort-value="{{ candidate.email or '' }}">
+                <td data-label="Email" data-sort-value="{{ candidate.email or '' }}" data-column-key="email">
                   {{ candidate.email or '—' }}
                 </td>
-                <td data-label="Access summary">
+                <td data-label="Access summary" data-column-key="access_summary">
                   {% if memberships %}
                     <ul class="impersonation-access-list">
                       {% for membership in memberships %}
@@ -81,7 +83,7 @@
                     <span class="text-muted">No assigned permissions</span>
                   {% endif %}
                 </td>
-                <td class="table__actions">
+                <td class="table__actions" data-column-key="actions">
                   <form action="/admin/impersonation" method="post" class="inline-form">
                     {% include "partials/csrf.html" %}
                     <input type="hidden" name="userId" value="{{ candidate.id }}" />
