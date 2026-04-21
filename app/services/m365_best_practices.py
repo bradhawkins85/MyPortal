@@ -33,6 +33,16 @@ from app.services.cis_benchmark import (
     _check_guest_access_restricted,
     _check_legacy_auth_blocked,
     _check_mfa_conditional_access,
+    _check_monitor_app_credential_expiry,
+    _check_monitor_ca_report_only_policies,
+    _check_monitor_cloud_admin_accounts,
+    _check_monitor_mfa_registration_policy,
+    _check_monitor_named_locations,
+    _check_monitor_risky_users,
+    _check_monitor_secure_score,
+    _check_monitor_sign_in_logs,
+    _check_monitor_sign_in_risk_policy,
+    _check_monitor_user_risk_policy,
     _check_password_never_expires,
     _check_security_defaults,
     _check_sspr_enabled,
@@ -177,6 +187,156 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "settings → Guest user access restrictions → Restricted."
         ),
         "source": _check_guest_access_restricted,
+        "default_enabled": True,
+    },
+    # ------------------------------------------------------------------
+    # Monitoring best practices
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_monitor_sign_in_logs",
+        "name": "Sign-in audit logs accessible",
+        "description": (
+            "Sign-in logs are essential for incident investigation and "
+            "monitoring potentially compromised accounts."
+        ),
+        "remediation": (
+            "Ensure the Microsoft Graph sign-in logs API is accessible: grant "
+            "AuditLog.Read.All and verify the tenant has an Azure AD Premium "
+            "P1 or P2 license."
+        ),
+        "source": _check_monitor_sign_in_logs,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_risky_users",
+        "name": "No active high-risk users",
+        "description": (
+            "Microsoft Entra ID Protection flags users whose credentials may "
+            "be compromised; risky users should be investigated promptly."
+        ),
+        "remediation": (
+            "Investigate and remediate risky users in the Entra portal → "
+            "Protection → Identity Protection → Risky users."
+        ),
+        "source": _check_monitor_risky_users,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_sign_in_risk_policy",
+        "name": "Sign-in risk policy enabled",
+        "description": (
+            "Enabling the sign-in risk policy automatically challenges or "
+            "blocks risky sign-ins detected by Entra ID Protection."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Identity Protection → Sign-in risk "
+            "policy → assign to All users, set risk level to Medium and above, "
+            "and require MFA."
+        ),
+        "source": _check_monitor_sign_in_risk_policy,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_user_risk_policy",
+        "name": "User risk policy enabled",
+        "description": (
+            "The user risk policy automatically blocks or requires a password "
+            "reset for accounts considered compromised."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Identity Protection → User risk "
+            "policy → assign to All users, set risk level to High, and "
+            "require secure password change."
+        ),
+        "source": _check_monitor_user_risk_policy,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_named_locations",
+        "name": "Named locations configured for Conditional Access",
+        "description": (
+            "Defining trusted named locations enables Conditional Access "
+            "policies to use location as a strong signal."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Conditional Access → Named "
+            "locations → add trusted IP ranges or country lists."
+        ),
+        "source": _check_monitor_named_locations,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_ca_report_only_policies",
+        "name": "No core security CA policies stuck in report-only",
+        "description": (
+            "Conditional Access policies in report-only mode provide no "
+            "protection; security-critical policies should be fully enabled."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Conditional Access → policy → set "
+            "state to 'On' after reviewing the report-only insights."
+        ),
+        "source": _check_monitor_ca_report_only_policies,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_app_credential_expiry",
+        "name": "No app registration credentials expiring within 30 days",
+        "description": (
+            "Expired application secrets cause authentication failures and "
+            "service outages; rotate credentials proactively."
+        ),
+        "remediation": (
+            "Entra portal → App registrations → application → Certificates & "
+            "secrets → create a new secret/certificate and update dependent "
+            "services before the existing one expires."
+        ),
+        "source": _check_monitor_app_credential_expiry,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_cloud_admin_accounts",
+        "name": "Privileged accounts are cloud-only (not hybrid-synced)",
+        "description": (
+            "Microsoft strongly recommends that Global Administrator accounts "
+            "are cloud-only identities to prevent on-premises compromise from "
+            "escalating to the cloud."
+        ),
+        "remediation": (
+            "Create dedicated cloud admin accounts in Entra ID and remove the "
+            "Global Administrator role from any synced accounts."
+        ),
+        "source": _check_monitor_cloud_admin_accounts,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_secure_score",
+        "name": "Microsoft Secure Score is at or above 50%",
+        "description": (
+            "Microsoft Secure Score is the primary KPI for overall M365 "
+            "security posture; tracking it ensures continuous improvement."
+        ),
+        "remediation": (
+            "Microsoft 365 Defender portal → Secure Score → review and "
+            "implement recommended improvement actions."
+        ),
+        "source": _check_monitor_secure_score,
+        "default_enabled": True,
+    },
+    {
+        "id": "bp_monitor_mfa_registration_policy",
+        "name": "Authentication methods policy is configured",
+        "description": (
+            "Microsoft recommends explicitly configuring the authentication "
+            "methods policy with modern methods such as Microsoft "
+            "Authenticator and FIDO2 keys."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Authentication methods → Policies → "
+            "enable Microsoft Authenticator, FIDO2 security keys, and other "
+            "modern methods."
+        ),
+        "source": _check_monitor_mfa_registration_policy,
         "default_enabled": True,
     },
 ]
