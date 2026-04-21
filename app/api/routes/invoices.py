@@ -149,6 +149,8 @@ async def patch_invoice(
         amount_decimal = amount_value if isinstance(amount_value, Decimal) else Decimal(str(amount_value))
         data["amount"] = amount_decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     updated = await invoice_repo.patch_invoice(invoice_id, **data)
+    company_id_value = updated.get("company_id") or existing.get("company_id")
+    audit_metadata = {"company_id": int(company_id_value)} if company_id_value is not None else None
     await audit_service.record(
         action="invoice.update",
         request=request,
@@ -157,7 +159,7 @@ async def patch_invoice(
         entity_id=invoice_id,
         before=existing,
         after=updated,
-        metadata={"company_id": int(updated.get("company_id", existing.get("company_id")))} if (updated.get("company_id") or existing.get("company_id")) is not None else None,
+        metadata=audit_metadata,
     )
     return InvoiceResponse.model_validate(updated)
 
