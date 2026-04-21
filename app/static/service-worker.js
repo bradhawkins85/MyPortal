@@ -1,8 +1,9 @@
-const CACHE_VERSION = 'myportal-static-v4';
+const CACHE_VERSION = 'myportal-static-v5';
 const STATIC_CACHE = CACHE_VERSION;
 const PRECACHE_URLS = [
   '/static/css/app.css',
   '/static/js/pwa.js',
+  '/static/js/viewport.js',
   '/static/logo.svg',
   '/static/favicon.svg'
 ];
