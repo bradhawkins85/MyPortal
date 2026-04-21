@@ -9,6 +9,15 @@
   {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_tag_exclusions or can_bulk_delete_tickets %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
+    <button
+      type="button"
+      class="button button--primary"
+      data-create-ticket-modal-open
+      aria-haspopup="dialog"
+      aria-controls="create-ticket-modal"
+    >
+      New ticket
+    </button>
     {% if show_ticket_tools %}
       <details class="header-title-menu__dropdown" data-header-menu>
         <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
@@ -90,17 +99,6 @@
         <div>
           <h1 class="management__title">Ticketing workspace</h1>
           <p class="management__subtitle">Monitor service demand, reply queues, and integration outcomes across connected modules.</p>
-        </div>
-        <div class="management__header-actions">
-          <button
-            type="button"
-            class="button button--primary"
-            data-create-ticket-modal-open
-            aria-haspopup="dialog"
-            aria-controls="create-ticket-modal"
-          >
-            New ticket
-          </button>
         </div>
       </header>
 
