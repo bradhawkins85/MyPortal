@@ -1,7 +1,7 @@
 """Repository for Microsoft 365 Best Practices results and global settings."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -79,7 +79,7 @@ async def upsert_setting(*, check_id: str, enabled: bool) -> None:
         VALUES (%s, %s, %s)
         ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), updated_at = VALUES(updated_at)
         """,
-        (check_id, 1 if enabled else 0, datetime.utcnow()),
+        (check_id, 1 if enabled else 0, datetime.now(timezone.utc).replace(tzinfo=None)),
     )
 
 
