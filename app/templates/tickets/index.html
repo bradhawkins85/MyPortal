@@ -1,53 +1,29 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block header_actions %}
-  <button
-    type="button"
-    class="button button--primary"
-    data-create-ticket-modal-open
-    aria-haspopup="dialog"
-    aria-controls="create-ticket-modal"
-  >
-    New ticket
-  </button>
+  {{ page_header_actions([
+    {"label": "New ticket", "variant": "primary", "type": "button",
+     "attrs": {"data-create-ticket-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-ticket-modal"}},
+  ]) }}
 {% endblock %}
 
 {% block content %}
-  <section class="card card--panel">
-    <header class="card__header">
-      <div>
-        <h2 class="card__title">Ticket overview</h2>
-        {% if filters_active %}
-          <p class="card__subtitle">Showing filtered results from your recorded tickets.</p>
-        {% else %}
-          <p class="card__subtitle">Track the latest support conversations raised for your active companies.</p>
-        {% endif %}
-      </div>
-    </header>
-    <div class="card__body">
-      {% if status_summary %}
-        <ul class="status-list" role="list">
-          {% for item in status_summary %}
-            <li class="status-list__item" role="listitem">
-              <span class="status-list__label">{{ item.label }}</span>
-              <span class="status-list__value">{{ item.count }}</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="card__empty">No tickets have been recorded yet. Create a ticket to start a new conversation.</p>
-      {% endif %}
-    </div>
-    <div class="table-skeleton" data-ticket-table-skeleton hidden>Loading tickets…</div>
-    <div class="tickets-toolbar__actions"><button type="button" class="button button--ghost" data-ticket-load-more hidden>Load more</button></div>
-  </section>
+  {% if status_summary %}
+    {% set total = namespace(v=0) %}
+    {% for item in status_summary %}{% set total.v = total.v + item.count %}{% endfor %}
+    {% set variant_map = {"open": "operational", "pending": "degraded", "closed": "neutral", "on_hold": "maintenance"} %}
+    {% set strip_items = [] %}
+    {% for item in status_summary %}
+      {% set _ = strip_items.append({"label": item.label, "value": item.count,
+         "variant": variant_map.get(item.label | lower | replace(' ', '_'), 'neutral')}) %}
+    {% endfor %}
+    {{ counter_strip(strip_items, total=total.v, total_label="All tickets") }}
+  {% endif %}
 
   <section class="card card--panel">
     <header class="card__header">
-      <div>
-        <h2 class="card__title">Ticket history</h2>
-        <p class="card__subtitle">Search and filter tickets you have raised or are watching.</p>
-      </div>
       <div class="card__controls tickets-toolbar">
         <form method="get" class="tickets-toolbar__form" autocomplete="off">
           <div class="tickets-toolbar__field">
@@ -77,35 +53,36 @@
         />
       </div>
     </header>
+    <div class="table-skeleton" data-ticket-table-skeleton hidden>Loading tickets…</div>
     {% if filters_active and not tickets %}
       <div class="alert alert--info" role="status">No tickets match the selected filters. Try adjusting the status or search keywords.</div>
     {% endif %}
     <div class="table-wrapper">
-      <table class="table" id="tickets-table" data-table>
+      <table class="table" id="tickets-table" data-table data-table-id="tickets-history">
         <thead>
           <tr>
-            <th scope="col" data-sort="int">Ticket</th>
-            <th scope="col" data-sort="string">Subject</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" data-sort="string">Priority</th>
-            <th scope="col" data-sort="string">Company</th>
-            <th scope="col" data-sort="date">Updated</th>
+            <th scope="col" data-column-key="id" data-sort="int">Ticket</th>
+            <th scope="col" data-column-key="subject" data-sort="string">Subject</th>
+            <th scope="col" data-column-key="status" data-sort="string">Status</th>
+            <th scope="col" data-column-key="priority" data-sort="string">Priority</th>
+            <th scope="col" data-column-key="company" data-sort="string">Company</th>
+            <th scope="col" data-column-key="updated" data-sort="date">Updated</th>
           </tr>
         </thead>
         <tbody>
           {% if tickets %}
             {% for ticket in tickets %}
               <tr>
-                <td data-label="Ticket">#{{ ticket.id }}</td>
-                <td data-label="Subject">
+                <td data-column-key="id" data-label="Ticket">#{{ ticket.id }}</td>
+                <td data-column-key="subject" data-label="Subject">
                   <a href="/tickets/{{ ticket.id }}">{{ ticket.subject or 'Untitled ticket' }}</a>
                 </td>
-                <td data-label="Status">
+                <td data-column-key="status" data-label="Status">
                   <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
                 </td>
-                <td data-label="Priority">{{ ticket.priority_label }}</td>
-                <td data-label="Company">{{ ticket.company_name or '—' }}</td>
-                <td data-label="Updated" data-value="{{ ticket.updated_iso or '' }}">
+                <td data-column-key="priority" data-label="Priority">{{ ticket.priority_label }}</td>
+                <td data-column-key="company" data-label="Company">{{ ticket.company_name or '—' }}</td>
+                <td data-column-key="updated" data-label="Updated" data-value="{{ ticket.updated_iso or '' }}">
                   {% if ticket.updated_iso %}
                     <span data-utc="{{ ticket.updated_iso }}"></span>
                   {% else %}
@@ -122,6 +99,7 @@
         </tbody>
       </table>
     </div>
+    <div class="tickets-toolbar__actions"><button type="button" class="button button--ghost" data-ticket-load-more hidden>Load more</button></div>
   </section>
 
   <!-- User ticket creation modal -->

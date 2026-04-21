@@ -1,41 +1,18 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}
-<div class="header-title-menu">
-  <span class="header-title-menu__label">Webhook Monitor</span>
-  <details class="header-title-menu__dropdown" data-header-menu>
-    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
-      Webhook tools
-      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
-        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-      </svg>
-      <span class="visually-hidden">Toggle webhook tools menu</span>
-    </summary>
-    <ul class="header-title-menu__list" role="menu">
-      <li class="header-title-menu__item" role="none">
-        <button type="button" class="header-title-menu__link" role="menuitem" data-webhook-delete-status="failed">
-          Delete all failed
-        </button>
-      </li>
-      <li class="header-title-menu__item" role="none">
-        <button type="button" class="header-title-menu__link" role="menuitem" data-webhook-delete-status="succeeded">
-          Delete all successful
-        </button>
-      </li>
-    </ul>
-  </details>
-</div>
+{% block header_title %}<span class="header__title-text">Webhook Monitor</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Delete all failed", "type": "button", "variant": "ghost", "attrs": {"data-webhook-delete-status": "failed"}},
+    {"label": "Delete all succeeded", "type": "button", "variant": "ghost", "attrs": {"data-webhook-delete-status": "succeeded"}}
+  ]) }}
 {% endblock %}
 
 {% block content %}
 <section class="card card--panel">
-  <header class="card__header card__header--actions">
-    <div>
-      <h2 class="card__title">Webhook Monitor</h2>
-      <p class="card__subtitle">
-        Monitor incoming and outgoing webhook requests, retry failures, and inspect detailed logs for troubleshooting.
-      </p>
-    </div>
+  <header class="card__header">
     <div class="card__controls">
       <input
         type="search"
@@ -47,18 +24,18 @@
     </div>
   </header>
   <div class="table-wrapper">
-    <table class="table" id="webhooks-table" data-table>
+    <table class="table" id="webhooks-table" data-table data-table-id="webhooks">
       <thead>
         <tr>
-          <th scope="col" data-sort="string">Direction</th>
-          <th scope="col" data-sort="string">Name</th>
-          <th scope="col" data-sort="string" class="table__col--truncate">Target</th>
-          <th scope="col" data-sort="string">Status</th>
-          <th scope="col" data-sort="number">Attempts</th>
-          <th scope="col" data-sort="date">Next attempt</th>
-          <th scope="col" data-sort="string">Last error</th>
-          <th scope="col" data-sort="date">Updated</th>
-          <th scope="col" class="table__actions">Actions</th>
+          <th scope="col" data-sort="string" data-column-key="direction">Direction</th>
+          <th scope="col" data-sort="string" data-column-key="name">Name</th>
+          <th scope="col" data-sort="string" class="table__col--truncate" data-column-key="target">Target</th>
+          <th scope="col" data-sort="string" data-column-key="status">Status</th>
+          <th scope="col" data-sort="number" data-column-key="attempts">Attempts</th>
+          <th scope="col" data-sort="date" data-column-key="next_attempt">Next attempt</th>
+          <th scope="col" data-sort="string" data-column-key="last_error">Last error</th>
+          <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
+          <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -70,35 +47,33 @@
             data-event-status="{{ event.status }}"
             data-event-direction="{{ event.direction or 'outgoing' }}"
           >
-            <td data-label="Direction">
+            <td data-label="Direction" data-column-key="direction">
               {% if event.direction == 'incoming' %}
                 <span class="badge badge--info">⬇ Incoming</span>
               {% else %}
                 <span class="badge badge--primary">⬆ Outgoing</span>
               {% endif %}
             </td>
-            <td data-label="Name">{{ event.name }}</td>
-            <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}">{{ event.target_url }}</td>
-            <td data-label="Status">{{ event.status }}</td>
-            <td data-label="Attempts" data-value="{{ event.attempt_count }}">
+            <td data-label="Name" data-column-key="name">{{ event.name }}</td>
+            <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}" data-column-key="target">{{ event.target_url }}</td>
+            <td data-label="Status" data-column-key="status">{{ event.status }}</td>
+            <td data-label="Attempts" data-value="{{ event.attempt_count }}" data-column-key="attempts">
               {{ event.attempt_count }}/{{ event.max_attempts }}
             </td>
-            <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}">
+            <td data-label="Next attempt" data-value="{{ event.next_attempt_iso or '' }}" data-column-key="next_attempt">
               {% if event.next_attempt_iso %}
                 <span data-utc="{{ event.next_attempt_iso }}"></span>
               {% else %}
                 <span class="text-muted">—</span>
               {% endif %}
             </td>
-            <td data-label="Last error">{{ event.last_error or '—' }}</td>
-            <td data-label="Updated" data-value="{{ event.updated_iso or '' }}">
+            <td data-label="Last error" data-column-key="last_error">{{ event.last_error or '—' }}</td>
+            <td data-label="Updated" data-value="{{ event.updated_iso or '' }}" data-column-key="updated">
               {% if event.updated_iso %}
                 <span data-utc="{{ event.updated_iso }}"></span>
               {% endif %}
             </td>
-            <td class="table__actions">
-              <div class="table__action-buttons">
-                <button type="button" class="button button--ghost" data-webhook-attempts>View attempts</button>
+            <td class="table__actions" data-column-key="actions">
                 <button
                   type="button"
                   class="button button--ghost"

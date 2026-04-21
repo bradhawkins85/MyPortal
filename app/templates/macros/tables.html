@@ -288,3 +288,76 @@
   <span class="loading-message">{{ message }}</span>
 </div>
 {% endmacro %}
+
+{# Standardised pagination bar.
+
+   Usage:
+     {% from "macros/tables.html" import pagination %}
+     {{ pagination(page, total_pages, page_size, base_url) }}
+
+   base_url  — the URL path without page / page_size params.
+   preserve  — extra query params to carry forward (dict).
+#}
+{% macro pagination(page, total_pages, page_size=None, base_url='', preserve=None) -%}
+  {%- if total_pages is not none and total_pages > 1 -%}
+    {%- set prev_page = page - 1 -%}
+    {%- set next_page = page + 1 -%}
+    {%- macro build_url(p) -%}
+      {%- set sep = '&' if '?' in base_url else '?' -%}
+      {{ base_url }}{{ sep }}page={{ p }}
+      {%- if page_size %}&page_size={{ page_size }}{% endif -%}
+      {%- if preserve -%}
+        {%- for k, v in preserve.items() -%}&{{ k }}={{ v }}{%- endfor -%}
+      {%- endif -%}
+    {%- endmacro -%}
+    <nav class="pagination" aria-label="Pagination" data-pagination>
+      <div class="pagination__info">
+        Page {{ page }} of {{ total_pages }}
+      </div>
+      <div class="pagination__controls">
+        {%- if page > 1 -%}
+          <a class="button button--ghost button--small"
+             href="{{ build_url(prev_page) | trim }}"
+             aria-label="Previous page">Previous</a>
+        {%- else -%}
+          <span class="button button--ghost button--small button--disabled"
+                aria-disabled="true">Previous</span>
+        {%- endif -%}
+        {%- for p in range([1, page - 2] | max, [total_pages + 1, page + 3] | min) -%}
+          {%- if p == page -%}
+            <span class="pagination__page pagination__page--current"
+                  aria-current="page">{{ p }}</span>
+          {%- else -%}
+            <a class="pagination__page"
+               href="{{ build_url(p) | trim }}">{{ p }}</a>
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if page < total_pages -%}
+          <a class="button button--ghost button--small"
+             href="{{ build_url(next_page) | trim }}"
+             aria-label="Next page">Next</a>
+        {%- else -%}
+          <span class="button button--ghost button--small button--disabled"
+                aria-disabled="true">Next</span>
+        {%- endif -%}
+      </div>
+    </nav>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Standardised empty state block.
+   Usage:
+     {% from "macros/tables.html" import empty_state %}
+     {{ empty_state("Title", "Subtitle or hint.") }}
+#}
+{% macro empty_state(title, subtitle='', icon=None) -%}
+  <div class="empty-state">
+    {%- if icon -%}
+      <div class="empty-state__icon" aria-hidden="true">{{ icon | safe }}</div>
+    {%- endif -%}
+    <h3 class="empty-state__title">{{ title }}</h3>
+    {%- if subtitle -%}
+      <p class="empty-state__subtitle">{{ subtitle }}</p>
+    {%- endif -%}
+  </div>
+{%- endmacro %}

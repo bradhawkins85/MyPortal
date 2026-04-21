@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Knowledge base admin{% endblock %}
+
 {% set scope_labels = {
   "anonymous": "Public",
   "user": "Specific users",
@@ -36,13 +38,13 @@
       </div>
     </header>
     <div class="table-wrapper table-wrapper--short">
-      <table class="table table--compact" id="kb-admin-table" data-table>
+      <table class="table table--compact" id="kb-admin-table" data-table data-table-id="knowledge-base">
         <thead>
           <tr>
-            <th scope="col" data-sort="string">Title</th>
-            <th scope="col" data-sort="string">Scope</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" data-sort="date">Updated</th>
+            <th scope="col" data-sort="string" data-column-key="title">Title</th>
+            <th scope="col" data-sort="string" data-column-key="scope">Scope</th>
+            <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
           </tr>
         </thead>
         <tbody>
@@ -55,7 +57,7 @@
             data-kb-is-published="{{ 'true' if article.is_published else 'false' }}"
             data-kb-updated="{{ article.updated_at_iso or '' }}"
           >
-            <td data-label="Title">
+            <td data-label="Title" data-column-key="title">
               <a class="kb-admin__link" href="/admin/knowledge-base/articles/{{ article.slug }}">
                 <span class="kb-admin__title">{{ article.title }}</span>
                 {% if article.summary %}
@@ -63,17 +65,17 @@
                 {% endif %}
               </a>
             </td>
-            <td data-label="Scope" data-value="{{ article.permission_scope }}">
+            <td data-label="Scope" data-value="{{ article.permission_scope }}" data-column-key="scope">
               <span class="tag">{{ scope_labels.get(article.permission_scope, article.permission_scope|title) }}</span>
             </td>
-            <td data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}">
+            <td data-label="Status" data-value="{{ 'Published' if article.is_published else 'Draft' }}" data-column-key="status">
               {% if article.is_published %}
                 <span class="status status--success">Published</span>
               {% else %}
                 <span class="status status--warning">Draft</span>
               {% endif %}
             </td>
-            <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}">
+            <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}" data-column-key="updated">
               <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>
             </td>
           </tr>

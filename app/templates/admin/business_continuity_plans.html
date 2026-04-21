@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block header_title %}Business continuity plans{% endblock %}
+
 {% set plan_type_labels = {
   "disaster_recovery": "Disaster Recovery",
   "incident_response": "Incident Response",
@@ -40,15 +42,15 @@
       </div>
     </header>
     <div class="table-wrapper table-wrapper--short">
-      <table class="table table--compact" id="bc-plans-table" data-table>
+      <table class="table table--compact" id="bc-plans-table" data-table data-table-id="bc-plans">
         <thead>
           <tr>
-            <th scope="col" data-sort="string">Title</th>
-            <th scope="col" data-sort="string">Type</th>
-            <th scope="col" data-sort="string">Version</th>
-            <th scope="col" data-sort="string">Status</th>
-            <th scope="col" data-sort="date">Last Updated</th>
-            <th scope="col" data-sort="date">Last Reviewed</th>
+            <th scope="col" data-sort="string" data-column-key="title">Title</th>
+            <th scope="col" data-sort="string" data-column-key="type">Type</th>
+            <th scope="col" data-sort="string" data-column-key="version">Version</th>
+            <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="date" data-column-key="last_updated">Last Updated</th>
+            <th scope="col" data-sort="date" data-column-key="last_reviewed">Last Reviewed</th>
           </tr>
         </thead>
         <tbody>
@@ -61,18 +63,18 @@
             data-bc-updated="{{ plan.updated_at_iso or '' }}"
             data-bc-reviewed="{{ plan.last_reviewed_at_iso or '' }}"
           >
-            <td data-label="Title">
+            <td data-label="Title" data-column-key="title">
               <a class="bc-plans-admin__link" href="/admin/business-continuity-plans/{{ plan.id }}">
                 <span class="bc-plans-admin__title">{{ plan.title }}</span>
               </a>
             </td>
-            <td data-label="Type" data-value="{{ plan.plan_type }}">
+            <td data-label="Type" data-value="{{ plan.plan_type }}" data-column-key="type">
               <span class="tag tag--{{ plan.plan_type }}">{{ plan_type_labels.get(plan.plan_type, plan.plan_type|title) }}</span>
             </td>
-            <td data-label="Version" data-value="{{ plan.version }}">
+            <td data-label="Version" data-value="{{ plan.version }}" data-column-key="version">
               <span class="badge">{{ plan.version }}</span>
             </td>
-            <td data-label="Status" data-value="{{ plan.status }}">
+            <td data-label="Status" data-value="{{ plan.status }}" data-column-key="status">
               {% if plan.status == 'active' %}
                 <span class="status status--success">Active</span>
               {% elif plan.status == 'draft' %}
@@ -81,10 +83,10 @@
                 <span class="status status--neutral">Archived</span>
               {% endif %}
             </td>
-            <td data-label="Last Updated" data-value="{{ plan.updated_at_iso or '' }}">
+            <td data-label="Last Updated" data-value="{{ plan.updated_at_iso or '' }}" data-column-key="last_updated">
               <span data-utc="{{ plan.updated_at_iso or '' }}">{{ plan.updated_at_iso or '—' }}</span>
             </td>
-            <td data-label="Last Reviewed" data-value="{{ plan.last_reviewed_at_iso or '' }}">
+            <td data-label="Last Reviewed" data-value="{{ plan.last_reviewed_at_iso or '' }}" data-column-key="last_reviewed">
               <span data-utc="{{ plan.last_reviewed_at_iso or '' }}">{{ plan.last_reviewed_at_iso or '—' }}</span>
             </td>
           </tr>

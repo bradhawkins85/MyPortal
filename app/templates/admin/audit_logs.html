@@ -1,13 +1,11 @@
 {% extends "base.html" %}
 
+{% block header_title %}Audit logs{% endblock %}
+
 {% block content %}
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">Audit trail</h2>
-        <p class="card__subtitle">Every change to memberships and roles is recorded to support compliance reviews.</p>
-      </div>
       <form method="get" class="filter-grid">
         <div class="form-field">
           <label class="form-label" for="filter-entity-type">Entity type</label>
@@ -32,30 +30,30 @@
       </form>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="audit-log-table" data-table>
+      <table class="table" id="audit-log-table" data-table data-table-id="audit-log">
         <thead>
           <tr>
-            <th scope="col" data-sort="date">Timestamp</th>
-            <th scope="col" data-sort="string">Actor</th>
-            <th scope="col" data-sort="string">Action</th>
-            <th scope="col" data-sort="string">Entity</th>
-            <th scope="col" data-sort="string">Changes</th>
+            <th scope="col" data-sort="date" data-column-key="timestamp">Timestamp</th>
+            <th scope="col" data-sort="string" data-column-key="actor">Actor</th>
+            <th scope="col" data-sort="string" data-column-key="action">Action</th>
+            <th scope="col" data-sort="string" data-column-key="entity">Entity</th>
+            <th scope="col" data-sort="string" data-column-key="changes">Changes</th>
           </tr>
         </thead>
         <tbody>
           {% if logs %}
             {% for log in logs %}
               <tr>
-                <td data-label="Timestamp" data-utc="{{ log.created_at_iso or '' }}" data-value="{{ log.created_at_iso or '' }}">{{ log.created_at_iso or '—' }}</td>
-                <td data-label="Actor">
+                <td data-label="Timestamp" data-utc="{{ log.created_at_iso or '' }}" data-value="{{ log.created_at_iso or '' }}" data-column-key="timestamp">{{ log.created_at_iso or '—' }}</td>
+                <td data-label="Actor" data-column-key="actor">
                   {% if log.user_email %}
                     <span class="stacked"><strong>{{ log.user_email }}</strong><span class="text-muted">User #{{ log.user_id }}</span></span>
                   {% else %}
                     <span class="text-muted">System</span>
                   {% endif %}
                 </td>
-                <td data-label="Action">{{ log.action }}</td>
-                <td data-label="Entity">
+                <td data-label="Action" data-column-key="action">{{ log.action }}</td>
+                <td data-label="Entity" data-column-key="entity">
                   {% if log.entity_type %}
                     <span class="tag">{{ log.entity_type }}</span>
                     {% if log.entity_id %}
@@ -65,7 +63,7 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
-                <td data-label="Changes">
+                <td data-label="Changes" data-column-key="changes">
                   <details class="details">
                     <summary>View</summary>
                     <div class="code-block">
