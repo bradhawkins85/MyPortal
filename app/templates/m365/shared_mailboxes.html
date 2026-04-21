@@ -24,17 +24,11 @@
   {% endif %}
 
   <section class="panel">
+    {% if synced_at %}
     <header class="panel__header">
-      <div>
-        <h2 class="panel__title">Shared Mailboxes</h2>
-        <p class="panel__subtitle">
-          Primary and archive mailbox sizes for shared, room and equipment mailboxes in the tenant.
-          {% if synced_at %}
-          Last synced {{ synced_at.strftime('%d %b %Y %H:%M') }} UTC.
-          {% endif %}
-        </p>
-      </div>
+      <p class="panel__subtitle">Last synced {{ synced_at.strftime('%d %b %Y %H:%M') }} UTC.</p>
     </header>
+    {% endif %}
     <div class="panel__body" {% if mailboxes %}style="padding:0"{% endif %}>
       {% if not has_credentials %}
       <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before syncing mailboxes.</p>
