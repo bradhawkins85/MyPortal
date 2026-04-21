@@ -6,9 +6,22 @@
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Audit trail</h2>
-        <p class="card__subtitle">Every change to memberships and roles is recorded to support compliance reviews.</p>
+        <p class="card__subtitle">Every change to user-managed data is recorded here. Use the filters to narrow the view, and expand a row to see exactly which fields changed.</p>
       </div>
       <form method="get" class="filter-grid">
+        <div class="form-field">
+          <label class="form-label" for="filter-search">Search</label>
+          <input class="form-input" id="filter-search" name="search" value="{{ filters.search }}" placeholder="Action, entity type, or actor email" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-action">Action</label>
+          <input class="form-input" id="filter-action" name="action" value="{{ filters.action }}" list="audit-action-options" placeholder="e.g. ticket.update" />
+          <datalist id="audit-action-options">
+            {% for action in available_actions %}
+              <option value="{{ action }}"></option>
+            {% endfor %}
+          </datalist>
+        </div>
         <div class="form-field">
           <label class="form-label" for="filter-entity-type">Entity type</label>
           <input class="form-input" id="filter-entity-type" name="entity_type" value="{{ filters.entity_type }}" />
@@ -22,7 +35,23 @@
           <input class="form-input" id="filter-user-id" name="user_id" value="{{ filters.user_id }}" />
         </div>
         <div class="form-field">
-          <label class="form-label" for="filter-limit">Limit</label>
+          <label class="form-label" for="filter-ip">IP address</label>
+          <input class="form-input" id="filter-ip" name="ip_address" value="{{ filters.ip_address }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-request-id">Request ID</label>
+          <input class="form-input" id="filter-request-id" name="request_id" value="{{ filters.request_id }}" placeholder="Pivot from server logs" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-since">Since (UTC)</label>
+          <input class="form-input" id="filter-since" type="datetime-local" name="since" value="{{ filters.since }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-until">Until (UTC)</label>
+          <input class="form-input" id="filter-until" type="datetime-local" name="until" value="{{ filters.until }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-limit">Page size</label>
           <input class="form-input" id="filter-limit" type="number" min="1" max="500" name="limit" value="{{ filters.limit }}" />
         </div>
         <div class="form-actions form-actions--inline">
@@ -39,6 +68,7 @@
             <th scope="col" data-sort="string">Actor</th>
             <th scope="col" data-sort="string">Action</th>
             <th scope="col" data-sort="string">Entity</th>
+            <th scope="col" data-sort="string">IP / Request</th>
             <th scope="col" data-sort="string">Changes</th>
           </tr>
         </thead>
@@ -54,7 +84,7 @@
                     <span class="text-muted">System</span>
                   {% endif %}
                 </td>
-                <td data-label="Action">{{ log.action }}</td>
+                <td data-label="Action"><code>{{ log.action }}</code></td>
                 <td data-label="Entity">
                   {% if log.entity_type %}
                     <span class="tag">{{ log.entity_type }}</span>
@@ -65,31 +95,70 @@
                     <span class="text-muted">—</span>
                   {% endif %}
                 </td>
+                <td data-label="IP / Request">
+                  <span class="stacked">
+                    <span>{{ log.ip_address or '—' }}</span>
+                    {% if log.request_id %}
+                      <span class="text-muted" title="{{ log.request_id }}"><code>{{ log.request_id[:12] }}…</code></span>
+                    {% endif %}
+                  </span>
+                </td>
                 <td data-label="Changes">
                   <details class="details">
-                    <summary>View</summary>
-                    <div class="code-block">
-                      <strong>Previous:</strong>
-                      <pre>{{ log.previous_value | tojson(indent=2) }}</pre>
-                      <strong>New:</strong>
-                      <pre>{{ log.new_value | tojson(indent=2) }}</pre>
-                      {% if log.metadata %}
+                    <summary>{{ log.diff_rows | length }} field{% if log.diff_rows | length != 1 %}s{% endif %}</summary>
+                    {% if log.diff_rows %}
+                      <table class="table table--compact">
+                        <thead>
+                          <tr>
+                            <th>Field</th>
+                            <th>Previous</th>
+                            <th>Current</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for row in log.diff_rows %}
+                            <tr{% if row.changed %} class="row--changed"{% endif %}>
+                              <td><code>{{ row.field }}</code></td>
+                              <td>{% if row.previous is mapping or row.previous is iterable and row.previous is not string %}<pre>{{ row.previous | tojson(indent=2) }}</pre>{% else %}{{ row.previous if row.previous is not none else '—' }}{% endif %}</td>
+                              <td>{% if row.current is mapping or row.current is iterable and row.current is not string %}<pre>{{ row.current | tojson(indent=2) }}</pre>{% else %}{{ row.current if row.current is not none else '—' }}{% endif %}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    {% else %}
+                      <p class="text-muted">No field-level diff recorded.</p>
+                    {% endif %}
+                    {% if log.metadata %}
+                      <div class="code-block">
                         <strong>Metadata:</strong>
                         <pre>{{ log.metadata | tojson(indent=2) }}</pre>
-                      {% endif %}
-                    </div>
+                      </div>
+                    {% endif %}
                   </details>
                 </td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="5" class="table__empty">No audit records match the selected filters.</td>
+              <td colspan="6" class="table__empty">No audit records match the selected filters.</td>
             </tr>
           {% endif %}
         </tbody>
       </table>
     </div>
+    {% if pagination.total %}
+      <footer class="card__footer">
+        <span class="text-muted">Showing {{ pagination.offset + 1 }}–{{ [pagination.offset + pagination.limit, pagination.total] | min }} of {{ pagination.total }}</span>
+        <span class="form-actions form-actions--inline">
+          {% if pagination.has_prev %}
+            <a class="button button--ghost" href="?{% for key, value in filters.items() if key != 'offset' and value not in (None, '') %}{{ key }}={{ value }}&amp;{% endfor %}offset={{ pagination.prev_offset }}">Previous</a>
+          {% endif %}
+          {% if pagination.has_next %}
+            <a class="button button--ghost" href="?{% for key, value in filters.items() if key != 'offset' and value not in (None, '') %}{{ key }}={{ value }}&amp;{% endfor %}offset={{ pagination.next_offset }}">Next</a>
+          {% endif %}
+        </span>
+      </footer>
+    {% endif %}
   </section>
 </div>
 {% endblock %}
