@@ -3482,6 +3482,53 @@ button.header-title-menu__link {
   min-width: 220px;
 }
 
+.tickets-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-base);
+  width: 100%;
+}
+
+.tickets-toolbar__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-gap-base);
+  align-items: flex-end;
+}
+
+.tickets-toolbar__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-gap-tight);
+  min-width: 160px;
+}
+
+.tickets-toolbar__actions {
+  display: flex;
+  gap: var(--space-gap-tight);
+  align-items: center;
+}
+
+.tickets-toolbar__search {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+@media (max-width: 1024px) {
+  .tickets-toolbar {
+    align-items: stretch;
+  }
+
+  .tickets-toolbar__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .tickets-toolbar__search {
+    width: 100%;
+  }
+}
+
 .checkbox--table {
   display: inline-flex;
   align-items: center;
