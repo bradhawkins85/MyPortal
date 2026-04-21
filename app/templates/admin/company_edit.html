@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+
+{% block header_title %}Edit company{% endblock %}
 {% block content %}
   <div data-company-id="{{ company.id }}">
   <div class="admin-grid admin-grid--columns">
@@ -642,7 +644,7 @@
             <button type="button" class="button button--primary" data-task-create>New automation</button>
           </div>
           <div class="table-wrapper">
-            <table class="table" id="company-automation-tasks" data-table>
+            <table class="table" id="company-automation-tasks" data-table data-table-id="company-automation-tasks">
               <thead>
                 <tr>
                   <th scope="col" data-sort="string">Name</th>
@@ -727,7 +729,7 @@
             <button type="button" class="button button--primary" data-recurring-item-create>Add item</button>
           </div>
           <div class="table-wrapper">
-            <table class="table" id="recurring-invoice-items-table" data-table>
+            <table class="table" id="recurring-invoice-items-table" data-table data-table-id="recurring-invoice-items">
               <thead>
                 <tr>
                   <th scope="col" data-sort="string">Product Code</th>
@@ -937,7 +939,7 @@
           />
         </div>
         <div class="table-wrapper">
-          <table class="table" id="company-assignments" data-table>
+          <table class="table" id="company-assignments" data-table data-table-id="company-assignments">
             <thead>
               <tr>
                 <th scope="col" data-sort="string">User</th>
@@ -1222,7 +1224,7 @@
             />
           </div>
           <div class="table-wrapper">
-            <table class="table" id="task-logs-table" data-table>
+            <table class="table" id="task-logs-table" data-table data-table-id="task-logs">
               <thead>
                 <tr>
                   <th scope="col" data-sort="string">Status</th>
