@@ -1,23 +1,41 @@
-{# Table macros for consistent styling and accessibility with sticky headers #}
+{# Table macros for consistent styling and accessibility with sticky headers.
 
-{% macro data_table(headers, sortable=true, sticky_header=true, aria_label="Data table") %}
+   See docs/ui_layout_standards.md for the standard layout these macros
+   support, including the column-visibility picker and toolbar pattern.
+
+   `headers` may be either a list of legacy header dicts:
+       {"label": "Name", "sortable": true, "width": "20%", "align": "left"}
+   or the richer columns shape used by the new toolbar:
+       {"key": "name", "label": "Name", "sortable": true, "sort_type": "string",
+        "default_visible": true, "mobile_priority": "essential",
+        "width": "20%", "align": "left"}
+
+   When `table_id` and `columns` are supplied, the table emits the
+   data-table-id and per-cell data-column-key attributes consumed by
+   table_columns.js.
+#}
+
+{% macro data_table(headers, sortable=true, sticky_header=true, aria_label="Data table",
+                    table_id=None, columns=None) %}
+{% set effective_columns = columns or headers %}
 <div class="table-container">
-  <table class="data-table{% if sticky_header %} data-table--sticky{% endif %}" role="table" aria-label="{{ aria_label }}">
+  <table class="data-table{% if sticky_header %} data-table--sticky{% endif %}"
+         role="table" aria-label="{{ aria_label }}"
+         {% if table_id %}data-table data-table-id="{{ table_id }}"{% endif %}>
     <thead>
       <tr role="row">
-        {% for header in headers %}
-        <th role="columnheader" 
-            {% if header.width %}style="width: {{ header.width }};"{% endif %}
-            {% if header.align %}style="text-align: {{ header.align }};"{% endif %}
+        {% for header in effective_columns %}
+        {% set sort_type = header.get('sort_type', 'string') %}
+        {% set is_sortable = sortable and header.get('sortable', True) %}
+        <th role="columnheader"
             scope="col"
-            {% if sortable and header.sortable|default(true) %}
-            class="sortable"
-            tabindex="0"
-            {% endif %}>
+            {% if header.get('key') %}data-column-key="{{ header.key }}"{% endif %}
+            {% if header.get('mobile_priority') %}data-mobile-priority="{{ header.mobile_priority }}"{% endif %}
+            {% if header.get('width') %}style="width: {{ header.width }};{% if header.get('align') %} text-align: {{ header.align }};{% endif %}"
+            {%- elif header.get('align') %} style="text-align: {{ header.align }};"{% endif %}
+            {% if is_sortable %}class="sortable" tabindex="0" data-sort="{{ sort_type }}"{% endif %}>
           {{ header.label }}
-          {% if sortable and header.sortable|default(true) %}
-          <span class="sort-indicator" aria-hidden="true"></span>
-          {% endif %}
+          {% if is_sortable %}<span class="sort-indicator" aria-hidden="true"></span>{% endif %}
         </th>
         {% endfor %}
       </tr>
@@ -28,6 +46,161 @@
   </table>
 </div>
 {% endmacro %}
+
+{# Standard table toolbar: search, filters, page size, column picker,
+   bulk actions menu. All controls are optional.
+
+   filters: list of {"name": str, "label": str, "value": str|None,
+                     "options": [(value, label), ...]}
+   bulk_actions: list of action dicts (same shape as header.html actions);
+                 each must carry an `attrs` entry with the per-page
+                 data-* hook used by the existing JS to enable/disable it.
+#}
+{% macro table_toolbar(table_id,
+                       search=True,
+                       search_placeholder='Search',
+                       search_name='q',
+                       search_value='',
+                       filters=None,
+                       page_sizes=None,
+                       page_size=None,
+                       page_size_name='page_size',
+                       columns=None,
+                       column_picker_label='Columns',
+                       bulk_actions=None,
+                       bulk_actions_label='Bulk actions',
+                       method='get',
+                       form_id=None,
+                       extra_class='') -%}
+  <div class="table-toolbar {{ extra_class }}" data-table-toolbar
+       data-table-toolbar-for="{{ table_id }}">
+    {%- if search or filters or page_sizes -%}
+      <form class="table-toolbar__filters"
+            method="{{ method }}"
+            {% if form_id %}id="{{ form_id }}"{% endif %}
+            autocomplete="off">
+        {%- if search -%}
+          <div class="table-toolbar__field table-toolbar__field--search">
+            <label class="visually-hidden" for="{{ table_id }}-search">{{ search_placeholder }}</label>
+            <input type="search"
+                   id="{{ table_id }}-search"
+                   name="{{ search_name }}"
+                   class="input"
+                   placeholder="{{ search_placeholder }}"
+                   value="{{ search_value or '' }}"
+                   data-table-filter="{{ table_id }}" />
+          </div>
+        {%- endif -%}
+        {%- for filter in (filters or []) -%}
+          <div class="table-toolbar__field">
+            <label for="{{ table_id }}-filter-{{ filter.name }}">{{ filter.label }}</label>
+            <select id="{{ table_id }}-filter-{{ filter.name }}"
+                    name="{{ filter.name }}"
+                    class="input">
+              {%- for option in filter.options -%}
+                {%- set opt_value = option[0] if option is iterable and option is not string and option|length > 1 else option -%}
+                {%- set opt_label = option[1] if option is iterable and option is not string and option|length > 1 else option -%}
+                <option value="{{ opt_value }}" {% if filter.get('value') == opt_value %}selected{% endif %}>{{ opt_label }}</option>
+              {%- endfor -%}
+            </select>
+          </div>
+        {%- endfor -%}
+        {%- if page_sizes -%}
+          <div class="table-toolbar__field table-toolbar__field--narrow">
+            <label for="{{ table_id }}-page-size">Page size</label>
+            <select id="{{ table_id }}-page-size" name="{{ page_size_name }}" class="input">
+              {%- for size in page_sizes -%}
+                <option value="{{ size }}" {% if page_size and page_size|string == size|string %}selected{% endif %}>{{ size }} per page</option>
+              {%- endfor -%}
+            </select>
+          </div>
+        {%- endif -%}
+      </form>
+    {%- endif -%}
+
+    <div class="table-toolbar__menus">
+      {%- if columns -%}
+        {{ table_column_picker(table_id, columns, column_picker_label) }}
+      {%- endif -%}
+      {%- if bulk_actions -%}
+        {{ table_bulk_actions(table_id, bulk_actions, bulk_actions_label) }}
+      {%- endif -%}
+    </div>
+  </div>
+{%- endmacro %}
+
+{# Column picker disclosure menu. `columns` uses the same shape as data_table. #}
+{% macro table_column_picker(table_id, columns, label='Columns') -%}
+  {%- set picker_id = 'columns-menu-' ~ table_id -%}
+  <div class="header-menu table-toolbar__columns" data-header-menu data-table-columns="{{ table_id }}">
+    <button type="button"
+            class="button button--ghost button--small header-menu__button"
+            data-header-menu-toggle
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="{{ picker_id }}">
+      <span>{{ label }}</span>
+      <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+        <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+      </svg>
+    </button>
+    <div id="{{ picker_id }}"
+         class="header-menu__panel header-menu__panel--checks"
+         role="menu"
+         data-header-menu-panel
+         data-table-columns-panel
+         hidden>
+      {%- for column in columns -%}
+        {%- if column.get('key') -%}
+          {%- set default_visible = column.get('default_visible', True) -%}
+          <label class="header-menu__check" role="menuitemcheckbox">
+            <input type="checkbox"
+                   data-table-column-toggle
+                   data-column-key="{{ column.key }}"
+                   data-default-visible="{{ 'true' if default_visible else 'false' }}"
+                   {% if default_visible %}checked{% endif %} />
+            <span>{{ column.label }}</span>
+          </label>
+        {%- endif -%}
+      {%- endfor -%}
+      <button type="button"
+              class="header-menu__item header-menu__item--reset"
+              data-table-columns-reset>
+        Reset to defaults
+      </button>
+    </div>
+  </div>
+{%- endmacro %}
+
+{# Bulk actions menu — entries follow the action dict shape from header.html.
+   Per-page JS is responsible for toggling the `disabled` attribute on each
+   item via its `attrs.data-*` hook as rows are selected. #}
+{% macro table_bulk_actions(table_id, actions, label='Bulk actions') -%}
+  {%- set menu_id = 'bulk-actions-menu-' ~ table_id -%}
+  {%- from "macros/header.html" import render_action -%}
+  <div class="header-menu" data-header-menu data-table-bulk-actions="{{ table_id }}">
+    <button type="button"
+            class="button button--ghost button--small header-menu__button"
+            data-header-menu-toggle
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="{{ menu_id }}">
+      <span>{{ label }}</span>
+      <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+        <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+      </svg>
+    </button>
+    <div id="{{ menu_id }}"
+         class="header-menu__panel"
+         role="menu"
+         data-header-menu-panel
+         hidden>
+      {%- for action in actions -%}
+        {{ render_action(action, in_menu=True) }}
+      {%- endfor -%}
+    </div>
+  </div>
+{%- endmacro %}
 
 {% macro action_buttons(buttons, align="left") %}
 <div class="action-buttons" style="justify-content: {{ 'flex-start' if align == 'left' else 'flex-end' if align == 'right' else 'center' }};">
