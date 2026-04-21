@@ -79,6 +79,10 @@ _PROVISION_APP_ROLES: list[str] = [
     "e2a3a72e-5f79-4c64-b1b1-878b674786c9",  # Mail.ReadWrite
     # Permissions for staff onboarding/offboarding group management:
     "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",  # GroupMember.ReadWrite.All (add/remove group members)
+    # Additional permissions for M365 monitoring best-practice checks:
+    "dc5007c0-2d7d-4c42-879c-2dab87571379",  # IdentityRiskyUser.Read.All
+    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",  # Application.Read.All
+    "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
