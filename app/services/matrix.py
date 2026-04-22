@@ -23,11 +23,11 @@ _SYNC_TIMEOUT_MS = 30_000
 _client: httpx.AsyncClient | None = None
 
 
-def _get_client(*, timeout: float = _DEFAULT_TIMEOUT) -> httpx.AsyncClient:
+def _get_client() -> httpx.AsyncClient:
     """Return (or create) the shared async HTTP client."""
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=timeout)
+        _client = httpx.AsyncClient()
     return _client
 
 
@@ -79,8 +79,8 @@ async def _request(
     url = f"{_base_url()}{path}"
     for attempt in range(max_retries):
         try:
-            client = _get_client(timeout=timeout)
-            resp = await client.request(method, url, headers=headers, json=json, params=params)
+            client = _get_client()
+            resp = await client.request(method, url, headers=headers, json=json, params=params, timeout=timeout)
         except httpx.RequestError as exc:
             if attempt >= max_retries - 1:
                 raise MatrixError("M_UNKNOWN", str(exc)) from exc
@@ -99,7 +99,7 @@ async def _request(
             error = data.get("error", resp.text[:200])
             raise MatrixError(errcode, error, resp.status_code)
         return data
-    return {}
+    raise MatrixError("M_LIMIT_EXCEEDED", "Request rate-limited; max retries exhausted")
 
 
 async def whoami() -> dict[str, Any]:

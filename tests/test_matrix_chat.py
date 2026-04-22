@@ -237,3 +237,65 @@ def test_sync_loop_still_handles_generic_errors():
     assert "except Exception as exc:" in source, (
         "matrix_sync must still handle generic exceptions"
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-request timeout (regression: shared client used wrong timeout for sync)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_uses_per_request_timeout(monkeypatch):
+    """The sync long-poll must use a timeout larger than the poll window.
+
+    Previously, the shared httpx client was created once with a 30-second
+    timeout and the sync call's larger timeout was silently ignored, causing
+    the HTTP request to race against the Matrix long-poll and timeout.
+    """
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    captured_timeout = None
+
+    def side_effect(request):
+        nonlocal captured_timeout
+        # httpx stores timeout on the request extensions
+        captured_timeout = request.extensions.get("timeout")
+        return httpx.Response(200, json={"next_batch": "s1"})
+
+    respx.get(url__regex=r"https://matrix\.example\.com/_matrix/client/v3/sync.*").mock(
+        side_effect=side_effect
+    )
+
+    from app.services.matrix import sync, _SYNC_TIMEOUT_MS
+    await sync(timeout_ms=_SYNC_TIMEOUT_MS)
+
+    # The per-request timeout dict must include a connect/read value larger
+    # than the poll window (30s) to avoid the race condition.
+    assert captured_timeout is not None, "No timeout captured on the HTTP request"
+    read_timeout = captured_timeout.get("read") if isinstance(captured_timeout, dict) else None
+    if read_timeout is not None:
+        assert read_timeout > _SYNC_TIMEOUT_MS / 1000, (
+            f"HTTP read timeout ({read_timeout}s) must exceed sync poll window "
+            f"({_SYNC_TIMEOUT_MS / 1000}s)"
+        )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rate_limit_exhausted_raises(monkeypatch):
+    """Exhausting rate-limit retries must raise MatrixError, not return {}."""
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    respx.post("https://matrix.example.com/_matrix/client/v3/createRoom").mock(
+        return_value=httpx.Response(
+            429,
+            json={"errcode": "M_LIMIT_EXCEEDED"},
+            headers={"Retry-After": "0"},
+        )
+    )
+
+    with pytest.raises(MatrixError) as exc_info:
+        await create_room(name="Rate Limited Room")
+    assert exc_info.value.errcode == "M_LIMIT_EXCEEDED"
