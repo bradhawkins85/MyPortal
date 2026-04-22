@@ -88,6 +88,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "dc5007c0-2d7d-4c42-879c-2dab87571379",  # IdentityRiskyUser.Read.All
     "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",  # Application.Read.All
     "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
+    "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
