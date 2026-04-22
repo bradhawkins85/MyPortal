@@ -5168,11 +5168,13 @@ async def save_m365_best_practices_settings(request: Request):
         return redirect
     form = await request.form()
     enabled_ids = {value for value in form.getlist("enabled")}
-    await m365_best_practices_service.set_enabled_checks(enabled_ids)
+    auto_remediate_ids = {value for value in form.getlist("auto_remediate")}
+    await m365_best_practices_service.set_enabled_checks(enabled_ids, auto_remediate_ids)
     log_info(
         "M365 best practice settings updated",
         user_id=user.get("id"),
         enabled_count=len(enabled_ids),
+        auto_remediate_count=len(auto_remediate_ids),
     )
     return RedirectResponse(
         url="/m365/best-practices/settings?success=Settings+saved",

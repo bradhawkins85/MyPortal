@@ -504,46 +504,89 @@ async def get_enabled_check_ids() -> set[str]:
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
         if check_id in settings:
-            if settings[check_id]:
+            if settings[check_id]["enabled"]:
                 enabled.add(check_id)
         elif bp.get("default_enabled", True):
             enabled.add(check_id)
     return enabled
 
 
-async def list_settings_with_catalog() -> list[dict[str, Any]]:
-    """Return the catalog merged with the current global enabled flag.
+async def get_auto_remediate_check_ids() -> set[str]:
+    """Return the set of check_ids that have auto-remediation enabled globally.
 
-    Each item contains the catalog metadata plus an ``enabled`` boolean
-    representing the current global setting (defaulting to the catalog's
-    ``default_enabled`` value when no row exists yet).
+    Only checks that declare ``has_remediation: True`` in the catalog can
+    meaningfully appear in this set; others are excluded even if the settings
+    row has ``auto_remediate=True``.
+    """
+    settings = await bp_repo.get_settings_map()
+    auto_remediate: set[str] = set()
+    for bp in _BEST_PRACTICES:
+        check_id = bp["id"]
+        if (
+            bp.get("has_remediation")
+            and check_id in settings
+            and settings[check_id].get("auto_remediate")
+        ):
+            auto_remediate.add(check_id)
+    return auto_remediate
+
+
+async def list_settings_with_catalog() -> list[dict[str, Any]]:
+    """Return the catalog merged with the current global enabled and auto-remediate flags.
+
+    Each item contains the catalog metadata plus:
+    - ``enabled`` boolean (global on/off, defaulting to ``default_enabled``)
+    - ``auto_remediate`` boolean (auto-remediation after each evaluation)
     """
     settings = await bp_repo.get_settings_map()
     out: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
         entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
-        entry["enabled"] = settings.get(bp["id"], bool(bp.get("default_enabled", True)))
+        row = settings.get(bp["id"])
+        entry["enabled"] = row["enabled"] if row else bool(bp.get("default_enabled", True))
+        entry["auto_remediate"] = row["auto_remediate"] if row else False
         out.append(entry)
     return out
 
 
-async def set_enabled_checks(enabled_check_ids: set[str]) -> None:
-    """Persist the global enabled flag for every catalog check.
+async def set_enabled_checks(
+    enabled_check_ids: set[str],
+    auto_remediate_check_ids: set[str] | None = None,
+) -> None:
+    """Persist the global enabled and auto-remediate flags for every catalog check.
+
+    ``enabled_check_ids`` controls which checks are active globally.
+    ``auto_remediate_check_ids`` controls which checks trigger automated
+    remediation immediately after evaluation (only honoured for checks that
+    declare ``has_remediation: True`` in the catalog).
 
     For checks toggled off, any previously-stored per-company results are
     cleared so they no longer appear on company pages.
     """
     catalog = _catalog_map()
     enabled_filtered = {cid for cid in enabled_check_ids if cid in catalog}
+    auto_remediate_filtered: set[str] = set()
+    if auto_remediate_check_ids is not None:
+        auto_remediate_filtered = {
+            cid
+            for cid in auto_remediate_check_ids
+            if cid in catalog and catalog[cid].get("has_remediation")
+        }
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
         is_enabled = check_id in enabled_filtered
-        await bp_repo.upsert_setting(check_id=check_id, enabled=is_enabled)
+        is_auto_remediate = check_id in auto_remediate_filtered
+        await bp_repo.upsert_setting(
+            check_id=check_id,
+            enabled=is_enabled,
+            auto_remediate=is_auto_remediate,
+        )
         if not is_enabled:
             await bp_repo.delete_result_for_check(check_id)
     log_info(
         "M365 Best Practice settings updated",
         enabled_count=len(enabled_filtered),
+        auto_remediate_count=len(auto_remediate_filtered),
         total=len(_BEST_PRACTICES),
     )
 
@@ -559,12 +602,19 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     Returns the list of result dicts (one per check) and persists each result
     in the ``m365_best_practice_results`` table.
 
+    After evaluation, any check that both:
+    - returned ``STATUS_FAIL``, and
+    - has ``auto_remediate`` enabled globally (and ``has_remediation: True``)
+
+    will have automated remediation triggered immediately.
+
     Graph-based checks receive the Graph access token; Exchange-Online-based
     checks (``source_type == "exo"``) receive the EXO token and tenant ID
     acquired once lazily.
     """
     graph_token = await acquire_access_token(company_id)
     enabled = await get_enabled_check_ids()
+    auto_remediate_ids = await get_auto_remediate_check_ids()
     run_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # EXO token/tenant – acquired lazily on first EXO check
@@ -606,6 +656,16 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             details=details,
             run_at=run_at,
         )
+
+        # Auto-remediate if the check failed and auto-remediation is enabled
+        if status == STATUS_FAIL and check_id in auto_remediate_ids:
+            log_info(
+                "M365 best practice auto-remediation triggered",
+                company_id=company_id,
+                check_id=check_id,
+            )
+            await remediate_check(company_id=company_id, check_id=check_id)
+
         results.append({
             "check_id": check_id,
             "check_name": check_name,
@@ -756,6 +816,7 @@ __all__ = [
     "list_best_practices",
     "list_settings_with_catalog",
     "get_enabled_check_ids",
+    "get_auto_remediate_check_ids",
     "set_enabled_checks",
     "run_best_practices",
     "get_last_results",
