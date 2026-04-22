@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.core.logging import log_error, log_info
+from app.core.logging import log_error, log_info, log_warning
 from app.repositories import cis_benchmarks as benchmark_repo
 from app.services.m365 import M365Error, _graph_get, acquire_access_token
 
@@ -37,6 +37,32 @@ async def _graph_get_all(token: str, url: str) -> list[dict[str, Any]]:
         items.extend(data.get("value", []))
         url = data.get("@odata.nextLink")
     return items
+
+
+def _unwrap_singleton_policy(data: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    """Extract a singleton policy resource from a Graph API response.
+
+    Some policy endpoints (e.g. ``/policies/authorizationPolicy``) return the
+    resource wrapped in an OData ``value`` collection even though there is only
+    ever one item.  This helper extracts the first item from that array, falling
+    back to the raw response when the ``value`` key is absent (e.g. in unit
+    tests or future API changes that return the resource directly).
+
+    A warning is logged when the fallback is used so that unexpected response
+    shapes are visible in logs.
+    """
+    value_list: list[dict[str, Any]] | None = data.get("value")  # type: ignore[assignment]
+    if value_list is not None:
+        if value_list:
+            return value_list[0]
+        # Empty collection — return an empty dict so callers see missing fields.
+        return {}
+    log_warning(
+        "Graph API response for policy endpoint did not contain a 'value' array; "
+        "falling back to raw response dict. This may indicate an unexpected API change.",
+        endpoint=endpoint,
+    )
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -428,16 +454,14 @@ async def _check_audit_log_enabled(token: str) -> dict[str, Any]:
 async def _check_sspr_enabled(token: str) -> dict[str, Any]:
     check_id = "m365_self_service_password_reset"
     check_name = "Self-Service Password Reset (SSPR) is enabled"
+    _endpoint = "policies/authorizationPolicy"
     try:
         data = await _graph_get(
             token,
             "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
             "?$select=allowedToUseSspr,defaultUserRolePermissions",
         )
-        # The endpoint returns a collection; extract the first (and only) policy item.
-        # Fall back to the raw response for backward-compatibility with environments
-        # that return the resource directly rather than wrapped in a value array.
-        policy: dict[str, Any] = next(iter(data.get("value") or []), data)
+        policy = _unwrap_singleton_policy(data, _endpoint)
         # allowedToUseSspr may be a direct property of authorizationPolicy or
         # nested inside defaultUserRolePermissions depending on the API version.
         allowed = policy.get("allowedToUseSspr")
@@ -481,14 +505,14 @@ async def _check_password_never_expires(token: str) -> dict[str, Any]:
 async def _check_guest_access_restricted(token: str) -> dict[str, Any]:
     check_id = "m365_guest_access_restricted"
     check_name = "Guest user access is restricted"
+    _endpoint = "policies/authorizationPolicy"
     try:
         data = await _graph_get(
             token,
             "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
             "?$select=guestUserRoleId,allowInvitesFrom",
         )
-        # The endpoint returns a collection; extract the first (and only) policy item.
-        policy: dict[str, Any] = next(iter(data.get("value") or []), data)
+        policy = _unwrap_singleton_policy(data, _endpoint)
         # guestUserRoleId values:
         #   10dae51f-b6af-4016-8d66-8c2a99b929b3 = Guest user (most restrictive)
         #   2af84b1e-32c8-42b7-82bc-daa82404023b = Guest user (limited access)
