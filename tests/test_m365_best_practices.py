@@ -997,6 +997,32 @@ async def test_remediate_concealed_names_failure_on_graph_error():
     assert upserts[0]["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_concealed_names_failure_on_token_acquisition_error():
+    """If Graph token acquisition fails, remediation status is recorded as 'failed' and a clear message is returned."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Invalid client secret"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=3, check_id="bp_concealed_names")
+
+    assert result["success"] is False
+    assert "token" in result["message"].lower() or "graph" in result["message"].lower()
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 3
+    assert upserts[0]["check_id"] == "bp_concealed_names"
+    assert upserts[0]["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Tenant capability detection / N/A marking
 # ---------------------------------------------------------------------------
@@ -1492,48 +1518,16 @@ async def test_run_best_practices_retries_transient_check_failure(monkeypatch):
             patch(
                 "app.services.m365_best_practices.detect_tenant_capabilities",
                 new_callable=AsyncMock,
-                return_value=set(),  # Tenant has no detected premium capabilities
-                return_value="tok",
+                return_value=set(),
             ),
             patch(
                 "app.services.m365_best_practices.get_enabled_check_ids",
                 new_callable=AsyncMock,
-                return_value={"bp_monitor_risky_users"},
                 return_value={enabled_id},
             ),
             patch(
                 "app.services.m365_best_practices.get_auto_remediate_check_ids",
                 new_callable=AsyncMock,
-                return_value={"bp_monitor_risky_users"},
-            ),
-            patch(
-                "app.services.m365_best_practices.bp_repo.upsert_result",
-                new_callable=AsyncMock,
-            ),
-            patch(
-                "app.services.m365_best_practices.remediate_check",
-                side_effect=fake_remediate,
-            ),
-        ):
-            results = await bp_service.run_best_practices(company_id=9)
-    finally:
-        bp_entry["source"] = real_source
-
-    assert len(results) == 1
-    assert results[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
-    assert remediated == []
-
-
-@pytest.mark.anyio("asyncio")
-async def test_detect_tenant_capabilities_returns_none_on_graph_error():
-    with patch(
-        "app.services.m365_best_practices._graph_get",
-        new_callable=AsyncMock,
-        side_effect=M365Error("403 Forbidden", http_status=403),
-    ):
-        caps = await bp_service.detect_tenant_capabilities("token")
-    assert caps is None
-
                 return_value=set(),
             ),
             patch(
@@ -1548,3 +1542,14 @@ async def test_detect_tenant_capabilities_returns_none_on_graph_error():
     assert fake_source.await_count == 2
     assert results[0]["status"] == "pass"
     assert upserts[0]["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_detect_tenant_capabilities_returns_none_on_graph_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("403 Forbidden", http_status=403),
+    ):
+        caps = await bp_service.detect_tenant_capabilities("token")
+    assert caps is None
