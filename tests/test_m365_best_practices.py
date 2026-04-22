@@ -853,3 +853,147 @@ async def test_run_best_practices_does_not_auto_remediate_when_not_in_auto_remed
     assert len(remediated) == 0
 
 
+# ---------------------------------------------------------------------------
+# _check_concealed_names
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_concealed_names_pass_when_display_enabled():
+    from app.services.m365_best_practices import _check_concealed_names
+
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"displayConcealedNames": True},
+    ):
+        result = await _check_concealed_names("token")
+
+    assert result["status"] == "pass"
+    assert "real" in result["details"].lower()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_concealed_names_fail_when_concealed():
+    from app.services.m365_best_practices import _check_concealed_names
+
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"displayConcealedNames": False},
+    ):
+        result = await _check_concealed_names("token")
+
+    assert result["status"] == "fail"
+    assert "conceal" in result["details"].lower()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_concealed_names_unknown_on_graph_error():
+    from app.services.m365_best_practices import _check_concealed_names
+
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Graph error"),
+    ):
+        result = await _check_concealed_names("token")
+
+    assert result["status"] == "unknown"
+    assert "Graph error" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_concealed_names_unknown_when_field_missing():
+    from app.services.m365_best_practices import _check_concealed_names
+
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        result = await _check_concealed_names("token")
+
+    assert result["status"] == "unknown"
+
+
+def test_concealed_names_in_catalog():
+    """bp_concealed_names must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_concealed_names" in ids
+
+
+def test_concealed_names_catalog_entry_has_remediation():
+    """bp_concealed_names must advertise automated remediation support."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_concealed_names")
+    assert entry.get("has_remediation") is True
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_url" not in entry
+    assert "remediation_payload" not in entry
+
+
+# ---------------------------------------------------------------------------
+# Graph-type remediation (bp_concealed_names)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_concealed_names_success():
+    """Successful Graph PATCH remediation updates DB and returns success."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=3, check_id="bp_concealed_names")
+
+    assert result["success"] is True
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 3
+    assert upserts[0]["check_id"] == "bp_concealed_names"
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_concealed_names_failure_on_graph_error():
+    """If the Graph PATCH fails, remediation status is recorded as 'failed'."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            side_effect=M365Error("PATCH failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=3, check_id="bp_concealed_names")
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
+
+
