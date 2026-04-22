@@ -237,6 +237,19 @@ class Settings(BaseSettings):
         validation_alias="MCP_RATE_LIMIT",
     )
     
+    # Matrix.org Chat Integration
+    matrix_enabled: bool = Field(default=False, validation_alias="MATRIX_ENABLED")
+    matrix_homeserver_url: str | None = Field(default=None, validation_alias="MATRIX_HOMESERVER_URL")
+    matrix_server_name: str | None = Field(default=None, validation_alias="MATRIX_SERVER_NAME")
+    matrix_bot_user_id: str | None = Field(default=None, validation_alias="MATRIX_BOT_USER_ID")
+    matrix_bot_access_token: str | None = Field(default=None, validation_alias="MATRIX_BOT_ACCESS_TOKEN")
+    matrix_device_id: str | None = Field(default=None, validation_alias="MATRIX_DEVICE_ID")
+    matrix_is_self_hosted: bool = Field(default=False, validation_alias="MATRIX_IS_SELF_HOSTED")
+    matrix_admin_access_token: str | None = Field(default=None, validation_alias="MATRIX_ADMIN_ACCESS_TOKEN")
+    matrix_default_room_preset: str = Field(default="private_chat", validation_alias="MATRIX_DEFAULT_ROOM_PRESET")
+    matrix_e2ee_enabled: bool = Field(default=False, validation_alias="MATRIX_E2EE_ENABLED")
+    matrix_invite_domain: str | None = Field(default=None, validation_alias="MATRIX_INVITE_DOMAIN")
+
     # IP Whitelisting Configuration
     ip_whitelist_enabled: bool = Field(
         default=False,
@@ -310,6 +323,9 @@ class Settings(BaseSettings):
         "mcp_readonly",
         "ip_whitelist_enabled",
         "ip_whitelist_admin_only",
+        "matrix_enabled",
+        "matrix_is_self_hosted",
+        "matrix_e2ee_enabled",
         mode="before",
     )
     @classmethod

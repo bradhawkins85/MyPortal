@@ -98,6 +98,7 @@ from app.api.routes import (
     system,
     uptimekuma,
     xero,
+    chat as chat_api,
 )
 from uuid import uuid4
 
@@ -1000,6 +1001,7 @@ app.include_router(service_status_api.router)
 app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
+app.include_router(chat_api.router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
@@ -1810,6 +1812,7 @@ async def _build_base_context(
         "integration_modules": module_lookup,
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
+        "matrix_chat_enabled": settings.matrix_enabled,
         "is_impersonating": is_impersonating,
         "impersonator_user": impersonator_user,
         "impersonation_started_at": impersonation_started_at,
@@ -1910,6 +1913,7 @@ async def _build_public_context(
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
+        "matrix_chat_enabled": settings.matrix_enabled,
     }
     if extra:
         context.update(extra)
@@ -3716,11 +3720,18 @@ async def on_startup() -> None:
             log_info("BCP default template bootstrapped")
 
     await scheduler_service.start()
+    if settings.matrix_enabled:
+        from app.services import matrix_sync
+        import asyncio as _asyncio
+        _asyncio.create_task(matrix_sync.run_sync_loop())
     log_info("Application started", environment=settings.environment)
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    if settings.matrix_enabled:
+        from app.services import matrix_sync
+        matrix_sync.stop_sync_loop()
     await scheduler_service.stop()
     await db.disconnect()
     log_info("Application shutdown")
@@ -20736,3 +20747,78 @@ async def register_page(request: Request):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_index(
+    request: Request,
+    status: str | None = Query(default=None),
+    session: SessionData | None = Depends(get_current_session),
+) -> HTMLResponse:
+    if not settings.matrix_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not enabled")
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    current_user = await user_repo.get_user_by_id(session.user_id)
+    if not current_user:
+        return RedirectResponse("/login", status_code=303)
+
+    user_id = current_user["id"]
+    company_id = current_user.get("company_id")
+    is_staff = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+
+    from app.repositories import chat as chat_repo
+    if is_staff:
+        rooms = await chat_repo.list_rooms(status=status)
+    else:
+        rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
+
+    ctx = await _build_template_context(request, session)
+    ctx.update({
+        "title": "Chat",
+        "rooms": rooms,
+        "status_filter": status,
+    })
+    return templates.TemplateResponse("chat/index.html", ctx)
+
+
+@app.get("/chat/{room_id}", response_class=HTMLResponse)
+async def chat_room_page(
+    request: Request,
+    room_id: int,
+    session: SessionData | None = Depends(get_current_session),
+) -> HTMLResponse:
+    if not settings.matrix_enabled:
+        raise HTTPException(status_code=404, detail="Chat is not enabled")
+    if not session:
+        return RedirectResponse("/login", status_code=303)
+
+    current_user = await user_repo.get_user_by_id(session.user_id)
+    if not current_user:
+        return RedirectResponse("/login", status_code=303)
+
+    from app.repositories import chat as chat_repo
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Chat room not found")
+
+    messages = await chat_repo.get_messages(room_id, limit=50)
+    participants = await chat_repo.get_participants(room_id)
+
+    user_id = current_user["id"]
+    is_staff = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    is_creator = room["created_by_user_id"] == user_id
+
+    ctx = await _build_template_context(request, session)
+    ctx.update({
+        "title": f"Chat: {room['subject']}",
+        "room": room,
+        "messages": messages,
+        "participants": participants,
+        "is_staff": is_staff,
+        "is_creator": is_creator,
+        "current_user_id": user_id,
+        "matrix_is_self_hosted": settings.matrix_is_self_hosted,
+    })
+    return templates.TemplateResponse("chat/room.html", ctx)
