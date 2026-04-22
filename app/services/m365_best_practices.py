@@ -64,7 +64,16 @@ from app.services.cis_benchmark import (
     run_intune_macos_benchmarks,
     run_intune_windows_benchmarks,
 )
-from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command, _graph_get, _graph_patch, acquire_access_token
+from app.services.m365 import (
+    M365Error,
+    _acquire_exo_access_token,
+    _exo_invoke_command,
+    _graph_get,
+    _graph_patch,
+    acquire_access_token,
+    acquire_delegated_token,
+    try_grant_missing_permissions,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1267,6 +1276,49 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     their batch runner once per group and results cached for the run.
     """
     graph_token = await acquire_access_token(company_id)
+
+    # Self-heal: re-apply any missing app role assignments using the stored
+    # delegated token from the "Authorise portal access" connect flow.  This
+    # handles tenants whose enterprise app service principal is missing
+    # required Graph permissions (Policy.Read.All, AuditLog.Read.All,
+    # SecurityEvents.Read.All, DeviceManagementConfiguration.Read.All,
+    # ReportSettings.ReadWrite.All, …) – typically because the app was
+    # provisioned before those permissions were added to the required set.
+    # Without this, every Conditional Access / authorization policy / named
+    # locations / Secure Score / device compliance check returns 403.
+    # Mirrors the pattern used by ``sync_company_licenses`` and
+    # ``sync_mailboxes`` for their own 403 self-healing.
+    try:
+        delegated_token = await acquire_delegated_token(company_id)
+    except Exception as exc:  # noqa: BLE001 – self-heal must never raise
+        log_error(
+            "M365 best practices: failed to acquire delegated token for self-heal",
+            company_id=company_id,
+            error=str(exc),
+        )
+        delegated_token = None
+    if delegated_token:
+        try:
+            granted = await try_grant_missing_permissions(
+                company_id, access_token=delegated_token
+            )
+        except Exception as exc:  # noqa: BLE001 – self-heal must never raise
+            log_error(
+                "M365 best practices: try_grant_missing_permissions raised",
+                company_id=company_id,
+                error=str(exc),
+            )
+            granted = False
+        if granted:
+            log_info(
+                "M365 best practices: granted missing app role assignments – "
+                "refreshing app access token",
+                company_id=company_id,
+            )
+            graph_token = await acquire_access_token(
+                company_id, force_client_credentials=True
+            )
+
     enabled = await get_enabled_check_ids()
     auto_remediate_ids = await get_auto_remediate_check_ids()
     run_at = datetime.now(timezone.utc).replace(tzinfo=None)
