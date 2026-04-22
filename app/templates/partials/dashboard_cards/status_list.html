@@ -1,0 +1,23 @@
+{# Status list card: rows of label + value #}
+{% set p = payload or {} %}
+{% set items = p.get('items') or [] %}
+<div class="dashboard-card__status-list">
+  {% if p.formatted_total is defined and p.formatted_total %}
+    <div class="dashboard-card__highlight">{{ p.formatted_total }}</div>
+  {% endif %}
+  {% if items %}
+    <ul class="status-list" role="list">
+      {% for item in items %}
+        <li class="status-list__item" role="listitem">
+          <span class="status-list__label">{{ item.label }}</span>
+          <span class="status-list__value">{{ item.formatted or item.value }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="dashboard-card__empty">No data available.</p>
+  {% endif %}
+  {% if p.link %}
+    <a class="dashboard-card__link" href="{{ p.link }}">View</a>
+  {% endif %}
+</div>
