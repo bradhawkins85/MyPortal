@@ -776,7 +776,8 @@ async def auto_update_control_compliance_from_requirements(
         new_status = ComplianceStatus.COMPLIANT
     elif compliance_calc["non_compliant_count"] > 0:
         new_status = ComplianceStatus.NON_COMPLIANT
-    elif compliance_calc["in_progress_count"] > 0:
+    elif compliance_calc["compliant_count"] > 0 or compliance_calc["in_progress_count"] > 0:
+        # Some requirements have been started/completed — mark as in progress
         new_status = ComplianceStatus.IN_PROGRESS
     elif compliance_calc["not_started_count"] > 0:
         new_status = ComplianceStatus.NOT_STARTED
@@ -790,3 +791,56 @@ async def auto_update_control_compliance_from_requirements(
         control_id=control_id,
         status=new_status,
     )
+
+
+async def get_per_maturity_statuses_for_company(
+    company_id: int,
+) -> dict[int, dict[str, str]]:
+    """
+    Compute per-maturity-level compliance status for every control for a company.
+
+    The status for each maturity level is derived from the requirement compliance
+    records:
+      - "compliant"    – all requirements at that level are compliant/not_applicable
+      - "in_progress"  – at least one requirement has been actioned (not_started is
+                         absent for at least one) but not all are done
+      - "not_started"  – no requirements have been actioned
+
+    Returns a mapping of ``control_id → {"ml1": status, "ml2": status, "ml3": status}``.
+    """
+    query = """
+        SELECT
+            er.control_id,
+            er.maturity_level,
+            COUNT(*) AS total_reqs,
+            SUM(CASE WHEN cerc.status IN ('compliant', 'not_applicable') THEN 1 ELSE 0 END) AS done_reqs,
+            SUM(CASE WHEN cerc.status IS NOT NULL AND cerc.status != 'not_started' THEN 1 ELSE 0 END) AS active_reqs
+        FROM essential8_requirements er
+        LEFT JOIN company_essential8_requirement_compliance cerc
+            ON er.id = cerc.requirement_id AND cerc.company_id = %(company_id)s
+        GROUP BY er.control_id, er.maturity_level
+    """
+    rows = await db.fetch_all(query, {"company_id": company_id})
+
+    result: dict[int, dict[str, str]] = {}
+    for row in rows:
+        control_id = row["control_id"]
+        ml = row["maturity_level"]  # "ml1", "ml2", or "ml3"
+        total = int(row["total_reqs"] or 0)
+        done = int(row["done_reqs"] or 0)
+        active = int(row["active_reqs"] or 0)
+
+        if total == 0 or active == 0:
+            ml_status = "not_started"
+        elif done == total:
+            ml_status = "compliant"
+        else:
+            ml_status = "in_progress"
+
+        if control_id not in result:
+            result[control_id] = {"ml1": "not_started", "ml2": "not_started", "ml3": "not_started"}
+
+        if ml in result[control_id]:
+            result[control_id][ml] = ml_status
+
+    return result
