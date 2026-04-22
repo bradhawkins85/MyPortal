@@ -20814,7 +20814,7 @@ async def chat_index(
     else:
         rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
 
-    ctx = await _build_template_context(request, session)
+    ctx = await _build_base_context(request, current_user)
     ctx.update({
         "title": "Chat",
         "rooms": rooms,
@@ -20850,7 +20850,7 @@ async def chat_room_page(
     is_staff = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
     is_creator = room["created_by_user_id"] == user_id
 
-    ctx = await _build_template_context(request, session)
+    ctx = await _build_base_context(request, current_user)
     ctx.update({
         "title": f"Chat: {room['subject']}",
         "room": room,
