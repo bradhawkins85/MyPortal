@@ -14,6 +14,7 @@ venv/
 test_venv/
 test_env/
 changes/*.json
+changes/.change-log-cache
 myportal.egg-info/
 myportal.db
 build/
