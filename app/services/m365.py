@@ -75,6 +75,11 @@ _PROVISION_APP_ROLES: list[str] = [
     # Additional permissions for mailbox reporting:
     "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
     "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
+    # Required by the "Display concealed names in reports" best-practice check
+    # (GET /admin/reportSettings) and its PATCH-based remediation. Distinct
+    # from Reports.Read.All – /admin/reportSettings rejects tokens that lack
+    # ReportSettings.* with S2SUnauthorized / "Invalid permission".
+    "ee353f83-55ef-4b78-82da-555bfa2b4b95",  # ReportSettings.ReadWrite.All
     # Permission for Office 365 Mailbox Import (m365-mail module):
     "e2a3a72e-5f79-4c64-b1b1-878b674786c9",  # Mail.ReadWrite
     # Permissions for staff onboarding/offboarding group management:
