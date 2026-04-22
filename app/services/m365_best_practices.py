@@ -287,6 +287,9 @@ async def _run_direct_send_remediation(exo_token: str, tenant_id: str) -> bool:
 
 
 _REPORT_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/reportSettings"
+_AUTHORIZATION_POLICY_URL = "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
+# guestUserRoleId: Guest user (most restrictive) – no directory read access
+_GUEST_ROLE_ID_MOST_RESTRICTIVE = "10dae51f-b6af-4016-8d66-8c2a99b929b3"
 
 
 async def _check_concealed_names(token: str) -> dict[str, Any]:
@@ -494,7 +497,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_guest_access_restricted,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {
+            "guestUserRoleId": _GUEST_ROLE_ID_MOST_RESTRICTIVE,
+            "allowInvitesFrom": "adminsAndGuestInviters",
+        },
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
@@ -1495,6 +1503,150 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     return results
 
 
+async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
+    """Run a single best-practice check by ``check_id`` for ``company_id``.
+
+    Acquires the necessary access tokens, runs only the named check (including
+    the self-heal permission grant used by :func:`run_best_practices`), persists
+    the result, and returns a result dict in the same shape as the entries
+    returned by :func:`run_best_practices`.
+
+    Raises :class:`ValueError` if ``check_id`` is unknown or not currently
+    enabled globally.
+    """
+    catalog = _catalog_map()
+    bp = catalog.get(check_id)
+    if not bp:
+        raise ValueError(f"Unknown best-practice check '{check_id}'")
+
+    enabled = await get_enabled_check_ids()
+    if check_id not in enabled:
+        raise ValueError(f"Best-practice check '{check_id}' is not enabled")
+
+    graph_token = await acquire_access_token(company_id)
+
+    # Self-heal: re-apply any missing app role assignments (mirrors run_best_practices).
+    try:
+        delegated_token = await acquire_delegated_token(company_id)
+    except Exception:  # noqa: BLE001 – self-heal must never raise
+        delegated_token = None
+    if delegated_token:
+        try:
+            granted = await try_grant_missing_permissions(
+                company_id, access_token=delegated_token
+            )
+            if granted:
+                graph_token = await acquire_access_token(
+                    company_id, force_client_credentials=True
+                )
+        except Exception:  # noqa: BLE001 – self-heal must never raise
+            pass
+
+    run_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    tenant_capabilities = await detect_tenant_capabilities(graph_token)
+    check_name = bp["name"]
+    cis_group = bp.get("cis_group")
+
+    missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
+    if missing:
+        status = STATUS_NOT_APPLICABLE
+        details = (
+            "Not applicable – this check requires the following Microsoft 365 "
+            f"license(s) which the tenant does not have: "
+            f"{_format_missing_licenses(missing)}."
+        )
+    elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
+        batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
+        if batch_runner:
+            try:
+                batch = await _call_check_with_retry(
+                    lambda runner=batch_runner: runner(graph_token),
+                    company_id=company_id,
+                    check_id=f"cis_group:{cis_group}",
+                )
+                group_results = {r["check_id"]: r for r in batch}
+                raw = group_results.get(check_id)
+                if raw:
+                    status = raw.get("status", STATUS_UNKNOWN)
+                    details = raw.get("details") or ""
+                else:
+                    status = STATUS_UNKNOWN
+                    details = "Check result not available from batch run."
+            except M365Error as exc:
+                log_error(
+                    "CIS Intune benchmark batch failed",
+                    company_id=company_id,
+                    cis_group=cis_group,
+                    error=str(exc),
+                )
+                status = STATUS_UNKNOWN
+                details = f"Unable to evaluate check: {exc}"
+        else:
+            status = STATUS_UNKNOWN
+            details = "No batch runner available for this check group."
+    else:
+        source_type = bp.get("source_type", "graph")
+        runner: BestPracticeRunner = bp["source"]
+        try:
+            if source_type == "exo":
+                exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
+                raw = await _call_check_with_retry(
+                    lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                    company_id=company_id,
+                    check_id=check_id,
+                )
+            else:
+                raw = await _call_check_with_retry(
+                    lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                    company_id=company_id,
+                    check_id=check_id,
+                )
+            status = raw.get("status", STATUS_UNKNOWN)
+            details = raw.get("details") or ""
+        except M365Error as exc:
+            log_error(
+                "M365 best practice check failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            status = STATUS_UNKNOWN
+            details = f"Unable to evaluate check: {exc}"
+
+    await bp_repo.upsert_result(
+        company_id=company_id,
+        check_id=check_id,
+        check_name=check_name,
+        status=status,
+        details=details,
+        run_at=run_at,
+    )
+
+    auto_remediate_ids = await get_auto_remediate_check_ids()
+    if status == STATUS_FAIL and check_id in auto_remediate_ids:
+        log_info(
+            "M365 best practice auto-remediation triggered",
+            company_id=company_id,
+            check_id=check_id,
+        )
+        await remediate_check(company_id=company_id, check_id=check_id)
+
+    log_info(
+        "M365 single best practice check run",
+        company_id=company_id,
+        check_id=check_id,
+    )
+    return {
+        "check_id": check_id,
+        "check_name": check_name,
+        "status": status,
+        "details": details,
+        "run_at": run_at,
+        "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
+        "has_remediation": bool(bp.get("has_remediation")),
+    }
+
+
 async def get_last_results(company_id: int) -> list[dict[str, Any]]:
     """Return the most recent stored best-practice results for ``company_id``.
 
@@ -1575,7 +1727,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             )
             return {
                 "success": False,
-                "message": f"Unable to acquire Exchange Online token: {exc}",
+                "message": "Unable to acquire Exchange Online token. Check that the app credentials are correct.",
             }
 
         cmdlet = bp.get("remediation_cmdlet", "")
@@ -1597,6 +1749,24 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         remediation_payload = bp.get("remediation_payload") or {}
         try:
             graph_token = await acquire_access_token(company_id)
+        except M365Error as exc:
+            log_error(
+                "M365 best practice remediation – Graph token acquisition failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            await bp_repo.update_remediation_status(
+                company_id=company_id,
+                check_id=check_id,
+                remediation_status="failed",
+                remediated_at=remediated_at,
+            )
+            return {
+                "success": False,
+                "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
+            }
+        try:
             await _graph_patch(graph_token, remediation_url, remediation_payload)
             success = True
         except M365Error as exc:
@@ -1656,6 +1826,7 @@ __all__ = [
     "set_enabled_checks",
     "save_company_exclusions",
     "run_best_practices",
+    "run_single_check",
     "get_last_results",
     "get_remediation",
     "remediate_check",
