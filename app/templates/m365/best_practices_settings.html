@@ -82,6 +82,9 @@
                 <span class="badge badge--info badge--cis" style="margin-left:0.4rem">CIS</span>
                 {% endif %}
                 <br /><small class="text-muted">{{ bp.id }}</small>
+                {% if bp.requires_licenses_display %}
+                <br /><small class="text-muted" title="Tenants without these licenses will see this check marked Not Applicable">Requires: {{ bp.requires_licenses_display }}</small>
+                {% endif %}
               </td>
               <td>{{ bp.description }}</td>
             </tr>
