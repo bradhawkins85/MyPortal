@@ -4079,6 +4079,13 @@ button.header-title-menu__link {
   display: none;
 }
 
+/* Ensure dialog.modal uses dark colour scheme so native form controls
+   (select, textarea, input) render with light text on dark backgrounds. */
+dialog.modal {
+  color: #f8fafc;
+  color-scheme: dark;
+}
+
 /* Hide dialog elements with .modal class when not open */
 dialog.modal:not([open]) {
   display: none;
