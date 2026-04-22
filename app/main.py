@@ -5093,6 +5093,44 @@ async def run_m365_best_practices(request: Request):
     )
 
 
+@app.post("/m365/best-practices/remediate/{check_id}", response_class=RedirectResponse)
+async def remediate_m365_best_practice(request: Request, check_id: str):
+    """Run automated remediation for a single best-practice check."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    # Validate that the check_id is a known best practice to prevent unintended operations
+    known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
+    if check_id not in known_ids:
+        return RedirectResponse(
+            url=f"/m365/best-practices?error={quote('Unknown best-practice check ID')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    result = await m365_best_practices_service.remediate_check(
+        company_id=company_id,
+        check_id=check_id,
+    )
+    log_info(
+        "M365 best practice remediation triggered",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+        success=result.get("success"),
+    )
+    message = quote(result.get("message", "Remediation attempted"))
+    if result.get("success"):
+        return RedirectResponse(
+            url=f"/m365/best-practices?success={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url=f"/m365/best-practices?error={message}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.get("/m365/best-practices/settings", response_class=HTMLResponse)
 async def m365_best_practices_settings_page(
     request: Request,

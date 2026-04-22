@@ -311,3 +311,238 @@ def test_permission_field_registered():
     assert "can_view_m365_best_practices" in _BOOLEAN_FIELDS
     assert "can_view_m365_best_practices" in _PERMISSION_FIELDS
     assert _PERMISSION_MAPPING.get("m365_best_practices.access") == "can_view_m365_best_practices"
+
+
+# ---------------------------------------------------------------------------
+# Disable Direct Send check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_direct_send_pass_when_rejected():
+    from app.services.m365_best_practices import _check_direct_send
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {"value": [{"RejectDirectSend": True}]}
+        result = await _check_direct_send("token", "tenant-id")
+
+    assert result["status"] == "pass"
+    assert "disabled" in result["details"].lower()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_direct_send_fail_when_not_rejected():
+    from app.services.m365_best_practices import _check_direct_send
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {"value": [{"RejectDirectSend": False}]}
+        result = await _check_direct_send("token", "tenant-id")
+
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_direct_send_unknown_on_error():
+    from app.services.m365_best_practices import _check_direct_send
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("EXO error"),
+    ):
+        result = await _check_direct_send("token", "tenant-id")
+
+    assert result["status"] == "unknown"
+    assert "EXO error" in result["details"]
+
+
+def test_direct_send_in_catalog():
+    """bp_disable_direct_send must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_disable_direct_send" in ids
+
+
+def test_direct_send_catalog_entry_has_has_remediation():
+    """bp_disable_direct_send must advertise automated remediation support."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_disable_direct_send")
+    assert entry.get("has_remediation") is True
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
+
+
+# ---------------------------------------------------------------------------
+# EXO runner in run_best_practices
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_exo_runner_uses_exo_token():
+    """EXO-type checks must be called with the EXO token and tenant_id."""
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == "bp_disable_direct_send")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "ok"})
+    bp_entry["source"] = fake_source
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_disable_direct_send"},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=99)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["check_id"] == "bp_disable_direct_send"
+    # EXO runner must be called with (exo_token, tenant_id)
+    fake_source.assert_awaited_once_with("exo-token", "tenant-123")
+
+
+# ---------------------------------------------------------------------------
+# remediate_check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_success():
+    """Successful EXO remediation updates DB and returns success."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=7, check_id="bp_disable_direct_send")
+
+    assert result["success"] is True
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 7
+    assert upserts[0]["check_id"] == "bp_disable_direct_send"
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_failure_on_exo_error():
+    """If the EXO command fails, remediation status is recorded as 'failed'."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Set-OrgConfig failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=7, check_id="bp_disable_direct_send")
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_unknown_id_returns_failure():
+    """Passing an unrecognised check_id should return a failure without DB writes."""
+    result = await bp_service.remediate_check(company_id=1, check_id="bp_does_not_exist")
+    assert result["success"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_non_remediable_check_returns_failure():
+    """A check without has_remediation=True must not attempt any external call."""
+    result = await bp_service.remediate_check(
+        company_id=1, check_id="bp_security_defaults"
+    )
+    assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# get_last_results – new fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_last_results_includes_remediation_fields():
+    """get_last_results must expose has_remediation, remediation_status, remediated_at."""
+    catalog = bp_service.list_best_practices()
+    check_id = "bp_disable_direct_send"
+    entry = next(bp for bp in catalog if bp["id"] == check_id)
+
+    rows = [
+        {
+            "check_id": check_id,
+            "check_name": entry["name"],
+            "status": "fail",
+            "details": "Direct Send enabled",
+            "run_at": datetime(2026, 1, 1, 10, 0, 0),
+            "remediation_status": "success",
+            "remediated_at": datetime(2026, 1, 2, 10, 0, 0),
+        }
+    ]
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=rows,
+        ),
+        patch(
+            "app.services.m365_best_practices.get_enabled_check_ids",
+            new_callable=AsyncMock,
+            return_value={check_id},
+        ),
+    ):
+        out = await bp_service.get_last_results(company_id=1)
+
+    assert len(out) == 1
+    item = out[0]
+    assert item["has_remediation"] is True
+    assert item["remediation_status"] == "success"
+    assert item["remediated_at"] == datetime(2026, 1, 2, 10, 0, 0)
+
