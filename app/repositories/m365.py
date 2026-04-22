@@ -197,6 +197,25 @@ async def upsert_mailbox(
     )
 
 
+async def set_mailbox_archive_enabled(
+    company_id: int,
+    user_principal_name: str,
+) -> None:
+    """Mark the cached mailbox row as having an in-place archive enabled.
+
+    Used after a successful Exchange Online ``Enable-Mailbox -Archive`` call so
+    the UI reflects the new state without waiting for the next mailbox sync.
+    """
+    await db.execute(
+        """
+        UPDATE m365_mailboxes
+           SET has_archive = 1
+         WHERE company_id = %s AND user_principal_name = %s
+        """,
+        (company_id, user_principal_name),
+    )
+
+
 async def delete_stale_mailboxes(company_id: int, current_upns: list[str]) -> None:
     """Remove mailbox rows for UPNs that are no longer present in the tenant."""
     if not current_upns:
