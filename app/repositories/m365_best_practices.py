@@ -85,6 +85,14 @@ async def delete_result_for_check(check_id: str) -> None:
     )
 
 
+async def delete_result_for_check_and_company(company_id: int, check_id: str) -> None:
+    """Remove the stored result for a single check for a specific company."""
+    await db.execute(
+        "DELETE FROM m365_best_practice_results WHERE company_id = %s AND check_id = %s",
+        (company_id, check_id),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Global enable/disable settings (super admin)
 # ---------------------------------------------------------------------------
