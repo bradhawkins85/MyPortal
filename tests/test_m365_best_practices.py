@@ -9,6 +9,8 @@ import pytest
 from app.services import m365_best_practices as bp_service
 from app.services.m365 import M365Error
 
+_GUEST_ROLE_ID_MOST_RESTRICTIVE = bp_service._GUEST_ROLE_ID_MOST_RESTRICTIVE
+
 
 @pytest.fixture
 def anyio_backend() -> str:
@@ -442,7 +444,7 @@ async def test_remediate_check_guest_access_restricted_success():
     # Verify the correct Graph endpoint and most-restrictive payload were used
     assert len(patched_urls) == 1
     assert "authorizationPolicy" in patched_urls[0]
-    assert patched_payloads[0]["guestUserRoleId"] == "10dae51f-b6af-4016-8d66-8c2a99b929b3"
+    assert patched_payloads[0]["guestUserRoleId"] == _GUEST_ROLE_ID_MOST_RESTRICTIVE
     assert patched_payloads[0]["allowInvitesFrom"] == "adminsAndGuestInviters"
 
 
