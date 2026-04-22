@@ -90,15 +90,23 @@ async def delete_result_for_check(check_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def upsert_setting(*, check_id: str, enabled: bool) -> None:
-    """Create or update the global enabled flag for a single check."""
+async def upsert_setting(*, check_id: str, enabled: bool, auto_remediate: bool = False) -> None:
+    """Create or update the global enabled flag and auto-remediate flag for a single check."""
     await db.execute(
         """
-        INSERT INTO m365_best_practice_settings (check_id, enabled, updated_at)
-        VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), updated_at = VALUES(updated_at)
+        INSERT INTO m365_best_practice_settings (check_id, enabled, auto_remediate, updated_at)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            enabled = VALUES(enabled),
+            auto_remediate = VALUES(auto_remediate),
+            updated_at = VALUES(updated_at)
         """,
-        (check_id, 1 if enabled else 0, datetime.now(timezone.utc).replace(tzinfo=None)),
+        (
+            check_id,
+            1 if enabled else 0,
+            1 if auto_remediate else 0,
+            datetime.now(timezone.utc).replace(tzinfo=None),
+        ),
     )
 
 
@@ -106,7 +114,7 @@ async def list_settings() -> list[dict[str, Any]]:
     """Return all global best-practice settings rows."""
     rows = await db.fetch_all(
         """
-        SELECT check_id, enabled, updated_at
+        SELECT check_id, enabled, auto_remediate, updated_at
         FROM m365_best_practice_settings
         ORDER BY check_id
         """,
@@ -115,11 +123,18 @@ async def list_settings() -> list[dict[str, Any]]:
     for row in rows:
         entry = dict(row)
         entry["enabled"] = bool(int(entry.get("enabled", 0) or 0))
+        entry["auto_remediate"] = bool(int(entry.get("auto_remediate", 0) or 0))
         out.append(entry)
     return out
 
 
-async def get_settings_map() -> dict[str, bool]:
-    """Return a mapping of check_id → enabled (bool)."""
+async def get_settings_map() -> dict[str, dict[str, bool]]:
+    """Return a mapping of check_id → {enabled, auto_remediate} (both bool)."""
     rows = await list_settings()
-    return {row["check_id"]: bool(row["enabled"]) for row in rows}
+    return {
+        row["check_id"]: {
+            "enabled": bool(row["enabled"]),
+            "auto_remediate": bool(row["auto_remediate"]),
+        }
+        for row in rows
+    }

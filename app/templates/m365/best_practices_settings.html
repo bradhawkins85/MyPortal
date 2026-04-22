@@ -23,6 +23,7 @@
         <p class="panel__subtitle">
           Best Practice checks are enabled or disabled <strong>globally</strong> across every company in MyPortal.
           Disabled checks are removed from per-company reports until re-enabled.
+          Auto-Remediation will automatically apply the fix for supported checks immediately after each evaluation.
         </p>
       </div>
     </header>
@@ -35,6 +36,7 @@
           <thead>
             <tr>
               <th style="width:6rem;text-align:center">Enabled</th>
+              <th style="width:9rem;text-align:center">Auto-Remediate</th>
               <th>Best Practice</th>
               <th>Description</th>
             </tr>
@@ -51,6 +53,21 @@
                   value="{{ bp.id }}"
                   {% if bp.enabled %}checked{% endif %}
                 />
+              </td>
+              <td style="text-align:center">
+                {% if bp.has_remediation %}
+                <label class="visually-hidden" for="ar-{{ bp.id }}">Auto-Remediate {{ bp.name }}</label>
+                <input
+                  type="checkbox"
+                  id="ar-{{ bp.id }}"
+                  name="auto_remediate"
+                  value="{{ bp.id }}"
+                  {% if bp.auto_remediate %}checked{% endif %}
+                  title="Automatically remediate this check after each evaluation if it fails"
+                />
+                {% else %}
+                <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+                {% endif %}
               </td>
               <td>
                 <strong>{{ bp.name }}</strong>
