@@ -295,6 +295,11 @@ async def test_get_last_results_filters_disabled_checks():
             "app.services.m365_best_practices.get_enabled_check_ids",
             new_callable=AsyncMock,
         ) as mock_enabled,
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         mock_list.return_value = rows
         mock_enabled.return_value = {enabled_id}
@@ -554,6 +559,11 @@ async def test_get_last_results_includes_remediation_fields():
             "app.services.m365_best_practices.get_enabled_check_ids",
             new_callable=AsyncMock,
             return_value={check_id},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+            new_callable=AsyncMock,
+            return_value=set(),
         ),
     ):
         out = await bp_service.get_last_results(company_id=1)
@@ -1492,48 +1502,21 @@ async def test_run_best_practices_retries_transient_check_failure(monkeypatch):
             patch(
                 "app.services.m365_best_practices.detect_tenant_capabilities",
                 new_callable=AsyncMock,
-                return_value=set(),  # Tenant has no detected premium capabilities
-                return_value="tok",
+                return_value=None,
             ),
             patch(
                 "app.services.m365_best_practices.get_enabled_check_ids",
                 new_callable=AsyncMock,
-                return_value={"bp_monitor_risky_users"},
                 return_value={enabled_id},
             ),
             patch(
                 "app.services.m365_best_practices.get_auto_remediate_check_ids",
                 new_callable=AsyncMock,
-                return_value={"bp_monitor_risky_users"},
+                return_value=set(),
             ),
             patch(
-                "app.services.m365_best_practices.bp_repo.upsert_result",
+                "app.services.m365_best_practices.bp_repo.get_company_exclusions",
                 new_callable=AsyncMock,
-            ),
-            patch(
-                "app.services.m365_best_practices.remediate_check",
-                side_effect=fake_remediate,
-            ),
-        ):
-            results = await bp_service.run_best_practices(company_id=9)
-    finally:
-        bp_entry["source"] = real_source
-
-    assert len(results) == 1
-    assert results[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
-    assert remediated == []
-
-
-@pytest.mark.anyio("asyncio")
-async def test_detect_tenant_capabilities_returns_none_on_graph_error():
-    with patch(
-        "app.services.m365_best_practices._graph_get",
-        new_callable=AsyncMock,
-        side_effect=M365Error("403 Forbidden", http_status=403),
-    ):
-        caps = await bp_service.detect_tenant_capabilities("token")
-    assert caps is None
-
                 return_value=set(),
             ),
             patch(
@@ -1548,3 +1531,176 @@ async def test_detect_tenant_capabilities_returns_none_on_graph_error():
     assert fake_source.await_count == 2
     assert results[0]["status"] == "pass"
     assert upserts[0]["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_detect_tenant_capabilities_returns_none_on_graph_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("403 Forbidden", http_status=403),
+    ):
+        caps = await bp_service.detect_tenant_capabilities("token")
+    assert caps is None
+
+
+# ---------------------------------------------------------------------------
+# Per-company exclusions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_settings_with_catalog_includes_excluded_field_no_company():
+    """Without a company_id, excluded is always False."""
+    with patch(
+        "app.services.m365_best_practices.bp_repo.get_settings_map",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        rows = await bp_service.list_settings_with_catalog()
+
+    assert all("excluded" in row for row in rows)
+    assert all(row["excluded"] is False for row in rows)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_settings_with_catalog_reflects_company_exclusions():
+    """Checks in the company exclusion set are flagged excluded=True."""
+    catalog = bp_service.list_best_practices()
+    excl_id = catalog[0]["id"]
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+            new_callable=AsyncMock,
+            return_value={excl_id},
+        ),
+    ):
+        rows = await bp_service.list_settings_with_catalog(company_id=99)
+
+    excluded_row = next(r for r in rows if r["id"] == excl_id)
+    assert excluded_row["excluded"] is True
+    other_rows = [r for r in rows if r["id"] != excl_id]
+    assert all(r["excluded"] is False for r in other_rows)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_save_company_exclusions_persists_valid_ids():
+    """Valid check_ids are forwarded to the repo; unknown ids are dropped."""
+    catalog = bp_service.list_best_practices()
+    valid_id = catalog[0]["id"]
+
+    saved: list = []
+
+    async def fake_set_excl(company_id, excluded):
+        saved.append((company_id, excluded))
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.set_company_exclusions",
+            side_effect=fake_set_excl,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.save_company_exclusions(
+            company_id=42,
+            excluded_check_ids={valid_id, "bp_does_not_exist"},
+        )
+
+    assert len(saved) == 1
+    company_id_saved, excluded_saved = saved[0]
+    assert company_id_saved == 42
+    assert valid_id in excluded_saved
+    assert "bp_does_not_exist" not in excluded_saved
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_skips_excluded_checks():
+    """Checks in the company exclusion set are not evaluated even if globally enabled."""
+    catalog = bp_service.list_best_practices()
+    enabled_id = catalog[0]["id"]
+    target = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == enabled_id)
+
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "ok"})
+    real_source = target["source"]
+    target["source"] = fake_source
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="token",
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={enabled_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+                new_callable=AsyncMock,
+                return_value={enabled_id},  # company has excluded this check
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=10)
+    finally:
+        target["source"] = real_source
+
+    assert results == []
+    fake_source.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_last_results_filters_excluded_checks():
+    """Stored results for company-excluded checks do not appear in the output."""
+    catalog = bp_service.list_best_practices()
+    shown_id = catalog[0]["id"]
+    hidden_id = catalog[1]["id"]
+
+    fake_rows = [
+        {"check_id": shown_id, "check_name": "A", "status": "pass", "details": "", "run_at": None,
+         "remediation_status": None, "remediated_at": None},
+        {"check_id": hidden_id, "check_name": "B", "status": "fail", "details": "", "run_at": None,
+         "remediation_status": None, "remediated_at": None},
+    ]
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=fake_rows,
+        ),
+        patch(
+            "app.services.m365_best_practices.get_enabled_check_ids",
+            new_callable=AsyncMock,
+            return_value={shown_id, hidden_id},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+            new_callable=AsyncMock,
+            return_value={hidden_id},
+        ),
+    ):
+        results = await bp_service.get_last_results(company_id=7)
+
+    result_ids = {r["check_id"] for r in results}
+    assert shown_id in result_ids
+    assert hidden_id not in result_ids

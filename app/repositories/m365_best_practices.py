@@ -138,3 +138,41 @@ async def get_settings_map() -> dict[str, dict[str, bool]]:
         }
         for row in rows
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-company exclusions
+# ---------------------------------------------------------------------------
+
+
+async def get_company_exclusions(company_id: int) -> set[str]:
+    """Return the set of check_ids excluded for a specific company."""
+    rows = await db.fetch_all(
+        """
+        SELECT check_id
+        FROM m365_best_practice_company_exclusions
+        WHERE company_id = %s
+        """,
+        (company_id,),
+    )
+    return {row["check_id"] for row in rows}
+
+
+async def set_company_exclusions(company_id: int, excluded_check_ids: set[str]) -> None:
+    """Replace the full set of excluded check_ids for ``company_id``.
+
+    Removes any exclusions no longer in the supplied set and inserts new ones.
+    """
+    await db.execute(
+        "DELETE FROM m365_best_practice_company_exclusions WHERE company_id = %s",
+        (company_id,),
+    )
+    for check_id in excluded_check_ids:
+        await db.execute(
+            """
+            INSERT INTO m365_best_practice_company_exclusions (company_id, check_id)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE check_id = VALUES(check_id)
+            """,
+            (company_id, check_id),
+        )
