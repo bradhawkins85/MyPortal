@@ -1016,7 +1016,7 @@ async def test_remediate_concealed_names_failure_on_token_acquisition_error():
         result = await bp_service.remediate_check(company_id=3, check_id="bp_concealed_names")
 
     assert result["success"] is False
-    assert "token" in result["message"].lower() or "graph" in result["message"].lower()
+    assert result["message"] == "Unable to acquire Microsoft Graph token. Check that the app credentials are correct."
     assert len(upserts) == 1
     assert upserts[0]["company_id"] == 3
     assert upserts[0]["check_id"] == "bp_concealed_names"
