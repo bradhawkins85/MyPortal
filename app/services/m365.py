@@ -2643,8 +2643,17 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             "isDeleted": is_deleted_raw in {"true", "1", "yes"},
         }
 
+    # Use D180 (the maximum supported period) rather than D7.  The
+    # ``Archive Storage Used (Byte)`` column in the Microsoft Graph CSV
+    # report is only populated for mailboxes whose *archive* had archiving
+    # activity within the reporting window.  A 7-day window therefore
+    # returns 0 for the vast majority of archives — which are not
+    # actively receiving new items every week — even though the archive
+    # contains gigabytes of older data.  D180 covers archives that had
+    # activity in the past six months and produces accurate sizes for
+    # virtually all real-world deployments.
     csv_report_url = (
-        "https://graph.microsoft.com/v1.0/reports/" "getMailboxUsageDetail(period='D7')"
+        "https://graph.microsoft.com/v1.0/reports/" "getMailboxUsageDetail(period='D180')"
     )
     headers = {
         "Authorization": f"Bearer {access_token}",
