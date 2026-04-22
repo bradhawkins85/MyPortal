@@ -46,6 +46,16 @@ def anyio_backend() -> str:
 # ---------------------------------------------------------------------------
 
 
+def test_provision_app_roles_includes_security_secure_score_read_all() -> None:
+    """The provisioning role list must include SecuritySecureScore.Read.All so
+    that ``/security/secureScores`` is accessible without a 403 error.
+    """
+    # Microsoft-published, well-known application permission ID for
+    # SecuritySecureScore.Read.All – required by GET /security/secureScores.
+    security_secure_score_read_all = "e0b77adb-e790-44a3-b0a0-257d06303687"
+    assert security_secure_score_read_all in m365_service._PROVISION_APP_ROLES
+
+
 def test_provision_app_roles_includes_report_settings_readwrite_all() -> None:
     """The provisioning role list must include ReportSettings.ReadWrite.All so
     the "Display concealed names" best-practice check & its PATCH remediation
@@ -290,3 +300,27 @@ async def test_run_best_practices_self_heal_swallows_errors() -> None:
         results = await bp_service.run_best_practices(company_id=1)
 
     assert results == []
+
+
+# ---------------------------------------------------------------------------
+# _check_monitor_secure_score returns STATUS_UNKNOWN with a clear message on 403
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_monitor_secure_score_unknown_on_403() -> None:
+    """A 403 from the secureScores endpoint maps to STATUS_UNKNOWN with a
+    message pointing to the missing SecuritySecureScore.Read.All permission.
+    """
+    with patch(
+        "app.services.cis_benchmark._graph_get",
+        side_effect=M365Error(
+            "Microsoft Graph request failed (403) – Auth token does not contain valid permissions",
+            http_status=403,
+        ),
+    ):
+        result = await cis_service._check_monitor_secure_score("fake-token")
+
+    assert result["status"] == STATUS_UNKNOWN
+    assert "SecuritySecureScore.Read.All" in result["details"]
+
