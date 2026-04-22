@@ -301,7 +301,7 @@ async def _attention_section(ctx: _DashboardContext) -> dict[str, Any]:
         try:
             licenses = await license_repo.list_company_licenses(int(ctx.active_company_id))
         except Exception as exc:
-            log_error("Dashboard: licence lookup failed", error=str(exc))
+            log_error("Dashboard: license lookup failed", error=str(exc))
             licenses = []
         exhausted = 0
         for licence in licenses or []:
@@ -316,7 +316,7 @@ async def _attention_section(ctx: _DashboardContext) -> dict[str, Any]:
             items.append(
                 {
                     "key": "licenses.exhausted",
-                    "label": "Licences with no available seats",
+                    "label": "Licenses with no available seats",
                     "count": exhausted,
                     "severity": "warning",
                     "href": "/licenses",
@@ -431,10 +431,10 @@ def _notification_subtitle(row: Mapping[str, Any]) -> str:
 
 def _format_currency(amount: Decimal) -> str:
     try:
-        quantised = amount.quantize(Decimal("0.01"))
+        quantized = amount.quantize(Decimal("0.01"))
     except Exception:  # pragma: no cover - defensive
         return f"${amount}"
-    return f"${quantised:,}"
+    return f"${quantized:,}"
 
 
 # ---------------------------------------------------------------------------
