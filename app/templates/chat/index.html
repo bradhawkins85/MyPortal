@@ -23,9 +23,18 @@
             <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>Closed</option>
           </select>
         </div>
+        {% if is_staff %}
+        <div class="toolbar__field">
+          <label class="form-label" for="chat-unattended-filter">Show</label>
+          <select id="chat-unattended-filter" name="unattended" class="form-input">
+            <option value="">All sessions</option>
+            <option value="1" {% if unattended_filter == '1' %}selected{% endif %}>Unattended only</option>
+          </select>
+        </div>
+        {% endif %}
         <div class="toolbar__actions">
           <button type="submit" class="button">Filter</button>
-          {% if status_filter %}
+          {% if status_filter or unattended_filter %}
             <a href="{{ request.url.path }}" class="button button--ghost">Clear</a>
           {% endif %}
         </div>
@@ -33,7 +42,7 @@
     </div>
   </header>
   {% if not rooms %}
-    <div class="alert alert--info" role="status">No chats found. Start a new chat to begin.</div>
+    <div class="alert alert--info" role="status">No chats found.{% if not is_staff %} Start a new chat to begin.{% endif %}</div>
   {% endif %}
   <div class="table-wrapper">
     <table class="table" id="chat-rooms-table" data-table>
@@ -42,6 +51,9 @@
           <th scope="col" data-sort="int">ID</th>
           <th scope="col" data-sort="string">Subject</th>
           <th scope="col" data-sort="string">Status</th>
+          {% if is_staff %}
+          <th scope="col" data-sort="string">Assigned to</th>
+          {% endif %}
           <th scope="col" data-sort="date">Created</th>
           <th scope="col" data-sort="date">Last message</th>
           <th scope="col">Actions</th>
@@ -51,16 +63,40 @@
         {% for room in rooms %}
         <tr>
           <td>{{ room.id }}</td>
-          <td><a href="/chat/{{ room.id }}">{{ room.subject | e }}</a></td>
+          <td>
+            <a href="/chat/{{ room.id }}">{{ room.subject | e }}</a>
+            {% if is_staff and room.status == 'open' and (room.tech_participant_count is not defined or room.tech_participant_count == 0) %}
+              <span class="badge badge--warning" title="No technician has joined this chat">Unattended</span>
+            {% endif %}
+          </td>
           <td>
             <span class="badge badge--{% if room.status == 'open' %}operational{% else %}neutral{% endif %}">
               {{ room.status | capitalize }}
             </span>
           </td>
+          {% if is_staff %}
+          <td>
+            {% if room.assigned_tech_display_name %}
+              {{ room.assigned_tech_display_name | e }}
+            {% elif room.assigned_tech_user_id %}
+              Tech #{{ room.assigned_tech_user_id }}
+            {% else %}
+              <span class="text-muted">Unassigned</span>
+            {% endif %}
+          </td>
+          {% endif %}
           <td>{{ room.created_at | default('—') }}</td>
           <td>{{ room.last_message_at | default('—') }}</td>
-          <td>
+          <td class="table-actions">
             <a href="/chat/{{ room.id }}" class="button button--sm">Open</a>
+            {% if is_staff and room.status == 'open' %}
+              <button class="button button--sm button--secondary btn-assign-join"
+                      data-room-id="{{ room.id }}"
+                      data-assigned="{{ room.assigned_tech_user_id | default('') }}"
+                      title="Assign to me and join">
+                {% if room.assigned_tech_user_id %}Reassign & Join{% else %}Assign & Join{% endif %}
+              </button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -133,6 +169,35 @@
       submit.disabled = false;
     }
   });
+
+  // Assign & Join buttons
+  const csrf = document.querySelector('[name="_csrf"]')?.value || '';
+  document.querySelectorAll('.btn-assign-join').forEach(btn => {
+    btn.addEventListener('click', async function() {
+      const roomId = this.dataset.roomId;
+      const alreadyAssigned = this.dataset.assigned;
+      if (alreadyAssigned && !confirm('This room is already assigned. Reassign to yourself?')) return;
+      this.disabled = true;
+      try {
+        const assignResp = await fetch(`/api/chat/rooms/${roomId}/assign`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+          body: '{}',
+        });
+        if (!assignResp.ok) {
+          const err = await assignResp.json();
+          alert(err.detail || 'Failed to assign');
+          this.disabled = false;
+          return;
+        }
+        window.location.href = '/chat/' + roomId;
+      } catch(err) {
+        alert('Network error: ' + err.message);
+        this.disabled = false;
+      }
+    });
+  });
 })();
 </script>
 {% endblock %}
+

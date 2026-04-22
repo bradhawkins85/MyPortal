@@ -27,6 +27,7 @@ async def list_rooms(
     company_id: int | None = None,
     user_id: int | None = None,
     status: str | None = None,
+    unattended_only: bool = False,
     offset: int = 0,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
@@ -47,10 +48,21 @@ async def list_rooms(
         clauses.append("r.status = %s")
         params.append(status)
 
+    if unattended_only:
+        clauses.append(
+            "r.id NOT IN (SELECT room_id FROM chat_room_participants WHERE role IN ('technician','admin'))"
+        )
+
     where = " AND ".join(clauses)
     params.extend([limit, offset])
     rows = await db.fetch_all(
-        f"SELECT r.* FROM chat_rooms r WHERE {where} ORDER BY r.updated_at DESC LIMIT %s OFFSET %s",
+        f"""SELECT r.*,
+               (SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count,
+               u.display_name AS assigned_tech_display_name
+            FROM chat_rooms r
+            LEFT JOIN users u ON u.id = r.assigned_tech_user_id
+            WHERE {where}
+            ORDER BY r.updated_at DESC LIMIT %s OFFSET %s""",
         tuple(params),
     )
     return [dict(r) for r in rows]
@@ -80,6 +92,7 @@ async def create_room(
 
 _ROOM_UPDATABLE_FIELDS = frozenset({
     "status", "updated_at", "last_message_at", "subject", "linked_ticket_id",
+    "assigned_tech_user_id",
 })
 
 _INVITE_UPDATABLE_FIELDS = frozenset({
@@ -99,6 +112,26 @@ async def update_room(room_id: int, **fields: Any) -> None:
     await db.execute(
         f"UPDATE chat_rooms SET {set_clauses} WHERE id = %s",
         tuple(params),
+    )
+
+
+async def assign_tech(room_id: int, tech_user_id: int) -> None:
+    """Assign a technician to a chat room (only if currently unassigned)."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        """UPDATE chat_rooms
+           SET assigned_tech_user_id = %s, updated_at = %s
+           WHERE id = %s AND assigned_tech_user_id IS NULL""",
+        (tech_user_id, now, room_id),
+    )
+
+
+async def reassign_tech(room_id: int, tech_user_id: int | None) -> None:
+    """Forcibly set (or clear) the assigned technician on a chat room."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        "UPDATE chat_rooms SET assigned_tech_user_id = %s, updated_at = %s WHERE id = %s",
+        (tech_user_id, now, room_id),
     )
 
 
