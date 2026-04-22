@@ -206,6 +206,10 @@ async def join_room(
 
     await chat_repo.add_participant(room_id, mxid, role="technician", user_id=user_id)
 
+    # Auto-assign this tech if the room has no assigned technician yet
+    if not room.get("assigned_tech_user_id"):
+        await chat_repo.assign_tech(room_id, user_id)
+
     await audit_service.log_action(
         action="join",
         entity_type="chat_room",
@@ -215,6 +219,48 @@ async def join_room(
     )
 
     return JSONResponse({"status": "joined"})
+
+
+@router.post("/rooms/{room_id}/assign", summary="Assign a technician to a chat room")
+async def assign_room(
+    room_id: int,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """Assign the calling technician/admin to this room, or force-reassign."""
+    _require_matrix_enabled()
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        raise HTTPException(status_code=403, detail="Only technicians or admins can be assigned")
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    user_id = current_user["id"]
+    is_admin = current_user.get("is_super_admin")
+
+    # Admins may forcibly reassign; technicians can only claim unassigned rooms
+    if room.get("assigned_tech_user_id") and not is_admin:
+        raise HTTPException(status_code=409, detail="Room is already assigned to another technician")
+
+    await chat_repo.reassign_tech(room_id, user_id)
+
+    mxid = _settings.matrix_bot_user_id or ""
+    try:
+        await matrix_service.invite_user(room["matrix_room_id"], mxid)
+    except Exception as exc:
+        log_error("Failed to invite bot user to room during assign", room_id=room_id, mxid=mxid, error=str(exc))
+    await chat_repo.add_participant(room_id, mxid, role="technician", user_id=user_id)
+
+    await audit_service.log_action(
+        action="assign",
+        entity_type="chat_room",
+        entity_id=room_id,
+        user_id=user_id,
+        new_value={"assigned_to": user_id},
+    )
+
+    return JSONResponse({"status": "assigned", "assigned_tech_user_id": user_id})
 
 
 @router.post("/rooms/{room_id}/close", summary="Close a chat room")
