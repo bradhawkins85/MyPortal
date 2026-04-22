@@ -5240,6 +5240,47 @@ async def sync_m365_mailboxes(request: Request):
     return JSONResponse({"queued": True}, status_code=202)
 
 
+@app.post("/m365/mailboxes/enable-archive", response_class=JSONResponse, tags=["Microsoft 365"])
+async def enable_m365_user_archive(request: Request):
+    """Enable the in-place archive mailbox for a user via Exchange Online PowerShell.
+
+    Issues ``Enable-Mailbox -Identity <upn> -Archive`` for the supplied UPN.  The
+    UPN must belong to a known user mailbox in this company; otherwise a 404 is
+    returned.  Requires super-admin privileges.
+    """
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+    upn = str((body or {}).get("upn") or "").strip()
+    if not upn:
+        return JSONResponse({"error": "A user principal name is required"}, status_code=400)
+
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    matching = next((mb for mb in user_mbs if mb.get("user_principal_name") == upn), None)
+    if matching is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
+    if matching.get("has_archive"):
+        return JSONResponse({"enabled": True, "already_enabled": True})
+
+    try:
+        await m365_service.enable_user_archive(company_id, upn)
+    except m365_service.M365Error as exc:
+        logger.exception("Failed to enable in-place archive for UPN %s", upn)
+        return JSONResponse(
+            {"error": "Unable to enable in-place archive at this time."},
+            status_code=503,
+        )
+    log_info("M365 in-place archive enable requested", company_id=company_id, user_id=user.get("id"), upn=upn)
+    return JSONResponse({"enabled": True})
+
+
 @app.get("/m365/mailboxes/permissions", response_class=JSONResponse, tags=["Microsoft 365"])
 async def get_m365_mailbox_permissions(request: Request, upn: str):
     """Return mailbox permission details for a given mailbox UPN.

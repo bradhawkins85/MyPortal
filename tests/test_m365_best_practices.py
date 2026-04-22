@@ -997,3 +997,554 @@ async def test_remediate_concealed_names_failure_on_graph_error():
     assert upserts[0]["remediation_status"] == "failed"
 
 
+# ---------------------------------------------------------------------------
+# Tenant capability detection / N/A marking
+# ---------------------------------------------------------------------------
+
+
+def test_detect_capabilities_from_skus_entra_p1_and_intune():
+    payload = {
+        "value": [
+            {
+                "skuPartNumber": "ENTERPRISEPACK",
+                "prepaidUnits": {"enabled": 5},
+                "servicePlans": [
+                    {
+                        "servicePlanId": "41781fb2-bc02-4b7c-bd55-b576c07bb09d",
+                        "provisioningStatus": "Success",
+                    },
+                    {
+                        "servicePlanId": "c1ec4a95-1f05-45b3-a911-aa3fa01094f5",
+                        "provisioningStatus": "Success",
+                    },
+                ],
+            }
+        ]
+    }
+    caps = bp_service._detect_capabilities_from_skus(payload)
+    assert bp_service.CAP_ENTRA_ID_P1 in caps
+    assert bp_service.CAP_INTUNE in caps
+    assert bp_service.CAP_ENTRA_ID_P2 not in caps
+
+
+def test_detect_capabilities_from_skus_p2_implies_p1():
+    payload = {
+        "value": [
+            {
+                "prepaidUnits": {"enabled": 1},
+                "servicePlans": [
+                    {
+                        "servicePlanId": "EEC0EB4F-6444-4F95-ABA0-50C24D67F998",
+                        "provisioningStatus": "Success",
+                    }
+                ],
+            }
+        ]
+    }
+    caps = bp_service._detect_capabilities_from_skus(payload)
+    assert bp_service.CAP_ENTRA_ID_P1 in caps
+    assert bp_service.CAP_ENTRA_ID_P2 in caps
+
+
+def test_detect_capabilities_from_skus_ignores_zero_units():
+    payload = {
+        "value": [
+            {
+                "prepaidUnits": {"enabled": 0},
+                "servicePlans": [
+                    {
+                        "servicePlanId": "41781fb2-bc02-4b7c-bd55-b576c07bb09d",
+                        "provisioningStatus": "Success",
+                    }
+                ],
+            }
+        ]
+    }
+    caps = bp_service._detect_capabilities_from_skus(payload)
+    assert caps == set()
+
+
+def test_detect_capabilities_from_skus_ignores_disabled_service_plans():
+    payload = {
+        "value": [
+            {
+                "prepaidUnits": {"enabled": 10},
+                "servicePlans": [
+                    {
+                        "servicePlanId": "c1ec4a95-1f05-45b3-a911-aa3fa01094f5",
+                        "provisioningStatus": "Disabled",
+                    }
+                ],
+            }
+        ]
+    }
+    caps = bp_service._detect_capabilities_from_skus(payload)
+    assert bp_service.CAP_INTUNE not in caps
+
+
+def test_missing_capabilities_returns_empty_when_capabilities_unknown():
+    """When detection failed (None), nothing is reported as missing."""
+    assert bp_service._missing_capabilities(["entra_id_p2"], None) == []
+
+
+def test_missing_capabilities_lists_unmet_requirements():
+    assert bp_service._missing_capabilities(
+        [bp_service.CAP_ENTRA_ID_P2, bp_service.CAP_INTUNE],
+        {bp_service.CAP_ENTRA_ID_P1},
+    ) == [bp_service.CAP_ENTRA_ID_P2, bp_service.CAP_INTUNE]
+
+
+def test_catalog_marks_legacy_auth_as_requiring_entra_p1():
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_block_legacy_auth")
+    assert bp_service.CAP_ENTRA_ID_P1 in entry.get("requires_licenses", [])
+
+
+def test_catalog_marks_risky_users_as_requiring_entra_p2():
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_monitor_risky_users")
+    assert bp_service.CAP_ENTRA_ID_P2 in entry.get("requires_licenses", [])
+
+
+def test_catalog_marks_intune_checks_as_requiring_intune():
+    catalog = bp_service.list_best_practices()
+    intune_entries = [bp for bp in catalog if bp.get("cis_group", "").startswith("intune_")]
+    assert intune_entries, "expected at least one Intune catalog entry"
+    for entry in intune_entries:
+        assert bp_service.CAP_INTUNE in entry.get("requires_licenses", []), entry["id"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_marks_check_as_na_when_license_missing():
+    """A check with requires_licenses must be marked N/A when capability is absent."""
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == "bp_monitor_risky_users")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "fail", "details": "should not run"})
+    bp_entry["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                # Tenant only has Entra ID P1, not P2
+                return_value={bp_service.CAP_ENTRA_ID_P1},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_monitor_risky_users"},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=7)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
+    assert "Microsoft Entra ID P2" in results[0]["details"]
+    # The check runner must NOT have been called
+    fake_source.assert_not_awaited()
+    # The N/A status must be persisted
+    assert upserts[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_runs_check_when_license_present():
+    """A check with requires_licenses runs normally when the tenant has the license."""
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == "bp_monitor_risky_users")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "no risky users"})
+    bp_entry["source"] = fake_source
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value={bp_service.CAP_ENTRA_ID_P1, bp_service.CAP_ENTRA_ID_P2},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_monitor_risky_users"},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=7)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == "pass"
+    fake_source.assert_awaited_once_with("graph-token")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_runs_check_when_capabilities_unknown():
+    """When capability detection returns None, checks must run normally (no N/A)."""
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == "bp_block_legacy_auth")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "fail", "details": "blocked"})
+    bp_entry["source"] = fake_source
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_block_legacy_auth"},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=8)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == "fail"
+    fake_source.assert_awaited_once_with("graph-token")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_na_does_not_trigger_auto_remediation():
+    """Auto-remediation must not run for checks marked N/A due to missing licenses."""
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == "bp_monitor_risky_users")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "fail", "details": "x"})
+    bp_entry["source"] = fake_source
+
+    remediated: list[str] = []
+
+    async def fake_remediate(*, company_id: int, check_id: str) -> dict:
+        remediated.append(check_id)
+        return {"success": True, "message": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Transient-failure retry helpers
+# ---------------------------------------------------------------------------
+
+
+def test_is_retryable_m365_error_network_error():
+    # No HTTP status -> network/decode error -> retryable
+    assert bp_service._is_retryable_m365_error(M365Error("boom"))
+
+
+def test_is_retryable_m365_error_transient_status():
+    for status in (408, 429, 500, 502, 503, 504):
+        assert bp_service._is_retryable_m365_error(M365Error("x", http_status=status))
+
+
+def test_is_retryable_m365_error_permanent_status():
+    for status in (400, 401, 403, 404):
+        assert not bp_service._is_retryable_m365_error(M365Error("x", http_status=status))
+
+
+def test_result_indicates_transient_failure_status_in_details():
+    assert bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Microsoft Graph request failed (429)"}
+    )
+    assert bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Exchange Online Get-OrganizationConfig failed (503)"}
+    )
+
+
+def test_result_indicates_transient_failure_decode_error():
+    assert bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Unable to query: response decode error: bad json"}
+    )
+
+
+def test_result_indicates_transient_failure_non_transient_unknown():
+    # An "Unable to determine" message is informational, not a transient request failure.
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Unable to determine Direct Send status."}
+    )
+    # Permanent client errors are not retryable.
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Microsoft Graph request failed (403)"}
+    )
+
+
+def test_result_indicates_transient_failure_pass_or_fail_not_retried():
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "pass", "details": "all good"}
+    )
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "fail", "details": "Microsoft Graph request failed (500)"}
+    )
+
+
+def test_result_indicates_transient_failure_batch_list():
+    transient_list = [
+        {"status": "unknown", "details": "Unable to retrieve device compliance policies: failed (502)"},
+        {"status": "unknown", "details": "Unable to retrieve device compliance policies: failed (502)"},
+    ]
+    assert bp_service._result_indicates_transient_failure(transient_list)
+    # Empty list is not transient
+    assert not bp_service._result_indicates_transient_failure([])
+    # Mixed list: not all unknown -> not retried as a batch
+    mixed = [
+        {"status": "pass", "details": "ok"},
+        {"status": "unknown", "details": "failed (503)"},
+    ]
+    assert not bp_service._result_indicates_transient_failure(mixed)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_succeeds_after_transient_error(monkeypatch):
+    """A transient M365Error is retried and the second attempt's result is returned."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise M365Error("transient", http_status=503)
+        return {"status": "pass", "details": "ok"}
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result == {"status": "pass", "details": "ok"}
+    assert calls["n"] == 2
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_succeeds_after_transient_unknown_result(monkeypatch):
+    """An unknown result with a transient marker is retried; success on retry replaces it."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return {
+                "status": bp_service.STATUS_UNKNOWN,
+                "details": "Unable to retrieve policy: Microsoft Graph request failed (429)",
+            }
+        return {"status": "fail", "details": "policy not configured"}
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result["status"] == "fail"
+    assert calls["n"] == 3
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_does_not_retry_permanent_error(monkeypatch):
+    """A permanent (e.g. 403) M365Error is raised immediately without retrying."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        raise M365Error("forbidden", http_status=403)
+
+    with pytest.raises(M365Error):
+        await bp_service._call_check_with_retry(
+            factory, company_id=1, check_id="bp_test"
+        )
+    assert calls["n"] == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_returns_last_unknown_after_exhaustion(monkeypatch):
+    """After exhausting retries we still return the last (unknown) result so the
+    caller can persist the underlying error message."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+    transient = {
+        "status": bp_service.STATUS_UNKNOWN,
+        "details": "Unable to retrieve policy: Microsoft Graph request failed (503)",
+    }
+
+    async def factory():
+        calls["n"] += 1
+        return transient
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result == transient
+    assert calls["n"] == bp_service._MAX_CHECK_ATTEMPTS
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_does_not_retry_non_transient_unknown(monkeypatch):
+    """An unknown result without a transient marker is returned immediately."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+    informational = {
+        "status": bp_service.STATUS_UNKNOWN,
+        "details": "Unable to determine Direct Send status from organization config.",
+    }
+
+    async def factory():
+        calls["n"] += 1
+        return informational
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result == informational
+    assert calls["n"] == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_retries_transient_check_failure(monkeypatch):
+    """run_best_practices retries a Graph check whose first attempt returns a
+    transient unknown result, and persists the successful retry's status."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+
+    catalog = bp_service.list_best_practices()
+    enabled_id = next(
+        bp["id"] for bp in catalog if not bp.get("cis_group")
+    )
+    target = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == enabled_id)
+    real_source = target["source"]
+
+    transient = {
+        "check_id": enabled_id,
+        "check_name": target["name"],
+        "status": bp_service.STATUS_UNKNOWN,
+        "details": "Unable to retrieve policy: Microsoft Graph request failed (429)",
+    }
+    success = {
+        "check_id": enabled_id,
+        "check_name": target["name"],
+        "status": "pass",
+        "details": "configured correctly",
+    }
+    fake_source = AsyncMock(side_effect=[transient, success])
+    target["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value=set(),  # Tenant has no detected premium capabilities
+                return_value="tok",
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_monitor_risky_users"},
+                return_value={enabled_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_monitor_risky_users"},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.remediate_check",
+                side_effect=fake_remediate,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=9)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
+    assert remediated == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_detect_tenant_capabilities_returns_none_on_graph_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("403 Forbidden", http_status=403),
+    ):
+        caps = await bp_service.detect_tenant_capabilities("token")
+    assert caps is None
+
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=7)
+    finally:
+        target["source"] = real_source
+
+    assert fake_source.await_count == 2
+    assert results[0]["status"] == "pass"
+    assert upserts[0]["status"] == "pass"

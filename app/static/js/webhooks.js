@@ -449,6 +449,39 @@
     });
   }
 
+  function bindRowMenuPositioning() {
+    // Per-row dropdown panels are inside .table-wrapper which has overflow-x: auto.
+    // Because overflow-x: auto implicitly sets overflow-y to auto, the browser clips
+    // absolutely-positioned children that extend outside the wrapper's padding box.
+    // For short tables (common case with few webhooks), the panel for the last row
+    // would be completely hidden. Fix by repositioning opened panels with position:fixed
+    // so they escape the overflow container entirely.
+    document.querySelectorAll('#webhooks-table [data-header-menu]').forEach(function (menu) {
+      var toggle = menu.querySelector('[data-header-menu-toggle]');
+      var panel = menu.querySelector('[data-header-menu-panel]');
+      if (!toggle || !panel) {
+        return;
+      }
+      // Use a MutationObserver to react to the panel's hidden attribute changing,
+      // which is how header_menu.js opens and closes panels.
+      var observer = new MutationObserver(function () {
+        if (!panel.hidden) {
+          var rect = toggle.getBoundingClientRect();
+          panel.style.position = 'fixed';
+          panel.style.top = (rect.bottom + 4) + 'px';
+          panel.style.right = (window.innerWidth - rect.right) + 'px';
+          panel.style.left = 'auto';
+        } else {
+          panel.style.position = '';
+          panel.style.top = '';
+          panel.style.right = '';
+          panel.style.left = '';
+        }
+      });
+      observer.observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+    });
+  }
+
   function bindBulkDeleteButtons() {
     document.querySelectorAll('[data-webhook-delete-status]').forEach((button) => {
       button.addEventListener('click', async () => {
@@ -498,5 +531,6 @@
     bindAttemptsButtons();
     bindDeleteButtons();
     bindBulkDeleteButtons();
+    bindRowMenuPositioning();
   });
 })();
