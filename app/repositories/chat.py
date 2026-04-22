@@ -194,7 +194,7 @@ async def add_participant(
         )
 
 
-_MESSAGES_SELECT = """
+_MESSAGES_SELECT_MYSQL = """
     SELECT m.id, m.room_id, m.matrix_event_id, m.sender_matrix_id, m.sender_user_id,
            m.body, m.msgtype, m.sent_at, m.redacted_at,
            COALESCE(
@@ -205,6 +205,21 @@ _MESSAGES_SELECT = """
     LEFT JOIN users u ON u.id = m.sender_user_id
 """
 
+_MESSAGES_SELECT_SQLITE = """
+    SELECT m.id, m.room_id, m.matrix_event_id, m.sender_matrix_id, m.sender_user_id,
+           m.body, m.msgtype, m.sent_at, m.redacted_at,
+           COALESCE(
+               NULLIF(m.sender_display_name, ''),
+               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '')
+           ) AS sender_display_name
+    FROM chat_messages m
+    LEFT JOIN users u ON u.id = m.sender_user_id
+"""
+
+
+def _messages_select() -> str:
+    return _MESSAGES_SELECT_SQLITE if db.is_sqlite() else _MESSAGES_SELECT_MYSQL
+
 
 async def get_messages(
     room_id: int,
@@ -213,6 +228,7 @@ async def get_messages(
     limit: int = 50,
     before_event_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    select = _messages_select()
     if before_event_id:
         pivot = await db.fetch_one(
             "SELECT sent_at FROM chat_messages WHERE matrix_event_id = %s",
@@ -220,7 +236,7 @@ async def get_messages(
         )
         if pivot:
             rows = await db.fetch_all(
-                _MESSAGES_SELECT + """
+                select + """
                 WHERE m.room_id = %s AND m.sent_at < %s AND m.redacted_at IS NULL
                 ORDER BY m.sent_at DESC LIMIT %s OFFSET %s""",
                 (room_id, pivot["sent_at"], limit, offset),
@@ -228,7 +244,7 @@ async def get_messages(
             return [dict(r) for r in reversed(rows)]
 
     rows = await db.fetch_all(
-        _MESSAGES_SELECT + """
+        select + """
         WHERE m.room_id = %s AND m.redacted_at IS NULL
         ORDER BY m.sent_at ASC LIMIT %s OFFSET %s""",
         (room_id, limit, offset),
