@@ -137,7 +137,7 @@ async def test_check_legacy_auth_blocked_pass():
         if "conditionalAccessPolicies" in url:
             return {"value": [blocking_policy]}
         if "authorizationPolicy" in url:
-            return {"allowedToUseSspr": True, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3"}
+            return {"value": [{"allowedToUseSspr": True, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3"}]}
         if "directoryRoles" in url:
             return {"value": [{"id": "role-1", "displayName": "Global Administrator"}]}
         if f"directoryRoles/role-1/members" in url:
@@ -164,7 +164,7 @@ async def test_check_legacy_auth_blocked_fail():
             # No blocking policy
             return {"value": [_make_ca_policy(name="MFA Policy", built_in_controls=["mfa"])]}
         if "authorizationPolicy" in url:
-            return {"allowedToUseSspr": True}
+            return {"value": [{"allowedToUseSspr": True}]}
         if "directoryRoles" in url:
             return {"value": [{"id": "role-1"}]}
         if "directoryRoles/role-1/members" in url:
@@ -199,7 +199,7 @@ async def test_global_admin_count_pass():
         if "directoryRoles/role-ga/members" in url:
             return {"value": [{"id": "u1"}, {"id": "u2"}]}
         if "authorizationPolicy" in url:
-            return {"allowedToUseSspr": True}
+            return {"value": [{"allowedToUseSspr": True}]}
         if "domains" in url:
             return {"value": []}
         if "auditLog" in url:
@@ -225,7 +225,7 @@ async def test_global_admin_count_fail_too_many():
         if "role-ga/members" in url:
             return {"value": [{"id": f"u{i}"} for i in range(8)]}
         if "authorizationPolicy" in url:
-            return {"allowedToUseSspr": True}
+            return {"value": [{"allowedToUseSspr": True}]}
         if "domains" in url:
             return {"value": []}
         if "auditLog" in url:
@@ -237,6 +237,87 @@ async def test_global_admin_count_fail_too_many():
 
     check = next(r for r in results if r["check_id"] == "m365_global_admin_count")
     assert check["status"] == STATUS_FAIL
+
+
+
+# ---------------------------------------------------------------------------
+# M365 check: SSPR Enabled
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sspr_enabled_pass_collection_response():
+    """SSPR check passes when API returns collection-wrapped response."""
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "authorizationPolicy" in url:
+            return {"value": [{"allowedToUseSspr": True}]}
+        return {}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_self_service_password_reset")
+    assert check["status"] == STATUS_PASS
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sspr_enabled_pass_nested_permissions():
+    """SSPR check passes when allowedToUseSspr is inside defaultUserRolePermissions."""
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "authorizationPolicy" in url:
+            return {"value": [{"defaultUserRolePermissions": {"allowedToUseSspr": True}}]}
+        return {}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_self_service_password_reset")
+    assert check["status"] == STATUS_PASS
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sspr_enabled_fail():
+    """SSPR check fails when allowedToUseSspr is False."""
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "authorizationPolicy" in url:
+            return {"value": [{"allowedToUseSspr": False}]}
+        return {}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_self_service_password_reset")
+    assert check["status"] == STATUS_FAIL
+    assert check["remediation"] is not None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sspr_enabled_unknown_when_field_missing():
+    """SSPR check returns unknown when neither allowedToUseSspr field is present."""
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "authorizationPolicy" in url:
+            return {"value": [{"id": "authorizationPolicy"}]}
+        return {}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_self_service_password_reset")
+    assert check["status"] == STATUS_UNKNOWN
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sspr_enabled_unknown_on_empty_collection():
+    """SSPR check returns unknown when value array is empty."""
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "authorizationPolicy" in url:
+            return {"value": []}
+        return {}
+
+    with patch("app.services.cis_benchmark._graph_get", side_effect=mock_graph_get):
+        results = await cis_service.run_m365_benchmarks("fake-token")
+
+    check = next(r for r in results if r["check_id"] == "m365_self_service_password_reset")
+    assert check["status"] == STATUS_UNKNOWN
 
 
 # ---------------------------------------------------------------------------
@@ -838,7 +919,7 @@ async def test_conditional_access_checks_follow_pagination():
             # Second page: blocking policy is here
             return {"value": [blocking_policy]}
         if "authorizationPolicy" in url:
-            return {"allowedToUseSspr": True, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3"}
+            return {"value": [{"allowedToUseSspr": True, "guestUserRoleId": "10dae51f-b6af-4016-8d66-8c2a99b929b3"}]}
         if "directoryRoles" in url and "members" not in url:
             return {"value": [{"id": "role-1", "displayName": "Global Administrator"}]}
         if "directoryRoles/role-1/members" in url:
