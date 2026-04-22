@@ -3558,6 +3558,35 @@ async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
     ]
 
 
+async def enable_user_archive(company_id: int, upn: str) -> None:
+    """Enable the in-place (online) archive mailbox for ``upn``.
+
+    Issues ``Enable-Mailbox -Identity <upn> -Archive`` via the Exchange Online
+    PowerShell REST ``InvokeCommand`` API and, on success, updates the cached
+    ``m365_mailboxes`` row so the UI reflects the new state immediately.
+
+    The caller is responsible for verifying that ``upn`` belongs to a known
+    mailbox in the given company.
+    """
+    normalised = str(upn or "").strip()
+    if not normalised:
+        raise M365Error("A user principal name is required", http_status=400)
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Enable-Mailbox",
+        {"Identity": normalised, "Archive": True},
+    )
+    await m365_repo.set_mailbox_archive_enabled(company_id, normalised)
+    log_info(
+        "M365 in-place archive enabled",
+        company_id=company_id,
+        upn=normalised,
+    )
+
+
 async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     """Return mailbox permission details for a given UPN.
 
