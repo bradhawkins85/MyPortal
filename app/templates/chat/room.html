@@ -337,6 +337,7 @@
     const isSelf = msg.sender_user_id === currentUserId;
     appendMessage(msg, isSelf, true);
     document.getElementById('chat-empty')?.remove();
+    if (key) lastKnownIds.add(key);
     notifyNewMessage(msg);
   });
 
