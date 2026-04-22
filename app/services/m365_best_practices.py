@@ -1123,10 +1123,10 @@ async def save_company_exclusions(company_id: int, excluded_check_ids: set[str])
     catalog = _catalog_map()
     filtered = {cid for cid in excluded_check_ids if cid in catalog}
     await bp_repo.set_company_exclusions(company_id, filtered)
-    # Clear any previously-stored results for newly-excluded checks so they
-    # no longer appear on the company's page.
+    # Clear any previously-stored results for newly-excluded checks for this
+    # company only so they no longer appear on the company's page.
     for check_id in filtered:
-        await bp_repo.delete_result_for_check(check_id)
+        await bp_repo.delete_result_for_check_and_company(company_id, check_id)
     log_info(
         "M365 best practice company exclusions updated",
         company_id=company_id,

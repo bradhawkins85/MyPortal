@@ -1606,7 +1606,7 @@ async def test_save_company_exclusions_persists_valid_ids():
             side_effect=fake_set_excl,
         ),
         patch(
-            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check_and_company",
             new_callable=AsyncMock,
         ),
     ):
