@@ -28,6 +28,7 @@ class UserUpdate(BaseModel):
     is_super_admin: Optional[bool] = None
     booking_link_url: Optional[str] = None
     email_signature: Optional[str] = None
+    matrix_user_id: Optional[str] = None
 
 
 class UserResponse(UserBase):
@@ -36,6 +37,7 @@ class UserResponse(UserBase):
     updated_at: Optional[datetime] = None
     force_password_change: Optional[int] = None
     is_super_admin: bool = False
+    matrix_user_id: Optional[str] = None
 
     class Config:
         from_attributes = True
