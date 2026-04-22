@@ -109,6 +109,43 @@ async def test_check_security_defaults_fail():
     assert sd["remediation"] is not None
 
 
+_CA_CHECK_PASS = {"status": STATUS_PASS, "check_id": "ca", "check_name": "ca", "details": "ok"}
+_CA_CHECK_FAIL = {"status": STATUS_FAIL, "check_id": "ca", "check_name": "ca", "details": "nope"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_security_defaults_pass_when_ca_configured():
+    """Security Defaults disabled but ≥3 CA checks pass → overall pass."""
+    with (
+        patch("app.services.cis_benchmark._graph_get", new_callable=AsyncMock) as mock_get,
+        patch("app.services.cis_benchmark._check_mfa_conditional_access", new_callable=AsyncMock, return_value=_CA_CHECK_PASS),
+        patch("app.services.cis_benchmark._check_legacy_auth_blocked", new_callable=AsyncMock, return_value=_CA_CHECK_PASS),
+        patch("app.services.cis_benchmark._check_admin_mfa", new_callable=AsyncMock, return_value=_CA_CHECK_PASS),
+        patch("app.services.cis_benchmark._check_monitor_named_locations", new_callable=AsyncMock, return_value=_CA_CHECK_PASS),
+        patch("app.services.cis_benchmark._check_monitor_ca_report_only_policies", new_callable=AsyncMock, return_value=_CA_CHECK_FAIL),
+    ):
+        mock_get.return_value = {"isEnabled": False}
+        result = await cis_service._check_security_defaults("fake-token")
+    assert result["status"] == STATUS_PASS
+    assert result["details"] == "Security Defaults are disabled."
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_security_defaults_fail_when_ca_not_configured():
+    """Security Defaults disabled and fewer than 3 CA checks pass → fail."""
+    with (
+        patch("app.services.cis_benchmark._graph_get", new_callable=AsyncMock) as mock_get,
+        patch("app.services.cis_benchmark._check_mfa_conditional_access", new_callable=AsyncMock, return_value=_CA_CHECK_FAIL),
+        patch("app.services.cis_benchmark._check_legacy_auth_blocked", new_callable=AsyncMock, return_value=_CA_CHECK_PASS),
+        patch("app.services.cis_benchmark._check_admin_mfa", new_callable=AsyncMock, return_value=_CA_CHECK_FAIL),
+        patch("app.services.cis_benchmark._check_monitor_named_locations", new_callable=AsyncMock, return_value=_CA_CHECK_FAIL),
+        patch("app.services.cis_benchmark._check_monitor_ca_report_only_policies", new_callable=AsyncMock, return_value=_CA_CHECK_PASS),
+    ):
+        mock_get.return_value = {"isEnabled": False}
+        result = await cis_service._check_security_defaults("fake-token")
+    assert result["status"] == STATUS_FAIL
+
+
 @pytest.mark.anyio("asyncio")
 async def test_check_security_defaults_unknown_on_error():
     from app.services.m365 import M365Error
