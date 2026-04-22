@@ -24,6 +24,7 @@
           Best Practice checks are enabled or disabled <strong>globally</strong> across every company in MyPortal.
           Disabled checks are removed from per-company reports until re-enabled.
           Auto-Remediation will automatically apply the fix for supported checks immediately after each evaluation.
+          Checks marked <span class="badge badge--info" style="font-size:0.7rem">CIS</span> are sourced from the CIS Microsoft 365 Foundations Benchmark or CIS Intune Benchmarks.
         </p>
       </div>
     </header>
@@ -31,6 +32,12 @@
       {% if csrf_token %}
       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
       {% endif %}
+
+      {# ---------------------------------------------------------------- #}
+      {# Microsoft 365 Best Practices (non-Intune)                        #}
+      {# ---------------------------------------------------------------- #}
+      {% set m365_catalog = catalog | rejectattr("cis_group", "defined") | list %}
+      {% if m365_catalog %}
       <div class="panel__body" style="padding:0">
         <table class="table">
           <thead>
@@ -42,7 +49,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for bp in catalog %}
+            {% for bp in m365_catalog %}
             <tr>
               <td style="text-align:center">
                 <label class="visually-hidden" for="bp-{{ bp.id }}">Enable {{ bp.name }}</label>
@@ -71,6 +78,9 @@
               </td>
               <td>
                 <strong>{{ bp.name }}</strong>
+                {% if bp.is_cis_benchmark %}
+                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                {% endif %}
                 <br /><small class="text-muted">{{ bp.id }}</small>
               </td>
               <td>{{ bp.description }}</td>
@@ -79,6 +89,131 @@
           </tbody>
         </table>
       </div>
+      {% endif %}
+
+      {# ---------------------------------------------------------------- #}
+      {# CIS Intune Windows checks                                         #}
+      {# ---------------------------------------------------------------- #}
+      {% set intune_windows = catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_windows") | list %}
+      {% if intune_windows %}
+      <div style="padding:1rem 1rem 0;border-top:1px solid var(--color-border,#e5e7eb)">
+        <h3 style="margin:0 0 0.5rem;font-size:0.95rem;font-weight:600">CIS Intune Benchmark – Windows</h3>
+      </div>
+      <div class="panel__body" style="padding:0">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:6rem;text-align:center">Enabled</th>
+              <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th>Check</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bp in intune_windows %}
+            <tr>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="bp-{{ bp.id }}">Enable {{ bp.name }}</label>
+                <input type="checkbox" id="bp-{{ bp.id }}" name="enabled" value="{{ bp.id }}" {% if bp.enabled %}checked{% endif %} />
+              </td>
+              <td style="text-align:center">
+                <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+              </td>
+              <td>
+                <strong>{{ bp.name }}</strong>
+                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <br /><small class="text-muted">{{ bp.id }}</small>
+              </td>
+              <td>{{ bp.description }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {# ---------------------------------------------------------------- #}
+      {# CIS Intune iOS/iPadOS checks                                      #}
+      {# ---------------------------------------------------------------- #}
+      {% set intune_ios = catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_ios") | list %}
+      {% if intune_ios %}
+      <div style="padding:1rem 1rem 0;border-top:1px solid var(--color-border,#e5e7eb)">
+        <h3 style="margin:0 0 0.5rem;font-size:0.95rem;font-weight:600">CIS Intune Benchmark – iOS / iPadOS</h3>
+      </div>
+      <div class="panel__body" style="padding:0">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:6rem;text-align:center">Enabled</th>
+              <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th>Check</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bp in intune_ios %}
+            <tr>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="bp-{{ bp.id }}">Enable {{ bp.name }}</label>
+                <input type="checkbox" id="bp-{{ bp.id }}" name="enabled" value="{{ bp.id }}" {% if bp.enabled %}checked{% endif %} />
+              </td>
+              <td style="text-align:center">
+                <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+              </td>
+              <td>
+                <strong>{{ bp.name }}</strong>
+                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <br /><small class="text-muted">{{ bp.id }}</small>
+              </td>
+              <td>{{ bp.description }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {# ---------------------------------------------------------------- #}
+      {# CIS Intune macOS checks                                           #}
+      {# ---------------------------------------------------------------- #}
+      {% set intune_macos = catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_macos") | list %}
+      {% if intune_macos %}
+      <div style="padding:1rem 1rem 0;border-top:1px solid var(--color-border,#e5e7eb)">
+        <h3 style="margin:0 0 0.5rem;font-size:0.95rem;font-weight:600">CIS Intune Benchmark – macOS</h3>
+      </div>
+      <div class="panel__body" style="padding:0">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:6rem;text-align:center">Enabled</th>
+              <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th>Check</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for bp in intune_macos %}
+            <tr>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="bp-{{ bp.id }}">Enable {{ bp.name }}</label>
+                <input type="checkbox" id="bp-{{ bp.id }}" name="enabled" value="{{ bp.id }}" {% if bp.enabled %}checked{% endif %} />
+              </td>
+              <td style="text-align:center">
+                <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+              </td>
+              <td>
+                <strong>{{ bp.name }}</strong>
+                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <br /><small class="text-muted">{{ bp.id }}</small>
+              </td>
+              <td>{{ bp.description }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
       <div class="panel__footer" style="display:flex;justify-content:flex-end;gap:0.5rem;padding:1rem">
         <button type="submit" class="button">Save settings</button>
       </div>
