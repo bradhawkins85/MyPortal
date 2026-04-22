@@ -43,7 +43,7 @@
             <th data-sort="number" style="text-align:right">Mailbox Size</th>
             <th data-sort="number" style="text-align:right">Archive Size</th>
             <th data-sort="number" style="text-align:right">Forwarding Rules</th>
-            <th>Permissions</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -76,6 +76,15 @@
                 aria-haspopup="dialog"
                 aria-controls="mailbox-perm-modal"
               >Mailbox Permissions</button>
+              {% if not mb.has_archive %}
+              <button
+                type="button"
+                class="button button--small"
+                data-enable-archive-btn
+                data-upn="{{ mb.user_principal_name }}"
+                data-display-name="{{ mb.display_name or mb.user_principal_name }}"
+              >Enable Archive</button>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -244,6 +253,56 @@
             errorEl.textContent = 'Failed to load permissions. Please try again.';
             errorEl.style.display = 'block';
           });
+      });
+    });
+  }());
+  </script>
+  <script>
+  (function () {
+    var buttons = document.querySelectorAll('[data-enable-archive-btn]');
+    if (!buttons.length) return;
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var upn = btn.getAttribute('data-upn');
+        var displayName = btn.getAttribute('data-display-name') || upn;
+        if (!upn) return;
+        if (!window.confirm('Enable in-place archive for ' + displayName + '?')) {
+          return;
+        }
+        btn.disabled = true;
+        var originalText = btn.textContent;
+        btn.textContent = 'Enabling…';
+        fetch('/m365/mailboxes/enable-archive', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'{% if csrf_token %},
+            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+          },
+          body: JSON.stringify({ upn: upn })
+        })
+        .then(function (resp) {
+          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (result) {
+          if (!result.ok || (result.data && result.data.error)) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            window.alert((result.data && result.data.error) || 'Failed to enable archive.');
+            return;
+          }
+          btn.textContent = '\u2713 Archive enabled';
+          // Remove the button so it is no longer displayed for this user.
+          setTimeout(function () {
+            if (btn.parentNode) {
+              btn.parentNode.removeChild(btn);
+            }
+          }, 1500);
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = originalText;
+          window.alert('Failed to enable archive. Please try again.');
+        });
       });
     });
   }());
