@@ -135,7 +135,7 @@
       const value = input ? input.value.trim() : '';
 
       try {
-        await requestJson(`/users/${userId}`, {
+        await requestJson(`/api/users/${userId}`, {
           method: 'PATCH',
           body: JSON.stringify({ mobile_phone: value || null }),
         });
@@ -159,7 +159,7 @@
       const value = input ? input.value.trim() : '';
 
       try {
-        await requestJson(`/users/${userId}`, {
+        await requestJson(`/api/users/${userId}`, {
           method: 'PATCH',
           body: JSON.stringify({ booking_link_url: value || null }),
         });
@@ -189,7 +189,7 @@
       }
 
       try {
-        await requestJson(`/users/${userId}`, {
+        await requestJson(`/api/users/${userId}`, {
           method: 'PATCH',
           body: JSON.stringify({ email_signature: value || null }),
         });
@@ -213,7 +213,7 @@
       const value = input ? input.value.trim() : '';
 
       try {
-        await requestJson(`/users/${userId}`, {
+        await requestJson(`/api/users/${userId}`, {
           method: 'PATCH',
           body: JSON.stringify({ matrix_user_id: value || null }),
         });
