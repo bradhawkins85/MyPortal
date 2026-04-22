@@ -1527,7 +1527,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             )
             return {
                 "success": False,
-                "message": f"Unable to acquire Exchange Online token: {exc}",
+                "message": "Unable to acquire Exchange Online token. Check that the app credentials are correct.",
             }
 
         cmdlet = bp.get("remediation_cmdlet", "")
@@ -1564,7 +1564,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             )
             return {
                 "success": False,
-                "message": f"Unable to acquire Microsoft Graph token: {exc}",
+                "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
             }
         try:
             await _graph_patch(graph_token, remediation_url, remediation_payload)
