@@ -163,6 +163,16 @@
             </a>
           </li>
           
+          {% if matrix_chat_enabled | default(false) %}
+          <li class="menu__item">
+            <a href="/chat" {% if current_path.startswith('/chat') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2C6.477 2 2 6.032 2 11c0 2.67 1.2 5.07 3.12 6.76L4 22l4.89-1.63C10.2 20.77 11.08 21 12 21c5.523 0 10-4.032 10-9S17.523 2 12 2zm0 2c4.418 0 8 3.134 8 7s-3.582 7-8 7a7.94 7.94 0 0 1-1.84-.22l-.42-.1-.38.13-2.92.97.69-2.79.12-.48-.31-.4A6.96 6.96 0 0 1 4 11c0-3.866 3.582-7 8-7z"/></svg>
+              </span>
+              <span class="menu__label">Chat</span>
+            </a>
+          </li>
+          {% endif %}
           {% if can_access_tickets %}
             {% set show_admin_tickets = (is_helpdesk_technician | default(false)) or (is_super_admin | default(false)) %}
             {% if show_admin_tickets %}
