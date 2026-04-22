@@ -52,12 +52,11 @@
     }
   });
 
-  // Close dropdown on Escape.
+  // Close dropdown on Escape; also close modal on Escape.
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       if (optionsDetails && optionsDetails.open) {
         closeOptionsDropdown();
-        return;
       }
       if (modal && !modal.hidden) {
         closeModal();
@@ -146,7 +145,7 @@
     if (editToggle) {
       editToggle.setAttribute('aria-pressed', editMode ? 'true' : 'false');
       const label = editToggle.querySelector('[data-dashboard-edit-label]');
-      if (label) label.textContent = editMode ? '✓ Done editing' : 'Edit layout';
+      if (label) label.textContent = editMode ? 'Done editing' : 'Edit layout';
     }
     grid.querySelectorAll('[data-dashboard-card]').forEach((card) => {
       card.setAttribute('draggable', editMode ? 'true' : 'false');
