@@ -986,3 +986,109 @@ def test_validate_plausible_uses_env_pepper(monkeypatch):
     )
 
     assert result["has_pepper"] is True
+
+
+def test_update_module_preserves_uptimekuma_secret_when_blank(monkeypatch):
+    """Saving UptimeKuma settings with a blank secret field must not clear an existing hash."""
+    import hashlib
+
+    existing_hash = hashlib.sha256("my-secret".encode()).hexdigest()
+    stored = {
+        "slug": "uptimekuma",
+        "enabled": True,
+        "settings": {"shared_secret_hash": existing_hash, "sync_service_status": True},
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_get_module(slug: str):
+        assert slug == "uptimekuma"
+        return stored
+
+    async def fake_update_module(slug: str, *, enabled=None, settings=None):
+        assert slug == "uptimekuma"
+        captured.update(settings or {})
+        return {"slug": slug, "enabled": stored["enabled"], "settings": dict(settings or {})}
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(modules.module_repo, "update_module", fake_update_module)
+
+    asyncio.run(
+        modules.update_module(
+            "uptimekuma",
+            enabled=True,
+            settings={"shared_secret": "", "sync_service_status": "true"},
+        )
+    )
+
+    assert captured["shared_secret_hash"] == existing_hash
+
+
+def test_update_module_preserves_chatgpt_mcp_secret_when_blank(monkeypatch):
+    """Saving chatgpt-mcp settings with a blank secret field must not clear an existing hash."""
+    import hashlib
+
+    existing_hash = hashlib.sha256("chatgpt-secret".encode()).hexdigest()
+    stored = {
+        "slug": "chatgpt-mcp",
+        "enabled": True,
+        "settings": {"shared_secret_hash": existing_hash, "allowed_actions": [], "max_results": 50,
+                     "allow_ticket_updates": False, "allowed_statuses": [], "system_user_id": None},
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_get_module(slug: str):
+        return stored
+
+    async def fake_update_module(slug: str, *, enabled=None, settings=None):
+        captured.update(settings or {})
+        return {"slug": slug, "enabled": stored["enabled"], "settings": dict(settings or {})}
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(modules.module_repo, "update_module", fake_update_module)
+
+    asyncio.run(
+        modules.update_module(
+            "chatgpt-mcp",
+            enabled=True,
+            settings={"shared_secret": ""},
+        )
+    )
+
+    assert captured["shared_secret_hash"] == existing_hash
+
+
+def test_update_module_preserves_ollama_mcp_secret_when_blank(monkeypatch):
+    """Saving ollama-mcp settings with a blank secret field must not clear an existing hash."""
+    import hashlib
+
+    existing_hash = hashlib.sha256("ollama-secret".encode()).hexdigest()
+    stored = {
+        "slug": "ollama-mcp",
+        "enabled": True,
+        "settings": {"shared_secret_hash": existing_hash, "allowed_actions": [], "max_results": 25,
+                     "allow_ticket_replies": False, "allow_ticket_updates": False,
+                     "allowed_statuses": [], "system_user_id": None,
+                     "include_internal_replies": False, "server_name": "MyPortal Ollama MCP",
+                     "server_version": "1.0.0"},
+    }
+    captured: dict[str, object] = {}
+
+    async def fake_get_module(slug: str):
+        return stored
+
+    async def fake_update_module(slug: str, *, enabled=None, settings=None):
+        captured.update(settings or {})
+        return {"slug": slug, "enabled": stored["enabled"], "settings": dict(settings or {})}
+
+    monkeypatch.setattr(modules.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(modules.module_repo, "update_module", fake_update_module)
+
+    asyncio.run(
+        modules.update_module(
+            "ollama-mcp",
+            enabled=True,
+            settings={"shared_secret": ""},
+        )
+    )
+
+    assert captured["shared_secret_hash"] == existing_hash

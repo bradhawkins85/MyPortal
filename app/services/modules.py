@@ -923,16 +923,16 @@ def _coerce_settings(
             if candidate in (None, ""):
                 candidate = shared_secret_hash_override
             candidate_str = str(candidate or "").strip()
-            if not candidate_str:
-                merged["shared_secret_hash"] = ""
-            elif (
-                len(candidate_str) == 64
-                and all(char in string.hexdigits for char in candidate_str)
-                and shared_secret_override in (None, "")
-            ):
-                merged["shared_secret_hash"] = candidate_str.lower()
-            else:
-                merged["shared_secret_hash"] = _hash_secret(candidate_str)
+            if candidate_str:
+                if (
+                    len(candidate_str) == 64
+                    and all(char in string.hexdigits for char in candidate_str)
+                    and shared_secret_override in (None, "")
+                ):
+                    merged["shared_secret_hash"] = candidate_str.lower()
+                else:
+                    merged["shared_secret_hash"] = _hash_secret(candidate_str)
+            # else: blank submission — preserve existing merged["shared_secret_hash"]
         # ensure a hash is always present even if override absent
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged["allowed_actions"] = _normalise_tool_names(merged.get("allowed_actions"))
@@ -952,16 +952,16 @@ def _coerce_settings(
             if candidate in (None, ""):
                 candidate = shared_secret_hash_override
             candidate_str = str(candidate or "").strip()
-            if not candidate_str:
-                merged["shared_secret_hash"] = ""
-            elif (
-                len(candidate_str) == 64
-                and all(char in string.hexdigits for char in candidate_str)
-                and shared_secret_override in (None, "")
-            ):
-                merged["shared_secret_hash"] = candidate_str.lower()
-            else:
-                merged["shared_secret_hash"] = _hash_secret(candidate_str)
+            if candidate_str:
+                if (
+                    len(candidate_str) == 64
+                    and all(char in string.hexdigits for char in candidate_str)
+                    and shared_secret_override in (None, "")
+                ):
+                    merged["shared_secret_hash"] = candidate_str.lower()
+                else:
+                    merged["shared_secret_hash"] = _hash_secret(candidate_str)
+            # else: blank submission — preserve existing merged["shared_secret_hash"]
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged["allowed_actions"] = _normalise_ollama_tool_names(
             merged.get("allowed_actions")
@@ -996,16 +996,16 @@ def _coerce_settings(
             if candidate in (None, ""):
                 candidate = shared_secret_hash_override
             candidate_str = str(candidate or "").strip()
-            if not candidate_str:
-                merged["shared_secret_hash"] = ""
-            elif (
-                len(candidate_str) == 64
-                and all(char in string.hexdigits for char in candidate_str)
-                and shared_secret_override in (None, "")
-            ):
-                merged["shared_secret_hash"] = candidate_str.lower()
-            else:
-                merged["shared_secret_hash"] = _hash_secret(candidate_str)
+            if candidate_str:
+                if (
+                    len(candidate_str) == 64
+                    and all(char in string.hexdigits for char in candidate_str)
+                    and shared_secret_override in (None, "")
+                ):
+                    merged["shared_secret_hash"] = candidate_str.lower()
+                else:
+                    merged["shared_secret_hash"] = _hash_secret(candidate_str)
+            # else: blank submission — preserve existing merged["shared_secret_hash"]
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged.pop("shared_secret", None)
         merged["sync_service_status"] = _ensure_bool(merged.get("sync_service_status"), True)

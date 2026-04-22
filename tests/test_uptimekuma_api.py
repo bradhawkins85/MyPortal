@@ -371,11 +371,6 @@ def test_receive_alert_payload_secret_redacted_in_logs_and_raw_payload(monkeypat
         assert kwargs["provided_secret"] == "payload-secret"
         assert kwargs["raw_payload"]["shared_secret"] == "[REDACTED]"
         return {"id": 99, "monitor_name": "Body Auth Monitor"}
-def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatch):
-    logged_calls = []
-
-    async def fake_ingest_alert(**_kwargs):
-        raise uptime_service.AuthenticationError("Invalid token")
 
     async def fake_log_incoming_webhook(**kwargs):
         logged_calls.append(kwargs)
@@ -393,6 +388,23 @@ def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatc
     assert response.status_code == 202
     assert len(logged_calls) == 1
     assert logged_calls[0]["payload"]["shared_secret"] == "[REDACTED]"
+
+
+def test_receive_alert_redacts_token_query_param_in_logged_source_url(monkeypatch):
+    logged_calls = []
+
+    async def fake_ingest_alert(**_kwargs):
+        raise uptime_service.AuthenticationError("Invalid token")
+
+    async def fake_log_incoming_webhook(**kwargs):
+        logged_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
             "/api/integration-modules/uptimekuma/alerts?token=super-secret",
             json={"status": "down"},
         )
@@ -434,3 +446,27 @@ def test_receive_alert_debug_log_redacts_query_token(monkeypatch):
     assert log_kwargs["url_path"] == "/api/integration-modules/uptimekuma/alerts"
     assert log_kwargs["has_query_params"] is True
     assert "url" not in log_kwargs
+
+
+def test_receive_alert_bearer_token_with_double_space(monkeypatch):
+    """UptimeKuma sometimes sends 'Bearer  TOKEN' (two spaces); token must be extracted correctly."""
+
+    async def fake_ingest_alert(**kwargs):
+        assert kwargs["provided_secret"] == "my-token"
+        return {"id": 77, "monitor_name": "My Server"}
+
+    async def fake_log_incoming_webhook(**kwargs):
+        return {}
+
+    monkeypatch.setattr(uptime_service, "ingest_alert", fake_ingest_alert)
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", fake_log_incoming_webhook)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/integration-modules/uptimekuma/alerts",
+            json={"status": "up"},
+            headers={"Authorization": "Bearer  my-token"},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
