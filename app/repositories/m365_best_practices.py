@@ -37,11 +37,30 @@ async def upsert_result(
     )
 
 
+async def update_remediation_status(
+    *,
+    company_id: int,
+    check_id: str,
+    remediation_status: str,
+    remediated_at: datetime,
+) -> None:
+    """Update the remediation status for an existing result row."""
+    await db.execute(
+        """
+        UPDATE m365_best_practice_results
+        SET remediation_status = %s, remediated_at = %s
+        WHERE company_id = %s AND check_id = %s
+        """,
+        (remediation_status, remediated_at, company_id, check_id),
+    )
+
+
 async def list_results(company_id: int) -> list[dict[str, Any]]:
     """Return all stored best-practice results for a company."""
     rows = await db.fetch_all(
         """
-        SELECT check_id, check_name, status, details, run_at
+        SELECT check_id, check_name, status, details, run_at,
+               remediation_status, remediated_at
         FROM m365_best_practice_results
         WHERE company_id = %s
         ORDER BY check_id
