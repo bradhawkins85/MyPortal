@@ -771,7 +771,9 @@ async def auto_update_control_compliance_from_requirements(
         control_id=control_id,
     )
     
-    # Determine the appropriate status
+    # Determine the appropriate status.
+    # Note: is_compliant is True only when ALL requirements are compliant/not_applicable,
+    # so the elif checks below are only reached when the control is not fully done.
     if compliance_calc["is_compliant"]:
         new_status = ComplianceStatus.COMPLIANT
     elif compliance_calc["non_compliant_count"] > 0:
@@ -782,7 +784,7 @@ async def auto_update_control_compliance_from_requirements(
     elif compliance_calc["not_started_count"] > 0:
         new_status = ComplianceStatus.NOT_STARTED
     else:
-        # All are not_applicable
+        # All requirements are not_applicable
         new_status = ComplianceStatus.NOT_APPLICABLE
     
     # Update the control compliance
@@ -830,7 +832,10 @@ async def get_per_maturity_statuses_for_company(
         done = int(row["done_reqs"] or 0)
         active = int(row["active_reqs"] or 0)
 
-        if total == 0 or active == 0:
+        if total == 0:
+            # No requirements exist for this maturity level — not applicable
+            ml_status = "not_started"
+        elif active == 0:
             ml_status = "not_started"
         elif done == total:
             ml_status = "compliant"
