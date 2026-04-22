@@ -287,6 +287,9 @@ async def _run_direct_send_remediation(exo_token: str, tenant_id: str) -> bool:
 
 
 _REPORT_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/reportSettings"
+_AUTHORIZATION_POLICY_URL = "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
+# guestUserRoleId: Guest user (most restrictive) – no directory read access
+_GUEST_ROLE_ID_MOST_RESTRICTIVE = "10dae51f-b6af-4016-8d66-8c2a99b929b3"
 
 
 async def _check_concealed_names(token: str) -> dict[str, Any]:
@@ -494,7 +497,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_guest_access_restricted,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {
+            "guestUserRoleId": _GUEST_ROLE_ID_MOST_RESTRICTIVE,
+            "allowInvitesFrom": "adminsAndGuestInviters",
+        },
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
