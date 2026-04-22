@@ -1,11 +1,8 @@
-# MyPortal is ~99% Vibe Coded
-
-# Note
-MyPortal is build primarily for internal use to suit what I need, you are welcome to use the app and create issues which I will look at when I have time, PR's are not accepted at this time but that may change in the furture. Many features work but have limited testing, many other features work but not as well as they should for example api POST requests my behave as GET requests.
-
 # MyPortal
 
-MyPortal is now a Python-first customer portal built with FastAPI, async MySQL access, and Jinja-powered views. The application retains parity with the previous portal experience while embracing a modern Python architecture that is easier to extend, test, and deploy.
+> **Note:** MyPortal is ~99% "vibe coded" and built primarily for internal use to suit what I need. You are welcome to use the app and create issues which I will look at when I have time. PRs are not accepted at this time, but that may change in the future. Many features work but have limited testing, and others work but not as well as they should — for example, some API `POST` requests may currently behave as `GET` requests.
+
+MyPortal is a Python-first customer portal built with FastAPI, async MySQL access, and Jinja-powered views. The application provides a modern Python architecture that is easy to extend, test, and deploy.
 
 There are no default login credentials; the first visit will prompt you to register the initial super administrator. If no user records exist the login flow transparently redirects to the registration screen.
 
@@ -267,6 +264,8 @@ gracefully fall back to an empty string.
    uvicorn app.main:app --reload
    ```
    On startup the application automatically applies any pending SQL migrations and ensures the database exists.
+7. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
+8. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
 ## Database migrations
 
@@ -306,8 +305,6 @@ SQL again. The helper acquires the same advisory lock used during startup, so
 other workers wait rather than applying migrations concurrently. Adjust the
 lock timeout with the `MIGRATION_LOCK_TIMEOUT` environment variable if your
 production servers need a longer window.
-7. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
-8. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
 ## Fail2ban Support
 
