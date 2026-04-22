@@ -79,7 +79,10 @@ async def test_get_enabled_check_ids_respects_stored_overrides():
         "app.services.m365_best_practices.bp_repo.get_settings_map",
         new_callable=AsyncMock,
     ) as mock_map:
-        mock_map.return_value = {first_id: False, second_id: True}
+        mock_map.return_value = {
+            first_id: {"enabled": False, "auto_remediate": False},
+            second_id: {"enabled": True, "auto_remediate": False},
+        }
         enabled = await bp_service.get_enabled_check_ids()
 
     assert first_id not in enabled  # explicitly disabled
@@ -187,6 +190,11 @@ async def test_run_best_practices_only_runs_enabled_checks_and_persists():
                 new_callable=AsyncMock,
             ) as mock_enabled,
             patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
                 "app.services.m365_best_practices.bp_repo.upsert_result",
                 side_effect=fake_upsert,
             ),
@@ -228,6 +236,11 @@ async def test_run_best_practices_handles_check_error_gracefully():
                 "app.services.m365_best_practices.get_enabled_check_ids",
                 new_callable=AsyncMock,
             ) as mock_enabled,
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
             patch(
                 "app.services.m365_best_practices.bp_repo.upsert_result",
                 new_callable=AsyncMock,
@@ -410,6 +423,11 @@ async def test_run_best_practices_exo_runner_uses_exo_token():
                 return_value={"bp_disable_direct_send"},
             ),
             patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
                 "app.services.m365_best_practices.bp_repo.upsert_result",
                 new_callable=AsyncMock,
             ),
@@ -545,4 +563,293 @@ async def test_get_last_results_includes_remediation_fields():
     assert item["has_remediation"] is True
     assert item["remediation_status"] == "success"
     assert item["remediated_at"] == datetime(2026, 1, 2, 10, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Auto-remediation settings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_auto_remediate_check_ids_returns_only_enabled_remediable():
+    """Only checks with auto_remediate=True and has_remediation=True are returned."""
+    catalog = bp_service.list_best_practices()
+    remediable_bp = next((bp for bp in catalog if bp.get("has_remediation")), None)
+    non_remediable_bp = next((bp for bp in catalog if not bp.get("has_remediation")), None)
+    assert remediable_bp is not None, "catalog must contain at least one remediable check"
+    assert non_remediable_bp is not None, "catalog must contain at least one non-remediable check"
+    remediable_id = remediable_bp["id"]
+    non_remediable_id = non_remediable_bp["id"]
+
+    with patch(
+        "app.services.m365_best_practices.bp_repo.get_settings_map",
+        new_callable=AsyncMock,
+    ) as mock_map:
+        mock_map.return_value = {
+            remediable_id: {"enabled": True, "auto_remediate": True},
+            non_remediable_id: {"enabled": True, "auto_remediate": True},
+        }
+        ids = await bp_service.get_auto_remediate_check_ids()
+
+    assert remediable_id in ids
+    assert non_remediable_id not in ids
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_auto_remediate_check_ids_empty_when_none_set():
+    with patch(
+        "app.services.m365_best_practices.bp_repo.get_settings_map",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        ids = await bp_service.get_auto_remediate_check_ids()
+    assert ids == set()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_set_enabled_checks_persists_auto_remediate_flag():
+    """set_enabled_checks must pass auto_remediate to upsert_setting for each check."""
+    catalog = bp_service.list_best_practices()
+    remediable_bp = next((bp for bp in catalog if bp.get("has_remediation")), None)
+    non_remediable_bp = next((bp for bp in catalog if not bp.get("has_remediation")), None)
+    assert remediable_bp is not None, "catalog must contain at least one remediable check"
+    assert non_remediable_bp is not None, "catalog must contain at least one non-remediable check"
+    remediable_id = remediable_bp["id"]
+    non_remediable_id = non_remediable_bp["id"]
+
+    upserted: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.upsert_setting",
+            side_effect=lambda **kw: upserted.append(kw) or None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.set_enabled_checks(
+            {remediable_id},
+            auto_remediate_check_ids={remediable_id},
+        )
+
+    remediable_call = next((c for c in upserted if c["check_id"] == remediable_id), None)
+    assert remediable_call is not None
+    assert remediable_call["enabled"] is True
+    assert remediable_call["auto_remediate"] is True
+
+    # Non-remediable checks must have auto_remediate=False even if passed in
+    other_calls = [c for c in upserted if c["check_id"] == non_remediable_id]
+    assert all(not c["auto_remediate"] for c in other_calls)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_set_enabled_checks_none_auto_remediate_defaults_to_false():
+    """When auto_remediate_check_ids is None, all checks get auto_remediate=False."""
+    catalog = bp_service.list_best_practices()
+
+    upserted: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.upsert_setting",
+            side_effect=lambda **kw: upserted.append(kw) or None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.set_enabled_checks({bp["id"] for bp in catalog})
+
+    assert all(c["auto_remediate"] is False for c in upserted)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_settings_with_catalog_includes_auto_remediate():
+    """list_settings_with_catalog must expose auto_remediate for each entry."""
+    catalog = bp_service.list_best_practices()
+    remediable_bp = next((bp for bp in catalog if bp.get("has_remediation")), None)
+    assert remediable_bp is not None, "catalog must contain at least one remediable check"
+    remediable_id = remediable_bp["id"]
+
+    with patch(
+        "app.services.m365_best_practices.bp_repo.get_settings_map",
+        new_callable=AsyncMock,
+    ) as mock_map:
+        mock_map.return_value = {
+            remediable_id: {"enabled": True, "auto_remediate": True},
+        }
+        rows = await bp_service.list_settings_with_catalog()
+
+    entry = next((r for r in rows if r["id"] == remediable_id), None)
+    assert entry is not None
+    assert entry["auto_remediate"] is True
+
+    # Other entries (not in settings map) should default to False
+    other = next((r for r in rows if r["id"] != remediable_id), None)
+    assert other is not None
+    assert other["auto_remediate"] is False
+
+
+# ---------------------------------------------------------------------------
+# run_best_practices – auto-remediation integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_triggers_auto_remediation_on_fail():
+    """When a check fails and auto_remediate is enabled, remediate_check is called."""
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == "bp_disable_direct_send")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "fail", "details": "Direct Send enabled"})
+    bp_entry["source"] = fake_source
+
+    remediated: list[dict] = []
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_disable_direct_send"},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_disable_direct_send"},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.remediate_check",
+                new_callable=AsyncMock,
+                side_effect=lambda **kw: remediated.append(kw) or {"success": True, "message": "ok"},
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=5)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == "fail"
+    assert len(remediated) == 1
+    assert remediated[0]["company_id"] == 5
+    assert remediated[0]["check_id"] == "bp_disable_direct_send"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_does_not_auto_remediate_on_pass():
+    """Passing checks must not trigger auto-remediation even if it is enabled."""
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == "bp_disable_direct_send")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "ok"})
+    bp_entry["source"] = fake_source
+
+    remediated: list[dict] = []
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_disable_direct_send"},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_disable_direct_send"},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.remediate_check",
+                new_callable=AsyncMock,
+                side_effect=lambda **kw: remediated.append(kw) or {"success": True, "message": "ok"},
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=5)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == "pass"
+    assert len(remediated) == 0
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_does_not_auto_remediate_when_not_in_auto_remediate_set():
+    """A failing check without auto_remediate enabled must not be automatically remediated."""
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == "bp_disable_direct_send")
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "fail", "details": "Direct Send enabled"})
+    bp_entry["source"] = fake_source
+
+    remediated: list[dict] = []
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={"bp_disable_direct_send"},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),  # auto-remediation disabled
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.remediate_check",
+                new_callable=AsyncMock,
+                side_effect=lambda **kw: remediated.append(kw) or {"success": True, "message": "ok"},
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=5)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == "fail"
+    assert len(remediated) == 0
+
 
