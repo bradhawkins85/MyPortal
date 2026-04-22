@@ -347,8 +347,14 @@ async def get_assignment(company_id: int, assignment_id: int) -> Optional[dict[s
     return _build_assignment(row) if row else None
 
 
-async def get_assignment_by_check(company_id: int, check_id: int) -> Optional[dict[str, Any]]:
-    query = f"{_ASSIGNMENT_SELECT} WHERE a.company_id = %(company_id)s AND a.check_id = %(check_id)s"
+async def get_assignment_by_check(
+    company_id: int, check_id: int, *, include_archived: bool = False
+) -> Optional[dict[str, Any]]:
+    archived_filter = "" if include_archived else " AND a.archived = 0"
+    query = (
+        f"{_ASSIGNMENT_SELECT} WHERE a.company_id = %(company_id)s"
+        f" AND a.check_id = %(check_id)s{archived_filter}"
+    )
     row = await db.fetch_one(query, {"company_id": company_id, "check_id": check_id})
     return _build_assignment(row) if row else None
 
@@ -362,13 +368,44 @@ async def create_assignment(
     notes: Optional[str] = None,
     owner_user_id: Optional[int] = None,
 ) -> dict[str, Any]:
+    # If an archived assignment already exists for this company+check, unarchive it
+    # instead of trying a duplicate INSERT (which would violate the unique key).
+    # If an active assignment already exists, guard against a duplicate-key error.
+    existing = await get_assignment_by_check(company_id, check_id, include_archived=True)
+    if existing:
+        if not existing.get("archived"):
+            raise ValueError(
+                f"An active assignment already exists for company {company_id}, check {check_id}"
+            )
+        updates: dict[str, Any] = {
+            "archived": 0,
+            "status": status.value,
+        }
+        if review_interval_days is not None:
+            updates["review_interval_days"] = review_interval_days
+        if notes is not None:
+            updates["notes"] = notes
+        if owner_user_id is not None:
+            updates["owner_user_id"] = owner_user_id
+        columns = ", ".join(f"{k} = %({k})s" for k in updates)
+        params: dict[str, Any] = {**updates, "id": existing["id"], "company_id": company_id}
+        await db.execute(
+            f"UPDATE company_compliance_check_assignments SET {columns}"
+            f" WHERE id = %(id)s AND company_id = %(company_id)s",
+            params,
+        )
+        result = await get_assignment(company_id, existing["id"])
+        if not result:
+            raise RuntimeError("Failed to retrieve reactivated assignment")
+        return result
+
     query = """
         INSERT INTO company_compliance_check_assignments
           (company_id, check_id, status, review_interval_days, notes, owner_user_id)
         VALUES
           (%(company_id)s, %(check_id)s, %(status)s, %(interval)s, %(notes)s, %(owner)s)
     """
-    new_id = await db.execute(query, {
+    new_id = await db.execute_returning_lastrowid(query, {
         "company_id": company_id,
         "check_id": check_id,
         "status": status.value,
@@ -387,7 +424,7 @@ async def bulk_assign_by_category(company_id: int, category_id: int) -> int:
     checks = await list_checks(category_id=category_id, is_active=True)
     created = 0
     for check in checks:
-        existing = await get_assignment_by_check(company_id, check["id"])
+        existing = await get_assignment_by_check(company_id, check["id"], include_archived=True)
         if existing:
             continue
         await create_assignment(company_id=company_id, check_id=check["id"])

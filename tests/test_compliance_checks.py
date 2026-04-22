@@ -464,3 +464,95 @@ async def test_manual_audit_append():
     finally:
         await _cleanup_company(company_id)
         await db.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for assignment bug fixes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_assignment_returns_full_record():
+    """create_assignment must return the full assignment dict (regression: used db.execute
+    instead of execute_returning_lastrowid, causing a RuntimeError on lookup)."""
+    await db.connect()
+    try:
+        company_id = await db.execute_returning_lastrowid(
+            "INSERT INTO companies (name) VALUES (%(name)s)", {"name": "Regression Co 1"}
+        )
+        checks = await repo.list_checks(is_active=True)
+        assignment = await repo.create_assignment(
+            company_id=company_id, check_id=checks[0]["id"]
+        )
+        assert assignment is not None
+        assert assignment["id"] is not None
+        assert assignment["company_id"] == company_id
+        assert assignment["check_id"] == checks[0]["id"]
+    finally:
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_create_assignment_archived_check_unarchives():
+    """Re-assigning an archived check should unarchive it instead of returning 409.
+    (Regression: get_assignment_by_check did not filter archived=0, causing the API
+    to return 409 Conflict for any previously archived check.)"""
+    await db.connect()
+    try:
+        company_id = await db.execute_returning_lastrowid(
+            "INSERT INTO companies (name) VALUES (%(name)s)", {"name": "Regression Co 2"}
+        )
+        checks = await repo.list_checks(is_active=True)
+        check_id = checks[0]["id"]
+
+        # Create and then archive the assignment
+        first = await repo.create_assignment(company_id=company_id, check_id=check_id)
+        await repo.update_assignment(company_id, first["id"], user_id=None, archived=True)
+
+        archived = await repo.get_assignment(company_id, first["id"])
+        assert archived is not None
+        assert archived.get("archived") in (True, 1)
+
+        # get_assignment_by_check should NOT return the archived assignment
+        active_only = await repo.get_assignment_by_check(company_id, check_id)
+        assert active_only is None
+
+        # Re-assigning should succeed (unarchive) rather than raise 409
+        reactivated = await repo.create_assignment(
+            company_id=company_id, check_id=check_id, status=CheckStatus.IN_PROGRESS
+        )
+        assert reactivated is not None
+        assert reactivated["id"] == first["id"]
+        assert reactivated.get("archived") in (False, 0)
+        assert reactivated["status"] == CheckStatus.IN_PROGRESS.value
+    finally:
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
+        await db.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_bulk_assign_skips_archived():
+    """bulk_assign_by_category should skip checks that are already assigned (archived or not)."""
+    await db.connect()
+    try:
+        company_id = await db.execute_returning_lastrowid(
+            "INSERT INTO companies (name) VALUES (%(name)s)", {"name": "Regression Co 3"}
+        )
+        cats = await repo.list_categories()
+        gmp_cat = next(c for c in cats if c["code"] == "GMP")
+
+        # First bulk assign
+        created = await repo.bulk_assign_by_category(company_id, gmp_cat["id"])
+        assert created > 0
+
+        # Archive one assignment
+        assignments = await repo.list_assignments(company_id, category_id=gmp_cat["id"])
+        await repo.update_assignment(company_id, assignments[0]["id"], user_id=None, archived=True)
+
+        # Re-running bulk assign should still create 0 (archived checks are skipped)
+        created2 = await repo.bulk_assign_by_category(company_id, gmp_cat["id"])
+        assert created2 == 0
+    finally:
+        await db.execute("DELETE FROM companies WHERE id = %(id)s", {"id": company_id})
+        await db.disconnect()
