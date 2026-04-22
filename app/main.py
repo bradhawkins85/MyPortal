@@ -20793,6 +20793,7 @@ async def health_check():
 async def chat_index(
     request: Request,
     status: str | None = Query(default=None),
+    unattended: str | None = Query(default=None),
     session: SessionData | None = Depends(get_current_session),
 ) -> HTMLResponse:
     if not settings.matrix_enabled:
@@ -20807,10 +20808,11 @@ async def chat_index(
     user_id = current_user["id"]
     company_id = current_user.get("company_id")
     is_staff = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    unattended_only = is_staff and unattended == "1"
 
     from app.repositories import chat as chat_repo
     if is_staff:
-        rooms = await chat_repo.list_rooms(status=status)
+        rooms = await chat_repo.list_rooms(status=status, unattended_only=unattended_only)
     else:
         rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
 
@@ -20819,6 +20821,8 @@ async def chat_index(
         "title": "Chat",
         "rooms": rooms,
         "status_filter": status,
+        "unattended_filter": unattended,
+        "is_staff": is_staff,
     })
     return templates.TemplateResponse("chat/index.html", ctx)
 
@@ -20850,10 +20854,20 @@ async def chat_room_page(
     is_staff = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
     is_creator = room["created_by_user_id"] == user_id
 
+    # Resolve assigned tech display name for staff view
+    assigned_tech_display_name = None
+    if is_staff and room.get("assigned_tech_user_id"):
+        tech = await user_repo.get_user_by_id(room["assigned_tech_user_id"])
+        if tech:
+            assigned_tech_display_name = tech.get("display_name") or tech.get("email")
+
+    room_dict = dict(room)
+    room_dict["assigned_tech_display_name"] = assigned_tech_display_name
+
     ctx = await _build_base_context(request, current_user)
     ctx.update({
         "title": f"Chat: {room['subject']}",
-        "room": room,
+        "room": room_dict,
         "messages": messages,
         "participants": participants,
         "is_staff": is_staff,
