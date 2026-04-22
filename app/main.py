@@ -5179,7 +5179,7 @@ async def m365_best_practices_settings_page(
     )
     if redirect:
         return redirect
-    catalog_with_settings = await m365_best_practices_service.list_settings_with_catalog()
+    catalog_with_settings = await m365_best_practices_service.list_settings_with_catalog(company_id)
     extra = {
         "title": "M365 Best Practices Settings",
         "company": company,
@@ -5206,12 +5206,15 @@ async def save_m365_best_practices_settings(request: Request):
     form = await request.form()
     enabled_ids = {value for value in form.getlist("enabled")}
     auto_remediate_ids = {value for value in form.getlist("auto_remediate")}
+    excluded_ids = {value for value in form.getlist("excluded")}
     await m365_best_practices_service.set_enabled_checks(enabled_ids, auto_remediate_ids)
+    await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
     log_info(
         "M365 best practice settings updated",
         user_id=user.get("id"),
         enabled_count=len(enabled_ids),
         auto_remediate_count=len(auto_remediate_ids),
+        excluded_count=len(excluded_ids),
     )
     return RedirectResponse(
         url="/m365/best-practices/settings?success=Settings+saved",

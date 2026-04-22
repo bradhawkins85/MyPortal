@@ -1057,20 +1057,25 @@ async def get_auto_remediate_check_ids() -> set[str]:
     return auto_remediate
 
 
-async def list_settings_with_catalog() -> list[dict[str, Any]]:
+async def list_settings_with_catalog(company_id: int | None = None) -> list[dict[str, Any]]:
     """Return the catalog merged with the current global enabled and auto-remediate flags.
 
     Each item contains the catalog metadata plus:
     - ``enabled`` boolean (global on/off, defaulting to ``default_enabled``)
     - ``auto_remediate`` boolean (auto-remediation after each evaluation)
+    - ``excluded`` boolean (per-company exclusion; only set when ``company_id`` is given)
     """
     settings = await bp_repo.get_settings_map()
+    excluded_ids: set[str] = set()
+    if company_id is not None:
+        excluded_ids = await bp_repo.get_company_exclusions(company_id)
     out: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
         entry = _enrich_catalog_entry(bp)
         row = settings.get(bp["id"])
         entry["enabled"] = row["enabled"] if row else bool(bp.get("default_enabled", True))
         entry["auto_remediate"] = row["auto_remediate"] if row else False
+        entry["excluded"] = bp["id"] in excluded_ids
         out.append(entry)
     return out
 
@@ -1114,6 +1119,26 @@ async def set_enabled_checks(
         enabled_count=len(enabled_filtered),
         auto_remediate_count=len(auto_remediate_filtered),
         total=len(_BEST_PRACTICES),
+    )
+
+
+async def save_company_exclusions(company_id: int, excluded_check_ids: set[str]) -> None:
+    """Persist the per-company check exclusions for ``company_id``.
+
+    Only check_ids present in the catalog are accepted; unknown ids are
+    silently ignored.
+    """
+    catalog = _catalog_map()
+    filtered = {cid for cid in excluded_check_ids if cid in catalog}
+    await bp_repo.set_company_exclusions(company_id, filtered)
+    # Clear any previously-stored results for newly-excluded checks for this
+    # company only so they no longer appear on the company's page.
+    for check_id in filtered:
+        await bp_repo.delete_result_for_check_and_company(company_id, check_id)
+    log_info(
+        "M365 best practice company exclusions updated",
+        company_id=company_id,
+        excluded_count=len(filtered),
     )
 
 
@@ -1342,6 +1367,15 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
 
     enabled = await get_enabled_check_ids()
     auto_remediate_ids = await get_auto_remediate_check_ids()
+    try:
+        excluded = await bp_repo.get_company_exclusions(company_id)
+    except Exception as exc:  # noqa: BLE001 – exclusion lookup must never break the runner
+        log_error(
+            "M365 best practices: company exclusion lookup failed",
+            company_id=company_id,
+            error=str(exc),
+        )
+        excluded = set()
     run_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Detect tenant licensing capabilities once per run.  Returns ``None``
@@ -1359,7 +1393,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
-        if check_id not in enabled:
+        if check_id not in enabled or check_id in excluded:
             continue
         check_name = bp["name"]
         cis_group = bp.get("cis_group")
@@ -1623,12 +1657,13 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
     """
     rows = await bp_repo.list_results(company_id)
     enabled = await get_enabled_check_ids()
+    excluded = await bp_repo.get_company_exclusions(company_id)
     catalog = _catalog_map()
 
     out: list[dict[str, Any]] = []
     for row in rows:
         check_id = row["check_id"]
-        if check_id not in enabled:
+        if check_id not in enabled or check_id in excluded:
             continue
         bp_meta = catalog.get(check_id, {})
         status = row.get("status") or STATUS_UNKNOWN
@@ -1789,6 +1824,7 @@ __all__ = [
     "get_enabled_check_ids",
     "get_auto_remediate_check_ids",
     "set_enabled_checks",
+    "save_company_exclusions",
     "run_best_practices",
     "run_single_check",
     "get_last_results",
