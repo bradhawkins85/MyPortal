@@ -12,6 +12,7 @@ return meaningful results.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -74,6 +75,10 @@ STATUS_FAIL = "fail"
 STATUS_UNKNOWN = "unknown"
 STATUS_NOT_APPLICABLE = "not_applicable"
 STATUS_EXCLUDED = "excluded"
+
+# Minimum number of Conditional Access checks that must pass to conclude
+# that the tenant uses CA policies in lieu of Security Defaults.
+_CA_CONFIGURED_THRESHOLD = 3
 
 # ---------------------------------------------------------------------------
 # Benchmark category constants
@@ -331,6 +336,20 @@ async def _check_security_defaults(token: str) -> dict[str, Any]:
         enabled = data.get("isEnabled", False)
         if enabled:
             return _pass(check_id, check_name, "Security Defaults are enabled.")
+        # Security Defaults are disabled.  When a tenant uses Conditional Access
+        # instead, disabling Security Defaults is the expected posture.  Detect
+        # this by running the Conditional Access-related checks concurrently; if
+        # at least 3 of them pass, CA is configured and the result is a pass.
+        ca_results = await asyncio.gather(
+            _check_mfa_conditional_access(token),
+            _check_legacy_auth_blocked(token),
+            _check_admin_mfa(token),
+            _check_monitor_named_locations(token),
+            _check_monitor_ca_report_only_policies(token),
+        )
+        ca_pass_count = sum(1 for r in ca_results if r.get("status") == STATUS_PASS)
+        if ca_pass_count >= _CA_CONFIGURED_THRESHOLD:
+            return _pass(check_id, check_name, "Security Defaults are disabled.")
         return _fail(check_id, check_name, "Security Defaults are disabled.")
     except M365Error as exc:
         return _unknown(check_id, check_name, f"Unable to retrieve policy: {exc}")
