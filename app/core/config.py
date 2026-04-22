@@ -236,7 +236,25 @@ class Settings(BaseSettings):
         default=60,
         validation_alias="MCP_RATE_LIMIT",
     )
-    
+    mcp_log_tools_enabled: bool = Field(
+        default=True,
+        validation_alias="MCP_LOG_TOOLS_ENABLED",
+        description=(
+            "Enable the audit-log and application-log MCP tools "
+            "(search_audit_logs, get_audit_log, get_application_logs). "
+            "Set to false to hide these tools from MCP clients."
+        ),
+    )
+    mcp_log_max_lines: int = Field(
+        default=500,
+        validation_alias="MCP_LOG_MAX_LINES",
+        ge=1,
+        description=(
+            "Maximum number of log lines that get_application_logs may return "
+            "in a single call. Capped at this value even when the caller requests more."
+        ),
+    )
+
     # Matrix.org Chat Integration
     matrix_enabled: bool = Field(default=False, validation_alias="MATRIX_ENABLED")
     matrix_homeserver_url: str | None = Field(default=None, validation_alias="MATRIX_HOMESERVER_URL")
@@ -321,6 +339,7 @@ class Settings(BaseSettings):
         "enable_hsts",
         "mcp_enabled",
         "mcp_readonly",
+        "mcp_log_tools_enabled",
         "ip_whitelist_enabled",
         "ip_whitelist_admin_only",
         "matrix_enabled",

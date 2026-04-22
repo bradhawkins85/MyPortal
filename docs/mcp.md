@@ -517,3 +517,187 @@ For issues or questions:
 - Review this documentation
 - Verify configuration settings
 - Test with simple requests before complex ones
+
+---
+
+## Ollama / GitHub Copilot MCP (HTTP JSON-RPC 2.0)
+
+MyPortal also ships a standards-compliant MCP endpoint that uses the HTTP
+JSON-RPC 2.0 transport required by **GitHub Copilot**, Ollama, and other MCP
+clients.
+
+### Endpoints
+
+| Path | Purpose |
+|---|---|
+| `POST /api/mcp/ollama/` | Ollama MCP endpoint |
+| `POST /api/mcp/copilot/` | Dedicated GitHub Copilot endpoint (same backend) |
+| `POST /api/mcp/copilot/rpc` | Alias for clients that expect `/rpc` |
+| `GET  /api/mcp/copilot/manifest` | Public discovery manifest (no auth) |
+
+### GitHub Copilot Setup
+
+#### VS Code `settings.json`
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "myportal": {
+        "type": "http",
+        "url": "https://your-myportal-host/api/mcp/copilot/",
+        "headers": {
+          "Authorization": "Bearer <your-shared-secret>"
+        }
+      }
+    }
+  }
+}
+```
+
+#### `.github/copilot-mcp.json` (repository-scoped)
+
+```json
+{
+  "servers": {
+    "myportal": {
+      "type": "http",
+      "url": "https://your-myportal-host/api/mcp/copilot/",
+      "headers": {
+        "Authorization": "Bearer <your-shared-secret>"
+      }
+    }
+  }
+}
+```
+
+The shared secret is the value you set in the **Ollama MCP** module settings
+(`OLLAMA_MCP_SHARED_SECRET`). It is hashed before storage; the plain-text
+value must be supplied in the `Authorization` header.
+
+### Authentication
+
+Provide your shared secret as a bearer token:
+
+```
+Authorization: Bearer <plain-text-shared-secret>
+```
+
+### Available Tools
+
+The Copilot/Ollama endpoint exposes all tools configured in the Ollama MCP
+module. The default set includes:
+
+| Tool | Description |
+|---|---|
+| `search_tickets` | Free-text search across ticket subjects and descriptions |
+| `list_tickets` | Browse recent tickets with optional filters |
+| `get_ticket` | Full detail for one ticket including replies and watchers |
+| `list_ticket_statuses` | List the configured ticket statuses |
+| `search_audit_logs` | Search the audit log (see below) |
+| `get_audit_log` | Retrieve one audit log entry by ID |
+| `get_application_logs` | Read recent application log lines from disk |
+
+Optional write tools (`create_ticket_reply`, `update_ticket`) must be
+explicitly enabled in the module settings.
+
+### Log Tools
+
+The three log-review tools are gated by `MCP_LOG_TOOLS_ENABLED` (default `true`).
+
+#### `search_audit_logs`
+
+Search the database audit log for user and system actions. Useful for
+tracing permission changes, login events, or entity modifications.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `user_id` | integer | Filter by the user who performed the action |
+| `action` | string | Partial match on action name (e.g. `login`, `delete`) |
+| `entity_type` | string | Filter by entity type (e.g. `ticket`, `user`) |
+| `ip_address` | string | Exact client IP filter |
+| `since` | ISO-8601 datetime | Only entries on or after this time |
+| `until` | ISO-8601 datetime | Only entries on or before this time |
+| `search` | string | Free-text search across action, entity_type, user email |
+| `limit` | integer | Max entries to return (default: module max_results) |
+| `offset` | integer | Pagination offset |
+
+**Example request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "al-1",
+  "method": "tools/call",
+  "params": {
+    "name": "search_audit_logs",
+    "arguments": {
+      "action": "login",
+      "since": "2026-01-01T00:00:00Z",
+      "limit": 10
+    }
+  }
+}
+```
+
+**Response fields:** `id`, `user_id`, `user_email`, `action`, `entity_type`,
+`entity_id`, `ip_address`, `request_id`, `created_at`.  
+Sensitive fields (`api_key`, `previous_value`, `new_value`, `metadata`) are
+**never** included.
+
+#### `get_audit_log`
+
+Retrieve a single audit log entry by its numeric ID.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `log_id` | integer (required) | Numeric ID of the audit log entry |
+
+#### `get_application_logs`
+
+Read recent lines from the on-disk application log (`FAIL2BAN_LOG_PATH`) or
+the dedicated error log (`ERROR_LOG_PATH`). Only available when the relevant
+path is configured and the file exists. Absolute file paths are never exposed.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `lines` | integer | Lines to return from the tail (default 100, max 500) |
+| `level` | `INFO`\|`WARNING`\|`ERROR` | Minimum severity filter |
+| `since` | ISO-8601 datetime | Only lines on or after this time |
+| `search` | string | Case-insensitive substring filter on the message |
+| `log_file` | `application`\|`error` | Which log file to read (default `application`) |
+
+**Example request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "log-1",
+  "method": "tools/call",
+  "params": {
+    "name": "get_application_logs",
+    "arguments": {
+      "lines": 50,
+      "level": "ERROR",
+      "search": "database"
+    }
+  }
+}
+```
+
+**Response fields per line:** `timestamp`, `level`, `request_id`, `user_id`, `message`.
+
+When the log file is not configured the response includes `"available": false`
+and a human-readable `message` explaining how to enable it.
+
+### New Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP_LOG_TOOLS_ENABLED` | `true` | Enable/disable all log-review MCP tools |
+| `MCP_LOG_MAX_LINES` | `500` | Hard cap on lines returned by `get_application_logs` |
+
