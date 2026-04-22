@@ -145,7 +145,9 @@ async def send_message(
 
     user_id = current_user["id"]
     display_name = current_user.get("display_name") or current_user.get("email", "User")
-    safe_body = str(sanitize_rich_text(body.body)) if body.body else body.body
+    sanitized = sanitize_rich_text(body.body) if body.body else None
+    safe_body_html = sanitized.html if sanitized else (body.body or "")
+    safe_body_text = sanitized.text_content if sanitized else (body.body or "")
 
     link = await chat_repo.get_chat_user_link(user_id=user_id)
     access_token = None
@@ -155,8 +157,8 @@ async def send_message(
         except Exception:
             access_token = None
 
-    formatted_body = f"<strong>{display_name}</strong>: {safe_body}" if not access_token else None
-    message_body = f"{display_name}: {safe_body}" if not access_token else safe_body
+    formatted_body = f"<strong>{display_name}</strong>: {safe_body_html}" if not access_token else None
+    message_body = f"{display_name}: {safe_body_text}" if not access_token else safe_body_text
 
     try:
         resp = await matrix_service.send_message(
