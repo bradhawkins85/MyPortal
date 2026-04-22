@@ -200,6 +200,30 @@
     });
   }
 
+  const matrixUsernameForm = document.getElementById('matrix-username-form');
+  const matrixUsernameSuccess = document.querySelector('[data-matrix-username-success]');
+  const matrixUsernameError = document.querySelector('[data-matrix-username-error]');
+
+  if (matrixUsernameForm && userId) {
+    matrixUsernameForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      clearMessages([matrixUsernameSuccess, matrixUsernameError]);
+
+      const input = matrixUsernameForm.querySelector('#matrix-user-id');
+      const value = input ? input.value.trim() : '';
+
+      try {
+        await requestJson(`/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ matrix_user_id: value || null }),
+        });
+        showMessage(matrixUsernameSuccess, 'Matrix username saved.');
+      } catch (error) {
+        showMessage(matrixUsernameError, error.message || 'Unable to save Matrix username.');
+      }
+    });
+  }
+
   const sidebarSection = root.querySelector('[data-sidebar-customisation]');
   const sidebarItemsBody = root.querySelector('[data-sidebar-items]');
   const sidebarSaveButton = root.querySelector('[data-sidebar-save]');

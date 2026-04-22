@@ -197,14 +197,29 @@ async def join_room(
         raise HTTPException(status_code=404, detail="Room not found")
 
     user_id = current_user["id"]
-    mxid = _settings.matrix_bot_user_id or ""
+    tech_mxid = current_user.get("matrix_user_id") or ""
+    bot_mxid = _settings.matrix_bot_user_id or ""
+    matrix_room_id = room["matrix_room_id"]
 
-    try:
-        await matrix_service.invite_user(room["matrix_room_id"], mxid)
-    except Exception:
-        pass
+    # Invite the technician's own Matrix account to the room (if configured)
+    if tech_mxid:
+        try:
+            await matrix_service.invite_user(matrix_room_id, tech_mxid)
+        except Exception:
+            pass
+        try:
+            await matrix_service.set_user_power_level(matrix_room_id, tech_mxid, 100)
+        except Exception as exc:
+            log_error("Failed to set Matrix power level for technician", room_id=room_id, mxid=tech_mxid, error=str(exc))
+    elif bot_mxid:
+        try:
+            await matrix_service.invite_user(matrix_room_id, bot_mxid)
+        except Exception:
+            pass
 
-    await chat_repo.add_participant(room_id, mxid, role="technician", user_id=user_id)
+    participant_mxid = tech_mxid or bot_mxid
+    if participant_mxid:
+        await chat_repo.add_participant(room_id, participant_mxid, role="technician", user_id=user_id)
 
     # Auto-assign this tech if the room has no assigned technician yet
     if not room.get("assigned_tech_user_id"):
@@ -245,12 +260,26 @@ async def assign_room(
 
     await chat_repo.reassign_tech(room_id, user_id)
 
-    mxid = _settings.matrix_bot_user_id or ""
-    try:
-        await matrix_service.invite_user(room["matrix_room_id"], mxid)
-    except Exception as exc:
-        log_error("Failed to invite bot user to room during assign", room_id=room_id, mxid=mxid, error=str(exc))
-    await chat_repo.add_participant(room_id, mxid, role="technician", user_id=user_id)
+    tech_mxid = current_user.get("matrix_user_id") or ""
+    bot_mxid = _settings.matrix_bot_user_id or ""
+    matrix_room_id = room["matrix_room_id"]
+
+    if tech_mxid:
+        try:
+            await matrix_service.invite_user(matrix_room_id, tech_mxid)
+        except Exception as exc:
+            log_error("Failed to invite technician to room during assign", room_id=room_id, mxid=tech_mxid, error=str(exc))
+        try:
+            await matrix_service.set_user_power_level(matrix_room_id, tech_mxid, 100)
+        except Exception as exc:
+            log_error("Failed to set Matrix power level for technician during assign", room_id=room_id, mxid=tech_mxid, error=str(exc))
+        await chat_repo.add_participant(room_id, tech_mxid, role="technician", user_id=user_id)
+    elif bot_mxid:
+        try:
+            await matrix_service.invite_user(matrix_room_id, bot_mxid)
+        except Exception as exc:
+            log_error("Failed to invite bot user to room during assign", room_id=room_id, mxid=bot_mxid, error=str(exc))
+        await chat_repo.add_participant(room_id, bot_mxid, role="technician", user_id=user_id)
 
     await audit_service.log_action(
         action="assign",
