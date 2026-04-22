@@ -48,10 +48,14 @@ async def list_rooms(
         clauses.append("r.status = %s")
         params.append(status)
 
+    # Use LEFT JOIN + NULL check instead of NOT IN for better performance on large tables
+    unattended_join = ""
     if unattended_only:
-        clauses.append(
-            "r.id NOT IN (SELECT room_id FROM chat_room_participants WHERE role IN ('technician','admin'))"
+        unattended_join = (
+            "LEFT JOIN chat_room_participants tp_unattended "
+            "ON tp_unattended.room_id = r.id AND tp_unattended.role IN ('technician','admin')"
         )
+        clauses.append("tp_unattended.room_id IS NULL")
 
     where = " AND ".join(clauses)
     params.extend([limit, offset])
@@ -61,6 +65,7 @@ async def list_rooms(
                u.display_name AS assigned_tech_display_name
             FROM chat_rooms r
             LEFT JOIN users u ON u.id = r.assigned_tech_user_id
+            {unattended_join}
             WHERE {where}
             ORDER BY r.updated_at DESC LIMIT %s OFFSET %s""",
         tuple(params),
