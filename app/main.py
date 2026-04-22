@@ -5108,13 +5108,6 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
             url=f"/m365/best-practices?error={quote('Unknown best-practice check ID')}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    form = await request.form()
-    csrf_token_form = form.get("_csrf")
-    if not csrf_token_form:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote('Invalid request')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
     result = await m365_best_practices_service.remediate_check(
         company_id=company_id,
         check_id=check_id,

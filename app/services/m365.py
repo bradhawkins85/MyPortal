@@ -835,7 +835,6 @@ async def _exo_invoke_command(
             "Exchange Online InvokeCommand failed",
             cmdlet=cmdlet_name,
             status=response.status_code,
-            body=response.text[:300] if response.text else "",
         )
         raise M365Error(
             f"Exchange Online {cmdlet_name} failed ({response.status_code})",
