@@ -151,6 +151,8 @@
 .chat-message--self { align-self: flex-end; background: var(--color-primary-subtle, #eff6ff); }
 .chat-message__meta { font-size: 0.75rem; color: var(--color-text-muted, #6b7280); margin-bottom: 0.25rem; }
 .chat-message__body { word-break: break-word; color: var(--color-text, #111827); }
+.chat-message--new { animation: chat-highlight 2.5s ease-out forwards; }
+@keyframes chat-highlight { 0% { box-shadow: 0 0 0 3px var(--color-primary, #3b82f6); background: var(--color-primary-subtle, #eff6ff); } 100% { box-shadow: none; } }
 .chat-composer { padding: 0.75rem; border-top: 1px solid var(--color-border, #e5e7eb); display: flex; gap: 0.5rem; align-items: flex-end; }
 .chat-composer__input { flex: 1; resize: none; }
 .chat-composer__send { white-space: nowrap; }
@@ -159,6 +161,8 @@
 .invite-credentials dt { font-weight: 600; }
 .invite-credentials__secret { font-family: monospace; }
 .text-muted { color: var(--color-text-muted, #6b7280); }
+.chat-new-msg-toast { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; background: var(--color-primary, #3b82f6); color: #fff; padding: 0.6rem 1.1rem; border-radius: 0.5rem; font-size: 0.875rem; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.18); transition: opacity 0.3s; }
+.chat-new-msg-toast[hidden] { display: none; }
 </style>
 {% endblock %}
 
@@ -175,38 +179,85 @@
 
   if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 
-  form?.addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const body = input.value.trim();
-    if (!body) return;
-    sendBtn.disabled = true;
+  // ── Audio notification ────────────────────────────────────────────────────
+  function playNotificationSound() {
     try {
-      const resp = await fetch(`/api/chat/rooms/${roomId}/messages`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
-        body: JSON.stringify({body}),
-      });
-      if (resp.ok) {
-        const msg = await resp.json();
-        appendMessage(msg, true);
-        input.value = '';
-        document.getElementById('chat-empty')?.remove();
-      } else {
-        const err = await resp.json();
-        alert(err.detail || 'Failed to send');
-      }
-    } catch(err) {
-      alert('Network error: ' + err.message);
-    } finally {
-      sendBtn.disabled = false;
-      input.focus();
-    }
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.35);
+    } catch (_) {}
+  }
+
+  // ── Tab title notification ────────────────────────────────────────────────
+  const originalTitle = document.title;
+  let unreadCount = 0;
+  let titleFlashTimer = null;
+
+  function showUnreadBadge(count) {
+    unreadCount = count;
+    document.title = `(${count}) ${originalTitle}`;
+    if (titleFlashTimer) return;
+    titleFlashTimer = setInterval(() => {
+      document.title = document.title.startsWith('(') ? originalTitle : `(${unreadCount}) ${originalTitle}`;
+    }, 1200);
+  }
+
+  function clearUnreadBadge() {
+    unreadCount = 0;
+    clearInterval(titleFlashTimer);
+    titleFlashTimer = null;
+    document.title = originalTitle;
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') clearUnreadBadge();
+  });
+  messagesEl?.addEventListener('scroll', () => {
+    const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+    if (atBottom) clearUnreadBadge();
   });
 
-  function appendMessage(msg, isSelf) {
+  // ── In-page toast notification ────────────────────────────────────────────
+  let chatToast = document.getElementById('chat-new-msg-toast');
+  if (!chatToast) {
+    chatToast = document.createElement('div');
+    chatToast.id = 'chat-new-msg-toast';
+    chatToast.className = 'chat-new-msg-toast';
+    chatToast.setAttribute('aria-live', 'polite');
+    chatToast.setAttribute('role', 'status');
+    chatToast.hidden = true;
+    document.body.appendChild(chatToast);
+  }
+  let toastTimer = null;
+  function showChatToast(sender) {
+    chatToast.textContent = `New message from ${sender}`;
+    chatToast.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { chatToast.hidden = true; }, 4000);
+  }
+  chatToast.addEventListener('click', () => {
+    chatToast.hidden = true;
+    clearUnreadBadge();
+    messagesEl?.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
+  });
+
+  // ── Message renderer ──────────────────────────────────────────────────────
+  function appendMessage(msg, isSelf, isNew) {
     const div = document.createElement('div');
-    div.className = 'chat-message' + (isSelf ? ' chat-message--self' : '');
+    div.className = 'chat-message' + (isSelf ? ' chat-message--self' : '') + (isNew && !isSelf ? ' chat-message--new' : '');
     div.dataset.eventId = msg.matrix_event_id || '';
+    div.dataset.msgId = msg.id || '';
 
     const meta = document.createElement('div');
     meta.className = 'chat-message__meta';
@@ -222,7 +273,96 @@
     div.appendChild(body);
     messagesEl?.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    if (isNew && !isSelf) {
+      setTimeout(() => div.classList.remove('chat-message--new'), 2500);
+    }
   }
+
+  // ── Notify user of a new incoming message ────────────────────────────────
+  function notifyNewMessage(msg) {
+    const isSelf = msg.sender_user_id === currentUserId;
+    if (isSelf) return;
+    playNotificationSound();
+    const sender = msg.sender_display_name || msg.sender_matrix_id || 'Someone';
+    showUnreadBadge(unreadCount + 1);
+    showChatToast(sender);
+  }
+
+  form?.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const body = input.value.trim();
+    if (!body) return;
+    sendBtn.disabled = true;
+    try {
+      const resp = await fetch(`/api/chat/rooms/${roomId}/messages`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+        body: JSON.stringify({body}),
+      });
+      if (resp.ok) {
+        const msg = await resp.json();
+        appendMessage(msg, true, false);
+        input.value = '';
+        document.getElementById('chat-empty')?.remove();
+      } else {
+        const err = await resp.json();
+        alert(err.detail || 'Failed to send');
+      }
+    } catch(err) {
+      alert('Network error: ' + err.message);
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  });
+
+  // ── Real-time updates via existing WebSocket refresh notifier ────────────
+  const chatRoomTopic = `chat:room:${roomId}`;
+  document.addEventListener('realtime:refresh', function(e) {
+    const topics = e.detail && Array.isArray(e.detail.topics) ? e.detail.topics : [];
+    if (!topics.includes(chatRoomTopic)) return;
+
+    // Prevent the default full-page reload — we handle this ourselves.
+    e.preventDefault();
+
+    const msg = e.detail && e.detail.data && e.detail.data.message;
+    if (!msg) return;
+
+    // Deduplicate: skip if the message is already rendered.
+    const key = msg.matrix_event_id || String(msg.id || '');
+    if (key && messagesEl?.querySelector(`[data-event-id="${CSS.escape(key)}"]`)) return;
+    if (msg.id && messagesEl?.querySelector(`[data-msg-id="${msg.id}"]`)) return;
+
+    const isSelf = msg.sender_user_id === currentUserId;
+    appendMessage(msg, isSelf, true);
+    document.getElementById('chat-empty')?.remove();
+    if (key) lastKnownIds.add(key);
+    notifyNewMessage(msg);
+  });
+
+  // ── Fallback polling (reduced to 5 s to catch messages from non-WS paths) ─
+  let lastKnownIds = new Set([...( messagesEl?.querySelectorAll('[data-event-id]') || [])].map(el => el.dataset.eventId).filter(Boolean));
+
+  setInterval(async function() {
+    try {
+      const resp = await fetch(`/api/chat/rooms/${roomId}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      for (const msg of (data.messages || [])) {
+        const key = msg.matrix_event_id || '';
+        if (key && lastKnownIds.has(key)) continue;
+        const msgIdKey = String(msg.id || '');
+        if (msgIdKey && messagesEl?.querySelector(`[data-msg-id="${msgIdKey}"]`)) continue;
+
+        const isSelf = msg.sender_user_id === currentUserId;
+        appendMessage(msg, isSelf, true);
+        document.getElementById('chat-empty')?.remove();
+        notifyNewMessage(msg);
+        if (key) lastKnownIds.add(key);
+      }
+    } catch {}
+  }, 5000);
 
   document.getElementById('btn-join-room')?.addEventListener('click', async function() {
     this.disabled = true;
@@ -305,21 +445,6 @@
       btn.disabled = false;
     }
   });
-
-  setInterval(async function() {
-    try {
-      const resp = await fetch(`/api/chat/rooms/${roomId}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const existingIds = new Set([...messagesEl.querySelectorAll('[data-event-id]')].map(el => el.dataset.eventId).filter(Boolean));
-      for (const msg of (data.messages || [])) {
-        if (!existingIds.has(msg.matrix_event_id || '')) {
-          const isSelf = msg.sender_user_id === currentUserId;
-          appendMessage(msg, isSelf);
-        }
-      }
-    } catch {}
-  }, 30000);  // Poll every 30 seconds as a fallback to the Matrix sync worker
 })();
 </script>
 {% endblock %}
