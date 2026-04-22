@@ -9493,8 +9493,9 @@ a.stat-strip__stat:focus-visible {
 
 .dashboard--customisable .dashboard__grid {
   display: grid;
-  grid-template-columns: repeat(var(--dashboard-columns, 12), minmax(0, 1fr));
-  grid-auto-rows: minmax(80px, auto);
+  grid-template-columns: repeat(var(--dashboard-columns, 24), minmax(0, 1fr));
+  --dashboard-row-height: 2rem;
+  grid-auto-rows: var(--dashboard-row-height);
   align-content: start;
   gap: clamp(0.5rem, 1vw, 1rem);
   width: 100%;
@@ -9503,16 +9504,15 @@ a.stat-strip__stat:focus-visible {
 
 @media (max-width: 960px) {
   .dashboard--customisable .dashboard__grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-  .dashboard--customisable .dashboard-card {
-    grid-column: 1 / -1 !important;
+    grid-template-columns: repeat(var(--dashboard-columns, 24), minmax(0, 1fr));
+    --dashboard-row-height: 1.8rem;
   }
 }
 
 @media (max-width: 600px) {
   .dashboard--customisable .dashboard__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--dashboard-columns, 24), minmax(0, 1fr));
+    --dashboard-row-height: 1.6rem;
   }
 }
 
