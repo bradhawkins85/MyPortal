@@ -96,7 +96,13 @@ async def list_categories() -> list[dict[str, Any]]:
         ORDER BY name
     """
     rows = await db.fetch_all(query)
-    return [dict(r) for r in rows]
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = _fmt(item.get("created_at"))
+        item["updated_at"] = _fmt(item.get("updated_at"))
+        result.append(item)
+    return result
 
 
 async def get_category(category_id: int) -> Optional[dict[str, Any]]:
@@ -106,7 +112,12 @@ async def get_category(category_id: int) -> Optional[dict[str, Any]]:
         WHERE id = %(id)s
     """
     row = await db.fetch_one(query, {"id": category_id})
-    return dict(row) if row else None
+    if not row:
+        return None
+    item = dict(row)
+    item["created_at"] = _fmt(item.get("created_at"))
+    item["updated_at"] = _fmt(item.get("updated_at"))
+    return item
 
 
 async def create_category(*, code: str, name: str, description: Optional[str] = None, is_system: bool = False) -> dict[str, Any]:
@@ -176,6 +187,8 @@ async def list_checks(
     result = []
     for row in rows:
         item = dict(row)
+        item["created_at"] = _fmt(item.get("created_at"))
+        item["updated_at"] = _fmt(item.get("updated_at"))
         item["category"] = {
             "id": item["category_id"],
             "code": item.pop("category_code"),
@@ -204,6 +217,8 @@ async def get_check(check_id: int) -> Optional[dict[str, Any]]:
     if not row:
         return None
     item = dict(row)
+    item["created_at"] = _fmt(item.get("created_at"))
+    item["updated_at"] = _fmt(item.get("updated_at"))
     item["category"] = {
         "id": item["category_id"],
         "code": item.pop("category_code"),
