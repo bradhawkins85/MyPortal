@@ -99,16 +99,14 @@ async def run_sync_loop() -> None:
                 await process_sync_response(sync_data)
 
             except matrix_service.MatrixError as exc:
-                if exc.errcode in ("M_UNKNOWN_TOKEN", "M_MISSING_TOKEN"):
-                    log_error(
-                        "Matrix access token is invalid or missing — "
-                        "update MATRIX_BOT_ACCESS_TOKEN in .env and restart",
-                        error=str(exc),
-                    )
-                    await asyncio.sleep(300)
-                else:
-                    log_error("Matrix sync error", error=str(exc))
-                    await asyncio.sleep(10)
+                if exc.errcode not in ("M_UNKNOWN_TOKEN", "M_MISSING_TOKEN"):
+                    raise
+                log_error(
+                    "Matrix access token is invalid or missing — "
+                    "update MATRIX_BOT_ACCESS_TOKEN in .env and restart",
+                    error=str(exc),
+                )
+                await asyncio.sleep(300)
             except Exception as exc:
                 log_error("Matrix sync error", error=str(exc))
                 await asyncio.sleep(10)
