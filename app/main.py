@@ -4949,24 +4949,10 @@ async def m365_page(request: Request, error: str | None = None, success: str | N
     return await _render_template("m365/index.html", request, user, extra=extra)
 
 
-@app.get("/m365/benchmarks", response_class=HTMLResponse)
-async def m365_benchmarks_page(request: Request, error: str | None = None, success: str | None = None):
-    user, membership, company, company_id, redirect = await _load_license_context(request)
-    if redirect:
-        return redirect
-    credentials = await m365_service.get_credentials(company_id)
-    results = await cis_benchmark_service.get_last_results(company_id)
-    extra = {
-        "title": "CIS Benchmarks",
-        "company": company,
-        "categories": cis_benchmark_service.BENCHMARK_CATEGORIES,
-        "results": results,
-        "has_credentials": bool(credentials),
-        "is_super_admin": bool(user.get("is_super_admin")),
-        "error": error,
-        "success": success,
-    }
-    return await _render_template("m365/benchmarks.html", request, user, extra=extra)
+@app.get("/m365/benchmarks", response_class=RedirectResponse)
+async def m365_benchmarks_redirect(request: Request):
+    """Redirect the old CIS Benchmarks page to the merged Best Practices page."""
+    return RedirectResponse(url="/m365/best-practices", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @app.post("/m365/benchmarks/run", response_class=RedirectResponse)
@@ -4981,10 +4967,10 @@ async def run_m365_benchmarks(request: Request):
         log_info("CIS benchmarks run", company_id=company_id, user_id=user.get("id"))
     except m365_service.M365Error as exc:
         return RedirectResponse(
-            url=f"/m365/benchmarks?error={quote(str(exc))}",
+            url=f"/m365/best-practices?error={quote(str(exc))}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    return RedirectResponse(url="/m365/benchmarks?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/m365/best-practices?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/m365/benchmarks/exclude", response_class=RedirectResponse)
@@ -4999,7 +4985,7 @@ async def exclude_benchmark_check(
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.add_exclusion(company_id, check_id, reason)
-    return RedirectResponse(url="/m365/benchmarks?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/m365/best-practices?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/m365/benchmarks/exclude/remove", response_class=RedirectResponse)
@@ -5013,7 +4999,7 @@ async def remove_benchmark_exclusion(
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.remove_exclusion(company_id, check_id)
-    return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/m365/best-practices?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ---------------------------------------------------------------------------
@@ -5254,6 +5240,47 @@ async def sync_m365_mailboxes(request: Request):
         asyncio.create_task(m365_service.sync_mailboxes(company_id))
     log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"))
     return JSONResponse({"queued": True}, status_code=202)
+
+
+@app.post("/m365/mailboxes/enable-archive", response_class=JSONResponse, tags=["Microsoft 365"])
+async def enable_m365_user_archive(request: Request):
+    """Enable the in-place archive mailbox for a user via Exchange Online PowerShell.
+
+    Issues ``Enable-Mailbox -Identity <upn> -Archive`` for the supplied UPN.  The
+    UPN must belong to a known user mailbox in this company; otherwise a 404 is
+    returned.  Requires super-admin privileges.
+    """
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+    upn = str((body or {}).get("upn") or "").strip()
+    if not upn:
+        return JSONResponse({"error": "A user principal name is required"}, status_code=400)
+
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    matching = next((mb for mb in user_mbs if mb.get("user_principal_name") == upn), None)
+    if matching is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
+    if matching.get("has_archive"):
+        return JSONResponse({"enabled": True, "already_enabled": True})
+
+    try:
+        await m365_service.enable_user_archive(company_id, upn)
+    except m365_service.M365Error as exc:
+        logger.exception("Failed to enable in-place archive for UPN %s", upn)
+        return JSONResponse(
+            {"error": "Unable to enable in-place archive at this time."},
+            status_code=503,
+        )
+    log_info("M365 in-place archive enable requested", company_id=company_id, user_id=user.get("id"), upn=upn)
+    return JSONResponse({"enabled": True})
 
 
 @app.get("/m365/mailboxes/permissions", response_class=JSONResponse, tags=["Microsoft 365"])
