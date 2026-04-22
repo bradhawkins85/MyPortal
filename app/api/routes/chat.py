@@ -248,8 +248,8 @@ async def assign_room(
     mxid = _settings.matrix_bot_user_id or ""
     try:
         await matrix_service.invite_user(room["matrix_room_id"], mxid)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error("Failed to invite bot user to room during assign", room_id=room_id, mxid=mxid, error=str(exc))
     await chat_repo.add_participant(room_id, mxid, role="technician", user_id=user_id)
 
     await audit_service.log_action(
