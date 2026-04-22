@@ -531,6 +531,70 @@ async def test_fetch_mailbox_usage_report_includes_archive_size():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_uses_d180_period():
+    """_fetch_mailbox_usage_report requests the D180 period from the Graph API.
+
+    Microsoft's getMailboxUsageDetail report only populates Archive Storage
+    Used (Byte) for archives that had archiving activity within the reporting
+    window.  The 7-day (D7) window therefore returns 0 for most archives —
+    which are not actively receiving new items every week — even though the
+    archive contains data.  D180 covers the past six months and produces
+    accurate archive sizes for virtually all real-world deployments.
+    """
+    captured_urls: list[str] = []
+
+    class _FakeResponse:
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            captured_urls.append(url)
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
+            csv_text = (
+                "User Principal Name,Display Name,Is Deleted,"
+                "Storage Used (Byte),Archive Storage Used (Byte)\n"
+                "user@example.com,Alice,false,1073741824,524288000\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert captured_urls, "No HTTP requests were made"
+    first_url = captured_urls[0]
+    assert "D180" in first_url, (
+        f"Expected D180 period in report URL, got: {first_url!r}. "
+        "Archive Storage Used (Byte) is only populated for archives with "
+        "activity in the reporting window; D7 returns 0 for inactive archives."
+    )
+    assert "D7" not in first_url, (
+        f"D7 period must not be used (returns 0 archive bytes for inactive archives): {first_url!r}"
+    )
+
+
+@pytest.mark.anyio("asyncio")
 async def test_fetch_mailbox_usage_report_csv_handles_header_variants_and_invalid_numbers():
     """CSV export tolerates header case/BOM drift and invalid numeric fields."""
 

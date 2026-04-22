@@ -29,6 +29,8 @@ the batch runners in ``cis_benchmark.py``.
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Union
 
@@ -63,6 +65,123 @@ from app.services.cis_benchmark import (
     run_intune_windows_benchmarks,
 )
 from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command, _graph_get, _graph_patch, acquire_access_token
+
+
+# ---------------------------------------------------------------------------
+# Tenant capability detection (license-based)
+# ---------------------------------------------------------------------------
+#
+# Several Best Practice checks can only be implemented when the tenant has
+# specific Microsoft 365 licenses.  For example, blocking legacy
+# authentication requires a Conditional Access policy (Microsoft Entra ID P1
+# or higher), and Identity-Protection-based checks (risky users, sign-in /
+# user risk policies) require Microsoft Entra ID P2.  When the tenant does
+# not have the required licenses, these checks cannot meaningfully be
+# evaluated or remediated, and we mark them as ``not_applicable`` so that
+# administrators are not asked to remediate something they cannot implement.
+#
+# Capabilities are derived from the ``subscribedSkus`` Graph endpoint by
+# inspecting each SKU's ``servicePlans`` collection.  A SKU "grants" a
+# capability when:
+#   * the subscription has at least one prepaid unit enabled, AND
+#   * the corresponding service plan is provisioned and not disabled
+#     (``provisioningStatus`` not equal to ``"Disabled"``).
+#
+# The mapping below translates well-known Microsoft service-plan GUIDs into
+# capability identifiers used by ``requires_licenses`` on catalog entries.
+# Service plan IDs are stable identifiers published by Microsoft – see
+# https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference
+
+# Capability identifiers
+CAP_ENTRA_ID_P1 = "entra_id_p1"
+CAP_ENTRA_ID_P2 = "entra_id_p2"
+CAP_INTUNE = "intune"
+
+# Friendly names used in the "not applicable" details message
+_CAPABILITY_FRIENDLY_NAMES: dict[str, str] = {
+    CAP_ENTRA_ID_P1: "Microsoft Entra ID P1",
+    CAP_ENTRA_ID_P2: "Microsoft Entra ID P2",
+    CAP_INTUNE: "Microsoft Intune",
+}
+
+# Service plan GUIDs (lower-case) that grant each capability.  Entra ID P2
+# always includes Entra ID P1 features.
+_SERVICE_PLAN_TO_CAPABILITIES: dict[str, set[str]] = {
+    # AAD_PREMIUM (Entra ID P1)
+    "41781fb2-bc02-4b7c-bd55-b576c07bb09d": {CAP_ENTRA_ID_P1},
+    # AAD_PREMIUM_P2 (Entra ID P2 – includes P1)
+    "eec0eb4f-6444-4f95-aba0-50c24d67f998": {CAP_ENTRA_ID_P1, CAP_ENTRA_ID_P2},
+    # INTUNE_A (Microsoft Intune)
+    "c1ec4a95-1f05-45b3-a911-aa3fa01094f5": {CAP_INTUNE},
+}
+
+
+def _detect_capabilities_from_skus(skus_payload: dict[str, Any]) -> set[str]:
+    """Return the set of capabilities granted by the tenant's subscribed SKUs.
+
+    ``skus_payload`` is the raw response from
+    ``GET https://graph.microsoft.com/v1.0/subscribedSkus``.
+    """
+    capabilities: set[str] = set()
+    for sku in skus_payload.get("value", []) or []:
+        prepaid = sku.get("prepaidUnits") or {}
+        try:
+            enabled_units = int(prepaid.get("enabled") or 0)
+        except (TypeError, ValueError):
+            enabled_units = 0
+        if enabled_units <= 0:
+            continue
+        for plan in sku.get("servicePlans") or []:
+            plan_id = str(plan.get("servicePlanId") or "").strip().lower()
+            if not plan_id:
+                continue
+            provisioning = str(plan.get("provisioningStatus") or "").strip().lower()
+            if provisioning == "disabled":
+                continue
+            granted = _SERVICE_PLAN_TO_CAPABILITIES.get(plan_id)
+            if granted:
+                capabilities |= granted
+    return capabilities
+
+
+async def detect_tenant_capabilities(graph_token: str) -> set[str] | None:
+    """Detect the licensing-derived capabilities of the tenant.
+
+    Returns ``None`` (capabilities unknown – fall back to running every
+    enabled check normally) if the call fails for any reason.  This keeps
+    the Best Practices runner robust when the tenant does not grant the
+    Directory.Read.All / Organization.Read.All permissions required by
+    ``subscribedSkus``.
+    """
+    try:
+        payload = await _graph_get(
+            graph_token, "https://graph.microsoft.com/v1.0/subscribedSkus"
+        )
+    except Exception as exc:  # noqa: BLE001 – capability detection must never break the runner
+        log_info(
+            "M365 best practices: tenant capability detection skipped",
+            error=str(exc),
+        )
+        return None
+    return _detect_capabilities_from_skus(payload)
+
+
+def _missing_capabilities(
+    required: list[str] | None, capabilities: set[str] | None
+) -> list[str]:
+    """Return the subset of ``required`` capabilities the tenant lacks.
+
+    ``capabilities`` of ``None`` (detection failed/skipped) means we cannot
+    determine missing licenses, so an empty list is returned (do not mark
+    the check as N/A).
+    """
+    if not required or capabilities is None:
+        return []
+    return [cap for cap in required if cap not in capabilities]
+
+
+def _format_missing_licenses(missing: list[str]) -> str:
+    return ", ".join(_CAPABILITY_FRIENDLY_NAMES.get(cap, cap) for cap in missing)
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +359,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "is_cis_benchmark": True,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
         "id": "bp_mfa_for_all_users",
@@ -256,6 +376,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "is_cis_benchmark": True,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
         "id": "bp_admin_mfa",
@@ -271,6 +392,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "is_cis_benchmark": True,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
         "id": "bp_global_admin_count",
@@ -393,6 +515,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_monitor_sign_in_logs,
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
         "id": "bp_monitor_risky_users",
@@ -408,6 +531,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_monitor_risky_users,
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
     },
     {
         "id": "bp_monitor_sign_in_risk_policy",
@@ -424,6 +548,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_monitor_sign_in_risk_policy,
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
     },
     {
         "id": "bp_monitor_user_risk_policy",
@@ -440,6 +565,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_monitor_user_risk_policy,
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
     },
     {
         "id": "bp_monitor_named_locations",
@@ -455,6 +581,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_monitor_named_locations,
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
         "id": "bp_monitor_ca_report_only_policies",
@@ -470,6 +597,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_monitor_ca_report_only_policies,
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
         "id": "bp_monitor_app_credential_expiry",
@@ -815,6 +943,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
 ]
 
+# All Intune-grouped checks require a Microsoft Intune license; mark them
+# automatically so the catalog stays DRY.
+for _bp in _BEST_PRACTICES:
+    if _bp.get("cis_group", "").startswith("intune_") and "requires_licenses" not in _bp:
+        _bp["requires_licenses"] = [CAP_INTUNE]
+
 # Mapping from cis_group name to the batch runner function from cis_benchmark.py
 _CIS_GROUP_RUNNERS: dict[str, Callable[..., Any]] = {
     "intune_windows": run_intune_windows_benchmarks,
@@ -823,12 +957,20 @@ _CIS_GROUP_RUNNERS: dict[str, Callable[..., Any]] = {
 }
 
 
+def _enrich_catalog_entry(bp: dict[str, Any]) -> dict[str, Any]:
+    """Return a public-facing copy of a catalog entry with internal keys
+    stripped and license requirements rendered as a human-friendly string.
+    """
+    entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
+    requires = bp.get("requires_licenses") or []
+    if requires:
+        entry["requires_licenses_display"] = _format_missing_licenses(requires)
+    return entry
+
+
 def list_best_practices() -> list[dict[str, Any]]:
     """Return the best-practice catalog (without internal runner keys)."""
-    return [
-        {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
-        for bp in _BEST_PRACTICES
-    ]
+    return [_enrich_catalog_entry(bp) for bp in _BEST_PRACTICES]
 
 
 def _catalog_map() -> dict[str, dict[str, Any]]:
@@ -895,7 +1037,7 @@ async def list_settings_with_catalog() -> list[dict[str, Any]]:
     settings = await bp_repo.get_settings_map()
     out: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
-        entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
+        entry = _enrich_catalog_entry(bp)
         row = settings.get(bp["id"])
         entry["enabled"] = row["enabled"] if row else bool(bp.get("default_enabled", True))
         entry["auto_remediate"] = row["auto_remediate"] if row else False
@@ -949,6 +1091,163 @@ async def set_enabled_checks(
 # Runner
 # ---------------------------------------------------------------------------
 
+# HTTP status codes that indicate a transient Microsoft Graph / Exchange Online
+# failure where retrying the request is likely to succeed.  Permanent errors
+# (e.g. 400 bad request, 401/403 auth/permission, 404 not found) are NOT
+# retried because retrying cannot turn them into the real check result – those
+# need real remediation (granting permissions, fixing configuration, etc.) and
+# the catalog's static remediation text already covers them.
+_RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+# Maximum number of attempts (initial + retries) for a single check request.
+_MAX_CHECK_ATTEMPTS = 3
+
+# Base delay (seconds) for exponential backoff between retries.  Actual delays
+# are 1s, 2s, 4s, … up to ``_MAX_RETRY_DELAY``.
+_RETRY_BASE_DELAY = 1.0
+_MAX_RETRY_DELAY = 8.0
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    """Return the exponential-backoff delay (seconds) before the next retry.
+
+    ``attempt`` is the 1-indexed attempt number that has just failed (so
+    ``attempt=1`` is the delay before the first retry, producing 1s, 2s, 4s,
+    … capped at :data:`_MAX_RETRY_DELAY`).
+    """
+    return min(_RETRY_BASE_DELAY * (2 ** (attempt - 1)), _MAX_RETRY_DELAY)
+
+# Pre-compiled regex matching a retryable HTTP status code embedded in an
+# ``M365Error`` message (e.g. ``"Microsoft Graph request failed (429)"``).
+_RETRYABLE_STATUS_IN_DETAILS = re.compile(
+    r"\(\s*(?:" + "|".join(str(s) for s in sorted(_RETRYABLE_HTTP_STATUSES)) + r")\s*\)"
+)
+
+# Substrings in a check's ``details`` that indicate a transient request-level
+# failure even when no HTTP status code is present (e.g. network / decode
+# errors raised by httpx).  Keep this list narrow so legitimately-unknown
+# results that happen for *non-transient* reasons are not retried.
+_TRANSIENT_DETAIL_MARKERS: tuple[str, ...] = (
+    "decode error",
+    "response parse error",
+    "request decode error",
+)
+
+
+def _is_retryable_m365_error(exc: M365Error) -> bool:
+    """Return True if ``exc`` represents a transient failure worth retrying.
+
+    Treats network-level / decode errors (no HTTP status attached) and the
+    standard transient HTTP statuses as retryable.  Permanent client errors
+    (400, 401, 403, 404, etc.) are not retried.
+    """
+    status = getattr(exc, "http_status", None)
+    if status is None:
+        return True
+    return status in _RETRYABLE_HTTP_STATUSES
+
+
+def _result_indicates_transient_failure(result: Any) -> bool:
+    """Return True when an unknown check result looks like a transient failure.
+
+    The underlying check helpers (in ``cis_benchmark`` and this module) catch
+    :class:`M365Error` themselves and return a ``STATUS_UNKNOWN`` result whose
+    ``details`` embeds the original error message.  This helper inspects that
+    message to decide whether the failure was transient (worth retrying) or
+    permanent / informational (a real "we cannot determine this" answer).
+
+    For batch runners that return a ``list`` of result dicts (e.g. the Intune
+    benchmark groups), the list is treated as transient when *every* item is
+    an unknown result with a transient marker – this is the shape produced
+    when the batch's top-level Graph call fails and propagates the same
+    error to every check in the group.
+    """
+    if isinstance(result, list):
+        if not result:
+            return False
+        return all(_result_indicates_transient_failure(item) for item in result)
+    if not isinstance(result, dict):
+        return False
+    if result.get("status") != STATUS_UNKNOWN:
+        return False
+    details = result.get("details") or ""
+    if not isinstance(details, str) or not details:
+        return False
+    if _RETRYABLE_STATUS_IN_DETAILS.search(details):
+        return True
+    lowered = details.lower()
+    return any(marker in lowered for marker in _TRANSIENT_DETAIL_MARKERS)
+
+
+async def _call_check_with_retry(
+    factory: Callable[[], Awaitable[Any]],
+    *,
+    company_id: int,
+    check_id: str,
+    max_attempts: int = _MAX_CHECK_ATTEMPTS,
+) -> Any:
+    """Invoke ``factory()`` with retry on transient failures.
+
+    ``factory`` must be a zero-argument callable that returns a fresh awaitable
+    each time it is invoked (so each attempt issues a new HTTP request).
+
+    Two retry signals are honoured:
+
+    * A raised :class:`M365Error` whose HTTP status is transient (or absent,
+      which indicates a network/decode error).  Permanent statuses re-raise
+      immediately.
+    * A returned result dict whose ``status`` is ``STATUS_UNKNOWN`` and whose
+      ``details`` embeds a transient HTTP status or network/parse error
+      marker.  Many check helpers already swallow :class:`M365Error` and
+      return such a dict, so this lets us retry them transparently.
+
+    On the final attempt the most recent outcome is returned (or re-raised)
+    unchanged so the caller can record the underlying error message in the
+    persisted result.
+    """
+    last_exc: M365Error | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = await factory()
+        except M365Error as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not _is_retryable_m365_error(exc):
+                raise
+            delay = _retry_backoff_seconds(attempt)
+            log_info(
+                "M365 best practice check transient failure – retrying",
+                company_id=company_id,
+                check_id=check_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                http_status=getattr(exc, "http_status", None),
+                graph_error_code=getattr(exc, "graph_error_code", None),
+                retry_in_seconds=delay,
+            )
+            await asyncio.sleep(delay)
+            continue
+
+        if attempt >= max_attempts or not _result_indicates_transient_failure(result):
+            return result
+
+        delay = _retry_backoff_seconds(attempt)
+        log_info(
+            "M365 best practice check returned transient unknown – retrying",
+            company_id=company_id,
+            check_id=check_id,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            details=(result.get("details") if isinstance(result, dict) else None),
+            retry_in_seconds=delay,
+        )
+        await asyncio.sleep(delay)
+
+    # Defensive: loop always either returns or raises, but keep mypy/static
+    # analysers happy in case max_attempts is somehow <= 0.
+    if last_exc is not None:
+        raise last_exc
+    raise M365Error(f"Best practice check '{check_id}' produced no result")
+
 
 async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     """Run all globally-enabled best-practice checks for ``company_id``.
@@ -972,6 +1271,11 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     auto_remediate_ids = await get_auto_remediate_check_ids()
     run_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    # Detect tenant licensing capabilities once per run.  Returns ``None``
+    # when detection fails (e.g., missing Directory.Read.All permission); in
+    # that case checks are run as before and never marked N/A.
+    tenant_capabilities = await detect_tenant_capabilities(graph_token)
+
     # EXO token/tenant – acquired lazily on first EXO check
     exo_token: str | None = None
     exo_tenant_id: str | None = None
@@ -987,13 +1291,27 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
         check_name = bp["name"]
         cis_group = bp.get("cis_group")
 
-        if cis_group and cis_group in _CIS_GROUP_RUNNERS:
+        # If the tenant lacks the licenses required to implement this check,
+        # mark it as N/A and skip evaluation/auto-remediation entirely.
+        missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
+        if missing:
+            status = STATUS_NOT_APPLICABLE
+            details = (
+                "Not applicable – this check requires the following Microsoft 365 "
+                f"license(s) which the tenant does not have: "
+                f"{_format_missing_licenses(missing)}."
+            )
+        elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
             # CIS batch check – run the group runner once and cache results
             if cis_group not in cis_group_cache:
                 batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
                 if batch_runner:
                     try:
-                        batch = await batch_runner(graph_token)
+                        batch = await _call_check_with_retry(
+                            lambda runner=batch_runner: runner(graph_token),
+                            company_id=company_id,
+                            check_id=f"cis_group:{cis_group}",
+                        )
                         cis_group_cache[cis_group] = {r["check_id"]: r for r in batch}
                     except M365Error as exc:
                         log_error(
@@ -1019,9 +1337,17 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 if source_type == "exo":
                     if exo_token is None:
                         exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
-                    raw = await runner(exo_token, exo_tenant_id)  # type: ignore[call-arg]
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
                 else:
-                    raw = await runner(graph_token)  # type: ignore[call-arg]
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
             except M365Error as exc:
@@ -1220,6 +1546,9 @@ __all__ = [
     "STATUS_FAIL",
     "STATUS_UNKNOWN",
     "STATUS_NOT_APPLICABLE",
+    "CAP_ENTRA_ID_P1",
+    "CAP_ENTRA_ID_P2",
+    "CAP_INTUNE",
     "list_best_practices",
     "list_settings_with_catalog",
     "get_enabled_check_ids",
@@ -1229,4 +1558,5 @@ __all__ = [
     "get_last_results",
     "get_remediation",
     "remediate_check",
+    "detect_tenant_capabilities",
 ]

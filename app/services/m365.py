@@ -2643,8 +2643,17 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             "isDeleted": is_deleted_raw in {"true", "1", "yes"},
         }
 
+    # Use D180 (the maximum supported period) rather than D7.  The
+    # ``Archive Storage Used (Byte)`` column in the Microsoft Graph CSV
+    # report is only populated for mailboxes whose *archive* had archiving
+    # activity within the reporting window.  A 7-day window therefore
+    # returns 0 for the vast majority of archives — which are not
+    # actively receiving new items every week — even though the archive
+    # contains gigabytes of older data.  D180 covers archives that had
+    # activity in the past six months and produces accurate sizes for
+    # virtually all real-world deployments.
     csv_report_url = (
-        "https://graph.microsoft.com/v1.0/reports/" "getMailboxUsageDetail(period='D7')"
+        "https://graph.microsoft.com/v1.0/reports/" "getMailboxUsageDetail(period='D180')"
     )
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -3556,6 +3565,35 @@ async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
     return [
         r for r in rows if not _PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")
     ]
+
+
+async def enable_user_archive(company_id: int, upn: str) -> None:
+    """Enable the in-place (online) archive mailbox for ``upn``.
+
+    Issues ``Enable-Mailbox -Identity <upn> -Archive`` via the Exchange Online
+    PowerShell REST ``InvokeCommand`` API and, on success, updates the cached
+    ``m365_mailboxes`` row so the UI reflects the new state immediately.
+
+    The caller is responsible for verifying that ``upn`` belongs to a known
+    mailbox in the given company.
+    """
+    normalised = str(upn or "").strip()
+    if not normalised:
+        raise M365Error("A user principal name is required", http_status=400)
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Enable-Mailbox",
+        {"Identity": normalised, "Archive": True},
+    )
+    await m365_repo.set_mailbox_archive_enabled(company_id, normalised)
+    log_info(
+        "M365 in-place archive enabled",
+        company_id=company_id,
+        upn=normalised,
+    )
 
 
 async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
