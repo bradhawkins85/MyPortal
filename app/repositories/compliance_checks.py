@@ -370,8 +370,13 @@ async def create_assignment(
 ) -> dict[str, Any]:
     # If an archived assignment already exists for this company+check, unarchive it
     # instead of trying a duplicate INSERT (which would violate the unique key).
-    archived = await get_assignment_by_check(company_id, check_id, include_archived=True)
-    if archived and archived.get("archived"):
+    # If an active assignment already exists, guard against a duplicate-key error.
+    existing = await get_assignment_by_check(company_id, check_id, include_archived=True)
+    if existing:
+        if not existing.get("archived"):
+            raise ValueError(
+                f"An active assignment already exists for company {company_id}, check {check_id}"
+            )
         updates: dict[str, Any] = {
             "archived": 0,
             "status": status.value,
@@ -383,13 +388,13 @@ async def create_assignment(
         if owner_user_id is not None:
             updates["owner_user_id"] = owner_user_id
         columns = ", ".join(f"{k} = %({k})s" for k in updates)
-        params: dict[str, Any] = {**updates, "id": archived["id"], "company_id": company_id}
+        params: dict[str, Any] = {**updates, "id": existing["id"], "company_id": company_id}
         await db.execute(
             f"UPDATE company_compliance_check_assignments SET {columns}"
             f" WHERE id = %(id)s AND company_id = %(company_id)s",
             params,
         )
-        result = await get_assignment(company_id, archived["id"])
+        result = await get_assignment(company_id, existing["id"])
         if not result:
             raise RuntimeError("Failed to retrieve reactivated assignment")
         return result
