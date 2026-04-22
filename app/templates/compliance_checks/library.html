@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block header_title %}Compliance Checks Library{% endblock %}
+{% block title %}Compliance Checks Library{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <select id="lib-category-filter" class="form-input form-input--sm" aria-label="Filter by category">
+      <option value="">All categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat.id }}">{{ cat.name }}</option>
+      {% endfor %}
+    </select>
+    <input
+      type="search"
+      id="lib-text-filter"
+      class="form-input form-input--sm"
+      placeholder="Search library…"
+      aria-label="Search library"
+    />
+    <button type="button" class="button button--secondary button--small" id="seed-btn">
+      Re-seed GMP/GLP
+    </button>
+    <button type="button" class="button button--primary button--small" id="add-check-btn">
+      Add check
+    </button>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="management management--single compliance-checks-library" data-layout>
+  <section class="management__content">
+    <header class="management__header">
+      <div>
+        <h1 class="management__title">Compliance checks library</h1>
+        <p class="management__subtitle">Manage the central catalogue of compliance checks available to assign to customers.</p>
+      </div>
+    </header>
+
+    <div class="card card--panel">
+      <div class="table-wrapper">
+        <table class="table" id="lib-table">
+          <thead>
+            <tr>
+              <th scope="col" style="width:10%">Category</th>
+              <th scope="col" style="width:8%">Code</th>
+              <th scope="col" style="width:30%">Title</th>
+              <th scope="col" style="width:8%">Interval</th>
+              <th scope="col" style="width:7%">Predefined</th>
+              <th scope="col" style="width:7%">Active</th>
+              <th scope="col" style="width:20%">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for check in checks %}
+            <tr
+              data-category="{{ check.category.id if check.category else '' }}"
+              data-search="{{ check.title | lower }} {{ check.code | lower }}"
+              id="check-row-{{ check.id }}"
+            >
+              <td><span class="tag tag--muted">{{ check.category.code if check.category else '—' }}</span></td>
+              <td class="table__mono">{{ check.code }}</td>
+              <td>
+                <strong>{{ check.title }}</strong>
+                {% if check.description %}
+                <p class="compliance-checks-table__desc">{{ check.description[:80] }}{% if check.description|length > 80 %}…{% endif %}</p>
+                {% endif %}
+              </td>
+              <td>{{ check.default_review_interval_days }}d</td>
+              <td>
+                {% if check.is_predefined %}
+                <span class="badge badge--status-compliant">Yes</span>
+                {% else %}
+                <span class="badge badge--status-not_started">No</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if check.is_active %}
+                <span class="badge badge--status-compliant">Yes</span>
+                {% else %}
+                <span class="badge badge--status-non_compliant">No</span>
+                {% endif %}
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="button button--ghost button--small edit-check-btn"
+                  data-check-id="{{ check.id }}"
+                  data-check='{{ check | tojson }}'
+                >Edit</button>
+                {% if check.is_active %}
+                <button
+                  type="button"
+                  class="button button--ghost button--small deactivate-check-btn"
+                  data-check-id="{{ check.id }}"
+                >Deactivate</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">
+                No checks in library. Use <strong>Re-seed GMP/GLP</strong> to load predefined checks.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+{# Add / Edit check modal #}
+<dialog class="modal" id="check-modal" aria-labelledby="check-modal-title">
+  <div class="modal__inner">
+    <header class="modal__header">
+      <h2 class="modal__title" id="check-modal-title">Add check</h2>
+      <button type="button" class="modal__close" aria-label="Close" id="check-modal-close">&times;</button>
+    </header>
+    <div class="modal__body">
+      <form id="check-form" class="form">
+        <input type="hidden" id="form-check-id" name="check_id" value="" />
+        <div class="form__group">
+          <label class="form__label" for="form-category">Category</label>
+          <select class="form-input" id="form-category" name="category_id" required>
+            <option value="">Select category…</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="form-code">Code</label>
+          <input type="text" class="form-input" id="form-code" name="code" required maxlength="100" placeholder="e.g. CUSTOM-001" />
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="form-title">Title</label>
+          <input type="text" class="form-input" id="form-title" name="title" required maxlength="255" />
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="form-description">Description</label>
+          <textarea class="form-input" id="form-description" name="description" rows="3"></textarea>
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="form-guidance">Guidance</label>
+          <textarea class="form-input" id="form-guidance" name="guidance" rows="3"></textarea>
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="form-interval">Default review interval (days)</label>
+          <input type="number" class="form-input" id="form-interval" name="default_review_interval_days" min="1" value="365" />
+        </div>
+        <div class="form__group form__group--inline">
+          <label class="form__label" for="form-evidence-required">Evidence required by default</label>
+          <input type="checkbox" id="form-evidence-required" name="default_evidence_required" />
+        </div>
+        <div class="form__group form__group--inline" id="form-active-group" style="display:none">
+          <label class="form__label" for="form-is-active">Active</label>
+          <input type="checkbox" id="form-is-active" name="is_active" checked />
+        </div>
+        <div class="form__actions">
+          <button type="submit" class="button button--primary" id="check-submit-btn">Add check</button>
+          <button type="button" class="button button--ghost" id="check-cancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</dialog>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const csrfToken = getCsrfToken();
+
+  // ---- Filtering ----
+  const catFilter = document.getElementById('lib-category-filter');
+  const txtFilter = document.getElementById('lib-text-filter');
+
+  function applyFilters() {
+    const cat = catFilter?.value || '';
+    const txt = txtFilter?.value.toLowerCase() || '';
+    document.querySelectorAll('#lib-table tbody tr[data-category]').forEach(row => {
+      const matchCat = !cat || row.dataset.category === cat;
+      const matchTxt = !txt || (row.dataset.search || '').includes(txt);
+      row.style.display = matchCat && matchTxt ? '' : 'none';
+    });
+  }
+
+  catFilter?.addEventListener('change', applyFilters);
+  txtFilter?.addEventListener('input', applyFilters);
+
+  // ---- Re-seed ----
+  document.getElementById('seed-btn')?.addEventListener('click', async () => {
+    if (!confirm('Re-seed predefined GMP/GLP checks? Existing entries will not be overwritten.')) return;
+    try {
+      const resp = await fetch('/api/compliance-checks/checks', { method: 'GET' });
+      alert('Seeding happens via the database migration. To re-seed, re-run migration 213.');
+    } catch {
+      alert('Error');
+    }
+  });
+
+  // ---- Modal helpers ----
+  const modal = document.getElementById('check-modal');
+  const modalTitle = document.getElementById('check-modal-title');
+  const submitBtn = document.getElementById('check-submit-btn');
+  const activeGroup = document.getElementById('form-active-group');
+  const checkIdInput = document.getElementById('form-check-id');
+
+  document.getElementById('add-check-btn')?.addEventListener('click', () => {
+    modalTitle.textContent = 'Add check';
+    submitBtn.textContent = 'Add check';
+    document.getElementById('check-form').reset();
+    checkIdInput.value = '';
+    activeGroup.style.display = 'none';
+    modal?.showModal();
+  });
+
+  document.getElementById('check-modal-close')?.addEventListener('click', () => modal?.close());
+  document.getElementById('check-cancel')?.addEventListener('click', () => modal?.close());
+
+  // Edit buttons
+  document.querySelectorAll('.edit-check-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const check = JSON.parse(btn.dataset.check);
+      modalTitle.textContent = 'Edit check';
+      submitBtn.textContent = 'Save changes';
+      checkIdInput.value = check.id;
+      document.getElementById('form-category').value = check.category_id;
+      document.getElementById('form-code').value = check.code;
+      document.getElementById('form-title').value = check.title;
+      document.getElementById('form-description').value = check.description || '';
+      document.getElementById('form-guidance').value = check.guidance || '';
+      document.getElementById('form-interval').value = check.default_review_interval_days;
+      document.getElementById('form-evidence-required').checked = !!check.default_evidence_required;
+      document.getElementById('form-is-active').checked = !!check.is_active;
+      activeGroup.style.display = '';
+      modal?.showModal();
+    });
+  });
+
+  // Deactivate buttons
+  document.querySelectorAll('.deactivate-check-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Deactivate this check? It will no longer be available for new assignments.')) return;
+      const checkId = btn.dataset.checkId;
+      try {
+        const resp = await fetch(`/api/compliance-checks/checks/${checkId}`, {
+          method: 'DELETE',
+          headers: { 'X-CSRF-Token': csrfToken },
+        });
+        if (resp.ok || resp.status === 204) window.location.reload();
+        else alert('Failed to deactivate check');
+      } catch {
+        alert('Failed to deactivate check');
+      }
+    });
+  });
+
+  // Form submit (create or update)
+  document.getElementById('check-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const checkId = checkIdInput.value;
+    const payload = {
+      category_id: parseInt(form.querySelector('[name=category_id]').value),
+      code: form.querySelector('[name=code]').value,
+      title: form.querySelector('[name=title]').value,
+      description: form.querySelector('[name=description]').value || null,
+      guidance: form.querySelector('[name=guidance]').value || null,
+      default_review_interval_days: parseInt(form.querySelector('[name=default_review_interval_days]').value) || 365,
+      default_evidence_required: form.querySelector('[name=default_evidence_required]').checked,
+      is_active: form.querySelector('[name=is_active]')?.checked ?? true,
+    };
+    try {
+      let resp;
+      if (checkId) {
+        resp = await fetch(`/api/compliance-checks/checks/${checkId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        resp = await fetch('/api/compliance-checks/checks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify(payload),
+        });
+      }
+      if (resp.ok) {
+        window.location.reload();
+      } else {
+        const data = await resp.json();
+        alert(data.detail || 'Failed to save check');
+      }
+    } catch {
+      alert('Failed to save check');
+    }
+  });
+
+  function getCsrfToken() {
+    return document.cookie.split('; ').find(r => r.startsWith('myportal_session_csrf='))?.split('=')[1] || '';
+  }
+});
+</script>
+{% endblock %}
