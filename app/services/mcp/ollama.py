@@ -15,12 +15,17 @@ opt in to reply / update tools via module settings.
 
 from __future__ import annotations
 
+import collections
 import json
+import re
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from fastapi import status
 from loguru import logger
 
+from app.core.config import get_settings as _get_app_settings
+from app.repositories import audit_logs as audit_logs_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import tickets as tickets_repo
 from app.services import tickets as tickets_service
@@ -46,6 +51,9 @@ DEFAULT_TOOLS: tuple[str, ...] = (
     "list_tickets",
     "get_ticket",
     "list_ticket_statuses",
+    "search_audit_logs",
+    "get_audit_log",
+    "get_application_logs",
 )
 
 OPTIONAL_WRITE_TOOLS: tuple[str, ...] = (
@@ -98,8 +106,55 @@ class OllamaMCPError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Settings & token resolution
+# Audit log serialisation
 # ---------------------------------------------------------------------------
+
+# Fields that must never appear in audit-log MCP responses even when present
+# in the raw database row.
+_AUDIT_LOG_SENSITIVE: frozenset[str] = frozenset(
+    {
+        "api_key",
+        "previous_value",
+        "new_value",
+        "metadata",
+    }
+)
+
+# Log line format emitted by configure_logging():
+# YYYY-MM-DDTHH:mm:ss.SSSZ | LEVEL | request_id | user_id | message
+_LOG_LINE_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+[+-]\d{4})"
+    r"\s*\|\s*(?P<level>[A-Z]+)"
+    r"\s*\|\s*(?P<request_id>[^|]*)"
+    r"\s*\|\s*(?P<user_id>[^|]*)"
+    r"\s*\|\s*(?P<message>.*)$"
+)
+
+
+def serialise_audit_log(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Project an audit log row to a safe, MCP-friendly payload.
+
+    Strips fields that could leak previous/new state or API keys.
+    """
+    created_at = record.get("created_at")
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        created_at = created_at.astimezone(timezone.utc).isoformat()
+    else:
+        created_at = str(created_at) if created_at is not None else None
+
+    return {
+        "id": record.get("id"),
+        "user_id": record.get("user_id"),
+        "user_email": record.get("user_email"),
+        "action": record.get("action"),
+        "entity_type": record.get("entity_type"),
+        "entity_id": record.get("entity_id"),
+        "ip_address": record.get("ip_address"),
+        "request_id": record.get("request_id"),
+        "created_at": created_at,
+    }
 
 
 def _resolve_token(authorization_header: str | None) -> str:
@@ -163,6 +218,15 @@ async def _load_settings() -> dict[str, Any]:
     if isinstance(raw_statuses, str):
         raw_statuses = [raw_statuses]
     allowed_statuses = [str(s).strip().lower() for s in raw_statuses if str(s).strip()]
+    app_settings = _get_app_settings()
+    log_tools_enabled = bool(app_settings.mcp_log_tools_enabled)
+    log_max_lines = int(app_settings.mcp_log_max_lines)
+    # Remove log tools from allowed_actions when the feature is disabled.
+    log_tool_names = {"search_audit_logs", "get_audit_log", "get_application_logs"}
+    if not log_tools_enabled:
+        allowed_actions = [a for a in allowed_actions if a not in log_tool_names]
+        if not allowed_actions:
+            allowed_actions = [a for a in DEFAULT_TOOLS if a not in log_tool_names]
     return {
         "secret_hash": secret_hash,
         "allowed_actions": allowed_actions,
@@ -174,6 +238,8 @@ async def _load_settings() -> dict[str, Any]:
         "include_internal_replies": bool(settings_obj.get("include_internal_replies")),
         "server_name": str(settings_obj.get("server_name") or DEFAULT_SERVER_NAME),
         "server_version": str(settings_obj.get("server_version") or DEFAULT_SERVER_VERSION),
+        "log_tools_enabled": log_tools_enabled,
+        "log_max_lines": log_max_lines,
     }
 
 
@@ -285,6 +351,155 @@ def _tool_definitions(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "assigned_user_id": {"type": "integer"},
                     "category": {"type": "string"},
                     "module_slug": {"type": "string"},
+                },
+            },
+        },
+        "search_audit_logs": {
+            "name": "search_audit_logs",
+            "description": (
+                "Search the MyPortal audit log for user and system actions. "
+                "Useful for troubleshooting access issues, tracing changes to "
+                "entities, or reviewing activity by a specific user or IP address. "
+                "Returns id, user_id, user_email, action, entity_type, entity_id, "
+                "ip_address, request_id, and created_at for each matching entry. "
+                "Sensitive fields such as previous/new values and API keys are "
+                "never included."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "integer",
+                        "description": "Filter by the ID of the user who performed the action.",
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": (
+                            "Partial match on the action name "
+                            "(e.g. 'login', 'create', 'delete')."
+                        ),
+                    },
+                    "entity_type": {
+                        "type": "string",
+                        "description": (
+                            "Filter by the type of entity affected "
+                            "(e.g. 'ticket', 'user', 'company')."
+                        ),
+                    },
+                    "ip_address": {
+                        "type": "string",
+                        "description": "Filter by the exact client IP address.",
+                    },
+                    "since": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": (
+                            "ISO-8601 UTC timestamp; only entries on or after "
+                            "this time are returned."
+                        ),
+                    },
+                    "until": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": (
+                            "ISO-8601 UTC timestamp; only entries on or before "
+                            "this time are returned."
+                        ),
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": (
+                            "Free-text search across action, entity_type, and "
+                            "the associated user's email address."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": max_results,
+                        "description": (
+                            f"Maximum number of entries to return (default {max_results})."
+                        ),
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Pagination offset (default 0).",
+                    },
+                },
+            },
+        },
+        "get_audit_log": {
+            "name": "get_audit_log",
+            "description": (
+                "Retrieve a single audit log entry by its numeric ID. "
+                "Use this after search_audit_logs to inspect the details "
+                "of a specific event. Returns the same safe fields as "
+                "search_audit_logs."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["log_id"],
+                "properties": {
+                    "log_id": {
+                        "type": "integer",
+                        "description": "Numeric ID of the audit log entry.",
+                    },
+                },
+            },
+        },
+        "get_application_logs": {
+            "name": "get_application_logs",
+            "description": (
+                "Read recent lines from the MyPortal application log file. "
+                "Useful for diagnosing errors, tracing request flows, or "
+                "reviewing WARNING/ERROR events on the live server. "
+                "Only available when a log file path is configured on the server. "
+                "Returns parsed log entries with timestamp, level, request_id, "
+                "user_id, and message — absolute file paths are never exposed."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "lines": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "description": (
+                            "Number of lines to return from the tail of the log "
+                            "file (default 100, max 500)."
+                        ),
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": ["INFO", "WARNING", "ERROR"],
+                        "description": (
+                            "Only return lines at this level or above. "
+                            "ERROR returns only ERROR lines; WARNING returns "
+                            "WARNING and ERROR; INFO returns all levels."
+                        ),
+                    },
+                    "since": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": (
+                            "ISO-8601 UTC timestamp; only log lines on or "
+                            "after this time are returned."
+                        ),
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": "Case-insensitive substring filter on the log message.",
+                    },
+                    "log_file": {
+                        "type": "string",
+                        "enum": ["application", "error"],
+                        "description": (
+                            "'application' reads from the main log file "
+                            "(FAIL2BAN_LOG_PATH); 'error' reads from the "
+                            "dedicated error log (ERROR_LOG_PATH) when configured."
+                        ),
+                    },
                 },
             },
         },
@@ -537,6 +752,223 @@ async def _update_ticket(
     }
 
 
+async def _search_audit_logs(
+    arguments: Mapping[str, Any],
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Handle the search_audit_logs tool call."""
+    max_results = int(settings.get("max_results", 25))
+    limit = min(int(arguments.get("limit") or max_results), max_results)
+    offset = max(0, int(arguments.get("offset") or 0))
+    user_id = _coerce_optional_int(arguments.get("user_id"), "user_id")
+    action = str(arguments.get("action") or "").strip() or None
+    entity_type = str(arguments.get("entity_type") or "").strip() or None
+    ip_address = str(arguments.get("ip_address") or "").strip() or None
+    search = str(arguments.get("search") or "").strip() or None
+
+    since: datetime | None = None
+    until: datetime | None = None
+    raw_since = str(arguments.get("since") or "").strip()
+    raw_until = str(arguments.get("until") or "").strip()
+    if raw_since:
+        try:
+            since = datetime.fromisoformat(raw_since.replace("Z", "+00:00"))
+        except ValueError:
+            raise OllamaMCPError(
+                status.HTTP_400_BAD_REQUEST,
+                "since must be a valid ISO-8601 datetime string",
+                rpc_code=ERR_INVALID_PARAMS,
+            )
+    if raw_until:
+        try:
+            until = datetime.fromisoformat(raw_until.replace("Z", "+00:00"))
+        except ValueError:
+            raise OllamaMCPError(
+                status.HTTP_400_BAD_REQUEST,
+                "until must be a valid ISO-8601 datetime string",
+                rpc_code=ERR_INVALID_PARAMS,
+            )
+
+    rows = await audit_logs_repo.list_audit_logs(
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        ip_address=ip_address,
+        since=since,
+        until=until,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    serialised = [serialise_audit_log(r) for r in rows]
+    return {
+        "logs": serialised,
+        "count": len(serialised),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+async def _get_audit_log_entry(
+    arguments: Mapping[str, Any],
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Handle the get_audit_log tool call."""
+    log_id = _coerce_optional_int(arguments.get("log_id"), "log_id")
+    if log_id is None:
+        raise OllamaMCPError(
+            status.HTTP_400_BAD_REQUEST,
+            "log_id is required",
+            rpc_code=ERR_INVALID_PARAMS,
+        )
+    row = await audit_logs_repo.get_audit_log(log_id)
+    if not row:
+        raise OllamaMCPError(
+            status.HTTP_404_NOT_FOUND,
+            f"Audit log entry {log_id} not found",
+            rpc_code=ERR_NOT_FOUND,
+        )
+    return {"log": serialise_audit_log(row)}
+
+
+# Log level hierarchy for filtering (highest value = most severe)
+_LOG_LEVEL_RANK: dict[str, int] = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
+
+
+async def _get_application_logs(
+    arguments: Mapping[str, Any],
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Handle the get_application_logs tool call.
+
+    Reads the last N lines from the configured log file, applies optional
+    level, timestamp, and keyword filters, and returns structured entries.
+    Absolute file paths are never included in the response.
+    """
+    import asyncio
+
+    app_settings = _get_app_settings()
+    log_max_lines = int(settings.get("log_max_lines", 500))
+
+    log_file_key = str(arguments.get("log_file") or "application").strip().lower()
+    if log_file_key == "error":
+        log_path = app_settings.error_log_path
+        log_label = "error"
+    else:
+        log_path = app_settings.fail2ban_log_path
+        log_label = "application"
+
+    if not log_path:
+        return {
+            "available": False,
+            "message": (
+                f"The {log_label} log file is not configured on this server. "
+                "Set FAIL2BAN_LOG_PATH (or ERROR_LOG_PATH for error logs) in "
+                "the server environment to enable log access."
+            ),
+            "lines": [],
+        }
+
+    log_path = log_path.expanduser()
+    if not log_path.exists():
+        return {
+            "available": False,
+            "message": (
+                f"The {log_label} log file has not been created yet "
+                "(the application may not have written any log entries)."
+            ),
+            "lines": [],
+        }
+
+    requested_lines = int(arguments.get("lines") or 100)
+    requested_lines = max(1, min(requested_lines, log_max_lines))
+
+    # Read the tail of the file without loading the entire file into memory.
+    raw_lines: list[str] = []
+    try:
+        loop = asyncio.get_event_loop()
+        raw_lines = await loop.run_in_executor(
+            None, _read_tail, str(log_path), requested_lines * 20
+        )
+    except OSError as exc:
+        logger.warning(f"MCP get_application_logs could not read log file: {exc}")
+        return {
+            "available": False,
+            "message": "Log file could not be read. Check server file permissions.",
+            "lines": [],
+        }
+
+    # Parse optional filters.
+    level_filter = str(arguments.get("level") or "").strip().upper() or None
+    search_filter = str(arguments.get("search") or "").strip().lower() or None
+    since_filter: datetime | None = None
+    raw_since = str(arguments.get("since") or "").strip()
+    if raw_since:
+        try:
+            since_filter = datetime.fromisoformat(raw_since.replace("Z", "+00:00"))
+        except ValueError:
+            raise OllamaMCPError(
+                status.HTTP_400_BAD_REQUEST,
+                "since must be a valid ISO-8601 datetime string",
+                rpc_code=ERR_INVALID_PARAMS,
+            )
+
+    min_rank = _LOG_LEVEL_RANK.get(level_filter, 0) if level_filter else 0
+
+    parsed: list[dict[str, Any]] = []
+    for line in raw_lines:
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
+        m = _LOG_LINE_RE.match(line)
+        if m:
+            entry_level = m.group("level").upper()
+            entry_rank = _LOG_LEVEL_RANK.get(entry_level, 1)
+            if entry_rank < min_rank:
+                continue
+            if search_filter and search_filter not in m.group("message").lower():
+                continue
+            if since_filter is not None:
+                try:
+                    entry_ts = datetime.fromisoformat(m.group("ts").replace(" ", "T"))
+                    if entry_ts.tzinfo is None:
+                        entry_ts = entry_ts.replace(tzinfo=timezone.utc)
+                    if entry_ts < since_filter:
+                        continue
+                except ValueError:
+                    pass
+            parsed.append(
+                {
+                    "timestamp": m.group("ts"),
+                    "level": entry_level,
+                    "request_id": m.group("request_id").strip() or None,
+                    "user_id": m.group("user_id").strip() or None,
+                    "message": m.group("message").strip(),
+                }
+            )
+        else:
+            # Non-matching lines (e.g. exception tracebacks) — include when
+            # no level/search filter is active, tagged as continuation lines.
+            if level_filter or search_filter:
+                continue
+            parsed.append({"timestamp": None, "level": None, "message": line})
+
+    # Return at most the requested number of entries (tail end).
+    tail = parsed[-requested_lines:] if len(parsed) > requested_lines else parsed
+    return {
+        "available": True,
+        "log_file": log_label,
+        "lines_returned": len(tail),
+        "lines": tail,
+    }
+
+
+def _read_tail(path: str, n: int) -> list[str]:
+    """Return the last *n* lines from *path* using a deque tail-read."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return list(collections.deque(fh, maxlen=n))
+
+
 async def _execute_tool(
     name: str,
     arguments: Mapping[str, Any],
@@ -561,6 +993,12 @@ async def _execute_tool(
         return await _create_reply(arguments, settings)
     if name == "update_ticket":
         return await _update_ticket(arguments, settings)
+    if name == "search_audit_logs":
+        return await _search_audit_logs(arguments, settings)
+    if name == "get_audit_log":
+        return await _get_audit_log_entry(arguments, settings)
+    if name == "get_application_logs":
+        return await _get_application_logs(arguments, settings)
     raise OllamaMCPError(
         status.HTTP_400_BAD_REQUEST,
         f"Unsupported tool: {name}",
