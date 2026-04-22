@@ -1452,10 +1452,14 @@
           }
           const room = await createResp.json();
           // Join as technician/admin so the room is assigned to this user
-          await fetch('/api/chat/rooms/' + room.id + '/join', {
+          const joinResp = await fetch('/api/chat/rooms/' + room.id + '/join', {
             method: 'POST',
             headers: { 'X-CSRFToken': '{{ csrf_token or "" }}' },
           });
+          if (!joinResp.ok) {
+            const err = await joinResp.json().catch(() => ({}));
+            console.warn('Failed to join chat room as technician:', err.detail || joinResp.status);
+          }
           window.location.href = '/chat/' + room.id;
         } catch (error) {
           console.error('Error starting chat:', error);
