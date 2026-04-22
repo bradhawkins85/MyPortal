@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,6 +28,17 @@ _settings = get_settings()
 _INVITE_EXPIRE_HOURS = 72
 
 
+def _serialize(obj: Any) -> Any:
+    """Recursively convert datetime/date values to ISO strings for JSON serialization."""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _serialize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_serialize(item) for item in obj]
+    return obj
+
+
 def _require_matrix_enabled() -> None:
     if not _settings.matrix_enabled:
         raise HTTPException(status_code=404, detail="Matrix chat is not enabled")
@@ -49,7 +60,7 @@ async def list_rooms(
     else:
         rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
 
-    return JSONResponse([dict(r) for r in rooms])
+    return JSONResponse(_serialize([dict(r) for r in rooms]))
 
 
 @router.post("/rooms", summary="Create a chat room")
@@ -92,7 +103,7 @@ async def create_room(
         new_value={"subject": body.subject},
     )
 
-    return JSONResponse(dict(room), status_code=201)
+    return JSONResponse(_serialize(dict(room)), status_code=201)
 
 
 @router.get("/rooms/{room_id}", summary="Get chat room details")
@@ -111,11 +122,11 @@ async def get_room(
     messages = await chat_repo.get_messages(room_id, limit=limit, before_event_id=before_event_id)
     participants = await chat_repo.get_participants(room_id)
 
-    return JSONResponse({
+    return JSONResponse(_serialize({
         "room": dict(room),
         "messages": [dict(m) for m in messages],
         "participants": [dict(p) for p in participants],
-    })
+    }))
 
 
 @router.post("/rooms/{room_id}/messages", summary="Send a message")
@@ -168,7 +179,7 @@ async def send_message(
         sent_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
-    return JSONResponse(dict(msg), status_code=201)
+    return JSONResponse(_serialize(dict(msg)), status_code=201)
 
 
 @router.post("/rooms/{room_id}/join", summary="Join a chat room (technician/admin)")
