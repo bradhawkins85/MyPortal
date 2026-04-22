@@ -8037,6 +8037,12 @@ a.service-card__ai-icon:hover {
   gap: 0.5rem;
 }
 
+.compliance-table__ml-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .badge--status-not_started {
   background: rgba(148, 163, 184, 0.18);
   color: rgba(226, 232, 240, 0.82);
