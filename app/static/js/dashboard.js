@@ -23,6 +23,7 @@
   const resetEndpoint = root.dataset.resetEndpoint || '/api/dashboard/layout/reset';
   const gridColumns = parseInt(root.dataset.gridColumns || '12', 10) || 12;
 
+  const optionsDetails = root.querySelector('[data-dashboard-options]');
   const editToggle = root.querySelector('[data-dashboard-edit]');
   const addButton = root.querySelector('[data-dashboard-add]');
   const resetButton = root.querySelector('[data-dashboard-reset]');
@@ -33,6 +34,36 @@
 
   let editMode = false;
   let saveTimer = null;
+
+  // ------------------------------------------------------------------
+  // Options dropdown helpers
+  // ------------------------------------------------------------------
+
+  function closeOptionsDropdown() {
+    if (optionsDetails && optionsDetails.open) {
+      optionsDetails.open = false;
+    }
+  }
+
+  // Close dropdown when clicking outside.
+  document.addEventListener('click', function (event) {
+    if (optionsDetails && !optionsDetails.contains(event.target)) {
+      closeOptionsDropdown();
+    }
+  });
+
+  // Close dropdown on Escape.
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      if (optionsDetails && optionsDetails.open) {
+        closeOptionsDropdown();
+        return;
+      }
+      if (modal && !modal.hidden) {
+        closeModal();
+      }
+    }
+  });
 
   function getCsrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -71,7 +102,7 @@
 
   function setCardPosition(card, position) {
     const w = clamp(position.w, 2, gridColumns);
-    let x = clamp(position.x, 0, gridColumns - w);
+    const x = clamp(position.x, 0, gridColumns - w);
     const y = clamp(position.y, 0, 60);
     const h = clamp(position.h, 1, 8);
     card.dataset.cardX = String(x);
@@ -114,7 +145,8 @@
     root.classList.toggle('dashboard--editing', editMode);
     if (editToggle) {
       editToggle.setAttribute('aria-pressed', editMode ? 'true' : 'false');
-      editToggle.textContent = editMode ? 'Done editing' : 'Edit layout';
+      const label = editToggle.querySelector('[data-dashboard-edit-label]');
+      if (label) label.textContent = editMode ? '✓ Done editing' : 'Edit layout';
     }
     grid.querySelectorAll('[data-dashboard-card]').forEach((card) => {
       card.setAttribute('draggable', editMode ? 'true' : 'false');
@@ -126,10 +158,69 @@
   }
 
   // ------------------------------------------------------------------
-  // Drag and drop reordering
+  // Grid cell calculation from pointer position
+  // ------------------------------------------------------------------
+
+  function getGridColWidth() {
+    const gridRect = grid.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+    return (gridRect.width - gap * (gridColumns - 1)) / gridColumns;
+  }
+
+  function getGridRowHeight() {
+    // Use the first card's height-per-row as a reference; fall back to 80px.
+    const card = grid.querySelector('[data-dashboard-card]');
+    if (card) {
+      const h = Math.max(parseInt(card.dataset.cardH || '2', 10), 1);
+      const rect = card.getBoundingClientRect();
+      if (rect.height > 0) return rect.height / h;
+    }
+    return 80;
+  }
+
+  function getCellFromPointer(clientX, clientY) {
+    const gridRect = grid.getBoundingClientRect();
+    const colW = getGridColWidth();
+    const rowH = getGridRowHeight();
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+    let col = Math.floor((clientX - gridRect.left) / (colW + gap));
+    let row = Math.floor((clientY - gridRect.top + grid.scrollTop) / rowH);
+    col = Math.max(0, Math.min(col, gridColumns - 1));
+    row = Math.max(0, row);
+    return { x: col, y: row };
+  }
+
+  // ------------------------------------------------------------------
+  // Drag and drop — free placement (or swap when dropped on a card)
   // ------------------------------------------------------------------
 
   let draggedCard = null;
+  let dropGhost = null;
+
+  function createDropGhost(w, h) {
+    removeDropGhost();
+    const ghost = document.createElement('div');
+    ghost.className = 'dashboard-drop-ghost';
+    ghost.style.gridColumn = '1 / span ' + w;
+    ghost.style.gridRow = '1 / span ' + h;
+    ghost.setAttribute('aria-hidden', 'true');
+    grid.appendChild(ghost);
+    dropGhost = ghost;
+    return ghost;
+  }
+
+  function removeDropGhost() {
+    if (dropGhost && dropGhost.parentNode) {
+      dropGhost.parentNode.removeChild(dropGhost);
+    }
+    dropGhost = null;
+  }
+
+  function updateDropGhost(x, y, w, h) {
+    if (!dropGhost) return;
+    dropGhost.style.gridColumn = (x + 1) + ' / span ' + w;
+    dropGhost.style.gridRow = (y + 1) + ' / span ' + h;
+  }
 
   function onDragStart(event) {
     if (!editMode) {
@@ -148,6 +239,9 @@
         /* ignore */
       }
     }
+    const w = parseInt(card.dataset.cardW, 10);
+    const h = parseInt(card.dataset.cardH, 10);
+    createDropGhost(w, h);
   }
 
   function onDragEnd() {
@@ -155,18 +249,29 @@
       draggedCard.classList.remove('dashboard-card--dragging');
     }
     draggedCard = null;
+    removeDropGhost();
   }
 
   function onDragOver(event) {
     if (!editMode || !draggedCard) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+
+    // Update ghost to show where card would land.
+    const w = parseInt(draggedCard.dataset.cardW, 10);
+    const h = parseInt(draggedCard.dataset.cardH, 10);
+    const cell = getCellFromPointer(event.clientX, event.clientY);
+    const clampedX = clamp(cell.x, 0, gridColumns - w);
+    updateDropGhost(clampedX, cell.y, w, h);
   }
 
   function onDrop(event) {
     if (!editMode || !draggedCard) return;
     event.preventDefault();
     const target = event.target.closest('[data-dashboard-card]');
+    const w = parseInt(draggedCard.dataset.cardW, 10);
+    const h = parseInt(draggedCard.dataset.cardH, 10);
+
     if (target && target !== draggedCard) {
       // Swap grid positions of the two cards.
       const srcPos = {
@@ -183,6 +288,10 @@
       };
       setCardPosition(draggedCard, dstPos);
       setCardPosition(target, srcPos);
+    } else if (!target) {
+      // Dropped on empty grid space — move card to that position.
+      const cell = getCellFromPointer(event.clientX, event.clientY);
+      setCardPosition(draggedCard, { x: cell.x, y: cell.y, w: w, h: h });
     }
     onDragEnd();
   }
@@ -202,12 +311,13 @@
     if (!card) return;
     event.preventDefault();
     resizingCard = card;
-    const cardRect = card.getBoundingClientRect();
+    const colW = getGridColWidth();
+    const rowH = getGridRowHeight();
     resizeStart = {
       pointerX: event.clientX,
       pointerY: event.clientY,
-      cellWidth: cardRect.width / Math.max(parseInt(card.dataset.cardW, 10), 1),
-      cellHeight: cardRect.height / Math.max(parseInt(card.dataset.cardH, 10), 1),
+      colWidth: colW,
+      rowHeight: rowH,
       startW: parseInt(card.dataset.cardW, 10),
       startH: parseInt(card.dataset.cardH, 10),
     };
@@ -219,8 +329,8 @@
     if (!resizingCard || !resizeStart) return;
     const dx = event.clientX - resizeStart.pointerX;
     const dy = event.clientY - resizeStart.pointerY;
-    const newW = Math.round(resizeStart.startW + dx / Math.max(resizeStart.cellWidth, 1));
-    const newH = Math.round(resizeStart.startH + dy / Math.max(resizeStart.cellHeight, 1));
+    const newW = Math.round(resizeStart.startW + dx / Math.max(resizeStart.colWidth, 1));
+    const newH = Math.round(resizeStart.startH + dy / Math.max(resizeStart.rowHeight, 1));
     setCardPosition(resizingCard, {
       x: parseInt(resizingCard.dataset.cardX, 10),
       y: parseInt(resizingCard.dataset.cardY, 10),
@@ -375,13 +485,13 @@
           '<h2 class="dashboard-card__title"></h2>' +
           '<span class="dashboard-card__category"></span>' +
         '</div>' +
-        '<div class="dashboard-card__controls">' +
-          '<button type="button" class="dashboard-card__handle" data-dashboard-card-handle aria-label="Move card">⠿</button>' +
-          '<button type="button" class="dashboard-card__remove" data-dashboard-card-remove aria-label="Remove card">×</button>' +
+        '<div class="dashboard-card__controls" data-dashboard-card-controls>' +
+          '<button type="button" class="dashboard-card__handle" data-dashboard-card-handle aria-label="Move card" tabindex="-1">⠿</button>' +
+          '<button type="button" class="dashboard-card__remove" data-dashboard-card-remove aria-label="Remove card" tabindex="-1">×</button>' +
         '</div>' +
       '</header>' +
       '<div class="dashboard-card__body"><p class="dashboard-card__empty">Loaded — refresh the page to render.</p></div>' +
-      '<button type="button" class="dashboard-card__resize" data-dashboard-card-resize aria-label="Resize card">⇲</button>'
+      '<button type="button" class="dashboard-card__resize" data-dashboard-card-resize aria-label="Resize card" tabindex="-1">⇲</button>'
     );
     card.querySelector('.dashboard-card__title').textContent = resolvedDescriptor.title || cardId;
     card.querySelector('.dashboard-card__category').textContent = resolvedDescriptor.category || '';
@@ -397,15 +507,22 @@
   // ------------------------------------------------------------------
 
   if (editToggle) {
-    editToggle.addEventListener('click', () => setEditMode(!editMode));
+    editToggle.addEventListener('click', () => {
+      setEditMode(!editMode);
+      closeOptionsDropdown();
+    });
   }
 
   if (addButton) {
-    addButton.addEventListener('click', openModal);
+    addButton.addEventListener('click', () => {
+      closeOptionsDropdown();
+      openModal();
+    });
   }
 
   if (resetButton) {
     resetButton.addEventListener('click', async () => {
+      closeOptionsDropdown();
       if (!window.confirm('Reset your dashboard to the default layout?')) return;
       try {
         await fetch(resetEndpoint, {
@@ -442,12 +559,6 @@
       addCard(cardId, descriptor);
     });
   }
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && modal && !modal.hidden) {
-      closeModal();
-    }
-  });
 
   grid.addEventListener('dragstart', onDragStart);
   grid.addEventListener('dragend', onDragEnd);
