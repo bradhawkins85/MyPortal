@@ -66,7 +66,6 @@ from app.api.routes import (
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
-    dashboard as dashboard_api,
     email_tracking,
     essential8 as essential8_api,
     compliance_checks as compliance_checks_api,
@@ -178,7 +177,7 @@ from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import company_domains
 from app.services import company_access
-from app.services import dashboard_cards as dashboard_cards_service
+from app.services import dashboard as dashboard_service
 from app.services import email as email_service
 from app.services import imap as imap_service
 from app.services import m365_mail as m365_mail_service
@@ -961,7 +960,6 @@ app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
-app.include_router(dashboard_api.router)
 app.include_router(email_tracking.router)
 app.include_router(smtp2go_webhooks.router)
 app.include_router(essential8_api.router)
@@ -1956,14 +1954,12 @@ async def _get_optional_user(
 async def _build_consolidated_overview(
     request: Request, user: dict[str, Any]
 ) -> dict[str, Any]:
-    """Backwards-compatible wrapper around the dashboard card builder.
+    """Build the home-page dashboard payload.
 
-    The dashboard now uses the extensible card registry in
-    :mod:`app.services.dashboard_cards`. This wrapper is preserved so existing
-    tests and any other callers keep working; new code should call
-    :func:`dashboard_cards_service.build_user_dashboard` directly.
+    Delegates to :func:`app.services.dashboard.build_dashboard`. The wrapper
+    is kept so other tests/code monkey-patching this name keep working.
     """
-    return await dashboard_cards_service.build_user_dashboard(request, user)
+    return await dashboard_service.build_dashboard(request, user)
 
 
 
@@ -3908,16 +3904,18 @@ async def index(request: Request):
         return redirect
     overview = await _build_consolidated_overview(request, user)
 
+    extra: dict[str, Any] = {
+        "title": "Dashboard",
+        "dashboard": overview,
+    }
+    if isinstance(overview, dict) and "unread_notifications" in overview:
+        extra["notification_unread_count"] = overview.get("unread_notifications", 0)
+
     return await _render_template(
         "dashboard.html",
         request,
         user,
-        extra={
-            "title": "Dashboard",
-            "overview": overview,
-            "notification_unread_count": overview.get("unread_notifications", 0),
-            "ollama_enabled": overview.get("ollama_enabled", False),
-        },
+        extra=extra,
     )
 
 
