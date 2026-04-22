@@ -75,7 +75,8 @@
     });
     // Close the menu when a menu item (but not a checkbox toggle) is clicked.
     panel.addEventListener('click', function (event) {
-      if (event.target.closest('.header-menu__item') && !event.target.closest('.header-menu__check')) {
+      var item = event.target.closest('.header-menu__item');
+      if (item && !item.closest('.header-menu__check')) {
         setMenuState(menu, false);
       }
     });
