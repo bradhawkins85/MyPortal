@@ -24,7 +24,7 @@
           Best Practice checks are enabled or disabled <strong>globally</strong> across every company in MyPortal.
           Disabled checks are removed from per-company reports until re-enabled.
           Auto-Remediation will automatically apply the fix for supported checks immediately after each evaluation.
-          Checks marked <span class="badge badge--info" style="font-size:0.7rem">CIS</span> are sourced from the CIS Microsoft 365 Foundations Benchmark or CIS Intune Benchmarks.
+          Checks marked <span class="badge badge--info badge--cis">CIS</span> are sourced from the CIS Microsoft 365 Foundations Benchmark or CIS Intune Benchmarks.
         </p>
       </div>
     </header>
@@ -79,7 +79,7 @@
               <td>
                 <strong>{{ bp.name }}</strong>
                 {% if bp.is_cis_benchmark %}
-                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <span class="badge badge--info badge--cis" style="margin-left:0.4rem">CIS</span>
                 {% endif %}
                 <br /><small class="text-muted">{{ bp.id }}</small>
               </td>
@@ -121,7 +121,7 @@
               </td>
               <td>
                 <strong>{{ bp.name }}</strong>
-                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <span class="badge badge--info badge--cis" style="margin-left:0.4rem">CIS</span>
                 <br /><small class="text-muted">{{ bp.id }}</small>
               </td>
               <td>{{ bp.description }}</td>
@@ -162,7 +162,7 @@
               </td>
               <td>
                 <strong>{{ bp.name }}</strong>
-                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <span class="badge badge--info badge--cis" style="margin-left:0.4rem">CIS</span>
                 <br /><small class="text-muted">{{ bp.id }}</small>
               </td>
               <td>{{ bp.description }}</td>
@@ -203,7 +203,7 @@
               </td>
               <td>
                 <strong>{{ bp.name }}</strong>
-                <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+                <span class="badge badge--info badge--cis" style="margin-left:0.4rem">CIS</span>
                 <br /><small class="text-muted">{{ bp.id }}</small>
               </td>
               <td>{{ bp.description }}</td>
