@@ -22,6 +22,14 @@ async def get_room_by_matrix_id(matrix_room_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+async def get_room_by_ticket_id(ticket_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM chat_rooms WHERE linked_ticket_id = %s ORDER BY created_at DESC LIMIT 1",
+        (ticket_id,),
+    )
+    return dict(row) if row else None
+
+
 async def list_rooms(
     *,
     company_id: int | None = None,
