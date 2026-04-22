@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from 'macros/mobile.html' import mobile_collapsible %}
 
 {% block title %}Dashboard{% endblock %}
 
@@ -7,186 +8,156 @@
 {% endblock %}
 
 {% block content %}
-{% set overview = overview or {} %}
-{% set cards = overview.get('cards') or [] %}
-{% set catalogue = overview.get('catalogue') or [] %}
-{% set grid_columns = overview.get('grid_columns') or 12 %}
-<section
-  class="dashboard dashboard--customisable"
-  data-dashboard
-  data-grid-columns="{{ grid_columns }}"
-  data-layout-endpoint="/api/dashboard/layout"
-  data-card-endpoint="/api/dashboard/cards"
-  data-reset-endpoint="/api/dashboard/layout/reset"
->
-  <header class="dashboard__toolbar" role="toolbar" aria-label="Dashboard controls">
-    <div class="dashboard__toolbar-info">
-      <h1 class="dashboard__title">Dashboard</h1>
-    </div>
-    <details class="dashboard__options" data-dashboard-options>
-      <summary class="dashboard__options-toggle">
-        <svg class="dashboard__options-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" width="16" height="16">
-          <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 8.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM10 14a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/>
-        </svg>
-        <span class="dashboard__options-label">Options</span>
-      </summary>
-      <ul class="dashboard__options-menu" role="menu">
-        <li role="none">
-          <button type="button" class="dashboard__options-item" data-dashboard-add role="menuitem">
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" width="14" height="14"><path d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"/></svg>
-            Add card
-          </button>
-        </li>
-        <li role="none">
-          <button type="button" class="dashboard__options-item dashboard__options-item--edit" data-dashboard-edit aria-pressed="false" role="menuitem">
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" width="14" height="14"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
-            <span data-dashboard-edit-label>Edit layout</span>
-          </button>
-        </li>
-        <li role="separator" class="dashboard__options-separator" aria-hidden="true"></li>
-        <li role="none">
-          <button type="button" class="dashboard__options-item dashboard__options-item--danger" data-dashboard-reset role="menuitem">
-            <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" width="14" height="14"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
-            Reset to defaults
-          </button>
-        </li>
-      </ul>
-    </details>
-  </header>
+{% set dashboard = dashboard or {} %}
+{% set greeting = dashboard.get('greeting') or {} %}
+{% set attention = dashboard.get('attention') or {'items': [], 'all_clear': True} %}
+{% set quick_actions = dashboard.get('quick_actions') or {'actions': []} %}
+{% set recent_activity = dashboard.get('recent_activity') or {'notifications': [], 'changes': []} %}
+{% set system_health = dashboard.get('system_health') %}
 
-  <div
-    class="dashboard__grid"
-    role="list"
-    data-dashboard-grid
-    style="--dashboard-columns: {{ grid_columns }};"
-  >
-    {% for card in cards %}
-      {% set descriptor = card.descriptor %}
-      {% set position = card.position %}
-      {% set payload = card.payload %}
-      <article
-        class="card card--dashboard dashboard-card"
-        role="listitem"
-        data-dashboard-card="{{ descriptor.id }}"
-        data-card-x="{{ position.x }}"
-        data-card-y="{{ position.y }}"
-        data-card-w="{{ position.w }}"
-        data-card-h="{{ position.h }}"
-        data-card-refresh="{{ descriptor.refresh_interval_seconds }}"
-        style="grid-column: {{ position.x + 1 }} / span {{ position.w }}; grid-row: {{ position.y + 1 }} / span {{ position.h }};"
-      >
-        <header class="dashboard-card__header">
-          <div class="dashboard-card__header-text">
-            <h2 class="dashboard-card__title">{{ descriptor.title }}</h2>
-            {% if descriptor.category %}
-              <span class="dashboard-card__category">{{ descriptor.category }}</span>
-            {% endif %}
-          </div>
-          <div class="dashboard-card__controls" data-dashboard-card-controls>
-            <button
-              type="button"
-              class="dashboard-card__handle"
-              data-dashboard-card-handle
-              aria-label="Move {{ descriptor.title }}"
-              hidden
-              tabindex="-1"
-            >
-              <span aria-hidden="true">⠿</span>
-            </button>
-            <button
-              type="button"
-              class="dashboard-card__remove"
-              data-dashboard-card-remove
-              aria-label="Remove {{ descriptor.title }}"
-              hidden
-              tabindex="-1"
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        </header>
-        <div class="dashboard-card__body">
-          {% if payload._error %}
-            <p class="dashboard-card__error">{{ payload._error }}</p>
-          {% else %}
-            {% include descriptor.template_partial %}
-          {% endif %}
-        </div>
-        <button
-          type="button"
-          class="dashboard-card__resize"
-          data-dashboard-card-resize
-          aria-label="Resize {{ descriptor.title }}"
-          hidden
-          tabindex="-1"
-        >
-          <span aria-hidden="true">⇲</span>
-        </button>
-      </article>
-    {% else %}
-      <p class="dashboard__empty">
-        Your dashboard is empty. Use <strong>Add card</strong> to choose what to display.
+<section class="dashboard-summary" aria-label="Dashboard summary">
+  <article class="card card--panel dashboard-summary__greeting">
+    <div class="dashboard-summary__greeting-text">
+      <h2 class="dashboard-summary__title">
+        {{ greeting.get('greeting') or 'Hello' }}, {{ greeting.get('name') or 'there' }}.
+      </h2>
+      <p class="dashboard-summary__meta">
+        {% if greeting.get('company_name') %}
+          {{ greeting.role or 'Member' }} · {{ greeting.company_name }}
+        {% else %}
+          {{ greeting.role or 'Member' }}
+        {% endif %}
       </p>
-    {% endfor %}
-  </div>
+    </div>
+    {% if greeting.get('can_switch_company') %}
+      <a class="button button--ghost button--small" href="{{ greeting.switch_url or '/companies' }}">
+        Switch company
+      </a>
+    {% endif %}
+  </article>
 
-  <div
-    class="modal"
-    id="dashboard-add-card-modal"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="dashboard-add-card-title"
-    aria-hidden="true"
-    hidden
-    data-dashboard-add-modal
-  >
-    <div class="modal__content" role="document">
-      <button type="button" class="modal__close" data-dashboard-add-close>
-        <span class="visually-hidden">Close</span>
-        &times;
-      </button>
-      <h2 class="modal__title" id="dashboard-add-card-title">Add a card</h2>
-      <p class="modal__subtitle">Choose information to surface on your personal dashboard.</p>
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Search cards…"
-        data-dashboard-add-search
-        aria-label="Filter cards"
-      />
-      <ul class="dashboard-catalogue" data-dashboard-catalogue role="list">
-        {% for entry in catalogue %}
-          <li
-            class="dashboard-catalogue__item"
-            role="listitem"
-            data-catalogue-id="{{ entry.id }}"
-            data-catalogue-category="{{ entry.category }}"
-            data-catalogue-title="{{ entry.title }}"
-          >
-            <div class="dashboard-catalogue__text">
-              <strong class="dashboard-catalogue__title">{{ entry.title }}</strong>
-              <span class="dashboard-catalogue__category">{{ entry.category }}</span>
-              <p class="dashboard-catalogue__description">{{ entry.description }}</p>
-            </div>
-            <button
-              type="button"
-              class="button button--primary"
-              data-dashboard-add-card="{{ entry.id }}"
-            >
-              Add
-            </button>
+  <article class="card card--panel dashboard-summary__attention" aria-labelledby="dashboard-attention-heading">
+    <header class="dashboard-summary__section-header">
+      <h2 id="dashboard-attention-heading" class="dashboard-summary__section-title">Needs your attention</h2>
+    </header>
+    {% if attention.all_clear %}
+      <p class="dashboard-summary__empty">
+        Nothing needs your attention right now. <span aria-hidden="true">🎉</span>
+      </p>
+    {% else %}
+      <ul class="dashboard-summary__attention-list" role="list">
+        {% for item in attention.get('items') or [] %}
+          <li class="dashboard-summary__attention-item dashboard-summary__attention-item--{{ item.severity or 'info' }}">
+            <a class="dashboard-summary__attention-link" href="{{ item.href }}">
+              <span class="dashboard-summary__attention-count">{{ item.count }}</span>
+              <span class="dashboard-summary__attention-label">{{ item.label }}</span>
+              {% if item.detail %}
+                <span class="dashboard-summary__attention-detail">{{ item.detail }}</span>
+              {% endif %}
+            </a>
           </li>
         {% endfor %}
       </ul>
-    </div>
-  </div>
-</section>
-{% endblock %}
+    {% endif %}
+  </article>
 
-{% block scripts %}
-  {{ super() }}
-  {% if overview.get('ollama_enabled') %}
-    <script src="{{ static_url('/static/js/agent.js') }}" defer></script>
+  {% if quick_actions.get('actions') %}
+    <article class="card card--panel dashboard-summary__actions" aria-labelledby="dashboard-actions-heading">
+      <header class="dashboard-summary__section-header">
+        <h2 id="dashboard-actions-heading" class="dashboard-summary__section-title">Quick actions</h2>
+      </header>
+      <ul class="dashboard-actions" role="list">
+        {% for action in quick_actions.actions %}
+          <li class="dashboard-actions__item">
+            <a class="button {% if action.variant == 'primary' %}button--primary{% else %}button--ghost{% endif %} button--small"
+               href="{{ action.href }}">
+              {{ action.label }}
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </article>
   {% endif %}
-  <script src="{{ static_url('/static/js/dashboard.js') }}" defer></script>
+
+  <article class="card card--panel dashboard-summary__activity" aria-labelledby="dashboard-activity-heading">
+    <header class="dashboard-summary__section-header">
+      <h2 id="dashboard-activity-heading" class="dashboard-summary__section-title">Recent activity</h2>
+    </header>
+    {% call mobile_collapsible('Notifications', open=True, id='dashboard-activity-notifications') %}
+      {% set notifications = recent_activity.get('notifications') or [] %}
+      {% if notifications %}
+        <ul class="dashboard-activity-list" role="list">
+          {% for entry in notifications %}
+            <li class="dashboard-activity-list__item{% if not entry.read %} dashboard-activity-list__item--unread{% endif %}">
+              <div class="dashboard-activity-list__title">{{ entry.title }}</div>
+              {% if entry.subtitle %}
+                <div class="dashboard-activity-list__subtitle">{{ entry.subtitle }}</div>
+              {% endif %}
+              {% if entry.occurred_at %}
+                <div class="dashboard-activity-list__meta">
+                  <span data-utc="{{ entry.occurred_at.isoformat() }}">{{ entry.occurred_at.isoformat() }}</span>
+                </div>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        {% if recent_activity.get('notifications_link') %}
+          <a class="dashboard-summary__more-link" href="{{ recent_activity.notifications_link }}">View all notifications</a>
+        {% endif %}
+      {% else %}
+        <p class="dashboard-summary__empty">No recent notifications.</p>
+      {% endif %}
+    {% endcall %}
+
+    {% set changes = recent_activity.get('changes') or [] %}
+    {% if changes %}
+      {% call mobile_collapsible('Recent changes', open=False, id='dashboard-activity-changes') %}
+        <ul class="dashboard-activity-list" role="list">
+          {% for entry in changes %}
+            <li class="dashboard-activity-list__item">
+              <div class="dashboard-activity-list__title">{{ entry.title }}</div>
+              {% if entry.subtitle %}
+                <div class="dashboard-activity-list__subtitle">{{ entry.subtitle }}</div>
+              {% endif %}
+              {% if entry.occurred_at %}
+                <div class="dashboard-activity-list__meta">
+                  <span data-utc="{{ entry.occurred_at.isoformat() }}">{{ entry.occurred_at.isoformat() }}</span>
+                </div>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        {% if recent_activity.get('changes_link') %}
+          <a class="dashboard-summary__more-link" href="{{ recent_activity.changes_link }}">View change log</a>
+        {% endif %}
+      {% endcall %}
+    {% endif %}
+  </article>
+
+  {% if system_health %}
+    <article class="card card--panel dashboard-summary__health" aria-labelledby="dashboard-health-heading">
+      <header class="dashboard-summary__section-header">
+        <h2 id="dashboard-health-heading" class="dashboard-summary__section-title">System health</h2>
+      </header>
+      <ul class="dashboard-health" role="list">
+        <li class="dashboard-health__item">
+          <span class="dashboard-health__value">{{ system_health.webhook_pending }}</span>
+          <span class="dashboard-health__label">Webhooks pending</span>
+        </li>
+        <li class="dashboard-health__item">
+          <span class="dashboard-health__value">{{ system_health.webhook_in_progress }}</span>
+          <span class="dashboard-health__label">In progress</span>
+        </li>
+        <li class="dashboard-health__item dashboard-health__item--{% if system_health.webhook_failed %}danger{% else %}neutral{% endif %}">
+          <span class="dashboard-health__value">{{ system_health.webhook_failed }}</span>
+          <span class="dashboard-health__label">Failed</span>
+        </li>
+      </ul>
+      <div class="dashboard-summary__more-links">
+        <a class="dashboard-summary__more-link" href="{{ system_health.webhooks_url }}">Webhook activity</a>
+        <a class="dashboard-summary__more-link" href="{{ system_health.service_status_url }}">Service status</a>
+      </div>
+    </article>
+  {% endif %}
+</section>
 {% endblock %}
