@@ -20871,8 +20871,15 @@ async def chat_room_page(
         if tech:
             assigned_tech_display_name = " ".join(filter(None, [tech.get("first_name"), tech.get("last_name")])) or tech.get("email")
 
+    creator_display_name = None
+    if room.get("created_by_user_id"):
+        creator = await user_repo.get_user_by_id(room["created_by_user_id"])
+        if creator:
+            creator_display_name = " ".join(filter(None, [creator.get("first_name"), creator.get("last_name")])) or creator.get("email")
+
     room_dict = dict(room)
     room_dict["assigned_tech_display_name"] = assigned_tech_display_name
+    room_dict["creator_display_name"] = creator_display_name
 
     ctx = await _build_base_context(request, current_user)
     ctx.update({
