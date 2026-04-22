@@ -204,6 +204,34 @@ def test_sanitise_layout_caps_card_count():
     assert len(out) <= dashboard_cards.MAX_LAYOUT_CARDS
 
 
+def test_sanitise_layout_caps_card_count_with_distinct_ids(monkeypatch):
+    """Verify the cap also fires when each entry uses a distinct, valid id."""
+    # Construct a synthetic registry of MAX_LAYOUT_CARDS + 5 unique ids by
+    # cloning an existing descriptor with new ids, so we can exercise the
+    # cap path that the duplicate-id deduper would otherwise short-circuit.
+    base = dashboard_cards.get_card("tickets.my_open")
+    extra_ids = [f"_synth.{i}" for i in range(dashboard_cards.MAX_LAYOUT_CARDS + 5)]
+    extra_registry = {
+        cid: dashboard_cards.CardDescriptor(
+            id=cid,
+            title=base.title,
+            description=base.description,
+            category=base.category,
+            template_partial=base.template_partial,
+            permission_check=base.permission_check,
+            data_loader=base.data_loader,
+            default_size=base.default_size,
+        )
+        for cid in extra_ids
+    }
+    merged = {**dashboard_cards._REGISTRY_BY_ID, **extra_registry}
+    monkeypatch.setattr(dashboard_cards, "_REGISTRY_BY_ID", merged)
+
+    payload = [{"id": cid, "x": 0, "y": 0, "w": 4, "h": 2} for cid in extra_ids]
+    out = dashboard_cards.sanitise_layout(payload)
+    assert len(out) == dashboard_cards.MAX_LAYOUT_CARDS
+
+
 def test_sanitise_layout_rejects_non_list_payloads():
     assert dashboard_cards.sanitise_layout(None) == []
     assert dashboard_cards.sanitise_layout({"cards": []}) == []

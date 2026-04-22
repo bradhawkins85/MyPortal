@@ -521,6 +521,10 @@ async def _load_recent_notifications(ctx: CardContext) -> Mapping[str, Any]:
 # Registry
 # ---------------------------------------------------------------------------
 
+def _require_ollama_card(ctx: CardContext) -> bool:
+    return ctx.module_enabled("ollama") and ctx.user_id is not None
+
+
 _CARD_REGISTRY: tuple[CardDescriptor, ...] = (
     CardDescriptor(
         id="overview.companies",
@@ -640,7 +644,7 @@ _CARD_REGISTRY: tuple[CardDescriptor, ...] = (
         description="Ask the MyPortal agent a question.",
         category="Knowledge",
         template_partial="partials/dashboard_cards/agent.html",
-        permission_check=lambda ctx: ctx.module_enabled("ollama") and ctx.user_id is not None,
+        permission_check=_require_ollama_card,
         data_loader=_load_agent_quick_ask,
         default_size="large",
     ),
