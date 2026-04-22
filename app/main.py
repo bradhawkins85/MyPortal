@@ -4542,7 +4542,15 @@ async def compliance_control_requirements_page(request: Request, control_id: int
     requirement_compliance_map = {}
     for rc in control_data.get("requirement_compliance", []):
         requirement_compliance_map[rc["requirement_id"]] = rc
-    
+
+    # Compute per-maturity-level statuses dynamically from requirement records
+    # so the header badges reflect actual requirement state (not stale stored status).
+    ml_statuses = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    ctrl_ml = ml_statuses.get(
+        control_id,
+        {"ml1": "not_started", "ml2": "not_started", "ml3": "not_started"},
+    )
+
     is_super_admin = bool(user.get("is_super_admin"))
     
     extra = {
@@ -4552,6 +4560,9 @@ async def compliance_control_requirements_page(request: Request, control_id: int
         "requirements_ml2": control_data["requirements_ml2"],
         "requirements_ml3": control_data["requirements_ml3"],
         "company_compliance": control_data.get("company_compliance"),
+        "ml1_status": ctrl_ml["ml1"],
+        "ml2_status": ctrl_ml["ml2"],
+        "ml3_status": ctrl_ml["ml3"],
         "requirement_compliance_map": requirement_compliance_map,
         "company": company,
         "is_super_admin": is_super_admin,

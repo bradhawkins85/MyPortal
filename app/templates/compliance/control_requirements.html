@@ -35,23 +35,32 @@
       {% if company %}
       <div class="management__header-actions compliance__header-actions">
         <span class="tag tag--muted">{{ company.name }}</span>
-        {% if company_compliance %}
-        <span class="badge badge--status-{{ company_compliance.status }}">
-          {% if company_compliance.status == 'not_started' %}Not started
-          {% elif company_compliance.status == 'in_progress' %}In progress
-          {% elif company_compliance.status == 'compliant' %}Compliant
-          {% elif company_compliance.status == 'non_compliant' %}Non-compliant
-          {% elif company_compliance.status == 'not_applicable' %}Not applicable
-          {% endif %}
-        </span>
-        <span class="badge badge--maturity-{{ company_compliance.maturity_level }}">
-          {% if company_compliance.maturity_level == 'ml0' %}ML0
-          {% elif company_compliance.maturity_level == 'ml1' %}ML1
-          {% elif company_compliance.maturity_level == 'ml2' %}ML2
-          {% elif company_compliance.maturity_level == 'ml3' %}ML3
-          {% endif %}
-        </span>
-        {% endif %}
+        <div class="compliance-table__ml-badges">
+          <span class="badge badge--status-{{ ml1_status }}">
+            ML1:
+            {% if ml1_status == 'not_started' %}Not started
+            {% elif ml1_status == 'in_progress' %}In progress
+            {% elif ml1_status == 'compliant' %}Compliant
+            {% elif ml1_status == 'non_compliant' %}Non-compliant
+            {% else %}Not started{% endif %}
+          </span>
+          <span class="badge badge--status-{{ ml2_status }}">
+            ML2:
+            {% if ml2_status == 'not_started' %}Not started
+            {% elif ml2_status == 'in_progress' %}In progress
+            {% elif ml2_status == 'compliant' %}Compliant
+            {% elif ml2_status == 'non_compliant' %}Non-compliant
+            {% else %}Not started{% endif %}
+          </span>
+          <span class="badge badge--status-{{ ml3_status }}">
+            ML3:
+            {% if ml3_status == 'not_started' %}Not started
+            {% elif ml3_status == 'in_progress' %}In progress
+            {% elif ml3_status == 'compliant' %}Compliant
+            {% elif ml3_status == 'non_compliant' %}Non-compliant
+            {% else %}Not started{% endif %}
+          </span>
+        </div>
       </div>
       {% endif %}
     </header>
