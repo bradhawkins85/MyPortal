@@ -29,6 +29,8 @@ the batch runners in ``cis_benchmark.py``.
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Union
 
@@ -1089,6 +1091,163 @@ async def set_enabled_checks(
 # Runner
 # ---------------------------------------------------------------------------
 
+# HTTP status codes that indicate a transient Microsoft Graph / Exchange Online
+# failure where retrying the request is likely to succeed.  Permanent errors
+# (e.g. 400 bad request, 401/403 auth/permission, 404 not found) are NOT
+# retried because retrying cannot turn them into the real check result – those
+# need real remediation (granting permissions, fixing configuration, etc.) and
+# the catalog's static remediation text already covers them.
+_RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+# Maximum number of attempts (initial + retries) for a single check request.
+_MAX_CHECK_ATTEMPTS = 3
+
+# Base delay (seconds) for exponential backoff between retries.  Actual delays
+# are 1s, 2s, 4s, … up to ``_MAX_RETRY_DELAY``.
+_RETRY_BASE_DELAY = 1.0
+_MAX_RETRY_DELAY = 8.0
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    """Return the exponential-backoff delay (seconds) before the next retry.
+
+    ``attempt`` is the 1-indexed attempt number that has just failed (so
+    ``attempt=1`` is the delay before the first retry, producing 1s, 2s, 4s,
+    … capped at :data:`_MAX_RETRY_DELAY`).
+    """
+    return min(_RETRY_BASE_DELAY * (2 ** (attempt - 1)), _MAX_RETRY_DELAY)
+
+# Pre-compiled regex matching a retryable HTTP status code embedded in an
+# ``M365Error`` message (e.g. ``"Microsoft Graph request failed (429)"``).
+_RETRYABLE_STATUS_IN_DETAILS = re.compile(
+    r"\(\s*(?:" + "|".join(str(s) for s in sorted(_RETRYABLE_HTTP_STATUSES)) + r")\s*\)"
+)
+
+# Substrings in a check's ``details`` that indicate a transient request-level
+# failure even when no HTTP status code is present (e.g. network / decode
+# errors raised by httpx).  Keep this list narrow so legitimately-unknown
+# results that happen for *non-transient* reasons are not retried.
+_TRANSIENT_DETAIL_MARKERS: tuple[str, ...] = (
+    "decode error",
+    "response parse error",
+    "request decode error",
+)
+
+
+def _is_retryable_m365_error(exc: M365Error) -> bool:
+    """Return True if ``exc`` represents a transient failure worth retrying.
+
+    Treats network-level / decode errors (no HTTP status attached) and the
+    standard transient HTTP statuses as retryable.  Permanent client errors
+    (400, 401, 403, 404, etc.) are not retried.
+    """
+    status = getattr(exc, "http_status", None)
+    if status is None:
+        return True
+    return status in _RETRYABLE_HTTP_STATUSES
+
+
+def _result_indicates_transient_failure(result: Any) -> bool:
+    """Return True when an unknown check result looks like a transient failure.
+
+    The underlying check helpers (in ``cis_benchmark`` and this module) catch
+    :class:`M365Error` themselves and return a ``STATUS_UNKNOWN`` result whose
+    ``details`` embeds the original error message.  This helper inspects that
+    message to decide whether the failure was transient (worth retrying) or
+    permanent / informational (a real "we cannot determine this" answer).
+
+    For batch runners that return a ``list`` of result dicts (e.g. the Intune
+    benchmark groups), the list is treated as transient when *every* item is
+    an unknown result with a transient marker – this is the shape produced
+    when the batch's top-level Graph call fails and propagates the same
+    error to every check in the group.
+    """
+    if isinstance(result, list):
+        if not result:
+            return False
+        return all(_result_indicates_transient_failure(item) for item in result)
+    if not isinstance(result, dict):
+        return False
+    if result.get("status") != STATUS_UNKNOWN:
+        return False
+    details = result.get("details") or ""
+    if not isinstance(details, str) or not details:
+        return False
+    if _RETRYABLE_STATUS_IN_DETAILS.search(details):
+        return True
+    lowered = details.lower()
+    return any(marker in lowered for marker in _TRANSIENT_DETAIL_MARKERS)
+
+
+async def _call_check_with_retry(
+    factory: Callable[[], Awaitable[Any]],
+    *,
+    company_id: int,
+    check_id: str,
+    max_attempts: int = _MAX_CHECK_ATTEMPTS,
+) -> Any:
+    """Invoke ``factory()`` with retry on transient failures.
+
+    ``factory`` must be a zero-argument callable that returns a fresh awaitable
+    each time it is invoked (so each attempt issues a new HTTP request).
+
+    Two retry signals are honoured:
+
+    * A raised :class:`M365Error` whose HTTP status is transient (or absent,
+      which indicates a network/decode error).  Permanent statuses re-raise
+      immediately.
+    * A returned result dict whose ``status`` is ``STATUS_UNKNOWN`` and whose
+      ``details`` embeds a transient HTTP status or network/parse error
+      marker.  Many check helpers already swallow :class:`M365Error` and
+      return such a dict, so this lets us retry them transparently.
+
+    On the final attempt the most recent outcome is returned (or re-raised)
+    unchanged so the caller can record the underlying error message in the
+    persisted result.
+    """
+    last_exc: M365Error | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = await factory()
+        except M365Error as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not _is_retryable_m365_error(exc):
+                raise
+            delay = _retry_backoff_seconds(attempt)
+            log_info(
+                "M365 best practice check transient failure – retrying",
+                company_id=company_id,
+                check_id=check_id,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                http_status=getattr(exc, "http_status", None),
+                graph_error_code=getattr(exc, "graph_error_code", None),
+                retry_in_seconds=delay,
+            )
+            await asyncio.sleep(delay)
+            continue
+
+        if attempt >= max_attempts or not _result_indicates_transient_failure(result):
+            return result
+
+        delay = _retry_backoff_seconds(attempt)
+        log_info(
+            "M365 best practice check returned transient unknown – retrying",
+            company_id=company_id,
+            check_id=check_id,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            details=(result.get("details") if isinstance(result, dict) else None),
+            retry_in_seconds=delay,
+        )
+        await asyncio.sleep(delay)
+
+    # Defensive: loop always either returns or raises, but keep mypy/static
+    # analysers happy in case max_attempts is somehow <= 0.
+    if last_exc is not None:
+        raise last_exc
+    raise M365Error(f"Best practice check '{check_id}' produced no result")
+
 
 async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     """Run all globally-enabled best-practice checks for ``company_id``.
@@ -1148,7 +1307,11 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
                 if batch_runner:
                     try:
-                        batch = await batch_runner(graph_token)
+                        batch = await _call_check_with_retry(
+                            lambda runner=batch_runner: runner(graph_token),
+                            company_id=company_id,
+                            check_id=f"cis_group:{cis_group}",
+                        )
                         cis_group_cache[cis_group] = {r["check_id"]: r for r in batch}
                     except M365Error as exc:
                         log_error(
@@ -1174,9 +1337,17 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 if source_type == "exo":
                     if exo_token is None:
                         exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
-                    raw = await runner(exo_token, exo_tenant_id)  # type: ignore[call-arg]
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
                 else:
-                    raw = await runner(graph_token)  # type: ignore[call-arg]
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
             except M365Error as exc:
