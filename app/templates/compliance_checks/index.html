@@ -168,8 +168,8 @@
     </header>
     <div class="modal__body">
       <form id="assign-form" class="form">
-        <div class="form__group">
-          <label class="form__label" for="assign-category">Category</label>
+        <div class="form-group">
+          <label class="form-label" for="assign-category">Category</label>
           <select class="form-input" id="assign-category" name="category_id">
             <option value="">— all categories —</option>
             {% for cat in categories %}
@@ -177,14 +177,14 @@
             {% endfor %}
           </select>
         </div>
-        <div class="form__group">
-          <label class="form__label" for="assign-check">Check</label>
+        <div class="form-group">
+          <label class="form-label" for="assign-check">Check</label>
           <select class="form-input" id="assign-check" name="check_id" required>
             <option value="">Select a check…</option>
           </select>
         </div>
-        <div class="form__group">
-          <label class="form__label" for="assign-notes">Notes (optional)</label>
+        <div class="form-group">
+          <label class="form-label" for="assign-notes">Notes (optional)</label>
           <textarea class="form-input" id="assign-notes" name="notes" rows="3"></textarea>
         </div>
         <div class="form__actions">
