@@ -73,10 +73,14 @@
 
       <div class="management__body management__body--columns">
         <div class="management__column management__column--details">
-          <article class="card card--panel">
-            <header class="card__header">
+          <details class="card card--panel card-collapsible" open>
+            <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Ticket details</h2>
-            </header>
+              <div class="card__collapsible-meta">
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content">
             <form action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form">
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
@@ -289,7 +293,8 @@
                 <button type="submit" class="button button--primary">Save changes</button>
               </div>
             </form>
-          </article>
+            </div>
+          </details>
 
           {% if relevant_services %}
             <article class="card card--panel">
@@ -505,6 +510,61 @@
             </div>
           </article>
 
+          {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Book a Call</h2>
+              </header>
+              <div class="card__body">
+                <p class="text-muted" style="margin-bottom: 1rem;">
+                  Schedule a call with {{ ticket_assigned_user.email }} to discuss this ticket.
+                </p>
+                <button
+                  data-cal-link="{{ ticket_assigned_user.booking_link_url }}"
+                  data-ticket-id="{{ ticket.id }}"
+                  data-ticket-subject="{{ ticket.subject | e }}"
+                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
+                  data-user-email="{{ (user.email or '') | e }}"
+                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
+                  class="button button--primary"
+                >
+                  Book a Call
+                </button>
+              </div>
+            </article>
+          {% endif %}
+
+          {% if matrix_chat_enabled %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Chat</h2>
+              </header>
+              <div class="card__body">
+                {% if ticket_chat_room %}
+                  <p class="text-muted" style="margin-bottom: 1rem;">
+                    A chat room is linked to this ticket.
+                  </p>
+                  <a href="/chat/{{ ticket_chat_room.id }}" class="button button--primary">
+                    Open Chat
+                  </a>
+                {% else %}
+                  <p class="text-muted" style="margin-bottom: 1rem;">
+                    Start a chat room for this ticket. You will be added as room admin.
+                  </p>
+                  <button
+                    type="button"
+                    class="button button--primary"
+                    data-start-chat-button
+                    data-ticket-id="{{ ticket.id }}"
+                    data-ticket-subject="{{ ticket.subject | e }}"
+                  >
+                    Start Chat
+                  </button>
+                {% endif %}
+              </div>
+            </article>
+          {% endif %}
+
           <article class="card card--panel">
             <header class="card__header">
               <h2 class="card__title">Attachments</h2>
@@ -559,30 +619,6 @@
               </p>
             </div>
           </article>
-
-          {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
-            <article class="card card--panel">
-              <header class="card__header">
-                <h2 class="card__title">Book a Call</h2>
-              </header>
-              <div class="card__body">
-                <p class="text-muted" style="margin-bottom: 1rem;">
-                  Schedule a call with {{ ticket_assigned_user.email }} to discuss this ticket.
-                </p>
-                <button
-                  data-cal-link="{{ ticket_assigned_user.booking_link_url }}"
-                  data-ticket-id="{{ ticket.id }}"
-                  data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
-                  data-user-email="{{ (user.email or '') | e }}"
-                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
-                  class="button button--primary"
-                >
-                  Book a Call
-                </button>
-              </div>
-            </article>
-          {% endif %}
 
           {% if ticket.xero_invoice_number %}
             <article class="card card--panel">
@@ -1396,5 +1432,42 @@
         alert(error.message || 'Failed to exclude tag. Please try again.');
       }
     }
+
+    // Start Chat button handler
+    document.querySelectorAll('[data-start-chat-button]').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const ticketId = btn.dataset.ticketId;
+        const ticketSubject = btn.dataset.ticketSubject;
+        btn.disabled = true;
+        btn.textContent = 'Starting chat…';
+        try {
+          const createResp = await fetch('/api/chat/rooms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token or "" }}' },
+            body: JSON.stringify({ subject: ticketSubject, linked_ticket_id: parseInt(ticketId, 10) }),
+          });
+          if (!createResp.ok) {
+            const err = await createResp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to create chat room');
+          }
+          const room = await createResp.json();
+          // Join as technician/admin so the room is assigned to this user
+          const joinResp = await fetch('/api/chat/rooms/' + room.id + '/join', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token or "" }}' },
+          });
+          if (!joinResp.ok) {
+            const err = await joinResp.json().catch(() => ({}));
+            console.warn('Failed to join chat room as technician:', err.detail || joinResp.status);
+          }
+          window.location.href = '/chat/' + room.id;
+        } catch (error) {
+          console.error('Error starting chat:', error);
+          alert(error.message || 'Failed to start chat. Please try again.');
+          btn.disabled = false;
+          btn.textContent = 'Start Chat';
+        }
+      });
+    });
   </script>
 {% endblock %}
