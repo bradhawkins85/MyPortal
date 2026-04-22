@@ -462,23 +462,23 @@
       if (!toggle || !panel) {
         return;
       }
-      toggle.addEventListener('click', function () {
-        // Defer so header_menu.js has already toggled the panel state.
-        setTimeout(function () {
-          if (!panel.hidden) {
-            var rect = toggle.getBoundingClientRect();
-            panel.style.position = 'fixed';
-            panel.style.top = (rect.bottom + 4) + 'px';
-            panel.style.right = (window.innerWidth - rect.right) + 'px';
-            panel.style.left = 'auto';
-          } else {
-            panel.style.position = '';
-            panel.style.top = '';
-            panel.style.right = '';
-            panel.style.left = '';
-          }
-        }, 0);
+      // Use a MutationObserver to react to the panel's hidden attribute changing,
+      // which is how header_menu.js opens and closes panels.
+      var observer = new MutationObserver(function () {
+        if (!panel.hidden) {
+          var rect = toggle.getBoundingClientRect();
+          panel.style.position = 'fixed';
+          panel.style.top = (rect.bottom + 4) + 'px';
+          panel.style.right = (window.innerWidth - rect.right) + 'px';
+          panel.style.left = 'auto';
+        } else {
+          panel.style.position = '';
+          panel.style.top = '';
+          panel.style.right = '';
+          panel.style.left = '';
+        }
       });
+      observer.observe(panel, { attributes: true, attributeFilter: ['hidden'] });
     });
   }
 
