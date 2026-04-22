@@ -1548,7 +1548,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             )
             return {
                 "success": False,
-                "message": f"Unable to acquire Exchange Online token: {exc}",
+                "message": "Unable to acquire Exchange Online token. Check that the app credentials are correct.",
             }
 
         cmdlet = bp.get("remediation_cmdlet", "")
@@ -1570,6 +1570,24 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         remediation_payload = bp.get("remediation_payload") or {}
         try:
             graph_token = await acquire_access_token(company_id)
+        except M365Error as exc:
+            log_error(
+                "M365 best practice remediation – Graph token acquisition failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            await bp_repo.update_remediation_status(
+                company_id=company_id,
+                check_id=check_id,
+                remediation_status="failed",
+                remediated_at=remediated_at,
+            )
+            return {
+                "success": False,
+                "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
+            }
+        try:
             await _graph_patch(graph_token, remediation_url, remediation_payload)
             success = True
         except M365Error as exc:

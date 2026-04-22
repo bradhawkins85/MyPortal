@@ -1080,6 +1080,32 @@ async def test_remediate_concealed_names_failure_on_graph_error():
     assert upserts[0]["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_concealed_names_failure_on_token_acquisition_error():
+    """If Graph token acquisition fails, remediation status is recorded as 'failed' and a clear message is returned."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Invalid client secret"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=3, check_id="bp_concealed_names")
+
+    assert result["success"] is False
+    assert result["message"] == "Unable to acquire Microsoft Graph token. Check that the app credentials are correct."
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 3
+    assert upserts[0]["check_id"] == "bp_concealed_names"
+    assert upserts[0]["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Tenant capability detection / N/A marking
 # ---------------------------------------------------------------------------
