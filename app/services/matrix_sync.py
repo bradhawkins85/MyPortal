@@ -48,6 +48,16 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             link = await chat_repo.get_chat_user_link(matrix_user_id=sender)
             portal_user_id = link["user_id"] if link else None
 
+            sender_display_name: str | None = None
+            if portal_user_id:
+                from app.repositories import users as user_repo
+                user = await user_repo.get_user_by_id(portal_user_id)
+                if user:
+                    full_name = " ".join(filter(None, [user.get("first_name"), user.get("last_name")]))
+                    sender_display_name = full_name or user.get("email") or None
+            if not sender_display_name:
+                sender_display_name = await matrix_service.get_display_name(sender)
+
             await chat_repo.add_message(
                 room_id=room["id"],
                 matrix_event_id=event_id,
@@ -55,6 +65,7 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
                 body=body,
                 msgtype=msgtype,
                 sender_user_id=portal_user_id,
+                sender_display_name=sender_display_name,
                 sent_at=sent_at,
             )
 
