@@ -20,6 +20,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import audit as audit_service
 from app.services import matrix as matrix_service
 from app.services import matrix_admin
+from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
@@ -172,16 +173,27 @@ async def send_message(
         log_error("Failed to send Matrix message", room_id=room_id, error=str(exc))
         raise HTTPException(status_code=502, detail="Failed to send message")
 
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     msg = await chat_repo.add_message(
         room_id=room_id,
         matrix_event_id=event_id,
         sender_matrix_id=current_user.get("matrix_user_id") or _settings.matrix_bot_user_id or "",
         body=body.body,
         sender_user_id=user_id,
-        sent_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        sent_at=now,
     )
 
-    return JSONResponse(_serialize(dict(msg)), status_code=201)
+    await chat_repo.update_room(room_id, last_message_at=now)
+
+    msg_data = _serialize(dict(msg))
+    msg_data.setdefault("sender_display_name", display_name)
+
+    await refresh_notifier.broadcast_refresh(
+        topics=[f"chat:room:{room_id}"],
+        data={"message": msg_data, "room_id": room_id},
+    )
+
+    return JSONResponse(msg_data, status_code=201)
 
 
 @router.post("/rooms/{room_id}/join", summary="Join a chat room (technician/admin)")
