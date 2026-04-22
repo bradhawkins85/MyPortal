@@ -1,9 +1,0 @@
-{# Staff summary card #}
-{% set p = payload or {} %}
-<div class="dashboard-card__staff">
-  <div class="dashboard-card__highlight">{{ p.formatted_total or '0' }}</div>
-  <div class="dashboard-card__meta">
-    {{ p.formatted_active or '0' }} active staff
-  </div>
-  <a class="dashboard-card__link" href="/staff">Manage staff</a>
-</div>
