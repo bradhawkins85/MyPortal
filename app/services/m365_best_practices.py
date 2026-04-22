@@ -52,7 +52,7 @@ from app.services.cis_benchmark import (
     _check_security_defaults,
     _check_sspr_enabled,
 )
-from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command, acquire_access_token
+from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command, _graph_get, _graph_patch, acquire_access_token
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ ExoRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
 BestPracticeRunner = Union[GraphRunner, ExoRunner]
 
 # Keys that are implementation details and must not be exposed in the public catalog
-_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params"})
+_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload"})
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +147,56 @@ async def _run_direct_send_remediation(exo_token: str, tenant_id: str) -> bool:
     except M365Error:
         return False
 
+
+_REPORT_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/reportSettings"
+
+
+async def _check_concealed_names(token: str) -> dict[str, Any]:
+    """Check whether concealed names are displayed in Microsoft 365 usage reports.
+
+    Calls ``GET /admin/reportSettings`` and inspects the ``displayConcealedNames``
+    property.  When ``displayConcealedNames`` is ``True`` the tenant has opted to
+    show real user, group, and site names in reports (the best-practice
+    recommendation); when it is ``False`` obfuscated names are shown instead.
+
+    Requires the ``Reports.Read.All`` or ``ReportSettings.Read.All`` Graph
+    application permission.
+    """
+    check_id = "bp_concealed_names"
+    check_name = "Display concealed user, group, and site names in all reports is enabled"
+    try:
+        data = await _graph_get(token, _REPORT_SETTINGS_URL)
+        display_concealed = data.get("displayConcealedNames")
+        if display_concealed is True:
+            return {
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": STATUS_PASS,
+                "details": "Report settings are configured to display real user, group, and site names.",
+            }
+        if display_concealed is False:
+            return {
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": STATUS_FAIL,
+                "details": (
+                    "Report settings are configured to conceal user, group, and site names. "
+                    "Enable display of real names to improve report usability and auditability."
+                ),
+            }
+        return {
+            "check_id": check_id,
+            "check_name": check_name,
+            "status": STATUS_UNKNOWN,
+            "details": "Unable to determine report settings concealed names status.",
+        }
+    except M365Error as exc:
+        return {
+            "check_id": check_id,
+            "check_name": check_name,
+            "status": STATUS_UNKNOWN,
+            "details": f"Unable to query report settings: {exc}",
+        }
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
     {
@@ -466,6 +516,28 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
     },
+    {
+        "id": "bp_concealed_names",
+        "name": "Display concealed user, group, and site names in all reports is enabled",
+        "description": (
+            "Microsoft 365 usage reports should display real user, group, and site "
+            "names so that administrators can accurately audit activity and identify "
+            "issues.  When concealed names are enabled, obfuscated identifiers are "
+            "shown instead, which reduces the usefulness of usage reports."
+        ),
+        "remediation": (
+            "Run the PowerShell command: "
+            "Update-MgAdminReportSetting -DisplayConcealedNames $true\n"
+            "Or via the Microsoft 365 admin center: Settings → Org settings → "
+            "Services → Reports → enable 'Display concealed user, group, and site names'."
+        ),
+        "source": _check_concealed_names,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _REPORT_SETTINGS_URL,
+        "remediation_payload": {"displayConcealedNames": True},
+    },
 ]
 
 
@@ -726,9 +798,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Currently only EXO-type checks that declare ``has_remediation: True``
-    support automated remediation.  For all other check IDs the function
-    returns a failure result without making any external calls.
+    Supports two remediation source types:
+
+    * ``"exo"`` – executes a cmdlet via the Exchange Online REST API using the
+      ``remediation_cmdlet`` and ``remediation_params`` catalog fields.
+    * ``"graph"`` – issues a ``PATCH`` request to Microsoft Graph using the
+      ``remediation_url`` and ``remediation_payload`` catalog fields.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -775,6 +850,22 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 error=str(exc),
             )
             success = False
+    elif source_type == "graph":
+        remediation_url = bp.get("remediation_url", "")
+        remediation_payload = bp.get("remediation_payload") or {}
+        try:
+            graph_token = await acquire_access_token(company_id)
+            await _graph_patch(graph_token, remediation_url, remediation_payload)
+            success = True
+        except M365Error as exc:
+            log_error(
+                "M365 best practice Graph remediation failed",
+                company_id=company_id,
+                check_id=check_id,
+                url=remediation_url,
+                error=str(exc),
+            )
+            success = False
     else:
         success = False
 
@@ -797,13 +888,13 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         return {
             "success": True,
             "message": (
-                f"Remediation command executed successfully. "
-                f"Re-evaluate the check to confirm the change took effect."
+                "Remediation command executed successfully. "
+                "Re-evaluate the check to confirm the change took effect."
             ),
         }
     return {
         "success": False,
-        "message": "Remediation command failed. Check that the app has the required Exchange Online permissions.",
+        "message": "Remediation command failed. Check that the app has the required permissions.",
     }
 
 

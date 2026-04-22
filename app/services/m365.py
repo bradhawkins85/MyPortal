@@ -935,6 +935,35 @@ async def _graph_post(
     return response.json()
 
 
+async def _graph_patch(
+    access_token: str,
+    url: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Issue a PATCH request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
+    _validate_graph_url(url)
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.patch(url, headers=headers, json=payload)
+    if response.status_code not in (200, 204):
+        log_error(
+            "Microsoft Graph PATCH failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        raise M365Error(
+            f"Microsoft Graph PATCH failed ({response.status_code})",
+            http_status=response.status_code,
+        )
+    if response.status_code == 204:
+        return {}
+    return response.json()
+
+
 async def _graph_delete(access_token: str, url: str) -> None:
     """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
     _validate_graph_url(url)
