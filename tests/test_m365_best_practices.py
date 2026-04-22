@@ -9,6 +9,8 @@ import pytest
 from app.services import m365_best_practices as bp_service
 from app.services.m365 import M365Error
 
+_GUEST_ROLE_ID_MOST_RESTRICTIVE = bp_service._GUEST_ROLE_ID_MOST_RESTRICTIVE
+
 
 @pytest.fixture
 def anyio_backend() -> str:
@@ -258,6 +260,64 @@ async def test_run_best_practices_handles_check_error_gracefully():
 
 
 # ---------------------------------------------------------------------------
+# run_single_check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_runs_and_persists():
+    catalog = bp_service.list_best_practices()
+    enabled_id = catalog[0]["id"]
+    target = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == enabled_id)
+
+    fake_result = {"check_id": enabled_id, "check_name": target["name"], "status": "pass", "details": "ok"}
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    real_source = target["source"]
+    fake_source = AsyncMock(return_value=fake_result)
+    target["source"] = fake_source
+    try:
+        with (
+            patch("app.services.m365_best_practices.acquire_access_token", new_callable=AsyncMock) as mock_token,
+            patch("app.services.m365_best_practices.get_enabled_check_ids", new_callable=AsyncMock) as mock_enabled,
+            patch("app.services.m365_best_practices.get_auto_remediate_check_ids", new_callable=AsyncMock, return_value=set()),
+            patch("app.services.m365_best_practices.bp_repo.upsert_result", side_effect=fake_upsert),
+        ):
+            mock_token.return_value = "fake-token"
+            mock_enabled.return_value = {enabled_id}
+            result = await bp_service.run_single_check(company_id=42, check_id=enabled_id)
+    finally:
+        target["source"] = real_source
+
+    assert result["check_id"] == enabled_id
+    assert result["status"] == "pass"
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 42
+    assert upserts[0]["check_id"] == enabled_id
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_raises_for_unknown_id():
+    with pytest.raises(ValueError, match="Unknown"):
+        await bp_service.run_single_check(company_id=1, check_id="bp_does_not_exist")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_raises_when_not_enabled():
+    catalog = bp_service.list_best_practices()
+    check_id = catalog[0]["id"]
+    with (
+        patch("app.services.m365_best_practices.get_enabled_check_ids", new_callable=AsyncMock) as mock_enabled,
+    ):
+        mock_enabled.return_value = set()
+        with pytest.raises(ValueError, match="not enabled"):
+            await bp_service.run_single_check(company_id=1, check_id=check_id)
+
+
+# ---------------------------------------------------------------------------
 # get_last_results
 # ---------------------------------------------------------------------------
 
@@ -396,6 +456,87 @@ def test_direct_send_catalog_entry_has_has_remediation():
     assert "source" not in entry
     assert "remediation_cmdlet" not in entry
     assert "remediation_params" not in entry
+
+
+def test_guest_access_restricted_catalog_entry_has_remediation():
+    """bp_guest_access_restricted must advertise automated remediation support."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_guest_access_restricted")
+    assert entry.get("has_remediation") is True
+    # Internal implementation keys must not be exposed in the public catalog
+    assert "source" not in entry
+    assert "remediation_url" not in entry
+    assert "remediation_payload" not in entry
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_guest_access_restricted_success():
+    """Successful Graph PATCH remediation for bp_guest_access_restricted updates DB and returns success."""
+    upserts: list[dict] = []
+    patched_urls: list[str] = []
+    patched_payloads: list[dict] = []
+
+    async def fake_graph_patch(token: str, url: str, payload: dict) -> None:
+        patched_urls.append(url)
+        patched_payloads.append(payload)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=5, check_id="bp_guest_access_restricted"
+        )
+
+    assert result["success"] is True
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 5
+    assert upserts[0]["check_id"] == "bp_guest_access_restricted"
+    assert upserts[0]["remediation_status"] == "success"
+    # Verify the correct Graph endpoint and most-restrictive payload were used
+    assert len(patched_urls) == 1
+    assert "authorizationPolicy" in patched_urls[0]
+    assert patched_payloads[0]["guestUserRoleId"] == _GUEST_ROLE_ID_MOST_RESTRICTIVE
+    assert patched_payloads[0]["allowInvitesFrom"] == "adminsAndGuestInviters"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_guest_access_restricted_failure_on_graph_error():
+    """If the Graph PATCH fails, remediation status is recorded as 'failed'."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=M365Error("PATCH authorizationPolicy failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=5, check_id="bp_guest_access_restricted"
+        )
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +1148,32 @@ async def test_remediate_concealed_names_failure_on_graph_error():
     assert upserts[0]["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_concealed_names_failure_on_token_acquisition_error():
+    """If Graph token acquisition fails, remediation status is recorded as 'failed' and a clear message is returned."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Invalid client secret"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=3, check_id="bp_concealed_names")
+
+    assert result["success"] is False
+    assert result["message"] == "Unable to acquire Microsoft Graph token. Check that the app credentials are correct."
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 3
+    assert upserts[0]["check_id"] == "bp_concealed_names"
+    assert upserts[0]["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Tenant capability detection / N/A marking
 # ---------------------------------------------------------------------------
@@ -1502,7 +1669,7 @@ async def test_run_best_practices_retries_transient_check_failure(monkeypatch):
             patch(
                 "app.services.m365_best_practices.detect_tenant_capabilities",
                 new_callable=AsyncMock,
-                return_value=None,
+                return_value=set(),
             ),
             patch(
                 "app.services.m365_best_practices.get_enabled_check_ids",
