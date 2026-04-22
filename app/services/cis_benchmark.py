@@ -431,9 +431,18 @@ async def _check_sspr_enabled(token: str) -> dict[str, Any]:
     try:
         data = await _graph_get(
             token,
-            "https://graph.microsoft.com/v1.0/policies/authorizationPolicy?$select=allowedToUseSspr",
+            "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
+            "?$select=allowedToUseSspr,defaultUserRolePermissions",
         )
-        allowed = data.get("allowedToUseSspr", None)
+        # The endpoint returns a collection; extract the first (and only) policy item.
+        # Fall back to the raw response for backward-compatibility with environments
+        # that return the resource directly rather than wrapped in a value array.
+        policy: dict[str, Any] = next(iter(data.get("value") or []), data)
+        # allowedToUseSspr may be a direct property of authorizationPolicy or
+        # nested inside defaultUserRolePermissions depending on the API version.
+        allowed = policy.get("allowedToUseSspr")
+        if allowed is None:
+            allowed = policy.get("defaultUserRolePermissions", {}).get("allowedToUseSspr")
         if allowed is True:
             return _pass(check_id, check_name, "SSPR is enabled for users.")
         if allowed is False:
@@ -478,6 +487,8 @@ async def _check_guest_access_restricted(token: str) -> dict[str, Any]:
             "https://graph.microsoft.com/v1.0/policies/authorizationPolicy"
             "?$select=guestUserRoleId,allowInvitesFrom",
         )
+        # The endpoint returns a collection; extract the first (and only) policy item.
+        policy: dict[str, Any] = next(iter(data.get("value") or []), data)
         # guestUserRoleId values:
         #   10dae51f-b6af-4016-8d66-8c2a99b929b3 = Guest user (most restrictive)
         #   2af84b1e-32c8-42b7-82bc-daa82404023b = Guest user (limited access)
@@ -486,8 +497,8 @@ async def _check_guest_access_restricted(token: str) -> dict[str, Any]:
             "10dae51f-b6af-4016-8d66-8c2a99b929b3",
             "2af84b1e-32c8-42b7-82bc-daa82404023b",
         }
-        role_id = str(data.get("guestUserRoleId") or "").lower()
-        allow_invites = str(data.get("allowInvitesFrom") or "")
+        role_id = str(policy.get("guestUserRoleId") or "").lower()
+        allow_invites = str(policy.get("allowInvitesFrom") or "")
         if not role_id:
             return _unknown(check_id, check_name, "guestUserRoleId not returned by the API – unable to evaluate guest access restriction.")
         role_ok = role_id in restricted_ids
