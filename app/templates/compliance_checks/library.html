@@ -121,8 +121,8 @@
     <div class="modal__body">
       <form id="check-form" class="form">
         <input type="hidden" id="form-check-id" name="check_id" value="" />
-        <div class="form__group">
-          <label class="form__label" for="form-category">Category</label>
+        <div class="form-group">
+          <label class="form-label" for="form-category">Category</label>
           <select class="form-input" id="form-category" name="category_id" required>
             <option value="">Select category…</option>
             {% for cat in categories %}
@@ -130,32 +130,32 @@
             {% endfor %}
           </select>
         </div>
-        <div class="form__group">
-          <label class="form__label" for="form-code">Code</label>
+        <div class="form-group">
+          <label class="form-label" for="form-code">Code</label>
           <input type="text" class="form-input" id="form-code" name="code" required maxlength="100" placeholder="e.g. CUSTOM-001" />
         </div>
-        <div class="form__group">
-          <label class="form__label" for="form-title">Title</label>
+        <div class="form-group">
+          <label class="form-label" for="form-title">Title</label>
           <input type="text" class="form-input" id="form-title" name="title" required maxlength="255" />
         </div>
-        <div class="form__group">
-          <label class="form__label" for="form-description">Description</label>
+        <div class="form-group">
+          <label class="form-label" for="form-description">Description</label>
           <textarea class="form-input" id="form-description" name="description" rows="3"></textarea>
         </div>
-        <div class="form__group">
-          <label class="form__label" for="form-guidance">Guidance</label>
+        <div class="form-group">
+          <label class="form-label" for="form-guidance">Guidance</label>
           <textarea class="form-input" id="form-guidance" name="guidance" rows="3"></textarea>
         </div>
-        <div class="form__group">
-          <label class="form__label" for="form-interval">Default review interval (days)</label>
+        <div class="form-group">
+          <label class="form-label" for="form-interval">Default review interval (days)</label>
           <input type="number" class="form-input" id="form-interval" name="default_review_interval_days" min="1" value="365" />
         </div>
-        <div class="form__group form__group--inline">
-          <label class="form__label" for="form-evidence-required">Evidence required by default</label>
+        <div class="form-group form-group--inline">
+          <label class="form-label" for="form-evidence-required">Evidence required by default</label>
           <input type="checkbox" id="form-evidence-required" name="default_evidence_required" />
         </div>
-        <div class="form__group form__group--inline" id="form-active-group" style="display:none">
-          <label class="form__label" for="form-is-active">Active</label>
+        <div class="form-group form-group--inline" id="form-active-group" style="display:none">
+          <label class="form-label" for="form-is-active">Active</label>
           <input type="checkbox" id="form-is-active" name="is_active" checked />
         </div>
         <div class="form__actions">
