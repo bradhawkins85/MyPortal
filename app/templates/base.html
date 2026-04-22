@@ -118,7 +118,9 @@
           {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) %}
           {% set can_view_compliance = (can_view_compliance | default(false)) or is_super_admin or membership.get('can_view_compliance') %}
           {% set can_view_m365_best_practices = (can_view_m365_best_practices | default(false)) or is_super_admin or membership.get('can_view_m365_best_practices') %}
-          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices %}
+          {% set can_view_compliance_checks = (can_view_compliance_checks | default(false)) or is_super_admin or membership.get('can_view_compliance_checks') %}
+          {% set can_manage_compliance_checks = (can_manage_compliance_checks | default(false)) or is_super_admin or membership.get('can_manage_compliance_checks') %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           <li class="menu__item">
@@ -329,12 +331,35 @@
           {% endif %}
           {% if can_view_compliance %}
             <li class="menu__item">
-              <a href="/compliance" {% if current_path.startswith('/compliance') %}aria-current="page"{% endif %}>
+              <a href="/compliance" {% if current_path.startswith('/compliance') and not current_path.startswith('/compliance-checks') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
                 </span>
                 <span class="menu__label">Compliance</span>
               </a>
+            </li>
+          {% endif %}
+          {% if can_view_compliance_checks %}
+            <li class="menu__item menu__item--expandable {% if current_path.startswith('/compliance-checks') %}menu__item--expanded{% endif %}" data-menu-key="/compliance-checks">
+              <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if current_path.startswith('/compliance-checks') %}true{% else %}false{% endif %}">
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4"/></svg>
+                </span>
+                <span class="menu__label">Compliance Checks</span>
+                <span class="menu__expand-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M6 9l6 6 6-6"/></svg>
+                </span>
+              </button>
+              <ul class="menu__submenu {% if current_path.startswith('/compliance-checks') %}menu__submenu--expanded{% endif %}">
+                <li class="menu__subitem">
+                  <a href="/compliance-checks" {% if current_path == '/compliance-checks' %}aria-current="page"{% endif %}>My Checks</a>
+                </li>
+                {% if is_super_admin %}
+                <li class="menu__subitem">
+                  <a href="/admin/compliance-checks/library" {% if current_path.startswith('/admin/compliance-checks') %}aria-current="page"{% endif %}>Library</a>
+                </li>
+                {% endif %}
+              </ul>
             </li>
           {% endif %}
           {% if can_view_bcp %}

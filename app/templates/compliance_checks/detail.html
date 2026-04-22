@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+
+{% set check = assignment.check if assignment else {} %}
+{% set check_title = check.title if check else 'Compliance Check' %}
+
+{% block header_title %}{{ check_title }}{% endblock %}
+{% block title %}{{ check_title }}{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <a href="/compliance-checks" class="button button--ghost button--small">← Back</a>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="management management--single compliance-checks-detail" data-layout>
+  <section class="management__content">
+    <header class="management__header">
+      <div>
+        <h1 class="management__title">{{ check_title }}</h1>
+        {% if check %}
+        <p class="management__subtitle">
+          <span class="tag tag--muted">{{ check.category.code if check.category else '' }}</span>
+          {{ check.code }}
+        </p>
+        {% endif %}
+      </div>
+      {% if company %}
+      <div class="management__header-actions">
+        <span class="tag tag--muted">{{ company.name }}</span>
+      </div>
+      {% endif %}
+    </header>
+
+    <div class="layout-cols layout-cols--2">
+      {# Left: Check details + update form #}
+      <div>
+        {% if check and check.description %}
+        <div class="card card--panel">
+          <h2 class="card__title">Description</h2>
+          <p>{{ check.description }}</p>
+          {% if check.guidance %}
+          <h3 class="form__label" style="margin-top:1rem">Guidance</h3>
+          <p class="text--muted">{{ check.guidance }}</p>
+          {% endif %}
+          <p class="text--muted" style="margin-top:0.5rem">
+            Default review interval: {{ check.default_review_interval_days }} days
+          </p>
+        </div>
+        {% endif %}
+
+        {% if can_manage %}
+        <div class="card card--panel">
+          <h2 class="card__title">Update status</h2>
+          <form id="update-form" class="form">
+            <div class="form__group">
+              <label class="form__label" for="status-select">Status</label>
+              <select class="form-input" id="status-select" name="status">
+                <option value="not_started" {% if assignment.status == 'not_started' %}selected{% endif %}>Not started</option>
+                <option value="in_progress" {% if assignment.status == 'in_progress' %}selected{% endif %}>In progress</option>
+                <option value="compliant" {% if assignment.status == 'compliant' %}selected{% endif %}>Compliant</option>
+                <option value="non_compliant" {% if assignment.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
+                <option value="not_applicable" {% if assignment.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
+              </select>
+            </div>
+            <div class="form__group">
+              <label class="form__label" for="checked-at">Last checked date</label>
+              <input
+                type="date"
+                class="form-input"
+                id="checked-at"
+                name="last_checked_at"
+                value="{{ assignment.last_checked_at[:10] if assignment.last_checked_at else '' }}"
+              />
+            </div>
+            <div class="form__group">
+              <label class="form__label" for="review-interval">Review interval (days)</label>
+              <input
+                type="number"
+                class="form-input"
+                id="review-interval"
+                name="review_interval_days"
+                min="1"
+                placeholder="{{ check.default_review_interval_days if check else 365 }}"
+                value="{{ assignment.review_interval_days if assignment.review_interval_days else '' }}"
+              />
+              <p class="form__hint">Leave blank to use the check's default interval.</p>
+            </div>
+            <div class="form__group">
+              <label class="form__label" for="notes">Notes</label>
+              <textarea class="form-input" id="notes" name="notes" rows="4">{{ assignment.notes or '' }}</textarea>
+            </div>
+            <div class="form__group">
+              <label class="form__label" for="evidence-summary">Evidence summary</label>
+              <textarea class="form-input" id="evidence-summary" name="evidence_summary" rows="3">{{ assignment.evidence_summary or '' }}</textarea>
+            </div>
+            <div class="form__actions">
+              <button type="submit" class="button button--primary">Save changes</button>
+            </div>
+          </form>
+        </div>
+        {% else %}
+        <div class="card card--panel">
+          <h2 class="card__title">Current status</h2>
+          <dl class="dl dl--inline">
+            <dt>Status</dt>
+            <dd>
+              <span class="badge badge--status-{{ assignment.status }}">
+                {% if assignment.status == 'not_started' %}Not started
+                {% elif assignment.status == 'in_progress' %}In progress
+                {% elif assignment.status == 'compliant' %}Compliant
+                {% elif assignment.status == 'non_compliant' %}Non-compliant
+                {% elif assignment.status == 'not_applicable' %}Not applicable
+                {% endif %}
+              </span>
+            </dd>
+            <dt>Last checked</dt>
+            <dd>{{ assignment.last_checked_at[:10] if assignment.last_checked_at else '—' }}</dd>
+            <dt>Next review</dt>
+            <dd>
+              {% if assignment.next_review_at %}
+                {% if assignment.is_overdue %}
+                  <span class="badge badge--review-overdue">Overdue {{ assignment.next_review_at[:10] }}</span>
+                {% elif assignment.is_due_soon %}
+                  <span class="badge badge--review-due-soon">Due {{ assignment.next_review_at[:10] }}</span>
+                {% else %}
+                  {{ assignment.next_review_at[:10] }}
+                {% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+            <dt>Notes</dt>
+            <dd>{{ assignment.notes or '—' }}</dd>
+          </dl>
+        </div>
+        {% endif %}
+      </div>
+
+      {# Right: Evidence + Audit #}
+      <div>
+        <div class="card card--panel">
+          <h2 class="card__title">Evidence</h2>
+          {% if evidence_items %}
+          <ul class="evidence-list">
+            {% for ev in evidence_items %}
+            <li class="evidence-list__item">
+              <span class="tag tag--muted">{{ ev.evidence_type }}</span>
+              <strong>{{ ev.title }}</strong>
+              {% if ev.evidence_type == 'url' and ev.content %}
+                — <a href="{{ ev.content }}" target="_blank" rel="noopener noreferrer">{{ ev.content[:60] }}{% if ev.content|length > 60 %}…{% endif %}</a>
+              {% elif ev.content %}
+                <p class="text--muted">{{ ev.content[:200] }}{% if ev.content|length > 200 %}…{% endif %}</p>
+              {% endif %}
+              {% if can_manage %}
+              <button
+                type="button"
+                class="button button--ghost button--xs delete-evidence-btn"
+                data-evidence-id="{{ ev.id }}"
+                aria-label="Delete evidence"
+              >×</button>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text--muted">No evidence recorded yet.</p>
+          {% endif %}
+
+          {% if can_manage %}
+          <hr class="divider"/>
+          <form id="add-evidence-form" class="form">
+            <h3 class="form__section-title">Add evidence</h3>
+            <div class="form__group">
+              <label class="form__label" for="ev-type">Type</label>
+              <select class="form-input" id="ev-type" name="evidence_type">
+                <option value="text">Text note</option>
+                <option value="url">URL / link</option>
+              </select>
+            </div>
+            <div class="form__group">
+              <label class="form__label" for="ev-title">Title</label>
+              <input type="text" class="form-input" id="ev-title" name="title" required placeholder="Short description" />
+            </div>
+            <div class="form__group">
+              <label class="form__label" for="ev-content">Content / URL</label>
+              <textarea class="form-input" id="ev-content" name="content" rows="3"></textarea>
+            </div>
+            <div class="form__actions">
+              <button type="submit" class="button button--secondary">Add evidence</button>
+            </div>
+          </form>
+          {% endif %}
+        </div>
+
+        <div class="card card--panel">
+          <h2 class="card__title">Audit history</h2>
+          {% if audit_trail %}
+          <ol class="audit-trail">
+            {% for entry in audit_trail %}
+            <li class="audit-trail__item">
+              <span class="audit-trail__time">{{ entry.created_at[:16].replace('T', ' ') if entry.created_at else '—' }}</span>
+              <span class="audit-trail__action">{{ entry.action | replace('_', ' ') | title }}</span>
+              {% if entry.change_summary %}
+              <span class="audit-trail__detail">{{ entry.change_summary }}</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ol>
+          {% else %}
+          <p class="text--muted">No changes recorded yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const companyId = {{ (company.id if company else None) | tojson }};
+  const assignmentId = {{ assignment.id | tojson }};
+  const csrfToken = getCsrfToken();
+
+  // ---- Update status form ----
+  document.getElementById('update-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const payload = {};
+    const status = form.querySelector('[name=status]')?.value;
+    if (status) payload.status = status;
+    const checkedAt = form.querySelector('[name=last_checked_at]')?.value;
+    if (checkedAt) payload.last_checked_at = checkedAt + 'T00:00:00';
+    const interval = parseInt(form.querySelector('[name=review_interval_days]')?.value);
+    if (interval) payload.review_interval_days = interval;
+    const notes = form.querySelector('[name=notes]')?.value;
+    if (notes !== undefined) payload.notes = notes;
+    const evidenceSummary = form.querySelector('[name=evidence_summary]')?.value;
+    if (evidenceSummary !== undefined) payload.evidence_summary = evidenceSummary;
+
+    try {
+      const resp = await fetch(`/api/compliance-checks/companies/${companyId}/assignments/${assignmentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        window.location.reload();
+      } else {
+        const data = await resp.json();
+        alert(data.detail || 'Failed to save changes');
+      }
+    } catch {
+      alert('Failed to save changes');
+    }
+  });
+
+  // ---- Add evidence form ----
+  document.getElementById('add-evidence-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const payload = {
+      evidence_type: form.querySelector('[name=evidence_type]')?.value,
+      title: form.querySelector('[name=title]')?.value,
+      content: form.querySelector('[name=content]')?.value || null,
+    };
+    try {
+      const resp = await fetch(`/api/compliance-checks/companies/${companyId}/assignments/${assignmentId}/evidence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        window.location.reload();
+      } else {
+        const data = await resp.json();
+        alert(data.detail || 'Failed to add evidence');
+      }
+    } catch {
+      alert('Failed to add evidence');
+    }
+  });
+
+  // ---- Delete evidence ----
+  document.querySelectorAll('.delete-evidence-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this evidence item?')) return;
+      const evId = btn.dataset.evidenceId;
+      try {
+        const resp = await fetch(
+          `/api/compliance-checks/companies/${companyId}/assignments/${assignmentId}/evidence/${evId}`,
+          { method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken } },
+        );
+        if (resp.ok) window.location.reload();
+        else alert('Failed to delete evidence');
+      } catch {
+        alert('Failed to delete evidence');
+      }
+    });
+  });
+
+  function getCsrfToken() {
+    return document.cookie.split('; ').find(r => r.startsWith('myportal_session_csrf='))?.split('=')[1] || '';
+  }
+});
+</script>
+{% endblock %}
