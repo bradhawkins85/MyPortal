@@ -234,3 +234,35 @@ def sanitize_localpart(name: str) -> str:
     clean = re.sub(r"[^a-z0-9._=-]", "", name.lower().replace(" ", "_"))
     clean = clean[:32] or "user"
     return clean
+
+
+async def get_power_levels(room_id: str) -> dict[str, Any]:
+    """Get the current power levels state for a room."""
+    return await _request(
+        "GET",
+        f"/_matrix/client/v3/rooms/{room_id}/state/m.room.power_levels/",
+        headers=_bot_headers(),
+    )
+
+
+async def set_user_power_level(
+    room_id: str,
+    user_id: str,
+    power_level: int = 100,
+) -> dict[str, Any]:
+    """Set a user's power level in a room (100 = admin, 50 = moderator, 0 = member).
+
+    Fetches the current power levels state, updates the target user's level,
+    and writes the new state back.  Any exception is propagated to the caller.
+    """
+    current = await get_power_levels(room_id)
+    users_map: dict[str, Any] = dict(current.get("users") or {})
+    users_map[user_id] = power_level
+    updated = dict(current)
+    updated["users"] = users_map
+    return await _request(
+        "PUT",
+        f"/_matrix/client/v3/rooms/{room_id}/state/m.room.power_levels/",
+        headers=_bot_headers(),
+        json=updated,
+    )

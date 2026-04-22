@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 import types
@@ -66,6 +67,8 @@ send_message = _matrix.send_message
 invite_user = _matrix.invite_user
 whoami = _matrix.whoami
 sanitize_localpart = _matrix.sanitize_localpart
+set_user_power_level = _matrix.set_user_power_level
+get_power_levels = _matrix.get_power_levels
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +197,67 @@ async def test_rate_limit_retry(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# set_user_power_level
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_set_user_power_level_grants_admin(monkeypatch):
+    """set_user_power_level should fetch current power levels and update the user."""
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    room_id = "!room1:example.com"
+    user_mxid = "@tech:example.com"
+    current_levels = {"users": {"@bot:example.com": 100}, "events": {}, "users_default": 0}
+
+    respx.get(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/state/m\.room\.power_levels/"
+    ).mock(return_value=httpx.Response(200, json=current_levels))
+
+    put_route = respx.put(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/state/m\.room\.power_levels/"
+    ).mock(return_value=httpx.Response(200, json={"event_id": "$pl1"}))
+
+    result = await set_user_power_level(room_id, user_mxid, 100)
+    assert result["event_id"] == "$pl1"
+
+    # Verify the PUT body included the tech user at level 100
+    sent_body = put_route.calls[0].request
+    body = json.loads(sent_body.content)
+    assert body["users"][user_mxid] == 100
+    # Existing bot user should be preserved
+    assert body["users"]["@bot:example.com"] == 100
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_set_user_power_level_preserves_existing_users(monkeypatch):
+    """Existing power levels for other users must not be removed."""
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    current_levels = {
+        "users": {"@existing:example.com": 50},
+        "users_default": 0,
+    }
+
+    respx.get(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/state/m\.room\.power_levels/"
+    ).mock(return_value=httpx.Response(200, json=current_levels))
+
+    put_route = respx.put(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/state/m\.room\.power_levels/"
+    ).mock(return_value=httpx.Response(200, json={"event_id": "$pl2"}))
+
+    await set_user_power_level("!room2:example.com", "@newtech:example.com", 100)
+
+    body = json.loads(put_route.calls[0].request.content)
+    assert body["users"]["@existing:example.com"] == 50
+    assert body["users"]["@newtech:example.com"] == 100
+
+
+# ---------------------------------------------------------------------------
 # Source-level checks (no heavy imports required)
 # ---------------------------------------------------------------------------
 
@@ -212,3 +276,20 @@ def test_external_invite_gated_by_self_hosted():
     assert "HTTPException" in source, (
         "invite_external must raise HTTPException when self-hosted is disabled"
     )
+
+
+def test_join_and_assign_use_tech_matrix_user_id():
+    """join_room and assign_room must use the technician's matrix_user_id as admin."""
+    source = pathlib.Path("app/api/routes/chat.py").read_text()
+    assert 'current_user.get("matrix_user_id")' in source, (
+        "join/assign must read the technician's matrix_user_id from current_user"
+    )
+    assert "set_user_power_level" in source, (
+        "join/assign must call set_user_power_level to grant admin rights"
+    )
+
+
+def test_set_power_level_function_exists():
+    """matrix service must expose set_user_power_level."""
+    assert callable(set_user_power_level), "set_user_power_level must be callable"
+    assert callable(get_power_levels), "get_power_levels must be callable"
