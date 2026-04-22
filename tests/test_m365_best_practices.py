@@ -574,8 +574,12 @@ async def test_get_last_results_includes_remediation_fields():
 async def test_get_auto_remediate_check_ids_returns_only_enabled_remediable():
     """Only checks with auto_remediate=True and has_remediation=True are returned."""
     catalog = bp_service.list_best_practices()
-    remediable_id = next(bp["id"] for bp in catalog if bp.get("has_remediation"))
-    non_remediable_id = next(bp["id"] for bp in catalog if not bp.get("has_remediation"))
+    remediable_bp = next((bp for bp in catalog if bp.get("has_remediation")), None)
+    non_remediable_bp = next((bp for bp in catalog if not bp.get("has_remediation")), None)
+    assert remediable_bp is not None, "catalog must contain at least one remediable check"
+    assert non_remediable_bp is not None, "catalog must contain at least one non-remediable check"
+    remediable_id = remediable_bp["id"]
+    non_remediable_id = non_remediable_bp["id"]
 
     with patch(
         "app.services.m365_best_practices.bp_repo.get_settings_map",
@@ -606,7 +610,12 @@ async def test_get_auto_remediate_check_ids_empty_when_none_set():
 async def test_set_enabled_checks_persists_auto_remediate_flag():
     """set_enabled_checks must pass auto_remediate to upsert_setting for each check."""
     catalog = bp_service.list_best_practices()
-    remediable_id = next(bp["id"] for bp in catalog if bp.get("has_remediation"))
+    remediable_bp = next((bp for bp in catalog if bp.get("has_remediation")), None)
+    non_remediable_bp = next((bp for bp in catalog if not bp.get("has_remediation")), None)
+    assert remediable_bp is not None, "catalog must contain at least one remediable check"
+    assert non_remediable_bp is not None, "catalog must contain at least one non-remediable check"
+    remediable_id = remediable_bp["id"]
+    non_remediable_id = non_remediable_bp["id"]
 
     upserted: list[dict] = []
 
@@ -625,12 +634,12 @@ async def test_set_enabled_checks_persists_auto_remediate_flag():
             auto_remediate_check_ids={remediable_id},
         )
 
-    remediable_call = next(c for c in upserted if c["check_id"] == remediable_id)
+    remediable_call = next((c for c in upserted if c["check_id"] == remediable_id), None)
+    assert remediable_call is not None
     assert remediable_call["enabled"] is True
     assert remediable_call["auto_remediate"] is True
 
     # Non-remediable checks must have auto_remediate=False even if passed in
-    non_remediable_id = next(bp["id"] for bp in catalog if not bp.get("has_remediation"))
     other_calls = [c for c in upserted if c["check_id"] == non_remediable_id]
     assert all(not c["auto_remediate"] for c in other_calls)
 
@@ -661,7 +670,9 @@ async def test_set_enabled_checks_none_auto_remediate_defaults_to_false():
 async def test_list_settings_with_catalog_includes_auto_remediate():
     """list_settings_with_catalog must expose auto_remediate for each entry."""
     catalog = bp_service.list_best_practices()
-    remediable_id = next(bp["id"] for bp in catalog if bp.get("has_remediation"))
+    remediable_bp = next((bp for bp in catalog if bp.get("has_remediation")), None)
+    assert remediable_bp is not None, "catalog must contain at least one remediable check"
+    remediable_id = remediable_bp["id"]
 
     with patch(
         "app.services.m365_best_practices.bp_repo.get_settings_map",
@@ -672,11 +683,13 @@ async def test_list_settings_with_catalog_includes_auto_remediate():
         }
         rows = await bp_service.list_settings_with_catalog()
 
-    entry = next(r for r in rows if r["id"] == remediable_id)
+    entry = next((r for r in rows if r["id"] == remediable_id), None)
+    assert entry is not None
     assert entry["auto_remediate"] is True
 
     # Other entries (not in settings map) should default to False
-    other = next(r for r in rows if r["id"] != remediable_id)
+    other = next((r for r in rows if r["id"] != remediable_id), None)
+    assert other is not None
     assert other["auto_remediate"] is False
 
 
