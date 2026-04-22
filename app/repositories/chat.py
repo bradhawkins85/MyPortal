@@ -245,15 +245,38 @@ async def add_message(
     if sent_at is None:
         sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    msg_id = await db.execute_returning_lastrowid(
-        """INSERT INTO chat_messages
-           (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-            body, msgtype, sent_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-        (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-         body, msgtype, sent_at),
-    )
-    row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = %s", (msg_id,))
+    if db.is_sqlite():
+        msg_id = await db.execute_returning_lastrowid(
+            """INSERT OR IGNORE INTO chat_messages
+               (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
+                body, msgtype, sent_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
+             body, msgtype, sent_at),
+        )
+        if msg_id:
+            row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = ?", (msg_id,))
+        else:
+            row = await db.fetch_one(
+                "SELECT * FROM chat_messages WHERE matrix_event_id = ?",
+                (matrix_event_id,),
+            )
+    else:
+        msg_id = await db.execute_returning_lastrowid(
+            """INSERT IGNORE INTO chat_messages
+               (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
+                body, msgtype, sent_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
+             body, msgtype, sent_at),
+        )
+        if msg_id:
+            row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = %s", (msg_id,))
+        else:
+            row = await db.fetch_one(
+                "SELECT * FROM chat_messages WHERE matrix_event_id = %s",
+                (matrix_event_id,),
+            )
     return dict(row) if row else {}
 
 
