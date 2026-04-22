@@ -93,3 +93,38 @@ async def ollama_mcp_manifest() -> JSONResponse:
     """Return a non-secret discovery manifest for the Ollama MCP server."""
 
     return JSONResponse(ollama_public_manifest())
+
+
+copilot_router = APIRouter(prefix="/api/mcp/copilot", tags=["Copilot MCP"])
+
+
+@copilot_router.post("/", response_class=JSONResponse)
+async def copilot_mcp_endpoint(
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> JSONResponse:
+    """JSON-RPC 2.0 / MCP endpoint for GitHub Copilot and compatible clients.
+
+    Delegates to the same Ollama-compatible handler as ``/api/mcp/ollama/``
+    but uses a dedicated path so that Copilot traffic is clearly identified
+    in logs and can be configured independently.
+    """
+
+    return await _ollama_rpc(request, authorization)
+
+
+@copilot_router.post("/rpc", response_class=JSONResponse)
+async def copilot_mcp_rpc_alias(
+    request: Request,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> JSONResponse:
+    """Alias for :func:`copilot_mcp_endpoint` for clients that expect ``/rpc``."""
+
+    return await _ollama_rpc(request, authorization)
+
+
+@copilot_router.get("/manifest", response_class=JSONResponse)
+async def copilot_mcp_manifest() -> JSONResponse:
+    """Return the public discovery manifest for the Copilot MCP endpoint."""
+
+    return JSONResponse(ollama_public_manifest())
