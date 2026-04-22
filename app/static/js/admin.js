@@ -3203,5 +3203,66 @@
     });
     bindModal({ modalId: 'edit-labour-types-modal', triggerSelector: '[data-edit-labour-types-open]' });
     bindModal({ modalId: 'import-product-modal', triggerSelector: '[data-import-product-modal-open]' });
+    bindAuditDiffModal();
   });
+
+  function bindAuditDiffModal() {
+    const modal = document.getElementById('audit-diff-modal');
+    const modalBody = document.getElementById('audit-diff-modal-body');
+    if (!modal || !modalBody) {
+      return;
+    }
+
+    let activeTrigger = null;
+
+    function openModal(trigger) {
+      activeTrigger = trigger;
+      const index = trigger.getAttribute('data-audit-diff-index');
+      const template = document.getElementById(`audit-diff-${index}`);
+      modalBody.innerHTML = '';
+      if (template) {
+        modalBody.appendChild(template.content.cloneNode(true));
+      }
+      modal.hidden = false;
+      modal.setAttribute('aria-hidden', 'false');
+      const closeBtn = modal.querySelector('[data-modal-close]');
+      if (closeBtn) {
+        closeBtn.focus();
+      }
+    }
+
+    function closeModal() {
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      if (activeTrigger) {
+        activeTrigger.focus();
+        activeTrigger = null;
+      }
+    }
+
+    document.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-audit-diff-btn]');
+      if (btn) {
+        openModal(btn);
+        return;
+      }
+      if (event.target === modal) {
+        closeModal();
+      }
+    });
+
+    modal.addEventListener('click', (event) => {
+      const closeBtn = event.target.closest('[data-modal-close]');
+      if (closeBtn) {
+        event.preventDefault();
+        closeModal();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !modal.hidden) {
+        closeModal();
+      }
+    });
+  }
 })();
