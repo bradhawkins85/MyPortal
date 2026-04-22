@@ -20859,7 +20859,7 @@ async def chat_room_page(
     if is_staff and room.get("assigned_tech_user_id"):
         tech = await user_repo.get_user_by_id(room["assigned_tech_user_id"])
         if tech:
-            assigned_tech_display_name = tech.get("display_name") or tech.get("email")
+            assigned_tech_display_name = " ".join(filter(None, [tech.get("first_name"), tech.get("last_name")])) or tech.get("email")
 
     room_dict = dict(room)
     room_dict["assigned_tech_display_name"] = assigned_tech_display_name
