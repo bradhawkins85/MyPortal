@@ -830,6 +830,13 @@ async def _check_monitor_secure_score(token: str) -> dict[str, Any]:
             f"Secure Score is {current:g}/{maximum:g} ({pct}% of maximum) – below the 50% threshold.",
         )
     except M365Error as exc:
+        err = str(exc).lower()
+        if exc.http_status == 403 or "403" in err or "forbidden" in err or "authorization" in err or "permissions" in err:
+            return _unknown(
+                check_id,
+                check_name,
+                "Unable to retrieve Secure Score – the app may lack SecuritySecureScore.Read.All permission.",
+            )
         return _unknown(check_id, check_name, f"Unable to retrieve Secure Score: {exc}")
 
 
