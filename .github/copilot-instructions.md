@@ -10,7 +10,9 @@ MyPortal is a Python-first customer portal built with FastAPI, async MySQL, and 
 - **Database**: MySQL (primary), SQLite (fallback)
 - **Frontend**: Jinja2 templates, responsive layouts
 - **Testing**: pytest, pytest-asyncio
-- **Key Dependencies**: uvicorn, aiomysql, pydantic, passlib, python-jose, redis, httpx
+- **Key Dependencies**: uvicorn, aiomysql, aiosqlite, pydantic, pydantic-settings, passlib[bcrypt], pyotp, itsdangerous, redis, httpx, apscheduler, loguru, bleach, weasyprint, cryptography, apprise
+
+The authoritative dependency list lives in `pyproject.toml`; update it there and keep this list in sync.
 
 ## Development Workflow
 
@@ -73,23 +75,51 @@ MyPortal is a Python-first customer portal built with FastAPI, async MySQL, and 
 
 ## UI and Frontend Guidelines
 
+The canonical layout, table, form, and theming rules live in
+[`docs/ui_layout_standards.md`](../docs/ui_layout_standards.md). All new pages
+and components must follow that document; the bullets below are a quick
+reference and must stay consistent with it.
+
 ### Layout and Design
 
-- Use 3-part layout (unless otherwise specified):
-  - Left menu with buttons and relevant icons
-  - Right header with page-specific menus
-  - Right body with actual app data
-- Apps should be themeable with custom favicons and logos
-- Use responsive layout design
-- Apps should not exceed viewport width or height (unless explicitly specified)
-- Keep row divider heights consistent across table width
-- Prefer form based user input over JSON code blocks, example an input box for Ticket Subject instead of a JSON code block for {"ticket.subject": ""} or instead of {"match": {"ticket.subject": "New Voicemail from 61%"}} use and/or grouping of supported fields that the admin can add/remove.
+- Use the standard 3-part layout (unless otherwise specified):
+  - Left **sidebar** with navigation buttons and relevant icons
+  - Top **page header** with the page title, optional meta line, and a single
+    right-aligned actions area (primary button + overflow "Actions ▾" menu)
+  - Right **body** with content cards (`.card.card--panel`) holding the actual
+    data, forms, or tables
+- Page titles come **only** from the `header_title` block of `base.html`; the
+  first card on the page must not repeat the title.
+- Page-level actions live in the top-right header area and are rendered with
+  the `page_header_actions` macro from `templates/macros/header.html` — never
+  as buttons inside a card body.
+- Apps should be themeable with custom favicons and logos via `site_settings`.
+- Use a responsive layout. Pages must not exceed the viewport width or height
+  unless explicitly specified.
+- Keep row divider heights consistent across table width.
+- Prefer form-based user input over JSON code blocks. For example, use an
+  input box for "Ticket Subject" instead of a JSON block such as
+  `{"ticket.subject": ""}`, and prefer and/or grouping of supported fields
+  (that admins can add/remove) over raw match payloads like
+  `{"match": {"ticket.subject": "New Voicemail from 61%"}}`.
+- All new components must use the existing CSS custom properties
+  (`var(--color-…)`, `var(--space-…)`); no hard-coded colors.
 
 ### Tables and Data Display
 
-- All tables should have sorting and filtering capabilities
-- Use consistent styling for data tables
-- Implement pagination for large datasets
+- Build tables with the macros in `templates/macros/tables.html`
+  (`data_table`, `table_toolbar`, `table_column_picker`, `empty_state`).
+- Every data table follows the shape
+  `[ search ] [ filter ] [ filter ] … [ Columns ▾ ] [ Bulk actions ▾ ]`
+  and must support sorting, filtering, and pagination for large datasets.
+- Column visibility is persisted automatically via
+  `app/static/js/table_columns.js`; new tables should use this generic
+  helper rather than per-table column scripts.
+- Status pills use `<span class="status status--<variant>">…</span>`
+  (variants: `success`, `warning`, `danger`, `info`, `neutral`).
+- Render timestamps with `<span data-utc="…">…</span>` so the existing JS
+  in `main.js` localises them. Never use `strftime` in templates for
+  user-facing dates.
 
 ## Change Log Management
 
