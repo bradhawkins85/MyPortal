@@ -274,9 +274,6 @@
                 <li class="menu__subitem">
                   <a href="/m365" {% if current_path == '/m365' %}aria-current="page"{% endif %}>Configuration</a>
                 </li>
-                <li class="menu__subitem">
-                  <a href="/m365/benchmarks" {% if current_path.startswith('/m365/benchmarks') %}aria-current="page"{% endif %}>CIS Benchmarks</a>
-                </li>
                 {% if can_view_m365_best_practices %}
                 <li class="menu__subitem">
                   <a href="/m365/best-practices" {% if current_path.startswith('/m365/best-practices') %}aria-current="page"{% endif %}>Best Practices</a>
