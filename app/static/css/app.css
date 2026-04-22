@@ -3967,6 +3967,10 @@ button.header-title-menu__link {
   color: rgba(229, 231, 235, 0.9);
 }
 
+.badge--cis {
+  font-size: 0.7rem;
+}
+
 .alert {
   border-radius: 0.85rem;
   padding: var(--space-gap-base) var(--space-gap-roomy);

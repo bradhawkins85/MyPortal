@@ -987,7 +987,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
         check_name = bp["name"]
         cis_group = bp.get("cis_group")
 
-        if cis_group:
+        if cis_group and cis_group in _CIS_GROUP_RUNNERS:
             # CIS batch check – run the group runner once and cache results
             if cis_group not in cis_group_cache:
                 batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)

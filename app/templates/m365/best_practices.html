@@ -58,7 +58,7 @@
           <td>
             <strong>{{ check.check_name }}</strong>
             {% if check.is_cis_benchmark %}
-            <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem" title="CIS Benchmark check">CIS</span>
+            <span class="badge badge--info badge--cis" style="margin-left:0.4rem" title="CIS Benchmark check">CIS</span>
             {% endif %}
             {% if check.description %}
             <br /><small class="text-muted">{{ check.description }}</small>
@@ -126,7 +126,7 @@
         <p class="panel__subtitle">
           Microsoft 365 Best Practice checks are enabled globally by your provider and
           evaluated individually against this company's tenant configuration.
-          Checks marked <span class="badge badge--info" style="font-size:0.7rem">CIS</span> are also part of the CIS Microsoft 365 Foundations Benchmark.
+          Checks marked <span class="badge badge--info badge--cis">CIS</span> are also part of the CIS Microsoft 365 Foundations Benchmark.
         </p>
       </div>
       {% if m365_results %}
@@ -285,7 +285,7 @@
             <td>
               <strong>{{ bp.name }}</strong>
               {% if bp.is_cis_benchmark %}
-              <span class="badge badge--info" style="margin-left:0.4rem;font-size:0.7rem">CIS</span>
+              <span class="badge badge--info badge--cis" style="margin-left:0.4rem">CIS</span>
               {% endif %}
               <br /><small class="text-muted">{{ bp.id }}</small>
             </td>
