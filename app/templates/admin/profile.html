@@ -84,6 +84,40 @@
           </div>
         </section>
 
+        {% if matrix_chat_enabled %}
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
+              <h2 class="card__title">Matrix Username</h2>
+              <p class="card__subtitle">Set your Matrix user ID (e.g. @username:server.com). When you join or are assigned to a chat room, you will be added as an admin using this account.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            <form class="form management__form" id="matrix-username-form">
+              <fieldset class="form__fieldset">
+                <legend class="form__legend">Matrix username</legend>
+                <div class="alert alert--info" data-matrix-username-success hidden role="status"></div>
+                <div class="alert alert--error" data-matrix-username-error hidden role="alert"></div>
+                <div class="form-field">
+                  <label class="form-label" for="matrix-user-id">Matrix user ID</label>
+                  <input
+                    class="form-input"
+                    type="text"
+                    id="matrix-user-id"
+                    name="matrixUserId"
+                    value="{{ current_user.matrix_user_id or '' }}"
+                    placeholder="@username:matrix.org"
+                  />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button">Save Matrix username</button>
+                </div>
+              </fieldset>
+            </form>
+          </div>
+        </section>
+        {% endif %}
+
         <section class="card card--panel">
           <header class="card__header card__header--stacked">
             <div>
