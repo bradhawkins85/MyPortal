@@ -401,9 +401,14 @@ async def _check_audit_log_enabled(token: str) -> dict[str, Any]:
     check_id = "m365_audit_log_enabled"
     check_name = "Unified audit log is enabled"
     try:
+        # Probe the directoryAudits endpoint (requires AuditLog.Read.All).  A
+        # 200 response confirms unified audit logging is provisioned for the
+        # tenant; a 403 means the app lacks the permission and we cannot tell.
+        # We previously called ``/security/auditLog/queries`` but that
+        # collection is POST-only and returned HTTP 400 on GET.
         data = await _graph_get(
             token,
-            "https://graph.microsoft.com/v1.0/security/auditLog/queries?$top=1",
+            "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?$top=1",
         )
         # If the endpoint is accessible, auditing is provisioned.  A 403 or
         # missing permission will have thrown M365Error above.
