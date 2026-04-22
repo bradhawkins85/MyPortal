@@ -19,6 +19,13 @@ Some checks (e.g. ``bp_disable_direct_send``) query Exchange Online via the
 REST InvokeCommand API instead of Microsoft Graph; these are marked with
 ``"source_type": "exo"`` in the catalog and their runner callables accept
 ``(exo_token, tenant_id)`` rather than a single Graph token string.
+
+CIS Benchmark checks (from the CIS Microsoft 365 Foundations Benchmark and
+CIS Microsoft Intune Benchmarks) are merged into this catalog.  Catalog
+entries sourced from a CIS Benchmark are flagged with ``"is_cis_benchmark": True``.
+Intune checks are grouped under a ``"cis_group"`` key
+(``"intune_windows"``, ``"intune_ios"``, or ``"intune_macos"``) and run via
+the batch runners in ``cis_benchmark.py``.
 """
 from __future__ import annotations
 
@@ -51,6 +58,9 @@ from app.services.cis_benchmark import (
     _check_password_never_expires,
     _check_security_defaults,
     _check_sspr_enabled,
+    run_intune_ios_benchmarks,
+    run_intune_macos_benchmarks,
+    run_intune_windows_benchmarks,
 )
 from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command, _graph_get, _graph_patch, acquire_access_token
 
@@ -213,6 +223,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_security_defaults,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_block_legacy_auth",
@@ -228,6 +239,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_legacy_auth_blocked,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_mfa_for_all_users",
@@ -243,6 +255,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_mfa_conditional_access,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_admin_mfa",
@@ -257,6 +270,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_admin_mfa,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_global_admin_count",
@@ -272,6 +286,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_global_admin_count,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_audit_log_enabled",
@@ -287,6 +302,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_audit_log_enabled,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_self_service_password_reset",
@@ -302,6 +318,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_sspr_enabled,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_password_never_expires",
@@ -318,6 +335,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_password_never_expires,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     {
         "id": "bp_guest_access_restricted",
@@ -333,6 +351,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_guest_access_restricted,
         "default_enabled": True,
         "has_remediation": False,
+        "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
     # Exchange Online checks
@@ -538,7 +557,270 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_url": _REPORT_SETTINGS_URL,
         "remediation_payload": {"displayConcealedNames": True},
     },
+    # ------------------------------------------------------------------
+    # CIS Microsoft Intune for Windows Benchmark checks
+    # ------------------------------------------------------------------
+    {
+        "id": "intune_windows_compliance_policy_exists",
+        "name": "Windows compliance policy exists",
+        "description": (
+            "At least one Windows device compliance policy must be configured "
+            "in Microsoft Intune to enforce security baselines on managed devices."
+        ),
+        "remediation": (
+            "Create at least one Windows device compliance policy: "
+            "Intune → Devices → Compliance policies → Create policy → Windows 10 and later."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_windows",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_windows_encryption",
+        "name": "BitLocker encryption required (Windows)",
+        "description": (
+            "Windows compliance policies should require BitLocker disk encryption "
+            "to protect data on managed devices."
+        ),
+        "remediation": (
+            "Create a Windows device compliance policy requiring BitLocker encryption: "
+            "Intune → Devices → Compliance policies → Create policy → Windows 10/11 → "
+            "System Security → Require BitLocker = Require."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_windows",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_windows_firewall",
+        "name": "Windows Firewall required",
+        "description": (
+            "Windows compliance policies should require the Windows Firewall "
+            "to be enabled on managed devices."
+        ),
+        "remediation": (
+            "Require Windows Firewall in the device compliance policy: "
+            "Intune → Devices → Compliance policies → Windows policy → "
+            "System Security → Firewall = Require."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_windows",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_windows_antivirus",
+        "name": "Antivirus required (Windows)",
+        "description": (
+            "Windows compliance policies should require antivirus software "
+            "to be active on managed devices."
+        ),
+        "remediation": (
+            "Require antivirus in the Windows device compliance policy: "
+            "Intune → Devices → Compliance policies → Windows policy → "
+            "System Security → Antivirus = Require."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_windows",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_windows_secure_boot",
+        "name": "Secure Boot required (Windows)",
+        "description": (
+            "Windows compliance policies should require Secure Boot to be "
+            "enabled, protecting against low-level firmware attacks."
+        ),
+        "remediation": (
+            "Require Secure Boot in the Windows device compliance policy: "
+            "Intune → Devices → Compliance policies → Windows policy → "
+            "System Security → Secure Boot enabled = Require."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_windows",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_windows_min_os",
+        "name": "Minimum OS version configured (Windows)",
+        "description": (
+            "Windows compliance policies should specify a minimum supported "
+            "OS version to prevent out-of-date devices from accessing corporate resources."
+        ),
+        "remediation": (
+            "Set a minimum supported OS version in the Windows compliance policy: "
+            "Intune → Devices → Compliance policies → Windows policy → "
+            "Device Properties → Minimum OS version."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_windows",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    # ------------------------------------------------------------------
+    # CIS Microsoft Intune for iOS/iPadOS Benchmark checks
+    # ------------------------------------------------------------------
+    {
+        "id": "intune_ios_compliance_policy_exists",
+        "name": "iOS/iPadOS compliance policy exists",
+        "description": (
+            "At least one iOS/iPadOS device compliance policy must be configured "
+            "in Microsoft Intune to enforce security baselines on managed devices."
+        ),
+        "remediation": (
+            "Create at least one iOS/iPadOS device compliance policy: "
+            "Intune → Devices → Compliance policies → Create policy → iOS/iPadOS."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_ios",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_ios_passcode_required",
+        "name": "Passcode required (iOS/iPadOS)",
+        "description": (
+            "iOS/iPadOS compliance policies should require a passcode/PIN "
+            "to protect device access."
+        ),
+        "remediation": (
+            "Require a passcode/PIN in the iOS compliance policy: "
+            "Intune → Compliance policies → iOS policy → System Security → Require a password."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_ios",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_ios_jailbreak_blocked",
+        "name": "Jailbroken devices blocked (iOS/iPadOS)",
+        "description": (
+            "iOS/iPadOS compliance policies should block jailbroken devices "
+            "which bypass Apple's security controls."
+        ),
+        "remediation": (
+            "Block jailbroken devices in the iOS compliance policy: "
+            "Intune → Compliance policies → iOS policy → Device Health → "
+            "Jailbroken devices = Block."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_ios",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_ios_min_os",
+        "name": "Minimum OS version configured (iOS/iPadOS)",
+        "description": (
+            "iOS/iPadOS compliance policies should specify a minimum supported "
+            "OS version to prevent outdated devices from accessing corporate resources."
+        ),
+        "remediation": (
+            "Set a minimum supported iOS version in the compliance policy: "
+            "Intune → Compliance policies → iOS policy → Device Properties → Minimum OS version."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_ios",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    # ------------------------------------------------------------------
+    # CIS Microsoft Intune for macOS Benchmark checks
+    # ------------------------------------------------------------------
+    {
+        "id": "intune_macos_compliance_policy_exists",
+        "name": "macOS compliance policy exists",
+        "description": (
+            "At least one macOS device compliance policy must be configured "
+            "in Microsoft Intune to enforce security baselines on managed devices."
+        ),
+        "remediation": (
+            "Create at least one macOS device compliance policy: "
+            "Intune → Devices → Compliance policies → Create policy → macOS."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_macos",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_macos_filevault",
+        "name": "FileVault disk encryption required (macOS)",
+        "description": (
+            "macOS compliance policies should require FileVault disk encryption "
+            "to protect data on managed Mac devices."
+        ),
+        "remediation": (
+            "Require FileVault disk encryption in the macOS compliance policy: "
+            "Intune → Compliance policies → macOS policy → System Security → "
+            "Require encryption of data storage on device."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_macos",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_macos_firewall",
+        "name": "macOS Firewall required",
+        "description": (
+            "macOS compliance policies should require the macOS Firewall "
+            "to be enabled on managed Mac devices."
+        ),
+        "remediation": (
+            "Require the macOS Firewall in the compliance policy: "
+            "Intune → Compliance policies → macOS policy → System Security → Firewall."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_macos",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_macos_min_os",
+        "name": "Minimum OS version configured (macOS)",
+        "description": (
+            "macOS compliance policies should specify a minimum supported "
+            "OS version to prevent outdated Mac devices from accessing corporate resources."
+        ),
+        "remediation": (
+            "Set a minimum supported macOS version in the compliance policy: "
+            "Intune → Compliance policies → macOS policy → Device Properties → Minimum OS version."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_macos",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "intune_macos_gatekeeper",
+        "name": "Gatekeeper enabled (macOS)",
+        "description": (
+            "macOS compliance policies should require Gatekeeper to be enabled, "
+            "ensuring only trusted software can run on managed Mac devices."
+        ),
+        "remediation": (
+            "Require Gatekeeper in the macOS compliance policy: "
+            "Intune → Compliance policies → macOS policy → System Security → Gatekeeper."
+        ),
+        "is_cis_benchmark": True,
+        "cis_group": "intune_macos",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
 ]
+
+# Mapping from cis_group name to the batch runner function from cis_benchmark.py
+_CIS_GROUP_RUNNERS: dict[str, Callable[..., Any]] = {
+    "intune_windows": run_intune_windows_benchmarks,
+    "intune_ios": run_intune_ios_benchmarks,
+    "intune_macos": run_intune_macos_benchmarks,
+}
 
 
 def list_best_practices() -> list[dict[str, Any]]:
@@ -682,7 +964,8 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
 
     Graph-based checks receive the Graph access token; Exchange-Online-based
     checks (``source_type == "exo"``) receive the EXO token and tenant ID
-    acquired once lazily.
+    acquired once lazily.  CIS Intune checks (``cis_group`` set) are run via
+    their batch runner once per group and results cached for the run.
     """
     graph_token = await acquire_access_token(company_id)
     enabled = await get_enabled_check_ids()
@@ -693,32 +976,63 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     exo_token: str | None = None
     exo_tenant_id: str | None = None
 
+    # Cache for CIS batch group results: group_name → {check_id: result_dict}
+    cis_group_cache: dict[str, dict[str, dict[str, Any]]] = {}
+
     results: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
         if check_id not in enabled:
             continue
         check_name = bp["name"]
-        source_type = bp.get("source_type", "graph")
-        runner: BestPracticeRunner = bp["source"]
-        try:
-            if source_type == "exo":
-                if exo_token is None:
-                    exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
-                raw = await runner(exo_token, exo_tenant_id)  # type: ignore[call-arg]
+        cis_group = bp.get("cis_group")
+
+        if cis_group and cis_group in _CIS_GROUP_RUNNERS:
+            # CIS batch check – run the group runner once and cache results
+            if cis_group not in cis_group_cache:
+                batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
+                if batch_runner:
+                    try:
+                        batch = await batch_runner(graph_token)
+                        cis_group_cache[cis_group] = {r["check_id"]: r for r in batch}
+                    except M365Error as exc:
+                        log_error(
+                            "CIS Intune benchmark batch failed",
+                            company_id=company_id,
+                            cis_group=cis_group,
+                            error=str(exc),
+                        )
+                        cis_group_cache[cis_group] = {}
+                else:
+                    cis_group_cache[cis_group] = {}
+            raw = cis_group_cache[cis_group].get(check_id)
+            if raw:
+                status = raw.get("status", STATUS_UNKNOWN)
+                details = raw.get("details") or ""
             else:
-                raw = await runner(graph_token)  # type: ignore[call-arg]
-            status = raw.get("status", STATUS_UNKNOWN)
-            details = raw.get("details") or ""
-        except M365Error as exc:
-            log_error(
-                "M365 best practice check failed",
-                company_id=company_id,
-                check_id=check_id,
-                error=str(exc),
-            )
-            status = STATUS_UNKNOWN
-            details = f"Unable to evaluate check: {exc}"
+                status = STATUS_UNKNOWN
+                details = "Check result not available from batch run."
+        else:
+            source_type = bp.get("source_type", "graph")
+            runner: BestPracticeRunner = bp["source"]
+            try:
+                if source_type == "exo":
+                    if exo_token is None:
+                        exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
+                    raw = await runner(exo_token, exo_tenant_id)  # type: ignore[call-arg]
+                else:
+                    raw = await runner(graph_token)  # type: ignore[call-arg]
+                status = raw.get("status", STATUS_UNKNOWN)
+                details = raw.get("details") or ""
+            except M365Error as exc:
+                log_error(
+                    "M365 best practice check failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                status = STATUS_UNKNOWN
+                details = f"Unable to evaluate check: {exc}"
 
         await bp_repo.upsert_result(
             company_id=company_id,
@@ -786,6 +1100,8 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "has_remediation": bool(bp_meta.get("has_remediation")),
             "remediation_status": row.get("remediation_status"),
             "remediated_at": row.get("remediated_at"),
+            "is_cis_benchmark": bool(bp_meta.get("is_cis_benchmark")),
+            "cis_group": bp_meta.get("cis_group", ""),
         })
     return out
 

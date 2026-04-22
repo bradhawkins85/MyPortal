@@ -4949,24 +4949,10 @@ async def m365_page(request: Request, error: str | None = None, success: str | N
     return await _render_template("m365/index.html", request, user, extra=extra)
 
 
-@app.get("/m365/benchmarks", response_class=HTMLResponse)
-async def m365_benchmarks_page(request: Request, error: str | None = None, success: str | None = None):
-    user, membership, company, company_id, redirect = await _load_license_context(request)
-    if redirect:
-        return redirect
-    credentials = await m365_service.get_credentials(company_id)
-    results = await cis_benchmark_service.get_last_results(company_id)
-    extra = {
-        "title": "CIS Benchmarks",
-        "company": company,
-        "categories": cis_benchmark_service.BENCHMARK_CATEGORIES,
-        "results": results,
-        "has_credentials": bool(credentials),
-        "is_super_admin": bool(user.get("is_super_admin")),
-        "error": error,
-        "success": success,
-    }
-    return await _render_template("m365/benchmarks.html", request, user, extra=extra)
+@app.get("/m365/benchmarks", response_class=RedirectResponse)
+async def m365_benchmarks_redirect(request: Request):
+    """Redirect the old CIS Benchmarks page to the merged Best Practices page."""
+    return RedirectResponse(url="/m365/best-practices", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @app.post("/m365/benchmarks/run", response_class=RedirectResponse)
@@ -4981,10 +4967,10 @@ async def run_m365_benchmarks(request: Request):
         log_info("CIS benchmarks run", company_id=company_id, user_id=user.get("id"))
     except m365_service.M365Error as exc:
         return RedirectResponse(
-            url=f"/m365/benchmarks?error={quote(str(exc))}",
+            url=f"/m365/best-practices?error={quote(str(exc))}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    return RedirectResponse(url="/m365/benchmarks?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/m365/best-practices?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/m365/benchmarks/exclude", response_class=RedirectResponse)
@@ -4999,7 +4985,7 @@ async def exclude_benchmark_check(
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.add_exclusion(company_id, check_id, reason)
-    return RedirectResponse(url="/m365/benchmarks?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/m365/best-practices?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/m365/benchmarks/exclude/remove", response_class=RedirectResponse)
@@ -5013,7 +4999,7 @@ async def remove_benchmark_exclusion(
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.remove_exclusion(company_id, check_id)
-    return RedirectResponse(url="/m365/benchmarks?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url="/m365/best-practices?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ---------------------------------------------------------------------------
