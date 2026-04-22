@@ -73,7 +73,7 @@
 
       <div class="management__body management__body--columns">
         <div class="management__column management__column--details">
-          <details class="card card--panel card-collapsible" open>
+          <details class="card card--panel card-collapsible">
             <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Ticket details</h2>
               <div class="card__collapsible-meta">
@@ -331,10 +331,14 @@
             </article>
           {% endif %}
 
-          <article class="card card--panel">
-            <header class="card__header">
+          <details class="card card--panel card-collapsible">
+            <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Additional details</h2>
-            </header>
+              <div class="card__collapsible-meta">
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content">
             <div class="card__body card__body--meta">
               <dl class="definition-list">
                 {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
@@ -508,7 +512,8 @@
                 </div>
               </dl>
             </div>
-          </article>
+            </div>
+          </details>
 
           {% if ticket_assigned_user and ticket_assigned_user.booking_link_url %}
             <article class="card card--panel">
