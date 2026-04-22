@@ -194,6 +194,18 @@ async def add_participant(
         )
 
 
+_MESSAGES_SELECT = """
+    SELECT m.id, m.room_id, m.matrix_event_id, m.sender_matrix_id, m.sender_user_id,
+           m.body, m.msgtype, m.sent_at, m.redacted_at,
+           COALESCE(
+               NULLIF(m.sender_display_name, ''),
+               NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '')
+           ) AS sender_display_name
+    FROM chat_messages m
+    LEFT JOIN users u ON u.id = m.sender_user_id
+"""
+
+
 async def get_messages(
     room_id: int,
     *,
@@ -202,23 +214,23 @@ async def get_messages(
     before_event_id: str | None = None,
 ) -> list[dict[str, Any]]:
     if before_event_id:
-        row = await db.fetch_one(
+        pivot = await db.fetch_one(
             "SELECT sent_at FROM chat_messages WHERE matrix_event_id = %s",
             (before_event_id,),
         )
-        if row:
+        if pivot:
             rows = await db.fetch_all(
-                """SELECT * FROM chat_messages
-                   WHERE room_id = %s AND sent_at < %s AND redacted_at IS NULL
-                   ORDER BY sent_at DESC LIMIT %s OFFSET %s""",
-                (room_id, row["sent_at"], limit, offset),
+                _MESSAGES_SELECT + """
+                WHERE m.room_id = %s AND m.sent_at < %s AND m.redacted_at IS NULL
+                ORDER BY m.sent_at DESC LIMIT %s OFFSET %s""",
+                (room_id, pivot["sent_at"], limit, offset),
             )
             return [dict(r) for r in reversed(rows)]
 
     rows = await db.fetch_all(
-        """SELECT * FROM chat_messages
-           WHERE room_id = %s AND redacted_at IS NULL
-           ORDER BY sent_at ASC LIMIT %s OFFSET %s""",
+        _MESSAGES_SELECT + """
+        WHERE m.room_id = %s AND m.redacted_at IS NULL
+        ORDER BY m.sent_at ASC LIMIT %s OFFSET %s""",
         (room_id, limit, offset),
     )
     return [dict(r) for r in rows]
@@ -240,6 +252,7 @@ async def add_message(
     body: str,
     msgtype: str = "m.text",
     sender_user_id: int | None = None,
+    sender_display_name: str | None = None,
     sent_at: datetime | None = None,
 ) -> dict[str, Any]:
     if sent_at is None:
@@ -249,10 +262,10 @@ async def add_message(
         msg_id = await db.execute_returning_lastrowid(
             """INSERT OR IGNORE INTO chat_messages
                (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-                body, msgtype, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                sender_display_name, body, msgtype, sent_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-             body, msgtype, sent_at),
+             sender_display_name, body, msgtype, sent_at),
         )
         if msg_id:
             row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = ?", (msg_id,))
@@ -265,10 +278,10 @@ async def add_message(
         msg_id = await db.execute_returning_lastrowid(
             """INSERT IGNORE INTO chat_messages
                (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-                body, msgtype, sent_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                sender_display_name, body, msgtype, sent_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
             (room_id, matrix_event_id, sender_matrix_id, sender_user_id,
-             body, msgtype, sent_at),
+             sender_display_name, body, msgtype, sent_at),
         )
         if msg_id:
             row = await db.fetch_one("SELECT * FROM chat_messages WHERE id = %s", (msg_id,))

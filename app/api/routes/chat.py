@@ -180,6 +180,7 @@ async def send_message(
         sender_matrix_id=current_user.get("matrix_user_id") or _settings.matrix_bot_user_id or "",
         body=body.body,
         sender_user_id=user_id,
+        sender_display_name=display_name,
         sent_at=now,
     )
 

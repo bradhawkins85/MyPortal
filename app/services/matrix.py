@@ -236,6 +236,20 @@ def sanitize_localpart(name: str) -> str:
     return clean
 
 
+async def get_display_name(user_id: str) -> str | None:
+    """Fetch a Matrix user's display name from their profile. Returns None on failure."""
+    try:
+        data = await _request(
+            "GET",
+            f"/_matrix/client/v3/profile/{user_id}/displayname",
+            headers=_bot_headers(),
+        )
+        name = data.get("displayname")
+        return name if name else None
+    except (MatrixError, MatrixConfigError):
+        return None
+
+
 async def get_power_levels(room_id: str) -> dict[str, Any]:
     """Get the current power levels state for a room."""
     return await _request(
