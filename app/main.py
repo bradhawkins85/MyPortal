@@ -649,7 +649,7 @@ app.add_middleware(
 # Add request logging middleware
 app.add_middleware(
     RequestLoggingMiddleware,
-    exempt_paths=("/static", "/health", "/manifest.webmanifest", "/service-worker.js"),
+    exempt_paths=("/static", "/health", "/manifest.webmanifest", "/service-worker.js", "/api/users/me/preferences"),
 )
 
 # Configure endpoint-specific rate limits per security requirements
