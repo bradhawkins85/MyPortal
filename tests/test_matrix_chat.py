@@ -212,3 +212,28 @@ def test_external_invite_gated_by_self_hosted():
     assert "HTTPException" in source, (
         "invite_external must raise HTTPException when self-hosted is disabled"
     )
+
+
+# ---------------------------------------------------------------------------
+# Sync loop error handling
+# ---------------------------------------------------------------------------
+
+def test_sync_loop_handles_unknown_token_with_long_backoff():
+    """Verify that the sync loop backs off longer on M_UNKNOWN_TOKEN errors."""
+    source = pathlib.Path("app/services/matrix_sync.py").read_text()
+    # Must distinguish M_UNKNOWN_TOKEN from other errors
+    assert "M_UNKNOWN_TOKEN" in source, (
+        "matrix_sync must handle M_UNKNOWN_TOKEN separately"
+    )
+    # Must use a significantly longer backoff for auth failures
+    assert "300" in source, (
+        "matrix_sync must back off 300 seconds on invalid token errors"
+    )
+
+
+def test_sync_loop_still_handles_generic_errors():
+    """Verify the sync loop still catches generic exceptions."""
+    source = pathlib.Path("app/services/matrix_sync.py").read_text()
+    assert "except Exception as exc:" in source, (
+        "matrix_sync must still handle generic exceptions"
+    )
