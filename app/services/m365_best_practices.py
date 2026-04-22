@@ -14,11 +14,16 @@ Several of the underlying Graph queries reuse helper functions from
 ``cis_benchmark`` to avoid duplication.  Each best-practice check has its
 own ``bp_*`` identifier and its own user-facing name and remediation text
 suitable for the Best Practices page.
+
+Some checks (e.g. ``bp_disable_direct_send``) query Exchange Online via the
+REST InvokeCommand API instead of Microsoft Graph; these are marked with
+``"source_type": "exo"`` in the catalog and their runner callables accept
+``(exo_token, tenant_id)`` rather than a single Graph token string.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Union
 
 from app.core.logging import log_error, log_info
 from app.repositories import m365_best_practices as bp_repo
@@ -47,7 +52,7 @@ from app.services.cis_benchmark import (
     _check_security_defaults,
     _check_sspr_enabled,
 )
-from app.services.m365 import M365Error, acquire_access_token
+from app.services.m365 import M365Error, _acquire_exo_access_token, _exo_invoke_command, acquire_access_token
 
 
 # ---------------------------------------------------------------------------
@@ -58,8 +63,89 @@ from app.services.m365 import M365Error, acquire_access_token
 # callable is an existing CIS-benchmark Graph helper that produces a result
 # dict with its own ``check_id``/``check_name``; we re-key the result to use
 # the ``bp_*`` id and Best-Practices-specific name when persisting.
+#
+# Entries with ``"source_type": "exo"`` call an Exchange Online InvokeCommand
+# runner that takes ``(exo_token: str, tenant_id: str)`` instead of a single
+# Graph token string.
+#
+# Entries with ``"has_remediation": True`` support one-click automated
+# remediation via the ``remediate_check`` service function.
 
-BestPracticeRunner = Callable[[str], Awaitable[dict[str, Any]]]
+# Runner types
+GraphRunner = Callable[[str], Awaitable[dict[str, Any]]]
+ExoRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
+BestPracticeRunner = Union[GraphRunner, ExoRunner]
+
+# Keys that are implementation details and must not be exposed in the public catalog
+_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params"})
+
+
+# ---------------------------------------------------------------------------
+# EXO-based check and remediation helpers
+# ---------------------------------------------------------------------------
+
+
+async def _check_direct_send(exo_token: str, tenant_id: str) -> dict[str, Any]:
+    """Check whether Direct Send (anonymous relay) is disabled via Exchange Online.
+
+    Calls ``Get-OrganizationConfig`` and inspects the ``RejectDirectSend``
+    property.  Requires the app to have ``Exchange.ManageAsApp`` and an
+    Exchange Administrator RBAC role.
+    """
+    check_id = "bp_disable_direct_send"
+    check_name = "Direct Send is disabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+        value = data.get("value") or []
+        config: dict[str, Any] = value[0] if isinstance(value, list) and value else {}
+        reject = config.get("RejectDirectSend")
+        if reject is True:
+            return {
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": STATUS_PASS,
+                "details": "Direct Send (anonymous relay) is disabled.",
+            }
+        if reject is False:
+            return {
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": STATUS_FAIL,
+                "details": (
+                    "Direct Send is enabled. External senders can relay mail "
+                    "through your tenant without authentication."
+                ),
+            }
+        return {
+            "check_id": check_id,
+            "check_name": check_name,
+            "status": STATUS_UNKNOWN,
+            "details": "Unable to determine Direct Send status from organization config.",
+        }
+    except M365Error as exc:
+        return {
+            "check_id": check_id,
+            "check_name": check_name,
+            "status": STATUS_UNKNOWN,
+            "details": f"Unable to query Exchange Online organization config: {exc}",
+        }
+
+
+async def _run_direct_send_remediation(exo_token: str, tenant_id: str) -> bool:
+    """Execute ``Set-OrganizationConfig -RejectDirectSend $true`` via EXO REST API.
+
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    try:
+        await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Set-OrganizationConfig",
+            {"RejectDirectSend": True},
+        )
+        return True
+    except M365Error:
+        return False
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -76,6 +162,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_security_defaults,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_block_legacy_auth",
@@ -90,6 +177,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_legacy_auth_blocked,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_mfa_for_all_users",
@@ -104,6 +192,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_mfa_conditional_access,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_admin_mfa",
@@ -117,6 +206,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_admin_mfa,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_global_admin_count",
@@ -131,6 +221,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_global_admin_count,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_audit_log_enabled",
@@ -145,6 +236,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_audit_log_enabled,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_self_service_password_reset",
@@ -159,6 +251,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_sspr_enabled,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_password_never_expires",
@@ -174,6 +267,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_password_never_expires,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_guest_access_restricted",
@@ -187,6 +281,29 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "settings → Guest user access restrictions → Restricted."
         ),
         "source": _check_guest_access_restricted,
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    # ------------------------------------------------------------------
+    # Exchange Online checks
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_disable_direct_send",
+        "name": "Disable Direct Send",
+        "description": (
+            "Direct Send allows external senders to relay mail through your "
+            "Exchange Online tenant without authentication. Disabling it "
+            "prevents unauthorized mail relay and reduces spam/phishing risk."
+        ),
+        "remediation": (
+            "Run the following Exchange Online PowerShell command to disable "
+            "Direct Send: Set-OrganizationConfig -RejectDirectSend $true"
+        ),
+        "source": _check_direct_send,
+        "source_type": "exo",
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {"RejectDirectSend": True},
         "default_enabled": True,
     },
     # ------------------------------------------------------------------
@@ -206,6 +323,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_sign_in_logs,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_risky_users",
@@ -220,6 +338,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_risky_users,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_sign_in_risk_policy",
@@ -235,6 +354,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_sign_in_risk_policy,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_user_risk_policy",
@@ -250,6 +370,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_user_risk_policy,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_named_locations",
@@ -264,6 +385,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_named_locations,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_ca_report_only_policies",
@@ -278,6 +400,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_ca_report_only_policies,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_app_credential_expiry",
@@ -293,6 +416,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_app_credential_expiry,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_cloud_admin_accounts",
@@ -308,6 +432,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_cloud_admin_accounts,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_secure_score",
@@ -322,6 +447,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_secure_score,
         "default_enabled": True,
+        "has_remediation": False,
     },
     {
         "id": "bp_monitor_mfa_registration_policy",
@@ -338,14 +464,15 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_monitor_mfa_registration_policy,
         "default_enabled": True,
+        "has_remediation": False,
     },
 ]
 
 
 def list_best_practices() -> list[dict[str, Any]]:
-    """Return the best-practice catalog (without runner callables)."""
+    """Return the best-practice catalog (without internal runner keys)."""
     return [
-        {k: v for k, v in bp.items() if k != "source"}
+        {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
         for bp in _BEST_PRACTICES
     ]
 
@@ -394,7 +521,7 @@ async def list_settings_with_catalog() -> list[dict[str, Any]]:
     settings = await bp_repo.get_settings_map()
     out: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
-        entry = {k: v for k, v in bp.items() if k != "source"}
+        entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
         entry["enabled"] = settings.get(bp["id"], bool(bp.get("default_enabled", True)))
         out.append(entry)
     return out
@@ -431,10 +558,18 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
 
     Returns the list of result dicts (one per check) and persists each result
     in the ``m365_best_practice_results`` table.
+
+    Graph-based checks receive the Graph access token; Exchange-Online-based
+    checks (``source_type == "exo"``) receive the EXO token and tenant ID
+    acquired once lazily.
     """
-    token = await acquire_access_token(company_id)
+    graph_token = await acquire_access_token(company_id)
     enabled = await get_enabled_check_ids()
     run_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # EXO token/tenant – acquired lazily on first EXO check
+    exo_token: str | None = None
+    exo_tenant_id: str | None = None
 
     results: list[dict[str, Any]] = []
     for bp in _BEST_PRACTICES:
@@ -442,9 +577,15 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
         if check_id not in enabled:
             continue
         check_name = bp["name"]
+        source_type = bp.get("source_type", "graph")
         runner: BestPracticeRunner = bp["source"]
         try:
-            raw = await runner(token)
+            if source_type == "exo":
+                if exo_token is None:
+                    exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
+                raw = await runner(exo_token, exo_tenant_id)  # type: ignore[call-arg]
+            else:
+                raw = await runner(graph_token)  # type: ignore[call-arg]
             status = raw.get("status", STATUS_UNKNOWN)
             details = raw.get("details") or ""
         except M365Error as exc:
@@ -472,6 +613,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             "details": details,
             "run_at": run_at,
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
+            "has_remediation": bool(bp.get("has_remediation")),
         })
 
     log_info(
@@ -509,8 +651,100 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "details": row.get("details") or "",
             "run_at": row.get("run_at"),
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
+            "has_remediation": bool(bp_meta.get("has_remediation")),
+            "remediation_status": row.get("remediation_status"),
+            "remediated_at": row.get("remediated_at"),
         })
     return out
+
+
+async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
+    """Attempt automated remediation for a single best-practice check.
+
+    Looks up the remediation command from the catalog, executes it via the
+    Exchange Online REST API (for EXO-type checks), records the outcome in the
+    database, and returns a result dict with ``success`` (bool) and ``message``
+    (str) keys.
+
+    Currently only EXO-type checks that declare ``has_remediation: True``
+    support automated remediation.  For all other check IDs the function
+    returns a failure result without making any external calls.
+    """
+    bp = _catalog_map().get(check_id)
+    if not bp or not bp.get("has_remediation"):
+        return {
+            "success": False,
+            "message": "Automated remediation is not available for this check.",
+        }
+
+    source_type = bp.get("source_type", "graph")
+    remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if source_type == "exo":
+        try:
+            exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+        except M365Error as exc:
+            log_error(
+                "M365 best practice remediation – EXO token acquisition failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            await bp_repo.update_remediation_status(
+                company_id=company_id,
+                check_id=check_id,
+                remediation_status="failed",
+                remediated_at=remediated_at,
+            )
+            return {
+                "success": False,
+                "message": f"Unable to acquire Exchange Online token: {exc}",
+            }
+
+        cmdlet = bp.get("remediation_cmdlet", "")
+        params = bp.get("remediation_params") or {}
+        try:
+            await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+            success = True
+        except M365Error as exc:
+            log_error(
+                "M365 best practice remediation command failed",
+                company_id=company_id,
+                check_id=check_id,
+                cmdlet=cmdlet,
+                error=str(exc),
+            )
+            success = False
+    else:
+        success = False
+
+    remediation_status = "success" if success else "failed"
+    await bp_repo.update_remediation_status(
+        company_id=company_id,
+        check_id=check_id,
+        remediation_status=remediation_status,
+        remediated_at=remediated_at,
+    )
+
+    log_info(
+        "M365 best practice remediation attempted",
+        company_id=company_id,
+        check_id=check_id,
+        success=success,
+    )
+
+    if success:
+        return {
+            "success": True,
+            "message": (
+                f"Remediation command executed successfully. "
+                f"Re-evaluate the check to confirm the change took effect."
+            ),
+        }
+    return {
+        "success": False,
+        "message": "Remediation command failed. Check that the app has the required Exchange Online permissions.",
+    }
 
 
 # Status constants re-exported for convenience.
@@ -526,4 +760,5 @@ __all__ = [
     "run_best_practices",
     "get_last_results",
     "get_remediation",
+    "remediate_check",
 ]
