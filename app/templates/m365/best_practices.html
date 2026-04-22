@@ -73,6 +73,7 @@
             <th>Best Practice</th>
             <th>Details</th>
             <th style="white-space:nowrap">Last evaluated</th>
+            {% if is_super_admin %}<th style="width:10rem">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -103,12 +104,38 @@
                 <p style="margin-top:0.5rem;font-size:0.875rem">{{ check.remediation }}</p>
               </details>
               {% endif %}
+              {% if check.remediation_status %}
+              <div style="margin-top:0.4rem">
+                {% if check.remediation_status == "success" %}
+                  <span style="color:var(--color-success,#16a34a);font-size:0.8rem">✓ Remediated
+                    {% if check.remediated_at %}<small class="text-muted">on {{ check.remediated_at.strftime('%d %b %Y %H:%M') }}</small>{% endif %}
+                  </span>
+                {% elif check.remediation_status == "failed" %}
+                  <span style="color:var(--color-error,#dc2626);font-size:0.8rem">✗ Remediation failed
+                    {% if check.remediated_at %}<small class="text-muted">on {{ check.remediated_at.strftime('%d %b %Y %H:%M') }}</small>{% endif %}
+                  </span>
+                {% endif %}
+              </div>
+              {% endif %}
             </td>
             <td style="white-space:nowrap">
               {% if check.run_at %}
               <small class="text-muted">{{ check.run_at.strftime('%d %b %Y %H:%M') }}</small>
               {% endif %}
             </td>
+            {% if is_super_admin %}
+            <td>
+              {% if check.status == "fail" and check.has_remediation %}
+              <form method="post" action="/m365/best-practices/remediate/{{ check.check_id }}" style="display:inline">
+                {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <button type="submit" class="button button--small button--warning"
+                        title="Run automated remediation via PowerShell">Remediate</button>
+              </form>
+              {% endif %}
+            </td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>

@@ -794,6 +794,63 @@ async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     return access_token, tenant_id
 
 
+async def _exo_invoke_command(
+    exo_token: str,
+    tenant_id: str,
+    cmdlet_name: str,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Call a single Exchange Online PowerShell cmdlet via the REST InvokeCommand API.
+
+    POSTs to ``https://outlook.office365.com/adminapi/beta/{tenant_id}/InvokeCommand``
+    using an app-only EXO access token.  The ``Exchange.ManageAsApp`` application
+    permission and an appropriate Exchange RBAC role (e.g. Exchange Administrator)
+    must already be granted.
+
+    Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
+    non-200 HTTP status.
+    """
+    safe_tenant = quote(str(tenant_id or "").strip(), safe="")
+    url = f"https://outlook.office365.com/adminapi/beta/{safe_tenant}/InvokeCommand"
+    payload: dict[str, Any] = {
+        "CmdletInput": {
+            "CmdletName": cmdlet_name,
+            "Parameters": parameters or {},
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {exo_token}",
+        "Accept-Encoding": "identity",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.DecodingError as exc:
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} request decode error: {exc}"
+        ) from exc
+    if response.status_code not in (200, 201, 204):
+        log_error(
+            "Exchange Online InvokeCommand failed",
+            cmdlet=cmdlet_name,
+            status=response.status_code,
+            body=response.text[:300] if response.text else "",
+        )
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} failed ({response.status_code})",
+            http_status=response.status_code,
+        )
+    if response.status_code == 204 or not response.text:
+        return {}
+    try:
+        return response.json()
+    except (ValueError, httpx.DecodingError) as exc:
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} response parse error: {exc}"
+        ) from exc
+
+
 async def _graph_get(
     access_token: str,
     url: str,
