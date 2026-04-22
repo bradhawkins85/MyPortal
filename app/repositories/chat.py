@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -65,7 +65,7 @@ async def create_room(
     company_id: int,
     linked_ticket_id: int | None = None,
 ) -> dict[str, Any]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     room_id = await db.execute_returning_lastrowid(
         """INSERT INTO chat_rooms
            (matrix_room_id, room_alias, created_by_user_id, company_id, subject,
@@ -138,7 +138,7 @@ async def add_participant(
     *,
     user_id: int | None = None,
 ) -> None:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if db.is_sqlite():
         await db.execute(
             """INSERT OR IGNORE INTO chat_room_participants
@@ -205,7 +205,7 @@ async def add_message(
     sent_at: datetime | None = None,
 ) -> dict[str, Any]:
     if sent_at is None:
-        sent_at = datetime.utcnow()
+        sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     msg_id = await db.execute_returning_lastrowid(
         """INSERT INTO chat_messages
@@ -254,7 +254,7 @@ async def upsert_chat_user_link(
     email: str | None = None,
     is_provisioned: bool = False,
 ) -> None:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if db.is_sqlite():
         await db.execute(
             """INSERT OR REPLACE INTO chat_user_links
@@ -321,7 +321,7 @@ async def create_invite(
     target_display_name: str | None = None,
     expires_at: datetime | None = None,
 ) -> dict[str, Any]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     invite_id = await db.execute_returning_lastrowid(
         """INSERT INTO chat_invites
            (room_id, created_by_user_id, target_email, target_phone,
@@ -359,7 +359,7 @@ async def get_sync_state() -> str | None:
 
 
 async def save_sync_state(next_batch: str) -> None:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if db.is_sqlite():
         await db.execute(
             """INSERT OR REPLACE INTO matrix_sync_state (id, next_batch, updated_at)

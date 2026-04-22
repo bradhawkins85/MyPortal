@@ -286,11 +286,13 @@ async def invite_external(
             log_error("Failed to provision Matrix user", mxid=mxid, error=str(exc))
             raise HTTPException(status_code=502, detail="Failed to provision Matrix user")
 
+        # Store provisioned user link — the temporary password is NOT persisted.
+        # It is returned once in the API response for the admin to communicate
+        # securely to the invitee. The invitee should change it on first login.
         await chat_repo.upsert_chat_user_link(
             matrix_user_id=mxid,
             email=body.target_email,
             is_provisioned=True,
-            access_token_encrypted=encrypt_secret(f"password:{password}"),
         )
 
     try:

@@ -18,6 +18,18 @@ _M_LIMIT_EXCEEDED = "M_LIMIT_EXCEEDED"
 _DEFAULT_TIMEOUT = 30.0
 _SYNC_TIMEOUT_MS = 30_000
 
+# Module-level shared client for connection pooling across Matrix API calls.
+# Limits are intentionally conservative; the sync loop uses a longer timeout.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client(*, timeout: float = _DEFAULT_TIMEOUT) -> httpx.AsyncClient:
+    """Return (or create) the shared async HTTP client."""
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=timeout)
+    return _client
+
 
 class MatrixError(RuntimeError):
     """Raised when Matrix homeserver responds with an error."""
@@ -67,8 +79,8 @@ async def _request(
     url = f"{_base_url()}{path}"
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.request(method, url, headers=headers, json=json, params=params)
+            client = _get_client(timeout=timeout)
+            resp = await client.request(method, url, headers=headers, json=json, params=params)
         except httpx.RequestError as exc:
             if attempt >= max_retries - 1:
                 raise MatrixError("M_UNKNOWN", str(exc)) from exc

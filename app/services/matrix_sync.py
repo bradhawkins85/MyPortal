@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import get_settings
@@ -43,7 +43,7 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             body = content.get("body", "")
             msgtype = content.get("msgtype", "m.text")
             origin_server_ts = event.get("origin_server_ts", 0)
-            sent_at = datetime.utcfromtimestamp(origin_server_ts / 1000)
+            sent_at = datetime.fromtimestamp(origin_server_ts / 1000, tz=timezone.utc).replace(tzinfo=None)
 
             link = await chat_repo.get_chat_user_link(matrix_user_id=sender)
             portal_user_id = link["user_id"] if link else None
