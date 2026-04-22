@@ -4487,6 +4487,17 @@ async def compliance_page(request: Request):
     
     # Get compliance records
     compliance_records = await essential8_repo.list_company_compliance(company_id)
+
+    # Attach per-maturity-level statuses to each record
+    ml_statuses = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    for record in compliance_records:
+        ctrl_ml = ml_statuses.get(
+            record["control_id"],
+            {"ml1": "not_started", "ml2": "not_started", "ml3": "not_started"},
+        )
+        record["ml1_status"] = ctrl_ml["ml1"]
+        record["ml2_status"] = ctrl_ml["ml2"]
+        record["ml3_status"] = ctrl_ml["ml3"]
     
     # Get compliance summary
     summary = await essential8_repo.get_company_compliance_summary(company_id)
