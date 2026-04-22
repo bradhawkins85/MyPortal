@@ -93,6 +93,13 @@
           </td>
           {% if show_actions %}
           <td>
+            <form method="post" action="/m365/best-practices/check/{{ check.check_id }}" style="display:inline">
+              {% if csrf_token %}
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <button type="submit" class="button button--small button--ghost"
+                      title="Re-evaluate this check now">Check</button>
+            </form>
             {% if check.status == "fail" and check.has_remediation %}
             <form method="post" action="/m365/best-practices/remediate/{{ check.check_id }}" style="display:inline">
               {% if csrf_token %}

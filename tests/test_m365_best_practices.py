@@ -260,6 +260,64 @@ async def test_run_best_practices_handles_check_error_gracefully():
 
 
 # ---------------------------------------------------------------------------
+# run_single_check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_runs_and_persists():
+    catalog = bp_service.list_best_practices()
+    enabled_id = catalog[0]["id"]
+    target = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == enabled_id)
+
+    fake_result = {"check_id": enabled_id, "check_name": target["name"], "status": "pass", "details": "ok"}
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    real_source = target["source"]
+    fake_source = AsyncMock(return_value=fake_result)
+    target["source"] = fake_source
+    try:
+        with (
+            patch("app.services.m365_best_practices.acquire_access_token", new_callable=AsyncMock) as mock_token,
+            patch("app.services.m365_best_practices.get_enabled_check_ids", new_callable=AsyncMock) as mock_enabled,
+            patch("app.services.m365_best_practices.get_auto_remediate_check_ids", new_callable=AsyncMock, return_value=set()),
+            patch("app.services.m365_best_practices.bp_repo.upsert_result", side_effect=fake_upsert),
+        ):
+            mock_token.return_value = "fake-token"
+            mock_enabled.return_value = {enabled_id}
+            result = await bp_service.run_single_check(company_id=42, check_id=enabled_id)
+    finally:
+        target["source"] = real_source
+
+    assert result["check_id"] == enabled_id
+    assert result["status"] == "pass"
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 42
+    assert upserts[0]["check_id"] == enabled_id
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_raises_for_unknown_id():
+    with pytest.raises(ValueError, match="Unknown"):
+        await bp_service.run_single_check(company_id=1, check_id="bp_does_not_exist")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_raises_when_not_enabled():
+    catalog = bp_service.list_best_practices()
+    check_id = catalog[0]["id"]
+    with (
+        patch("app.services.m365_best_practices.get_enabled_check_ids", new_callable=AsyncMock) as mock_enabled,
+    ):
+        mock_enabled.return_value = set()
+        with pytest.raises(ValueError, match="not enabled"):
+            await bp_service.run_single_check(company_id=1, check_id=check_id)
+
+
+# ---------------------------------------------------------------------------
 # get_last_results
 # ---------------------------------------------------------------------------
 

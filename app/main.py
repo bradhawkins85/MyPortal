@@ -5089,6 +5089,47 @@ async def run_m365_best_practices(request: Request):
     )
 
 
+@app.post("/m365/best-practices/check/{check_id}", response_class=RedirectResponse)
+async def run_single_m365_best_practice_check(request: Request, check_id: str):
+    """Run a single best-practice check for the current company."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
+    if check_id not in known_ids:
+        return RedirectResponse(
+            url=f"/m365/best-practices?error={quote('Unknown best-practice check ID')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    try:
+        await m365_best_practices_service.run_single_check(
+            company_id=company_id,
+            check_id=check_id,
+        )
+        log_info(
+            "M365 single best practice check run",
+            company_id=company_id,
+            check_id=check_id,
+            user_id=user.get("id"),
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/m365/best-practices?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365/best-practices?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/m365/best-practices?success=Check+evaluated",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post("/m365/best-practices/remediate/{check_id}", response_class=RedirectResponse)
 async def remediate_m365_best_practice(request: Request, check_id: str):
     """Run automated remediation for a single best-practice check."""
