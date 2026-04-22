@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from 'macros/mobile.html' import mobile_collapsible %}
 
 {% block header_title %}Ticket{% endblock %}
 
@@ -24,89 +23,92 @@
       </header>
       <div class="management__body management__body--columns">
         <div class="management__column management__column--details">
-          <article class="card card--panel">
-            <header class="card__header u-hide-mobile">
+          <details class="card card--panel card-collapsible" open>
+            <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Ticket details</h2>
-            </header>
-            <div class="card__body">
-              {% call mobile_collapsible('Ticket details', open=False) %}
-              <dl class="description-list">
-                <div class="description-list__row">
-                  <dt>Status</dt>
-                  <dd><span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span></dd>
-                </div>
-                <div class="description-list__row">
-                  <dt>Priority</dt>
-                  <dd>{{ ticket.priority_label }}</dd>
-                </div>
-                {% if ticket.company_name %}
+              <div class="card__collapsible-meta">
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content">
+              <div class="card__body">
+                <dl class="description-list">
                   <div class="description-list__row">
-                    <dt>Company</dt>
-                    <dd>{{ ticket.company_name }}</dd>
+                    <dt>Status</dt>
+                    <dd><span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span></dd>
                   </div>
-                {% endif %}
-                {% if ticket.requester_label %}
                   <div class="description-list__row">
-                    <dt>Requester</dt>
-                    <dd>{{ ticket.requester_label }}</dd>
+                    <dt>Priority</dt>
+                    <dd>{{ ticket.priority_label }}</dd>
                   </div>
-                {% endif %}
-                {% if ticket.assigned_label %}
+                  {% if ticket.company_name %}
+                    <div class="description-list__row">
+                      <dt>Company</dt>
+                      <dd>{{ ticket.company_name }}</dd>
+                    </div>
+                  {% endif %}
+                  {% if ticket.requester_label %}
+                    <div class="description-list__row">
+                      <dt>Requester</dt>
+                      <dd>{{ ticket.requester_label }}</dd>
+                    </div>
+                  {% endif %}
+                  {% if ticket.assigned_label %}
+                    <div class="description-list__row">
+                      <dt>Assigned to</dt>
+                      <dd>{{ ticket.assigned_label }}</dd>
+                    </div>
+                  {% endif %}
                   <div class="description-list__row">
-                    <dt>Assigned to</dt>
-                    <dd>{{ ticket.assigned_label }}</dd>
-                  </div>
-                {% endif %}
-                <div class="description-list__row">
-                  <dt>Created</dt>
-                  <dd>
-                    {% if ticket.created_iso %}
-                      <span data-utc="{{ ticket.created_iso }}"></span>
-                    {% else %}
-                      <span class="text-muted">—</span>
-                    {% endif %}
-                  </dd>
-                </div>
-                <div class="description-list__row">
-                  <dt>Updated</dt>
-                  <dd>
-                    {% if ticket.updated_iso %}
-                      <span data-utc="{{ ticket.updated_iso }}"></span>
-                    {% else %}
-                      <span class="text-muted">—</span>
-                    {% endif %}
-                  </dd>
-                </div>
-                {% if ticket.xero_invoice_number %}
-                  <div class="description-list__row">
-                    <dt>Invoice Number</dt>
-                    <dd><strong>{{ ticket.xero_invoice_number }}</strong></dd>
-                  </div>
-                {% endif %}
-                {% if ticket.billed_at_iso %}
-                  <div class="description-list__row">
-                    <dt>Billed At</dt>
+                    <dt>Created</dt>
                     <dd>
-                      <span data-utc="{{ ticket.billed_at_iso }}"></span>
+                      {% if ticket.created_iso %}
+                        <span data-utc="{{ ticket.created_iso }}"></span>
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
                     </dd>
                   </div>
-                {% endif %}
-                {% if ticket_watchers %}
                   <div class="description-list__row">
-                    <dt>Watchers</dt>
+                    <dt>Updated</dt>
                     <dd>
-                      <ul class="list list--inline">
-                        {% for watcher in ticket_watchers %}
-                          <li>{{ watcher.label }}</li>
-                        {% endfor %}
-                      </ul>
+                      {% if ticket.updated_iso %}
+                        <span data-utc="{{ ticket.updated_iso }}"></span>
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
                     </dd>
                   </div>
-                {% endif %}
-              </dl>
-              {% endcall %}
+                  {% if ticket.xero_invoice_number %}
+                    <div class="description-list__row">
+                      <dt>Invoice Number</dt>
+                      <dd><strong>{{ ticket.xero_invoice_number }}</strong></dd>
+                    </div>
+                  {% endif %}
+                  {% if ticket.billed_at_iso %}
+                    <div class="description-list__row">
+                      <dt>Billed At</dt>
+                      <dd>
+                        <span data-utc="{{ ticket.billed_at_iso }}"></span>
+                      </dd>
+                    </div>
+                  {% endif %}
+                  {% if ticket_watchers %}
+                    <div class="description-list__row">
+                      <dt>Watchers</dt>
+                      <dd>
+                        <ul class="list list--inline">
+                          {% for watcher in ticket_watchers %}
+                            <li>{{ watcher.label }}</li>
+                          {% endfor %}
+                        </ul>
+                      </dd>
+                    </div>
+                  {% endif %}
+                </dl>
+              </div>
             </div>
-          </article>
+          </details>
 
           <article class="card card--panel">
             <header class="card__header">
@@ -188,7 +190,7 @@
             </article>
           {% endif %}
 
-          {% if matrix_chat_enabled %}
+          {% if matrix_chat_enabled and (ticket_chat_room or is_requester) %}
             <article class="card card--panel">
               <header class="card__header">
                 <h2 class="card__title">Chat</h2>
@@ -201,7 +203,7 @@
                   <a href="/chat/{{ ticket_chat_room.id }}" class="button button--primary">
                     Open Chat
                   </a>
-                {% else %}
+                {% elif is_requester %}
                   <p class="text-muted" style="margin-bottom: 1rem;">
                     Start a chat room for this ticket.
                   </p>
@@ -642,7 +644,7 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
-  {% if matrix_chat_enabled and not ticket_chat_room %}
+  {% if matrix_chat_enabled and not ticket_chat_room and is_requester %}
   <script>
     document.querySelectorAll('[data-start-chat-button]').forEach(function (btn) {
       btn.addEventListener('click', async function () {
