@@ -17648,6 +17648,15 @@ async def _render_ticket_detail(
     # Create service status lookup for consistent styling
     service_status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
 
+    # Fetch linked chat room for this ticket (if matrix chat is enabled)
+    ticket_chat_room: dict[str, Any] | None = None
+    if settings.matrix_enabled:
+        from app.repositories import chat as chat_repo
+        try:
+            ticket_chat_room = await chat_repo.get_room_by_ticket_id(ticket_id)
+        except Exception as exc:
+            log_error("Failed to load linked chat room for ticket", ticket_id=ticket_id, error=str(exc))
+
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
@@ -17691,6 +17700,7 @@ async def _render_ticket_detail(
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
+        "ticket_chat_room": ticket_chat_room,
         "success_message": success_message,
         "error_message": error_message,
     }
