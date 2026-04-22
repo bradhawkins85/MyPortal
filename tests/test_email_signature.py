@@ -110,7 +110,7 @@ def test_update_user_email_signature_via_api(monkeypatch, active_session):
 
     # Test updating email signature
     response = client.patch(
-        f"/users/{user_id}",
+        f"/api/users/{user_id}",
         json={"email_signature": signature_html},
         headers={"X-CSRF-Token": active_session.csrf_token},
         cookies={"session_token": active_session.session_token},
@@ -122,7 +122,7 @@ def test_update_user_email_signature_via_api(monkeypatch, active_session):
 
     # Test clearing email signature
     response = client.patch(
-        f"/users/{user_id}",
+        f"/api/users/{user_id}",
         json={"email_signature": None},
         headers={"X-CSRF-Token": active_session.csrf_token},
         cookies={"session_token": active_session.session_token},
@@ -159,7 +159,7 @@ def test_user_cannot_update_other_users_signature(monkeypatch, active_session):
 
     # Try to update another user's signature
     response = client.patch(
-        f"/users/{other_user_id}",
+        f"/api/users/{other_user_id}",
         json={"email_signature": signature_html},
         headers={"X-CSRF-Token": active_session.csrf_token},
         cookies={"session_token": active_session.session_token},
