@@ -59,6 +59,23 @@ def test_provision_app_roles_includes_report_settings_readwrite_all() -> None:
     assert report_settings_readwrite in m365_service._PROVISION_APP_ROLES
 
 
+@pytest.mark.anyio("asyncio")
+async def test_check_concealed_names_403_returns_actionable_message() -> None:
+    """A 403 from ``/admin/reportSettings`` must surface a clear, actionable
+    message about the missing ReportSettings.ReadWrite.All permission and
+    direct the administrator to re-authorise via the M365 settings page.
+    """
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403),
+    ):
+        result = await bp_service._check_concealed_names("fake-token")
+
+    assert result["status"] == STATUS_UNKNOWN
+    assert "ReportSettings.ReadWrite.All" in result["details"]
+    assert "Authorise portal access" in result["details"]
+
+
 # ---------------------------------------------------------------------------
 # _check_audit_log_enabled now uses the GET-able directoryAudits endpoint
 # ---------------------------------------------------------------------------

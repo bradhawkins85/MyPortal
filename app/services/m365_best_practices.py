@@ -297,8 +297,10 @@ async def _check_concealed_names(token: str) -> dict[str, Any]:
     show real user, group, and site names in reports (the best-practice
     recommendation); when it is ``False`` obfuscated names are shown instead.
 
-    Requires the ``Reports.Read.All`` or ``ReportSettings.Read.All`` Graph
-    application permission.
+    Requires the ``ReportSettings.ReadWrite.All`` Graph application permission.
+    The ``/admin/reportSettings`` endpoint rejects tokens that lack this specific
+    permission with ``S2SUnauthorized / Invalid permission`` (403), even when the
+    token carries ``Reports.Read.All``.
     """
     check_id = "bp_concealed_names"
     check_name = "Display concealed user, group, and site names in all reports is enabled"
@@ -329,6 +331,17 @@ async def _check_concealed_names(token: str) -> dict[str, Any]:
             "details": "Unable to determine report settings concealed names status.",
         }
     except M365Error as exc:
+        if exc.http_status == 403:
+            return {
+                "check_id": check_id,
+                "check_name": check_name,
+                "status": STATUS_UNKNOWN,
+                "details": (
+                    "The enterprise app is missing the ReportSettings.ReadWrite.All permission "
+                    "required to read /admin/reportSettings. To fix this: on the M365 settings "
+                    "page, click 'Authorise portal access' to re-grant the required permissions."
+                ),
+            }
         return {
             "check_id": check_id,
             "check_name": check_name,
