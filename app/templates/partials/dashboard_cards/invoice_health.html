@@ -1,0 +1,17 @@
+{# Invoice health card #}
+{% set p = payload or {} %}
+<div class="dashboard-card__invoices">
+  <div class="dashboard-card__highlight">{{ p.open_formatted or '$0.00' }}</div>
+  <div class="dashboard-card__meta">{{ p.overdue_formatted or '0' }} overdue invoices</div>
+  {% set items = p.get('items') or [] %}
+  {% if items %}
+    <ul class="status-list status-list--compact" role="list">
+      {% for item in items %}
+        <li class="status-list__item" role="listitem">
+          <span class="status-list__label">{{ item.label }}</span>
+          <span class="status-list__value">{{ item.formatted or item.value }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
