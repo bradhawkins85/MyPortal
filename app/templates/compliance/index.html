@@ -60,9 +60,10 @@
             <tr>
               <th scope="col" style="width: 4%">#</th>
               <th scope="col" style="width: 26%">Control</th>
-              <th scope="col" style="width: 28%">Status</th>
-              <th scope="col" style="width: 18%">Maturity</th>
-              <th scope="col" style="width: 12%">Last reviewed</th>
+              <th scope="col" style="width: 16%">ML1</th>
+              <th scope="col" style="width: 16%">ML2</th>
+              <th scope="col" style="width: 16%">ML3</th>
+              <th scope="col" style="width: 10%">Last reviewed</th>
               <th scope="col" style="width: 12%">Actions</th>
             </tr>
           </thead>
@@ -82,36 +83,31 @@
                 </div>
               </td>
               <td>
-                <div class="compliance-table__ml-badges">
-                  <span class="badge badge--status-{{ record.ml1_status }}">
-                    {% if record.ml1_status == 'not_started' %}Not started
-                    {% elif record.ml1_status == 'in_progress' %}In progress
-                    {% elif record.ml1_status == 'compliant' %}Compliant
-                    {% elif record.ml1_status == 'non_compliant' %}Non-compliant
-                    {% else %}Not started{% endif %}
-                  </span>
-                  <span class="badge badge--status-{{ record.ml2_status }}">
-                    {% if record.ml2_status == 'not_started' %}Not started
-                    {% elif record.ml2_status == 'in_progress' %}In progress
-                    {% elif record.ml2_status == 'compliant' %}Compliant
-                    {% elif record.ml2_status == 'non_compliant' %}Non-compliant
-                    {% else %}Not started{% endif %}
-                  </span>
-                  <span class="badge badge--status-{{ record.ml3_status }}">
-                    {% if record.ml3_status == 'not_started' %}Not started
-                    {% elif record.ml3_status == 'in_progress' %}In progress
-                    {% elif record.ml3_status == 'compliant' %}Compliant
-                    {% elif record.ml3_status == 'non_compliant' %}Non-compliant
-                    {% else %}Not started{% endif %}
-                  </span>
-                </div>
+                <span class="badge badge--status-{{ record.ml1_status }}">
+                  {% if record.ml1_status == 'not_started' %}Not started
+                  {% elif record.ml1_status == 'in_progress' %}In progress
+                  {% elif record.ml1_status == 'compliant' %}Compliant
+                  {% elif record.ml1_status == 'non_compliant' %}Non-compliant
+                  {% else %}Not started{% endif %}
+                </span>
               </td>
               <td>
-                <div class="compliance-table__ml-badges">
-                  <span class="badge badge--maturity-ml1">ML1</span>
-                  <span class="badge badge--maturity-ml2">ML2</span>
-                  <span class="badge badge--maturity-ml3">ML3</span>
-                </div>
+                <span class="badge badge--status-{{ record.ml2_status }}">
+                  {% if record.ml2_status == 'not_started' %}Not started
+                  {% elif record.ml2_status == 'in_progress' %}In progress
+                  {% elif record.ml2_status == 'compliant' %}Compliant
+                  {% elif record.ml2_status == 'non_compliant' %}Non-compliant
+                  {% else %}Not started{% endif %}
+                </span>
+              </td>
+              <td>
+                <span class="badge badge--status-{{ record.ml3_status }}">
+                  {% if record.ml3_status == 'not_started' %}Not started
+                  {% elif record.ml3_status == 'in_progress' %}In progress
+                  {% elif record.ml3_status == 'compliant' %}Compliant
+                  {% elif record.ml3_status == 'non_compliant' %}Non-compliant
+                  {% else %}Not started{% endif %}
+                </span>
               </td>
               <td>{{ record.last_reviewed_date or '—' }}</td>
               <td>
@@ -124,7 +120,7 @@
             </tr>
             {% else %}
             <tr>
-              <td colspan="6" class="table__empty">
+              <td colspan="7" class="table__empty">
                 No compliance records found.
                 {% if is_super_admin %}
                 <button type="button" class="button button--ghost button--small" id="initialize-compliance">Initialize controls</button>
