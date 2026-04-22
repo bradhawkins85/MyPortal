@@ -68,6 +68,7 @@ from app.api.routes import (
     companies,
     email_tracking,
     essential8 as essential8_api,
+    compliance_checks as compliance_checks_api,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -960,6 +961,7 @@ app.include_router(companies.router)
 app.include_router(email_tracking.router)
 app.include_router(smtp2go_webhooks.router)
 app.include_router(essential8_api.router)
+app.include_router(compliance_checks_api.router)
 app.include_router(licenses_api.router)
 app.include_router(forms_api.router)
 app.include_router(knowledge_base_api.router)
@@ -1715,6 +1717,8 @@ async def _build_base_context(
         "can_view_bcp": can_view_bcp,
         "can_edit_bcp": can_edit_bcp,
         "can_view_m365_best_practices": is_super_admin or _has_permission("can_view_m365_best_practices"),
+        "can_view_compliance_checks": is_super_admin or _has_permission("can_view_compliance_checks"),
+        "can_manage_compliance_checks": is_super_admin or _has_permission("can_manage_compliance_checks"),
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1897,6 +1901,8 @@ async def _build_public_context(
         "can_manage_staff": False,
         "can_view_compliance": False,
         "can_view_m365_best_practices": False,
+        "can_view_compliance_checks": False,
+        "can_manage_compliance_checks": False,
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
@@ -4540,6 +4546,119 @@ async def compliance_control_requirements_page(request: Request, control_id: int
         "is_super_admin": is_super_admin,
     }
     return await _render_template("compliance/control_requirements.html", request, user, extra=extra)
+
+
+async def _load_compliance_checks_context(request: Request):
+    """Load context for compliance checks pages.
+
+    Requires the user to have can_view_compliance_checks permission.
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_view = bool(membership and membership.get("can_view_compliance_checks"))
+    if not (is_super_admin or can_view):
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
+@app.get("/compliance-checks", response_class=HTMLResponse)
+async def compliance_checks_page(request: Request):
+    """Customer compliance checks list page."""
+    from app.repositories import compliance_checks as cc_repo
+
+    user, membership, company, company_id, redirect = await _load_compliance_checks_context(request)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_manage = is_super_admin or bool(membership and membership.get("can_manage_compliance_checks"))
+    assignments = await cc_repo.list_assignments(company_id)
+    summary = await cc_repo.get_assignment_summary(company_id)
+    categories = await cc_repo.list_categories()
+
+    extra = {
+        "title": "Compliance Checks",
+        "assignments": assignments,
+        "summary": summary,
+        "categories": categories,
+        "company": company,
+        "is_super_admin": is_super_admin,
+        "can_manage": can_manage,
+    }
+    return await _render_template("compliance_checks/index.html", request, user, extra=extra)
+
+
+@app.get("/compliance-checks/{assignment_id}", response_class=HTMLResponse)
+async def compliance_checks_detail_page(request: Request, assignment_id: int):
+    """Compliance check assignment detail page."""
+    from app.repositories import compliance_checks as cc_repo
+
+    user, membership, company, company_id, redirect = await _load_compliance_checks_context(request)
+    if redirect:
+        return redirect
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_manage = is_super_admin or bool(membership and membership.get("can_manage_compliance_checks"))
+    assignment = await cc_repo.get_assignment(company_id, assignment_id)
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    evidence_items = await cc_repo.list_evidence(assignment_id)
+    audit_trail = await cc_repo.list_audit(assignment_id, limit=50)
+
+    extra = {
+        "title": assignment.get("check", {}).get("title", "Compliance Check"),
+        "assignment": assignment,
+        "evidence_items": evidence_items,
+        "audit_trail": audit_trail,
+        "company": company,
+        "is_super_admin": is_super_admin,
+        "can_manage": can_manage,
+    }
+    return await _render_template("compliance_checks/detail.html", request, user, extra=extra)
+
+
+@app.get("/admin/compliance-checks/library", response_class=HTMLResponse)
+async def compliance_checks_library_page(request: Request):
+    """Compliance checks library management page (super admin only)."""
+    from app.repositories import compliance_checks as cc_repo
+
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    checks = await cc_repo.list_checks()
+    categories = await cc_repo.list_categories()
+
+    extra = {
+        "title": "Compliance Checks Library",
+        "checks": checks,
+        "categories": categories,
+        "is_super_admin": True,
+    }
+    return await _render_template("compliance_checks/library.html", request, user, extra=extra)
 
 
 @app.head("/invoices", response_class=HTMLResponse)

@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block header_title %}Compliance Checks{% endblock %}
+{% block title %}Compliance Checks{% endblock %}
+
+{% block header_actions %}
+  <div class="header-actions">
+    <select id="category-filter" class="form-input form-input--sm" aria-label="Filter by category">
+      <option value="">All categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat.code }}">{{ cat.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="status-filter" class="form-input form-input--sm" aria-label="Filter by status">
+      <option value="">All statuses</option>
+      <option value="not_started">Not started</option>
+      <option value="in_progress">In progress</option>
+      <option value="compliant">Compliant</option>
+      <option value="non_compliant">Non-compliant</option>
+      <option value="not_applicable">Not applicable</option>
+    </select>
+    <input
+      type="search"
+      id="text-filter"
+      class="form-input form-input--sm"
+      placeholder="Search checks…"
+      aria-label="Search checks"
+    />
+    {% if can_manage %}
+    <button type="button" class="button button--primary button--small" id="assign-check-btn">
+      Assign check
+    </button>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="management management--single compliance-checks" data-layout>
+  <section class="management__content">
+    <header class="management__header">
+      <div>
+        <h1 class="management__title">Compliance checks</h1>
+        <p class="management__subtitle">Track your organisation's compliance obligations and review schedules.</p>
+      </div>
+      {% if company %}
+      <div class="management__header-actions">
+        <span class="tag tag--muted">{{ company.name }}</span>
+      </div>
+      {% endif %}
+    </header>
+
+    {# Summary cards #}
+    <div class="card card--panel compliance-checks-summary">
+      <div class="compliance-summary__grid">
+        <div class="compliance-summary__item compliance-summary__item--accent">
+          <span class="compliance-summary__label">Compliance rate</span>
+          <span class="compliance-summary__value">{{ summary.compliance_percentage }}%</span>
+          <span class="compliance-summary__hint">{{ summary.compliant }} of {{ summary.total }} checks</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">In progress</span>
+          <span class="compliance-summary__value">{{ summary.in_progress }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Not started</span>
+          <span class="compliance-summary__value">{{ summary.not_started }}</span>
+        </div>
+        <div class="compliance-summary__item {% if summary.overdue_count > 0 %}compliance-summary__item--warning{% endif %}">
+          <span class="compliance-summary__label">Overdue</span>
+          <span class="compliance-summary__value">{{ summary.overdue_count }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Due soon</span>
+          <span class="compliance-summary__value">{{ summary.due_soon_count }}</span>
+        </div>
+      </div>
+    </div>
+
+    {# Assignments table #}
+    <div class="card card--panel">
+      <div class="table-wrapper">
+        <table class="table compliance-checks-table" id="checks-table">
+          <thead>
+            <tr>
+              <th scope="col" style="width:12%">Category</th>
+              <th scope="col" style="width:6%">Code</th>
+              <th scope="col" style="width:28%">Check</th>
+              <th scope="col" style="width:13%">Status</th>
+              <th scope="col" style="width:13%">Last checked</th>
+              <th scope="col" style="width:13%">Next review</th>
+              <th scope="col" style="width:15%">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in assignments %}
+            <tr
+              data-category="{{ a.check.category.code if a.check and a.check.category else '' }}"
+              data-status="{{ a.status }}"
+              data-search="{{ (a.check.title if a.check else '') | lower }} {{ (a.check.code if a.check else '') | lower }}"
+            >
+              <td>
+                {% if a.check and a.check.category %}
+                <span class="tag tag--muted">{{ a.check.category.code }}</span>
+                {% endif %}
+              </td>
+              <td class="table__mono">{{ a.check.code if a.check else '—' }}</td>
+              <td>
+                <span class="compliance-checks-table__title">{{ a.check.title if a.check else '—' }}</span>
+                {% if a.check and a.check.description %}
+                <p class="compliance-checks-table__desc">
+                  {{ a.check.description[:80] }}{% if a.check.description | length > 80 %}…{% endif %}
+                </p>
+                {% endif %}
+              </td>
+              <td>
+                <span class="badge badge--status-{{ a.status }}">
+                  {% if a.status == 'not_started' %}Not started
+                  {% elif a.status == 'in_progress' %}In progress
+                  {% elif a.status == 'compliant' %}Compliant
+                  {% elif a.status == 'non_compliant' %}Non-compliant
+                  {% elif a.status == 'not_applicable' %}Not applicable
+                  {% endif %}
+                </span>
+              </td>
+              <td>{{ a.last_checked_at[:10] if a.last_checked_at else '—' }}</td>
+              <td>
+                {% if a.next_review_at %}
+                  {% if a.is_overdue %}
+                    <span class="badge badge--review-overdue">Overdue {{ a.next_review_at[:10] }}</span>
+                  {% elif a.is_due_soon %}
+                    <span class="badge badge--review-due-soon">Due {{ a.next_review_at[:10] }}</span>
+                  {% else %}
+                    {{ a.next_review_at[:10] }}
+                  {% endif %}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>
+                <a href="/compliance-checks/{{ a.id }}" class="button button--ghost button--small">View</a>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7" class="table__empty">
+                No compliance checks assigned yet.
+                {% if is_super_admin %}
+                Use the <strong>Assign check</strong> button or visit the
+                <a href="/admin/compliance-checks/library">library</a> to assign checks from a category.
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+{# Assign check modal #}
+{% if can_manage %}
+<dialog class="modal" id="assign-modal" aria-labelledby="assign-modal-title">
+  <div class="modal__inner">
+    <header class="modal__header">
+      <h2 class="modal__title" id="assign-modal-title">Assign a compliance check</h2>
+      <button type="button" class="modal__close" aria-label="Close" id="assign-modal-close">&times;</button>
+    </header>
+    <div class="modal__body">
+      <form id="assign-form" class="form">
+        <div class="form__group">
+          <label class="form__label" for="assign-category">Category</label>
+          <select class="form-input" id="assign-category" name="category_id">
+            <option value="">— all categories —</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="assign-check">Check</label>
+          <select class="form-input" id="assign-check" name="check_id" required>
+            <option value="">Select a check…</option>
+          </select>
+        </div>
+        <div class="form__group">
+          <label class="form__label" for="assign-notes">Notes (optional)</label>
+          <textarea class="form-input" id="assign-notes" name="notes" rows="3"></textarea>
+        </div>
+        <div class="form__actions">
+          <button type="submit" class="button button--primary">Assign</button>
+          <button type="button" class="button button--ghost" id="assign-cancel">Cancel</button>
+        </div>
+      </form>
+      <div id="assign-bulk-section" style="display:none">
+        <hr class="divider"/>
+        <p>Or assign <strong>all active checks</strong> from a category at once:</p>
+        <button type="button" class="button button--secondary" id="bulk-assign-btn">Bulk assign selected category</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const companyId = {{ (company.id if company else None) | tojson }};
+  const csrfToken = getCsrfToken();
+
+  // ---- Filtering ----
+  const categoryFilter = document.getElementById('category-filter');
+  const statusFilter = document.getElementById('status-filter');
+  const textFilter = document.getElementById('text-filter');
+
+  function applyFilters() {
+    const cat = categoryFilter?.value.toLowerCase() || '';
+    const st = statusFilter?.value.toLowerCase() || '';
+    const txt = textFilter?.value.toLowerCase() || '';
+    document.querySelectorAll('#checks-table tbody tr[data-status]').forEach(row => {
+      const matchCat = !cat || row.dataset.category?.toLowerCase() === cat;
+      const matchSt = !st || row.dataset.status === st;
+      const matchTxt = !txt || (row.dataset.search || '').includes(txt);
+      row.style.display = matchCat && matchSt && matchTxt ? '' : 'none';
+    });
+  }
+
+  categoryFilter?.addEventListener('change', applyFilters);
+  statusFilter?.addEventListener('change', applyFilters);
+  textFilter?.addEventListener('input', applyFilters);
+
+  // ---- Assign modal ----
+  const modal = document.getElementById('assign-modal');
+  const openBtn = document.getElementById('assign-check-btn');
+  const closeBtn = document.getElementById('assign-modal-close');
+  const cancelBtn = document.getElementById('assign-cancel');
+  const assignCategorySelect = document.getElementById('assign-category');
+  const assignCheckSelect = document.getElementById('assign-check');
+  const bulkSection = document.getElementById('assign-bulk-section');
+  const bulkBtn = document.getElementById('bulk-assign-btn');
+
+  if (openBtn && modal) {
+    openBtn.addEventListener('click', () => modal.showModal());
+  }
+  closeBtn?.addEventListener('click', () => modal?.close());
+  cancelBtn?.addEventListener('click', () => modal?.close());
+
+  // Populate checks when category changes
+  assignCategorySelect?.addEventListener('change', async () => {
+    const catId = assignCategorySelect.value;
+    assignCheckSelect.innerHTML = '<option value="">Loading…</option>';
+    const url = `/api/compliance-checks/checks${catId ? `?category_id=${catId}&is_active=true` : '?is_active=true'}`;
+    try {
+      const resp = await fetch(url);
+      const checks = await resp.json();
+      assignCheckSelect.innerHTML = '<option value="">Select a check…</option>' +
+        checks.map(c => `<option value="${c.id}">${c.code} – ${c.title}</option>`).join('');
+    } catch {
+      assignCheckSelect.innerHTML = '<option value="">Failed to load</option>';
+    }
+    if (bulkSection) bulkSection.style.display = catId ? '' : 'none';
+  });
+
+  // Submit single assignment
+  document.getElementById('assign-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const checkId = parseInt(assignCheckSelect.value);
+    if (!checkId || !companyId) return;
+    try {
+      const resp = await fetch(`/api/compliance-checks/companies/${companyId}/assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({
+          check_id: checkId,
+          notes: document.getElementById('assign-notes')?.value || null,
+        }),
+      });
+      if (resp.ok) {
+        window.location.reload();
+      } else {
+        const data = await resp.json();
+        alert(data.detail || 'Failed to assign check');
+      }
+    } catch {
+      alert('Failed to assign check');
+    }
+  });
+
+  // Bulk assign by category
+  bulkBtn?.addEventListener('click', async () => {
+    const catId = parseInt(assignCategorySelect?.value);
+    if (!catId || !companyId) { alert('Select a category first'); return; }
+    try {
+      const resp = await fetch(`/api/compliance-checks/companies/${companyId}/assignments/bulk-by-category`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ category_id: catId }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        alert(`${data.created_count} check(s) assigned.`);
+        window.location.reload();
+      } else {
+        alert('Bulk assignment failed');
+      }
+    } catch {
+      alert('Bulk assignment failed');
+    }
+  });
+
+  function getCsrfToken() {
+    return document.cookie.split('; ').find(r => r.startsWith('myportal_session_csrf='))?.split('=')[1] || '';
+  }
+});
+</script>
+{% endblock %}
