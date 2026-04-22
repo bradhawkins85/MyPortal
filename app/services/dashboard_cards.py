@@ -48,9 +48,9 @@ LAYOUT_PREFERENCE_KEY = "dashboard:layout:v1"
 # Layout primitives
 # ---------------------------------------------------------------------------
 
-GRID_COLUMNS = 12
-MIN_CARD_WIDTH = 2
-MAX_CARD_WIDTH = 12
+GRID_COLUMNS = 24
+MIN_CARD_WIDTH = 1
+MAX_CARD_WIDTH = 24
 MIN_CARD_HEIGHT = 1
 MAX_CARD_HEIGHT = 8
 MAX_LAYOUT_CARDS = 32
@@ -58,12 +58,12 @@ MAX_GRID_ROWS = 60
 
 # Named sizes mapped to (width, height) in grid cells.
 SIZE_PRESETS: dict[str, tuple[int, int]] = {
-    "small": (3, 2),
-    "medium": (4, 2),
-    "wide": (6, 2),
-    "large": (6, 3),
-    "tall": (4, 4),
-    "full": (12, 3),
+    "small": (6, 2),
+    "medium": (8, 2),
+    "wide": (12, 2),
+    "large": (12, 3),
+    "tall": (8, 4),
+    "full": (24, 3),
 }
 
 
@@ -801,7 +801,7 @@ def sanitise_layout(
 def default_layout(allowed_ids) -> list[dict[str, Any]]:
     """Return a sensible default layout for the supplied allowed cards.
 
-    Cards are placed left-to-right in a 12-column grid, in registration order
+    Cards are placed left-to-right in a 24-column grid, in registration order
     among the allowed set, with each card given its preferred size.
     """
     layout: list[dict[str, Any]] = []
