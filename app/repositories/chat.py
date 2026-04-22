@@ -62,7 +62,7 @@ async def list_rooms(
     rows = await db.fetch_all(
         f"""SELECT r.*,
                (SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count,
-               u.display_name AS assigned_tech_display_name
+               CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name
             FROM chat_rooms r
             LEFT JOIN users u ON u.id = r.assigned_tech_user_id
             {unattended_join}
