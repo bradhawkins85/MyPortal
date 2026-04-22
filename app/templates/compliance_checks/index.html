@@ -37,18 +37,6 @@
 {% block content %}
 <div class="management management--single compliance-checks" data-layout>
   <section class="management__content">
-    <header class="management__header">
-      <div>
-        <h1 class="management__title">Compliance checks</h1>
-        <p class="management__subtitle">Track your organisation's compliance obligations and review schedules.</p>
-      </div>
-      {% if company %}
-      <div class="management__header-actions">
-        <span class="tag tag--muted">{{ company.name }}</span>
-      </div>
-      {% endif %}
-    </header>
-
     {# Summary cards #}
     <div class="card card--panel compliance-checks-summary">
       <div class="compliance-summary__grid">
@@ -138,6 +126,14 @@
               </td>
               <td>
                 <a href="/compliance-checks/{{ a.id }}" class="button button--ghost button--small">View</a>
+                {% if is_super_admin %}
+                <button
+                  type="button"
+                  class="button button--ghost button--small button--danger delete-assignment-btn"
+                  data-assignment-id="{{ a.id }}"
+                  data-check-title="{{ a.check.title if a.check else 'this check' }}"
+                >Delete</button>
+                {% endif %}
               </td>
             </tr>
             {% else %}
@@ -305,6 +301,29 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch {
       alert('Bulk assignment failed');
     }
+  });
+
+  // ---- Delete assignment ----
+  document.querySelectorAll('.delete-assignment-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const title = btn.dataset.checkTitle || 'this check';
+      if (!confirm(`Delete assignment for "${title}"? This cannot be undone.`)) return;
+      const assignmentId = btn.dataset.assignmentId;
+      try {
+        const resp = await fetch(`/api/compliance-checks/companies/${companyId}/assignments/${assignmentId}`, {
+          method: 'DELETE',
+          headers: { 'X-CSRF-Token': csrfToken },
+        });
+        if (resp.ok || resp.status === 204) {
+          window.location.reload();
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          alert(data.detail || 'Failed to delete assignment');
+        }
+      } catch {
+        alert('Failed to delete assignment');
+      }
+    });
   });
 
   function getCsrfToken() {
