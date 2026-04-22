@@ -1270,6 +1270,218 @@ async def test_run_best_practices_na_does_not_trigger_auto_remediation():
         remediated.append(check_id)
         return {"success": True, "message": "ok"}
 
+
+# ---------------------------------------------------------------------------
+# Transient-failure retry helpers
+# ---------------------------------------------------------------------------
+
+
+def test_is_retryable_m365_error_network_error():
+    # No HTTP status -> network/decode error -> retryable
+    assert bp_service._is_retryable_m365_error(M365Error("boom"))
+
+
+def test_is_retryable_m365_error_transient_status():
+    for status in (408, 429, 500, 502, 503, 504):
+        assert bp_service._is_retryable_m365_error(M365Error("x", http_status=status))
+
+
+def test_is_retryable_m365_error_permanent_status():
+    for status in (400, 401, 403, 404):
+        assert not bp_service._is_retryable_m365_error(M365Error("x", http_status=status))
+
+
+def test_result_indicates_transient_failure_status_in_details():
+    assert bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Microsoft Graph request failed (429)"}
+    )
+    assert bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Exchange Online Get-OrganizationConfig failed (503)"}
+    )
+
+
+def test_result_indicates_transient_failure_decode_error():
+    assert bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Unable to query: response decode error: bad json"}
+    )
+
+
+def test_result_indicates_transient_failure_non_transient_unknown():
+    # An "Unable to determine" message is informational, not a transient request failure.
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Unable to determine Direct Send status."}
+    )
+    # Permanent client errors are not retryable.
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "unknown", "details": "Microsoft Graph request failed (403)"}
+    )
+
+
+def test_result_indicates_transient_failure_pass_or_fail_not_retried():
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "pass", "details": "all good"}
+    )
+    assert not bp_service._result_indicates_transient_failure(
+        {"status": "fail", "details": "Microsoft Graph request failed (500)"}
+    )
+
+
+def test_result_indicates_transient_failure_batch_list():
+    transient_list = [
+        {"status": "unknown", "details": "Unable to retrieve device compliance policies: failed (502)"},
+        {"status": "unknown", "details": "Unable to retrieve device compliance policies: failed (502)"},
+    ]
+    assert bp_service._result_indicates_transient_failure(transient_list)
+    # Empty list is not transient
+    assert not bp_service._result_indicates_transient_failure([])
+    # Mixed list: not all unknown -> not retried as a batch
+    mixed = [
+        {"status": "pass", "details": "ok"},
+        {"status": "unknown", "details": "failed (503)"},
+    ]
+    assert not bp_service._result_indicates_transient_failure(mixed)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_succeeds_after_transient_error(monkeypatch):
+    """A transient M365Error is retried and the second attempt's result is returned."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise M365Error("transient", http_status=503)
+        return {"status": "pass", "details": "ok"}
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result == {"status": "pass", "details": "ok"}
+    assert calls["n"] == 2
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_succeeds_after_transient_unknown_result(monkeypatch):
+    """An unknown result with a transient marker is retried; success on retry replaces it."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return {
+                "status": bp_service.STATUS_UNKNOWN,
+                "details": "Unable to retrieve policy: Microsoft Graph request failed (429)",
+            }
+        return {"status": "fail", "details": "policy not configured"}
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result["status"] == "fail"
+    assert calls["n"] == 3
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_does_not_retry_permanent_error(monkeypatch):
+    """A permanent (e.g. 403) M365Error is raised immediately without retrying."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+
+    async def factory():
+        calls["n"] += 1
+        raise M365Error("forbidden", http_status=403)
+
+    with pytest.raises(M365Error):
+        await bp_service._call_check_with_retry(
+            factory, company_id=1, check_id="bp_test"
+        )
+    assert calls["n"] == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_returns_last_unknown_after_exhaustion(monkeypatch):
+    """After exhausting retries we still return the last (unknown) result so the
+    caller can persist the underlying error message."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+    transient = {
+        "status": bp_service.STATUS_UNKNOWN,
+        "details": "Unable to retrieve policy: Microsoft Graph request failed (503)",
+    }
+
+    async def factory():
+        calls["n"] += 1
+        return transient
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result == transient
+    assert calls["n"] == bp_service._MAX_CHECK_ATTEMPTS
+
+
+@pytest.mark.anyio("asyncio")
+async def test_call_check_with_retry_does_not_retry_non_transient_unknown(monkeypatch):
+    """An unknown result without a transient marker is returned immediately."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+    calls = {"n": 0}
+    informational = {
+        "status": bp_service.STATUS_UNKNOWN,
+        "details": "Unable to determine Direct Send status from organization config.",
+    }
+
+    async def factory():
+        calls["n"] += 1
+        return informational
+
+    result = await bp_service._call_check_with_retry(
+        factory, company_id=1, check_id="bp_test"
+    )
+    assert result == informational
+    assert calls["n"] == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_retries_transient_check_failure(monkeypatch):
+    """run_best_practices retries a Graph check whose first attempt returns a
+    transient unknown result, and persists the successful retry's status."""
+    monkeypatch.setattr(bp_service, "_RETRY_BASE_DELAY", 0)
+    monkeypatch.setattr(bp_service, "_MAX_RETRY_DELAY", 0)
+
+    catalog = bp_service.list_best_practices()
+    enabled_id = next(
+        bp["id"] for bp in catalog if not bp.get("cis_group")
+    )
+    target = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == enabled_id)
+    real_source = target["source"]
+
+    transient = {
+        "check_id": enabled_id,
+        "check_name": target["name"],
+        "status": bp_service.STATUS_UNKNOWN,
+        "details": "Unable to retrieve policy: Microsoft Graph request failed (429)",
+    }
+    success = {
+        "check_id": enabled_id,
+        "check_name": target["name"],
+        "status": "pass",
+        "details": "configured correctly",
+    }
+    fake_source = AsyncMock(side_effect=[transient, success])
+    target["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
     try:
         with (
             patch(
@@ -1281,11 +1493,13 @@ async def test_run_best_practices_na_does_not_trigger_auto_remediation():
                 "app.services.m365_best_practices.detect_tenant_capabilities",
                 new_callable=AsyncMock,
                 return_value=set(),  # Tenant has no detected premium capabilities
+                return_value="tok",
             ),
             patch(
                 "app.services.m365_best_practices.get_enabled_check_ids",
                 new_callable=AsyncMock,
                 return_value={"bp_monitor_risky_users"},
+                return_value={enabled_id},
             ),
             patch(
                 "app.services.m365_best_practices.get_auto_remediate_check_ids",
@@ -1320,3 +1534,17 @@ async def test_detect_tenant_capabilities_returns_none_on_graph_error():
         caps = await bp_service.detect_tenant_capabilities("token")
     assert caps is None
 
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=7)
+    finally:
+        target["source"] = real_source
+
+    assert fake_source.await_count == 2
+    assert results[0]["status"] == "pass"
+    assert upserts[0]["status"] == "pass"
