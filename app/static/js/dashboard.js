@@ -21,7 +21,8 @@
   const layoutEndpoint = root.dataset.layoutEndpoint || '/api/dashboard/layout';
   const cardEndpoint = root.dataset.cardEndpoint || '/api/dashboard/cards';
   const resetEndpoint = root.dataset.resetEndpoint || '/api/dashboard/layout/reset';
-  const gridColumns = parseInt(root.dataset.gridColumns || '12', 10) || 12;
+  const gridColumns = parseInt(root.dataset.gridColumns || '24', 10) || 24;
+  const maxGridRows = 60;
 
   const optionsDetails = root.querySelector('[data-dashboard-options]');
   const editToggle = root.querySelector('[data-dashboard-edit]');
@@ -99,16 +100,52 @@
     return value;
   }
 
+  function getCardRect(card) {
+    return {
+      x: parseInt(card.dataset.cardX || '0', 10) || 0,
+      y: parseInt(card.dataset.cardY || '0', 10) || 0,
+      w: parseInt(card.dataset.cardW || '4', 10) || 4,
+      h: parseInt(card.dataset.cardH || '2', 10) || 2,
+    };
+  }
+
+  function rectanglesOverlap(a, b) {
+    return a.x < (b.x + b.w) && (a.x + a.w) > b.x && a.y < (b.y + b.h) && (a.y + a.h) > b.y;
+  }
+
+  function resolveCollisions(activeCard) {
+    const cards = Array.from(grid.querySelectorAll('[data-dashboard-card]'));
+    const activeRect = getCardRect(activeCard);
+    let changed = true;
+    let pass = 0;
+    while (changed && pass < 80) {
+      changed = false;
+      pass += 1;
+      cards.forEach((card) => {
+        if (card === activeCard) return;
+        const rect = getCardRect(card);
+        if (!rectanglesOverlap(activeRect, rect)) return;
+        const nextY = clamp(activeRect.y + activeRect.h, 0, maxGridRows);
+        if (nextY !== rect.y) {
+          card.dataset.cardY = String(nextY);
+          applyPosition(card);
+          changed = true;
+        }
+      });
+    }
+  }
+
   function setCardPosition(card, position) {
-    const w = clamp(position.w, 2, gridColumns);
+    const w = clamp(position.w, 1, gridColumns);
     const x = clamp(position.x, 0, gridColumns - w);
-    const y = clamp(position.y, 0, 60);
-    const h = clamp(position.h, 1, 8);
+    const y = clamp(position.y, 0, maxGridRows);
+    const h = clamp(position.h, 1, 12);
     card.dataset.cardX = String(x);
     card.dataset.cardY = String(y);
     card.dataset.cardW = String(w);
     card.dataset.cardH = String(h);
     applyPosition(card);
+    resolveCollisions(card);
     schedulePersist();
   }
 
@@ -152,6 +189,7 @@
       card.setAttribute('tabindex', editMode ? '0' : '-1');
       card.querySelectorAll('[data-dashboard-card-handle], [data-dashboard-card-remove], [data-dashboard-card-resize]').forEach((control) => {
         control.setAttribute('tabindex', editMode ? '0' : '-1');
+        control.hidden = !editMode;
       });
     });
   }
@@ -167,14 +205,9 @@
   }
 
   function getGridRowHeight() {
-    // Use the first card's height-per-row as a reference; fall back to 80px.
-    const card = grid.querySelector('[data-dashboard-card]');
-    if (card) {
-      const h = Math.max(parseInt(card.dataset.cardH || '2', 10), 1);
-      const rect = card.getBoundingClientRect();
-      if (rect.height > 0) return rect.height / h;
-    }
-    return 80;
+    const configured = parseFloat(getComputedStyle(grid).getPropertyValue('--dashboard-row-height'));
+    if (configured > 0) return configured;
+    return 36;
   }
 
   function getCellFromPointer(clientX, clientY) {
@@ -267,31 +300,10 @@
   function onDrop(event) {
     if (!editMode || !draggedCard) return;
     event.preventDefault();
-    const target = event.target.closest('[data-dashboard-card]');
     const w = parseInt(draggedCard.dataset.cardW, 10);
     const h = parseInt(draggedCard.dataset.cardH, 10);
-
-    if (target && target !== draggedCard) {
-      // Swap grid positions of the two cards.
-      const srcPos = {
-        x: parseInt(draggedCard.dataset.cardX, 10),
-        y: parseInt(draggedCard.dataset.cardY, 10),
-        w: parseInt(draggedCard.dataset.cardW, 10),
-        h: parseInt(draggedCard.dataset.cardH, 10),
-      };
-      const dstPos = {
-        x: parseInt(target.dataset.cardX, 10),
-        y: parseInt(target.dataset.cardY, 10),
-        w: parseInt(target.dataset.cardW, 10),
-        h: parseInt(target.dataset.cardH, 10),
-      };
-      setCardPosition(draggedCard, dstPos);
-      setCardPosition(target, srcPos);
-    } else if (!target) {
-      // Dropped on empty grid space — move card to that position.
-      const cell = getCellFromPointer(event.clientX, event.clientY);
-      setCardPosition(draggedCard, { x: cell.x, y: cell.y, w: w, h: h });
-    }
+    const cell = getCellFromPointer(event.clientX, event.clientY);
+    setCardPosition(draggedCard, { x: cell.x, y: cell.y, w: w, h: h });
     onDragEnd();
   }
 
@@ -485,12 +497,12 @@
           '<span class="dashboard-card__category"></span>' +
         '</div>' +
         '<div class="dashboard-card__controls" data-dashboard-card-controls>' +
-          '<button type="button" class="dashboard-card__handle" data-dashboard-card-handle aria-label="Move card" tabindex="-1">⠿</button>' +
-          '<button type="button" class="dashboard-card__remove" data-dashboard-card-remove aria-label="Remove card" tabindex="-1">×</button>' +
+          '<button type="button" class="dashboard-card__handle" data-dashboard-card-handle aria-label="Move card" hidden tabindex="-1">⠿</button>' +
+          '<button type="button" class="dashboard-card__remove" data-dashboard-card-remove aria-label="Remove card" hidden tabindex="-1">×</button>' +
         '</div>' +
       '</header>' +
       '<div class="dashboard-card__body"><p class="dashboard-card__empty">Loaded — refresh the page to render.</p></div>' +
-      '<button type="button" class="dashboard-card__resize" data-dashboard-card-resize aria-label="Resize card" tabindex="-1">⇲</button>'
+      '<button type="button" class="dashboard-card__resize" data-dashboard-card-resize aria-label="Resize card" hidden tabindex="-1">⇲</button>'
     );
     card.querySelector('.dashboard-card__title').textContent = resolvedDescriptor.title || cardId;
     card.querySelector('.dashboard-card__category').textContent = resolvedDescriptor.category || '';
