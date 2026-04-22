@@ -1,0 +1,22 @@
+{# Entry list card: rows of {title, subtitle, optional read flag} #}
+{% set p = payload or {} %}
+{% set items = p.get('items') or [] %}
+<div class="dashboard-card__entry-list">
+  {% if items %}
+    <ul class="entry-list" role="list">
+      {% for item in items %}
+        <li class="entry-list__item{% if item.read is defined and not item.read %} entry-list__item--unread{% endif %}" role="listitem">
+          <div class="entry-list__title">{{ item.title }}</div>
+          {% if item.subtitle %}
+            <div class="entry-list__subtitle">{{ item.subtitle }}</div>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="dashboard-card__empty">Nothing to show yet.</p>
+  {% endif %}
+  {% if p.link %}
+    <a class="dashboard-card__link" href="{{ p.link }}">View all</a>
+  {% endif %}
+</div>

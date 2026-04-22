@@ -1,0 +1,12 @@
+{# Simple counter card: label + big value + description #}
+{% set p = payload or {} %}
+<div class="dashboard-card__counter">
+  {% if p.label %}<span class="dashboard-card__label">{{ p.label }}</span>{% endif %}
+  <span class="dashboard-card__value">{{ p.formatted or p.value or '0' }}</span>
+  {% if p.description %}
+    <span class="dashboard-card__meta">{{ p.description }}</span>
+  {% endif %}
+  {% if p.link %}
+    <a class="dashboard-card__link" href="{{ p.link }}">View</a>
+  {% endif %}
+</div>
