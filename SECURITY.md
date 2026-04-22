@@ -68,14 +68,14 @@ Disables sensitive browser features:
 **Status:** ✅ Implemented
 
 **Limit:** 5 attempts per 15 minutes per IP address
-**Endpoint:** `/api/auth/login`
+**Endpoint:** `/auth/login`
 **Purpose:** Prevents brute force password attacks
 
 ### Password Reset Rate Limiting
 **Status:** ✅ Implemented
 
 **Limit:** 3 requests per hour per IP address
-**Endpoints:** `/api/auth/password/forgot`, `/auth/password/forgot`
+**Endpoints:** `/auth/password/forgot`
 **Purpose:** Prevents password reset abuse and account enumeration
 
 ### File Upload Rate Limiting
