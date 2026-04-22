@@ -37,18 +37,6 @@
 {% block content %}
 <div class="management management--single compliance-checks" data-layout>
   <section class="management__content">
-    <header class="management__header">
-      <div>
-        <h1 class="management__title">Compliance checks</h1>
-        <p class="management__subtitle">Track your organisation's compliance obligations and review schedules.</p>
-      </div>
-      {% if company %}
-      <div class="management__header-actions">
-        <span class="tag tag--muted">{{ company.name }}</span>
-      </div>
-      {% endif %}
-    </header>
-
     {# Summary cards #}
     <div class="card card--panel compliance-checks-summary">
       <div class="compliance-summary__grid">
