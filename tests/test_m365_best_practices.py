@@ -1923,6 +1923,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_dkim_enabled_all_domains",
     "bp_third_party_storage_owa",
     "bp_idle_session_timeout_3h",
+    "bp_mailtips_enabled",
     "bp_shared_mailbox_signin_blocked",
     "bp_antiphish_impersonated_domain_protection",
     "bp_antiphish_impersonated_user_protection",
@@ -2071,6 +2072,28 @@ async def test_check_email_otp_disabled_fail():
         return_value={"state": "enabled"},
     ):
         result = await bp_service._check_email_otp_disabled("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_mailtips_enabled_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"MailTipsAllTipsEnabled": True}]},
+    ):
+        result = await bp_service._check_mailtips_enabled("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_mailtips_enabled_fail():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"MailTipsAllTipsEnabled": False}]},
+    ):
+        result = await bp_service._check_mailtips_enabled("exo-token", "tenant-id")
     assert result["status"] == "fail"
 
 
