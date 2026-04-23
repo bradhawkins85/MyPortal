@@ -100,17 +100,35 @@
                 {% endif %}
               </td>
               <td class="table__actions">
-                <div class="table__action-buttons">
-                  <a class="button button--ghost" href="/admin/shop/packages/{{ package.id }}">Edit</a>
-                  <form action="/shop/admin/package/{{ package.id }}/archive" method="post" class="inline-form">
-                    {% include "partials/csrf.html" %}
-                    <input type="hidden" name="archived" value="{{ '0' if package.archived else '1' }}" />
-                    <button type="submit" class="button button--ghost">{{ 'Unarchive' if package.archived else 'Archive' }}</button>
-                  </form>
-                  <form action="/shop/admin/package/{{ package.id }}/delete" method="post" class="inline-form" data-confirm="Delete this package?">
-                    {% include "partials/csrf.html" %}
-                    <button type="submit" class="button button--danger">Delete</button>
-                  </form>
+                {%- set row_menu_id = 'package-actions-menu-' ~ package.id -%}
+                <div class="header-menu" data-header-menu>
+                  <button type="button"
+                          class="button button--ghost button--small header-menu__button"
+                          data-header-menu-toggle
+                          aria-haspopup="menu"
+                          aria-expanded="false"
+                          aria-controls="{{ row_menu_id }}">
+                    <span>Actions</span>
+                    <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                      <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                    </svg>
+                  </button>
+                  <div id="{{ row_menu_id }}"
+                       class="header-menu__panel"
+                       role="menu"
+                       data-header-menu-panel
+                       hidden>
+                    <a class="header-menu__item" role="menuitem" href="/admin/shop/packages/{{ package.id }}">Edit</a>
+                    <form action="/shop/admin/package/{{ package.id }}/archive" method="post" class="header-menu__form">
+                      {% include "partials/csrf.html" %}
+                      <input type="hidden" name="archived" value="{{ '0' if package.archived else '1' }}" />
+                      <button type="submit" class="header-menu__item" role="menuitem">{{ 'Unarchive' if package.archived else 'Archive' }}</button>
+                    </form>
+                    <form action="/shop/admin/package/{{ package.id }}/delete" method="post" class="header-menu__form" onsubmit="return confirm('Delete this package?');">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="header-menu__item header-menu__item--danger" role="menuitem">Delete</button>
+                    </form>
+                  </div>
                 </div>
               </td>
             </tr>
