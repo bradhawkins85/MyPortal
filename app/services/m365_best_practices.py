@@ -2186,6 +2186,51 @@ async def _check_mailbox_auditing_enabled_all_users(
                    f"{len(not_audited)} user mailbox(es) do not have AuditEnabled set to True: "
                    + ", ".join(not_audited[:5])
                    + ("…" if len(not_audited) > 5 else ""))
+
+
+async def _check_block_users_message_limit(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that outbound spam filter policies block users who reach the message limit.
+
+    Calls ``Get-HostedOutboundSpamFilterPolicy`` and inspects every policy for
+    the ``ActionWhenThresholdReached`` property.  The recommended action is
+    ``BlockUser`` so that accounts that exceed the outbound sending limit are
+    immediately blocked from sending further mail, reducing the blast radius of
+    a compromised account used for spam.
+    """
+    check_id = "bp_block_users_message_limit"
+    check_name = "Block users who reached the message limit"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-HostedOutboundSpamFilterPolicy"
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-HostedOutboundSpamFilterPolicy: {exc}")
+    rows = data.get("value") or []
+    if not rows:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No outbound spam filter policies returned.")
+    failing: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        action = str(row.get("ActionWhenThresholdReached") or "").strip()
+        name = row.get("Name") or row.get("Identity") or "Default"
+        if action.lower() != "blockuser":
+            failing.append(f"{name} (ActionWhenThresholdReached={action!r}; should be 'BlockUser')")
+    if not failing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"All {len(rows)} outbound spam filter "
+                       f"{'policy' if len(rows) == 1 else 'policies'} block users "
+                       "when the message limit is reached.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(failing)} {'policy does' if len(failing) == 1 else 'policies do'} "
+                   "not block users when the message limit is reached: "
+                   + "; ".join(failing[:5]))
+
+
 async def _check_quarantine_notification_enabled(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -3228,6 +3273,30 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_mailbox_params": {"AuditEnabled": True},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
         "is_cis_benchmark": True,
+    },
+    {
+        "id": "bp_block_users_message_limit",
+        "name": "Block users who reached the message limit",
+        "description": (
+            "When a user exceeds the outbound message sending limit, Exchange Online "
+            "can alert administrators, restrict the user, or block the account from "
+            "sending mail entirely. Setting ActionWhenThresholdReached to BlockUser "
+            "ensures that a compromised account being used for spam is immediately "
+            "prevented from sending further messages, limiting the blast radius and "
+            "protecting the tenant's sending reputation."
+        ),
+        "remediation": (
+            "For each outbound spam filter policy:\n"
+            "Set-HostedOutboundSpamFilterPolicy -Identity <name> "
+            "-ActionWhenThresholdReached BlockUser"
+        ),
+        "source": _check_block_users_message_limit,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-HostedOutboundSpamFilterPolicy",
+        "remediation_params": {"ActionWhenThresholdReached": "BlockUser"},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
         "id": "bp_modern_auth_exo",
