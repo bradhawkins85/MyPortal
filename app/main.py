@@ -1723,6 +1723,9 @@ async def _build_base_context(
         "can_view_m365_best_practices": is_super_admin or _has_permission("can_view_m365_best_practices"),
         "can_view_compliance_checks": is_super_admin or _has_permission("can_view_compliance_checks"),
         "can_manage_compliance_checks": is_super_admin or _has_permission("can_manage_compliance_checks"),
+        "can_view_m365_user_mailboxes": is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
+        "can_view_m365_shared_mailboxes": is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
+        "can_access_chat": is_super_admin or _has_permission("can_access_chat"),
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1908,6 +1911,9 @@ async def _build_public_context(
         "can_view_m365_best_practices": False,
         "can_view_compliance_checks": False,
         "can_manage_compliance_checks": False,
+        "can_view_m365_user_mailboxes": False,
+        "can_view_m365_shared_mailboxes": False,
+        "can_access_chat": False,
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
@@ -5244,9 +5250,50 @@ async def save_m365_best_practices_settings(request: Request):
     )
 
 
+async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: str):
+    """Load context for M365 mailbox pages.
+
+    A user may access the page if they are a super admin, have
+    ``can_manage_licenses``, or have the specific ``mailbox_permission`` flag
+    (e.g. ``can_view_m365_user_mailboxes`` or ``can_view_m365_shared_mailboxes``).
+    """
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    can_access = bool(
+        is_super_admin
+        or (membership and membership.get("can_manage_licenses"))
+        or (membership and membership.get(mailbox_permission))
+    )
+    if not can_access:
+        return (
+            user,
+            membership,
+            None,
+            company_id,
+            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
 @app.get("/m365/mailboxes/users", response_class=HTMLResponse)
 async def m365_user_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_context(
+        request, mailbox_permission="can_view_m365_user_mailboxes"
+    )
     if redirect:
         return redirect
     credentials = await m365_service.get_credentials(company_id)
@@ -5266,7 +5313,9 @@ async def m365_user_mailboxes_page(request: Request, error: str | None = None, s
 
 @app.get("/m365/mailboxes/shared", response_class=HTMLResponse)
 async def m365_shared_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_context(
+        request, mailbox_permission="can_view_m365_shared_mailboxes"
+    )
     if redirect:
         return redirect
     credentials = await m365_service.get_credentials(company_id)
@@ -20918,9 +20967,19 @@ async def chat_index(
     if not current_user:
         return RedirectResponse("/login", status_code=303)
 
-    user_id = current_user["id"]
+    is_super_admin = bool(current_user.get("is_super_admin"))
+    is_helpdesk = bool(current_user.get("is_helpdesk_technician"))
     company_id = current_user.get("company_id")
-    is_staff = current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    if not is_super_admin and not is_helpdesk:
+        membership = None
+        if company_id is not None:
+            membership = await user_company_repo.get_user_company(current_user["id"], int(company_id))
+        can_access = bool(membership and membership.get("can_access_chat"))
+        if not can_access:
+            return RedirectResponse("/", status_code=303)
+
+    user_id = current_user["id"]
+    is_staff = is_super_admin or is_helpdesk
     unattended_only = is_staff and unattended == "1"
 
     from app.repositories import chat as chat_repo
