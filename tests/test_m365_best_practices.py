@@ -1941,6 +1941,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_link_sharing_restricted_spo_od",
     "bp_modern_auth_sp_apps",
     "bp_sharepoint_infected_files_block",
+    "bp_sharepoint_sign_out_inactive_users",
     # Teams
     "bp_anon_dialin_cannot_start_meeting",
     "bp_only_org_can_bypass_lobby",
@@ -3060,6 +3061,69 @@ async def test_check_sharepoint_infected_files_block_unknown_when_property_missi
         return_value={"sharingCapability": "disabled"},
     ):
         result = await bp_service._check_sharepoint_infected_files_block("token")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_sign_out_inactive_users_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "idleSignOutEnabled": True,
+            "idleSignOutWarnAfterSeconds": 2700,
+            "idleSignOutSignOutAfterSeconds": 300,
+        },
+    ):
+        result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_sign_out_inactive_users_fail_disabled():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"idleSignOutEnabled": False},
+    ):
+        result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_sign_out_inactive_users_fail_timeout_too_long():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "idleSignOutEnabled": True,
+            "idleSignOutWarnAfterSeconds": 3600,
+            "idleSignOutSignOutAfterSeconds": 900,
+        },
+    ):
+        result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_sign_out_inactive_users_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("forbidden"),
+    ):
+        result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_sign_out_inactive_users_unknown_when_property_missing():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"sharingCapability": "disabled"},
+    ):
+        result = await bp_service._check_sharepoint_sign_out_inactive_users("token")
     assert result["status"] == "unknown"
 
 
