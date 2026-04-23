@@ -1566,6 +1566,55 @@ async def _check_mailbox_audit_actions(
                    f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(bad[:5]))
 
 
+async def _check_quarantine_notification_enabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that end-user spam/quarantine notifications are enabled with a daily frequency.
+
+    Calls ``Get-HostedContentFilterPolicy`` and inspects every policy for the
+    ``EnableEndUserSpamNotifications`` and ``EndUserSpamNotificationFrequency``
+    properties.  Exchange Online supports notification frequencies of 1, 2, or
+    3 days; the CIS recommendation (and the intent of a ≤ 4-hour notification
+    window) is to set the shortest available interval of 1 day so users are
+    alerted to quarantined mail as promptly as possible.
+    """
+    check_id = "bp_quarantine_notification_enabled"
+    check_name = "End-user spam quarantine notifications are enabled with a daily frequency"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-HostedContentFilterPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-HostedContentFilterPolicy: {exc}")
+    rows = data.get("value") or []
+    if not rows:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No hosted content filter policies returned.")
+    failing: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        enabled = row.get("EnableEndUserSpamNotifications")
+        frequency = row.get("EndUserSpamNotificationFrequency")
+        name = row.get("Name") or row.get("Identity") or "Default"
+        if enabled is not True:
+            failing.append(f"{name} (notifications disabled)")
+        elif frequency is not None:
+            try:
+                if int(frequency) > 1:
+                    failing.append(f"{name} (frequency={frequency} days; should be 1)")
+            except (ValueError, TypeError):
+                failing.append(f"{name} (frequency={frequency!r} is not a recognised value)")
+    if not failing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"All {len(rows)} hosted content filter "
+                       f"{'policy' if len(rows) == 1 else 'policies'} have end-user "
+                       "quarantine notifications enabled with a daily frequency.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(failing)} {'policy does' if len(failing) == 1 else 'policies do'} "
+                   "not meet the quarantine notification requirement: "
+                   + "; ".join(failing[:5]))
+
+
 _BEST_PRACTICES: list[dict[str, Any]] = [
     {
         "id": "bp_security_defaults",
@@ -2641,6 +2690,34 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_quarantine_notification_enabled",
+        "name": "End-user spam quarantine notifications are enabled with a daily frequency",
+        "description": (
+            "Ensuring end-user quarantine notifications are enabled and set to the "
+            "shortest available interval (1 day) means users are alerted promptly "
+            "when legitimate mail is quarantined, reducing the risk of missed "
+            "communications. Exchange Online supports 1-, 2-, or 3-day notification "
+            "intervals; 1 day is the best available approximation of a 4-hour "
+            "notification window."
+        ),
+        "remediation": (
+            "For each hosted content filter policy:\n"
+            "Set-HostedContentFilterPolicy -Identity <name> "
+            "-EnableEndUserSpamNotifications $true "
+            "-EndUserSpamNotificationFrequency 1"
+        ),
+        "source": _check_quarantine_notification_enabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-HostedContentFilterPolicy",
+        "remediation_params": {
+            "EnableEndUserSpamNotifications": True,
+            "EndUserSpamNotificationFrequency": 1,
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     # ------------------------------------------------------------------
