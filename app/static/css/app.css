@@ -3486,7 +3486,9 @@ button.header-title-menu__link {
 
 .tickets-toolbar {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: var(--space-gap-base);
   width: 100%;
 }
