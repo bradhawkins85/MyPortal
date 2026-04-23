@@ -187,6 +187,36 @@
             <span>Continuity Access</span>
             <span class="form-help">Access to view and manage business continuity plans</span>
           </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="compliance_checks.access" data-permission-checkbox />
+            <span>Compliance Checks Access</span>
+            <span class="form-help">View compliance check results and assigned checks (separate from Essential 8 Compliance)</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="compliance_checks.manage" data-permission-checkbox />
+            <span>Compliance Checks Manage</span>
+            <span class="form-help">Create, update, and delete compliance check items and assignments</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="m365_best_practices.access" data-permission-checkbox />
+            <span>Office 365 Best Practice</span>
+            <span class="form-help">View and run Microsoft 365 best practice checks and remediation</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="m365_user_mailboxes.access" data-permission-checkbox />
+            <span>Office 365 User Mailboxes</span>
+            <span class="form-help">View and manage user mailboxes in Microsoft 365</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="m365_shared_mailboxes.access" data-permission-checkbox />
+            <span>Office 365 Shared Mailboxes</span>
+            <span class="form-help">View and manage shared mailboxes in Microsoft 365</span>
+          </label>
+          <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="chat.access" data-permission-checkbox />
+            <span>Chat Access</span>
+            <span class="form-help">Access the chat interface to view and participate in conversations</span>
+          </label>
         </div>
         <p class="form-help" id="role-permissions-help">Select the permissions to assign to this role.</p>
       </div>
@@ -264,6 +294,30 @@
         <div class="definition-list__item">
           <dt><code>continuity.access</code></dt>
           <dd>Provide access to view and manage business continuity plans and related documentation.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>compliance_checks.access</code></dt>
+          <dd>Allow members to view compliance check results and assigned checks. This is separate from the Essential 8 Compliance permission.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>compliance_checks.manage</code></dt>
+          <dd>Grant authority to create, update, and delete compliance check items and assignments.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>m365_best_practices.access</code></dt>
+          <dd>Allow members to view and run Microsoft 365 best practice checks and remediation actions.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>m365_user_mailboxes.access</code></dt>
+          <dd>Allow members to view and manage user mailboxes in the connected Microsoft 365 tenant.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>m365_shared_mailboxes.access</code></dt>
+          <dd>Allow members to view and manage shared mailboxes in the connected Microsoft 365 tenant.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>chat.access</code></dt>
+          <dd>Permit members to access the chat interface and participate in conversations.</dd>
         </div>
       </dl>
       <p class="text-muted">New permissions will be documented here as they become available.</p>

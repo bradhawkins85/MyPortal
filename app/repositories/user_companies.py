@@ -25,6 +25,9 @@ _BOOLEAN_FIELDS = {
     "can_view_m365_best_practices",
     "can_view_compliance_checks",
     "can_manage_compliance_checks",
+    "can_view_m365_user_mailboxes",
+    "can_view_m365_shared_mailboxes",
+    "can_access_chat",
     "is_admin",
 }
 
@@ -44,6 +47,9 @@ _PERMISSION_FIELDS = {
     "can_view_m365_best_practices",
     "can_view_compliance_checks",
     "can_manage_compliance_checks",
+    "can_view_m365_user_mailboxes",
+    "can_view_m365_shared_mailboxes",
+    "can_access_chat",
     "is_admin",
 }
 
@@ -66,6 +72,9 @@ _PERMISSION_MAPPING = {
     "m365_best_practices.access": "can_view_m365_best_practices",
     "compliance_checks.access": "can_view_compliance_checks",
     "compliance_checks.manage": "can_manage_compliance_checks",
+    "m365_user_mailboxes.access": "can_view_m365_user_mailboxes",
+    "m365_shared_mailboxes.access": "can_view_m365_shared_mailboxes",
+    "chat.access": "can_access_chat",
 }
 
 
