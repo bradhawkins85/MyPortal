@@ -1917,6 +1917,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_audit_disabled_org_false",
     "bp_audit_log_search_enabled",
     "bp_mailbox_audit_actions",
+    "bp_mailbox_auditing_enabled",
     "bp_modern_auth_exo",
     "bp_smtp_auth_disabled",
     "bp_dkim_enabled_all_domains",
@@ -2162,6 +2163,118 @@ async def test_check_users_cannot_create_security_groups_fail():
 
 
 # ---------------------------------------------------------------------------
+# Quarantine notification check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_enabled_pass():
+    """All policies have notifications enabled and frequency=1: pass."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "EnableEndUserSpamNotifications": True,
+                    "EndUserSpamNotificationFrequency": 1,
+                }
+            ]
+        }
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "pass"
+    assert result["check_id"] == "bp_quarantine_notification_enabled"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_disabled_fails():
+    """Policy with notifications disabled: fail."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "EnableEndUserSpamNotifications": False,
+                    "EndUserSpamNotificationFrequency": 1,
+                }
+            ]
+        }
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "disabled" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_high_frequency_fails():
+    """Policy with notifications enabled but frequency > 1 day: fail."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "EnableEndUserSpamNotifications": True,
+                    "EndUserSpamNotificationFrequency": 3,
+                }
+            ]
+        }
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "frequency=3" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_unknown_on_error():
+    """EXO error returns unknown status with error message."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("EXO unavailable"),
+    ):
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "unknown"
+    assert "EXO unavailable" in result["details"]
+
+
+def test_quarantine_notification_in_catalog():
+    """bp_quarantine_notification_enabled must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_quarantine_notification_enabled" in ids
+
+
+def test_quarantine_notification_catalog_entry():
+    """bp_quarantine_notification_enabled catalog entry must have the expected fields."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_quarantine_notification_enabled")
+    assert entry.get("has_remediation") is True
+    assert entry.get("default_enabled") is True
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
+
+
+# ---------------------------------------------------------------------------
 # License-based N/A scoping for the new capability constants
 # ---------------------------------------------------------------------------
 
@@ -2186,6 +2299,7 @@ def test_service_plan_to_capabilities_includes_new_capabilities():
 
 # ---------------------------------------------------------------------------
 # Anti-phishing impersonation checks
+# _check_mailbox_auditing_enabled_all_users
 # ---------------------------------------------------------------------------
 
 
@@ -2237,6 +2351,48 @@ async def test_antiphish_impersonated_domain_protection_unknown_on_error():
     ):
         result = await bp_service._check_antiphish_impersonated_domain_protection(
             "exo-token", "tenant-123"
+async def test_check_mailbox_auditing_enabled_pass_when_all_enabled():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {"UserPrincipalName": "alice@contoso.com", "AuditEnabled": True},
+            {"UserPrincipalName": "bob@contoso.com", "AuditEnabled": True},
+        ]},
+    ):
+        result = await bp_service._check_mailbox_auditing_enabled_all_users(
+            "exo-token", "tenant-id"
+        )
+    assert result["status"] == "pass"
+    assert "2" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_mailbox_auditing_enabled_fail_when_some_disabled():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {"UserPrincipalName": "alice@contoso.com", "AuditEnabled": True},
+            {"UserPrincipalName": "bob@contoso.com", "AuditEnabled": False},
+        ]},
+    ):
+        result = await bp_service._check_mailbox_auditing_enabled_all_users(
+            "exo-token", "tenant-id"
+        )
+    assert result["status"] == "fail"
+    assert "bob@contoso.com" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_mailbox_auditing_enabled_unknown_when_no_mailboxes():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": []},
+    ):
+        result = await bp_service._check_mailbox_auditing_enabled_all_users(
+            "exo-token", "tenant-id"
         )
     assert result["status"] == "unknown"
 
@@ -2289,6 +2445,14 @@ async def test_antiphish_impersonated_user_protection_unknown_on_error():
     ):
         result = await bp_service._check_antiphish_impersonated_user_protection(
             "exo-token", "tenant-123"
+async def test_check_mailbox_auditing_enabled_unknown_on_exo_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=bp_service.M365Error("connection refused"),
+    ):
+        result = await bp_service._check_mailbox_auditing_enabled_all_users(
+            "exo-token", "tenant-id"
         )
     assert result["status"] == "unknown"
 
@@ -2407,3 +2571,90 @@ async def test_antiphish_quarantine_impersonated_user_unknown_on_error():
             "exo-token", "tenant-123"
         )
     assert result["status"] == "unknown"
+# ---------------------------------------------------------------------------
+# _remediate_foreach_mailbox
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_foreach_mailbox_enables_audit_on_affected_only():
+    """Set-Mailbox is called only for mailboxes where AuditEnabled is not True."""
+    mailboxes = [
+        {"UserPrincipalName": "alice@contoso.com", "AuditEnabled": True},
+        {"UserPrincipalName": "bob@contoso.com", "AuditEnabled": False},
+    ]
+    get_call = AsyncMock(return_value={"value": mailboxes})
+    set_call = AsyncMock(return_value={})
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        if cmdlet == "Get-Mailbox":
+            return await get_call(token, tenant, cmdlet, params)
+        return await set_call(token, tenant, cmdlet, params)
+
+    with patch("app.services.m365_best_practices._exo_invoke_command", side_effect=fake_exo):
+        result = await bp_service._remediate_foreach_mailbox(
+            "exo-token", "tenant-id", 1, "bp_mailbox_auditing_enabled",
+            {"AuditEnabled": True},
+        )
+    assert result is True
+    # Set-Mailbox called exactly once (only for bob)
+    assert set_call.call_count == 1
+    _, _, _, params = set_call.call_args[0]
+    assert params["Identity"] == "bob@contoso.com"
+    assert params["AuditEnabled"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_foreach_mailbox_returns_false_on_set_error():
+    """Returns False when Set-Mailbox fails for at least one mailbox."""
+    mailboxes = [{"UserPrincipalName": "alice@contoso.com", "AuditEnabled": False}]
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        if cmdlet == "Get-Mailbox":
+            return {"value": mailboxes}
+        raise bp_service.M365Error("permission denied")
+
+    with patch("app.services.m365_best_practices._exo_invoke_command", side_effect=fake_exo):
+        result = await bp_service._remediate_foreach_mailbox(
+            "exo-token", "tenant-id", 1, "bp_mailbox_auditing_enabled",
+            {"AuditEnabled": True},
+        )
+    assert result is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_foreach_mailbox_skips_all_when_already_compliant():
+    """No Set-Mailbox calls when all mailboxes are already compliant."""
+    mailboxes = [
+        {"UserPrincipalName": "alice@contoso.com", "AuditEnabled": True},
+        {"UserPrincipalName": "bob@contoso.com", "AuditEnabled": True},
+    ]
+    set_call = AsyncMock(return_value={})
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        if cmdlet == "Get-Mailbox":
+            return {"value": mailboxes}
+        return await set_call(token, tenant, cmdlet, params)
+
+    with patch("app.services.m365_best_practices._exo_invoke_command", side_effect=fake_exo):
+        result = await bp_service._remediate_foreach_mailbox(
+            "exo-token", "tenant-id", 1, "bp_mailbox_auditing_enabled",
+            {"AuditEnabled": True},
+        )
+    assert result is True
+    assert set_call.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# bp_mailbox_auditing_enabled catalog entry
+# ---------------------------------------------------------------------------
+
+
+def test_bp_mailbox_auditing_enabled_catalog_entry():
+    catalog = {bp["id"]: bp for bp in bp_service.list_best_practices()}
+    entry = catalog.get("bp_mailbox_auditing_enabled")
+    assert entry is not None, "bp_mailbox_auditing_enabled must be in the catalog"
+    assert entry["has_remediation"] is True
+    assert entry["is_cis_benchmark"] is True
+    assert "AuditEnabled" in entry["remediation"]
+

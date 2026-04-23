@@ -1666,6 +1666,82 @@ async def _check_antiphish_quarantine_impersonated_user(
                    "No anti-phishing policy has TargetedUserProtectionAction set to Quarantine. "
                    "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
                    "-TargetedUserProtectionAction Quarantine")
+async def _check_mailbox_auditing_enabled_all_users(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_mailbox_auditing_enabled"
+    check_name = "Ensure mailbox auditing for all users is Enabled"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-Mailbox",
+            {"ResultSize": "Unlimited", "Filter": "RecipientTypeDetails -eq 'UserMailbox'"},
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-Mailbox: {exc}")
+    rows = data.get("value") or []
+    if not rows:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No user mailboxes found to evaluate.")
+    not_audited = [
+        r.get("UserPrincipalName") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("AuditEnabled") is not True
+    ]
+    if not not_audited:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Mailbox auditing (AuditEnabled) is enabled on all {len(rows)} user mailbox(es).")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(not_audited)} user mailbox(es) do not have AuditEnabled set to True: "
+                   + ", ".join(not_audited[:5])
+                   + ("…" if len(not_audited) > 5 else ""))
+async def _check_quarantine_notification_enabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that end-user spam/quarantine notifications are enabled with a daily frequency.
+
+    Calls ``Get-HostedContentFilterPolicy`` and inspects every policy for the
+    ``EnableEndUserSpamNotifications`` and ``EndUserSpamNotificationFrequency``
+    properties.  Exchange Online supports notification frequencies of 1, 2, or
+    3 days; the CIS recommendation (and the intent of a ≤ 4-hour notification
+    window) is to set the shortest available interval of 1 day so users are
+    alerted to quarantined mail as promptly as possible.
+    """
+    check_id = "bp_quarantine_notification_enabled"
+    check_name = "End-user spam quarantine notifications are enabled with a daily frequency"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-HostedContentFilterPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-HostedContentFilterPolicy: {exc}")
+    rows = data.get("value") or []
+    if not rows:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No hosted content filter policies returned.")
+    failing: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        enabled = row.get("EnableEndUserSpamNotifications")
+        frequency = row.get("EndUserSpamNotificationFrequency")
+        name = row.get("Name") or row.get("Identity") or "Default"
+        if enabled is not True:
+            failing.append(f"{name} (notifications disabled)")
+        elif frequency is not None:
+            try:
+                if int(frequency) > 1:
+                    failing.append(f"{name} (frequency={frequency} days; should be 1)")
+            except (ValueError, TypeError):
+                failing.append(f"{name} (frequency={frequency!r} is not a recognised value)")
+    if not failing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"All {len(rows)} hosted content filter "
+                       f"{'policy' if len(rows) == 1 else 'policies'} have end-user "
+                       "quarantine notifications enabled with a daily frequency.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(failing)} {'policy does' if len(failing) == 1 else 'policies do'} "
+                   "not meet the quarantine notification requirement: "
+                   + "; ".join(failing[:5]))
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -2640,6 +2716,29 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
+        "id": "bp_mailbox_auditing_enabled",
+        "name": "Ensure mailbox auditing for all users is Enabled",
+        "description": (
+            "Mailbox audit logging records actions taken on each mailbox by "
+            "mailbox owners, delegates, and admins. Enabling AuditEnabled on "
+            "every user mailbox ensures that activity is captured in the unified "
+            "audit log for forensic investigation and compliance purposes."
+        ),
+        "remediation": (
+            "Enable auditing on all user mailboxes via Exchange Online PowerShell: "
+            "Get-Mailbox -RecipientTypeDetails UserMailbox -ResultSize Unlimited "
+            "| Set-Mailbox -AuditEnabled $true"
+        ),
+        "source": _check_mailbox_auditing_enabled_all_users,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_type": "foreach_mailbox_exo",
+        "remediation_mailbox_params": {"AuditEnabled": True},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "is_cis_benchmark": True,
+    },
+    {
         "id": "bp_modern_auth_exo",
         "name": "Modern authentication for Exchange Online is enabled",
         "description": (
@@ -2818,6 +2917,31 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
+        "id": "bp_quarantine_notification_enabled",
+        "name": "End-user spam quarantine notifications are enabled with a daily frequency",
+        "description": (
+            "Ensuring end-user quarantine notifications are enabled and set to the "
+            "shortest available interval (1 day) means users are alerted promptly "
+            "when legitimate mail is quarantined, reducing the risk of missed "
+            "communications. Exchange Online supports 1-, 2-, or 3-day notification "
+            "intervals; 1 day is the best available approximation of a 4-hour "
+            "notification window."
+        ),
+        "remediation": (
+            "For each hosted content filter policy:\n"
+            "Set-HostedContentFilterPolicy -Identity <name> "
+            "-EnableEndUserSpamNotifications $true "
+            "-EndUserSpamNotificationFrequency 1"
+        ),
+        "source": _check_quarantine_notification_enabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-HostedContentFilterPolicy",
+        "remediation_params": {
+            "EnableEndUserSpamNotifications": True,
+            "EndUserSpamNotificationFrequency": 1,
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     # ------------------------------------------------------------------
@@ -4208,6 +4332,62 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
     return out
 
 
+async def _remediate_foreach_mailbox(
+    exo_token: str,
+    tenant_id: str,
+    company_id: int,
+    check_id: str,
+    mailbox_params: dict[str, Any],
+) -> bool:
+    """Enable auditing (or apply other per-mailbox settings) on all user mailboxes.
+
+    Fetches every user mailbox, then calls ``Set-Mailbox`` for each one that
+    does not already satisfy every key/value pair in *mailbox_params*.
+    Returns ``True`` if all required updates succeeded (or none were needed),
+    ``False`` if at least one update failed.
+    """
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-Mailbox",
+            {"ResultSize": "Unlimited", "Filter": "RecipientTypeDetails -eq 'UserMailbox'"},
+        )
+    except M365Error as exc:
+        log_error(
+            "M365 foreach-mailbox remediation – Get-Mailbox failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return False
+
+    rows = data.get("value") or []
+    all_ok = True
+    for mailbox in rows:
+        if not isinstance(mailbox, dict):
+            continue
+        identity = mailbox.get("UserPrincipalName") or mailbox.get("Identity")
+        if not identity:
+            continue
+        # Skip mailboxes that already satisfy every required parameter value.
+        if all(mailbox.get(k) == v for k, v in mailbox_params.items()):
+            continue
+        try:
+            await _exo_invoke_command(
+                exo_token, tenant_id, "Set-Mailbox",
+                {"Identity": identity, **mailbox_params},
+            )
+        except M365Error as exc:
+            log_error(
+                "M365 foreach-mailbox remediation – Set-Mailbox failed",
+                company_id=company_id,
+                check_id=check_id,
+                identity=identity,
+                error=str(exc),
+            )
+            all_ok = False
+    return all_ok
+
+
 async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     """Attempt automated remediation for a single best-practice check.
 
@@ -4216,12 +4396,17 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports two remediation source types:
+    Supports three remediation patterns:
 
-    * ``"exo"`` – executes a cmdlet via the Exchange Online REST API using the
-      ``remediation_cmdlet`` and ``remediation_params`` catalog fields.
-    * ``"graph"`` – issues a ``PATCH`` request to Microsoft Graph using the
-      ``remediation_url`` and ``remediation_payload`` catalog fields.
+    * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
+      REST API using the ``remediation_cmdlet`` and ``remediation_params``
+      catalog fields.
+    * ``source_type="exo"`` with ``remediation_type="foreach_mailbox_exo"`` –
+      fetches all user mailboxes and calls ``Set-Mailbox`` on each one that does
+      not already satisfy the required parameters using the
+      ``remediation_mailbox_params`` catalog field.
+    * ``source_type="graph"`` – issues a ``PATCH`` request to Microsoft Graph
+      using the ``remediation_url`` and ``remediation_payload`` catalog fields.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -4254,20 +4439,26 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 "message": "Unable to acquire Exchange Online token. Check that the app credentials are correct.",
             }
 
-        cmdlet = bp.get("remediation_cmdlet", "")
-        params = bp.get("remediation_params") or {}
-        try:
-            await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
-            success = True
-        except M365Error as exc:
-            log_error(
-                "M365 best practice remediation command failed",
-                company_id=company_id,
-                check_id=check_id,
-                cmdlet=cmdlet,
-                error=str(exc),
+        if bp.get("remediation_type") == "foreach_mailbox_exo":
+            mailbox_params = bp.get("remediation_mailbox_params") or {}
+            success = await _remediate_foreach_mailbox(
+                exo_token, tenant_id, company_id, check_id, mailbox_params
             )
-            success = False
+        else:
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+                success = True
+            except M365Error as exc:
+                log_error(
+                    "M365 best practice remediation command failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    cmdlet=cmdlet,
+                    error=str(exc),
+                )
+                success = False
     elif source_type == "graph":
         remediation_url = bp.get("remediation_url", "")
         remediation_payload = bp.get("remediation_payload") or {}
