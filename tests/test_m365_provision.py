@@ -290,6 +290,100 @@ async def test_provision_scope_constant():
     assert "offline_access" in m365_service.PROVISION_SCOPE
 
 
+# ---------------------------------------------------------------------------
+# Tests for transient appRoleAssignment propagation retry
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_post_app_role_assignment_retries_on_transient_propagation_error(monkeypatch):
+    """`_post_app_role_assignment_with_retry` retries on the well-known
+    Microsoft Graph propagation error and succeeds on a later attempt."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+
+    attempts = {"n": 0}
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise m365_service.M365Error(
+                "Microsoft Graph POST failed (400): Permission being assigned was not found on application",
+                http_status=400,
+                graph_error_code="Request_BadRequest",
+            )
+        return {"id": "assignment-id"}
+
+    with patch.object(m365_service, "_graph_post", side_effect=mock_graph_post):
+        result = await m365_service._post_app_role_assignment_with_retry(
+            "token",
+            "https://graph.microsoft.com/v1.0/servicePrincipals/sp-id/appRoleAssignments",
+            {"principalId": "sp-id", "resourceId": "graph-sp-id", "appRoleId": "role-id"},
+            initial_delay_seconds=0.0,
+        )
+
+    assert result == {"id": "assignment-id"}
+    assert attempts["n"] == 3
+    assert len(sleeps) == 2  # slept between attempts 1→2 and 2→3
+
+
+@pytest.mark.anyio("asyncio")
+async def test_post_app_role_assignment_does_not_retry_on_409(monkeypatch):
+    """Conflicts (already-assigned roles) must propagate immediately so the
+    caller's existing 409 short-circuit can run."""
+    async def fake_sleep(seconds: float) -> None:  # pragma: no cover
+        raise AssertionError("should not sleep on 409")
+
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        raise m365_service.M365Error(
+            "Microsoft Graph POST failed (409)", http_status=409
+        )
+
+    with patch.object(m365_service, "_graph_post", side_effect=mock_graph_post):
+        with pytest.raises(m365_service.M365Error):
+            await m365_service._post_app_role_assignment_with_retry(
+                "token",
+                "https://graph.microsoft.com/v1.0/servicePrincipals/sp-id/appRoleAssignments",
+                {},
+                initial_delay_seconds=0.0,
+            )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_post_app_role_assignment_gives_up_after_max_attempts(monkeypatch):
+    async def fake_sleep(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+
+    attempts = {"n": 0}
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        attempts["n"] += 1
+        raise m365_service.M365Error(
+            "Microsoft Graph POST failed (400): Permission being assigned was not found on application",
+            http_status=400,
+            graph_error_code="Request_BadRequest",
+        )
+
+    with patch.object(m365_service, "_graph_post", side_effect=mock_graph_post):
+        with pytest.raises(m365_service.M365Error, match="Permission being assigned"):
+            await m365_service._post_app_role_assignment_with_retry(
+                "token",
+                "https://graph.microsoft.com/v1.0/servicePrincipals/sp-id/appRoleAssignments",
+                {},
+                max_attempts=3,
+                initial_delay_seconds=0.0,
+            )
+
+    assert attempts["n"] == 3
+
+
 @pytest.mark.anyio("asyncio")
 async def test_provision_app_roles_constant():
     """_PROVISION_APP_ROLES contains known Microsoft Graph permission GUIDs."""
