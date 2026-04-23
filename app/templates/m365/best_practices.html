@@ -10,7 +10,7 @@
     {% set bp_actions = [] %}
     {% if has_credentials and catalog %}
       {% set _ = bp_actions.append({
-        "label": "Evaluate now", "type": "form", "variant": "primary",
+        "label": "Evaluate now", "type": "form",
         "action": "/m365/best-practices/run", "method": "post"
       }) %}
     {% endif %}
