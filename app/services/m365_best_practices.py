@@ -1503,6 +1503,24 @@ async def _check_idle_session_timeout(
                    f"Idle session timeout enabled={enabled}, interval={interval or 'unset'}; set ≤ 03:00:00.")
 
 
+async def _check_mailtips_enabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_mailtips_enabled"
+    check_name = "MailTips are enabled for end users"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("MailTipsAllTipsEnabled") is True:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "MailTipsAllTipsEnabled is True; MailTips are enabled for end users.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "MailTipsAllTipsEnabled is not True; MailTips are not fully enabled for end users.")
+
+
 async def _check_shared_mailbox_signin_blocked(token: str) -> dict[str, Any]:
     """Identify shared-mailbox user accounts that have not been disabled.
 
@@ -2624,6 +2642,24 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "ActivityBasedAuthenticationTimeoutEnabled": True,
             "ActivityBasedAuthenticationTimeoutInterval": "03:00:00",
         },
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_mailtips_enabled",
+        "name": "MailTips are enabled for end users",
+        "description": (
+            "MailTips warn users about potential issues before they send an email "
+            "(e.g. replying-all to large groups, sending to external recipients, or "
+            "sending to restricted distribution lists), helping to prevent data leaks "
+            "and accidental mis-sends."
+        ),
+        "remediation": "Set-OrganizationConfig -MailTipsAllTipsEnabled $true",
+        "source": _check_mailtips_enabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {"MailTipsAllTipsEnabled": True},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
