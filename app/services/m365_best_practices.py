@@ -3998,6 +3998,31 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
     },
+    {
+        "id": "bp_restrict_anon_users_start_meeting",
+        "name": "Restrict anonymous users from starting Teams meetings",
+        "description": (
+            "AllowAnonymousUsersToStartMeeting should be set to $false so that "
+            "unauthenticated participants cannot start Teams meetings without an "
+            "authenticated organiser being present, reducing the risk of "
+            "unsupervised meetings and data exposure."
+        ),
+        "remediation": (
+            "Set-CsTeamsMeetingPolicy -Identity Global "
+            "-AllowAnonymousUsersToStartMeeting $false"
+        ),
+        "source": _manual_review_factory(
+            "bp_restrict_anon_users_start_meeting",
+            "Restrict anonymous users from starting Teams meetings",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
+            "Select AllowAnonymousUsersToStartMeeting",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+        "is_cis_benchmark": True,
+    },
     # ------------------------------------------------------------------
     # Defender / Purview
     # ------------------------------------------------------------------
