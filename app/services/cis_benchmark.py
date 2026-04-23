@@ -290,6 +290,12 @@ _REMEDIATION: dict[str, str] = {
         "Or via PowerShell: Set-CsTeamsMeetingPolicy -Identity Global "
         "-AllowAnonymousUsersToStartMeeting $false"
     ),
+    "bp_customer_lockbox": (
+        "Enable the Customer Lockbox feature: "
+        "Microsoft 365 admin centre → Settings → Org settings → Security & privacy → "
+        "Customer lockbox → turn on. "
+        "Or via PowerShell: Set-OrganizationConfig -CustomerLockBoxEnabled $true"
+    ),
 }
 
 
