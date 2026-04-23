@@ -1393,18 +1393,18 @@ async def _check_email_otp_disabled(token: str) -> dict[str, Any]:
 
 async def _check_user_consent_disallowed(token: str) -> dict[str, Any]:
     check_id = "bp_user_consent_apps_disallowed"
-    check_name = "User consent to apps accessing company data is not allowed"
+    check_name = "User consent to apps accessing company data on their behalf is not allowed"
     auth = await _safe_graph_get(token, _AUTHORIZATION_POLICY_URL)
     if auth is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read authorization policy.")
     perms = (auth.get("defaultUserRolePermissions") or {}).get(
         "permissionGrantPoliciesAssigned"
     ) or []
-    legacy_present = any("microsoft-user-default-legacy" in str(p) for p in perms)
-    if legacy_present:
+    if perms:
+        policies = ", ".join(str(p) for p in perms)
         return _result(
             check_id, check_name, STATUS_FAIL,
-            "User consent to apps is allowed via the legacy default permission grant policy.",
+            f"User consent to apps is allowed via permission grant policies: {policies}.",
         )
     return _result(check_id, check_name, STATUS_PASS, "User consent to apps is not granted by default.")
 
@@ -2972,6 +2972,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": True,
+        "is_cis_benchmark": True,
         "remediation_url": _AUTHORIZATION_POLICY_URL,
         "remediation_payload": {
             "defaultUserRolePermissions": {"permissionGrantPoliciesAssigned": []}
