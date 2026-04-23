@@ -1788,6 +1788,24 @@ async def _check_modern_auth_exo(
                    "Modern authentication is disabled for Exchange Online (OAuth2ClientProfileEnabled is not True).")
 
 
+async def _check_customer_lockbox(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_customer_lockbox"
+    check_name = "Ensure the customer lockbox feature is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("CustomerLockBoxEnabled") is True:
+        return _result(check_id, check_name, STATUS_PASS, "CustomerLockBoxEnabled is True.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Customer Lockbox is not enabled; enable it via "
+                   "Set-OrganizationConfig -CustomerLockBoxEnabled $true.")
+
+
 async def _check_smtp_auth_disabled(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -3363,6 +3381,26 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_cmdlet": "Set-OrganizationConfig",
         "remediation_params": {"OAuth2ClientProfileEnabled": True},
+        "is_cis_benchmark": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_customer_lockbox",
+        "name": "Ensure the customer lockbox feature is enabled",
+        "description": (
+            "Customer Lockbox ensures that Microsoft cannot access customer "
+            "content to perform a service operation without explicit customer "
+            "approval. Enabling it provides an additional layer of control and "
+            "transparency, allowing organisations to review, approve, or reject "
+            "Microsoft engineer access requests to their data."
+        ),
+        "remediation": "Set-OrganizationConfig -CustomerLockBoxEnabled $true",
+        "source": _check_customer_lockbox,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {"CustomerLockBoxEnabled": True},
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },

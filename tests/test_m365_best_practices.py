@@ -3614,3 +3614,58 @@ def test_automatic_email_forwarding_catalog_entry():
     assert "source" not in entry
     assert "remediation_cmdlet" not in entry
     assert "remediation_params" not in entry
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_customer_lockbox_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"CustomerLockBoxEnabled": True}]},
+    ):
+        result = await bp_service._check_customer_lockbox("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_customer_lockbox_fail():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"CustomerLockBoxEnabled": False}]},
+    ):
+        result = await bp_service._check_customer_lockbox("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "CustomerLockBoxEnabled" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_customer_lockbox_unknown_on_exo_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=bp_service.M365Error("EXO unavailable"),
+    ):
+        result = await bp_service._check_customer_lockbox("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+def test_customer_lockbox_in_catalog():
+    """bp_customer_lockbox must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp.get("id") for bp in catalog}
+    assert "bp_customer_lockbox" in ids
+
+
+def test_customer_lockbox_catalog_entry():
+    """bp_customer_lockbox catalog entry must have the expected fields."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_customer_lockbox")
+    assert entry.get("has_remediation") is True
+    assert entry.get("default_enabled") is True
+    assert entry.get("is_cis_benchmark") is True
+    assert "CustomerLockBoxEnabled" in entry["remediation"]
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
