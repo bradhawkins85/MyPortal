@@ -1046,9 +1046,23 @@ async def _graph_patch(
             status=response.status_code,
             body=response.text,
         )
+        graph_error_code: str | None = None
+        graph_error_message: str | None = None
+        try:
+            err = response.json().get("error") or {}
+            code_value = err.get("code")
+            message_value = err.get("message")
+            if isinstance(code_value, str):
+                graph_error_code = code_value
+            if isinstance(message_value, str):
+                graph_error_message = message_value
+        except Exception:  # noqa: BLE001
+            pass
+        suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
-            f"Microsoft Graph PATCH failed ({response.status_code})",
+            f"Microsoft Graph PATCH failed ({response.status_code}){suffix}",
             http_status=response.status_code,
+            graph_error_code=graph_error_code,
         )
     if response.status_code == 204:
         return {}
@@ -2362,16 +2376,28 @@ async def reset_user_password(company_id: int, staff_email: str) -> str:
     new_password = _generate_m365_password()
 
     encoded_user_id = quote(user_id, safe="")
-    await _graph_patch(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
-        {
-            "passwordProfile": {
-                "forceChangePasswordNextSignIn": True,
-                "password": new_password,
-            }
-        },
-    )
+    try:
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+            {
+                "passwordProfile": {
+                    "forceChangePasswordNextSignIn": True,
+                    "password": new_password,
+                }
+            },
+        )
+    except M365Error as exc:
+        if exc.http_status == 403 and exc.graph_error_code == "Authorization_RequestDenied":
+            raise M365Error(
+                "The Microsoft 365 app does not have permission to reset this password. "
+                "Ensure the app has the User.ReadWrite.All application permission with "
+                "admin consent, and that the target account does not hold a privileged "
+                "admin role (which requires additional Azure AD role assignments).",
+                http_status=403,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
     return new_password
 
 
