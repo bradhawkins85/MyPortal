@@ -2417,6 +2417,11 @@ async def test_antiphish_impersonated_domain_protection_unknown_on_error():
     ):
         result = await bp_service._check_antiphish_impersonated_domain_protection(
             "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_check_mailbox_auditing_enabled_pass_when_all_enabled():
     with patch(
         "app.services.m365_best_practices._exo_invoke_command",
@@ -2511,6 +2516,11 @@ async def test_antiphish_impersonated_user_protection_unknown_on_error():
     ):
         result = await bp_service._check_antiphish_impersonated_user_protection(
             "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_check_mailbox_auditing_enabled_unknown_on_exo_error():
     with patch(
         "app.services.m365_best_practices._exo_invoke_command",
@@ -2724,3 +2734,355 @@ def test_bp_mailbox_auditing_enabled_catalog_entry():
     assert entry["is_cis_benchmark"] is True
     assert "AuditEnabled" in entry["remediation"]
 
+
+
+# ---------------------------------------------------------------------------
+# SharePoint Online checks (Graph /admin/sharepoint/settings)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_content_sharing_restricted_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"sharingCapability": "existingExternalUserSharingOnly"},
+    ):
+        result = await bp_service._check_external_content_sharing_restricted("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_content_sharing_restricted_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"sharingCapability": "externalUserAndGuestSharing"},
+    ):
+        result = await bp_service._check_external_content_sharing_restricted("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_content_sharing_restricted_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("forbidden"),
+    ):
+        result = await bp_service._check_external_content_sharing_restricted("token")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sp_guests_cannot_share_unowned_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"isResharingByExternalUsersEnabled": False},
+    ):
+        result = await bp_service._check_sp_guests_cannot_share_unowned("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sp_guests_cannot_share_unowned_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"isResharingByExternalUsersEnabled": True},
+    ):
+        result = await bp_service._check_sp_guests_cannot_share_unowned("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_modern_auth_sp_apps_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"isLegacyAuthProtocolsEnabled": False},
+    ):
+        result = await bp_service._check_modern_auth_sp_apps("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_modern_auth_sp_apps_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"isLegacyAuthProtocolsEnabled": True},
+    ):
+        result = await bp_service._check_modern_auth_sp_apps("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_link_sharing_restricted_spo_od_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"defaultSharingLinkType": "direct", "defaultLinkPermission": "view"},
+    ):
+        result = await bp_service._check_link_sharing_restricted_spo_od("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_link_sharing_restricted_spo_od_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"defaultSharingLinkType": "anonymous", "defaultLinkPermission": "edit"},
+    ):
+        result = await bp_service._check_link_sharing_restricted_spo_od("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_infected_files_block_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"isDisableInfectedFileDownload": True},
+    ):
+        result = await bp_service._check_sharepoint_infected_files_block("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_infected_files_block_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"isDisableInfectedFileDownload": False},
+    ):
+        result = await bp_service._check_sharepoint_infected_files_block("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_infected_files_block_unknown_when_property_missing():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"sharingCapability": "disabled"},
+    ):
+        result = await bp_service._check_sharepoint_infected_files_block("token")
+    assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Defender for Office 365 checks (EXO)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_safe_links_office_apps_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {
+                "Name": "Strict Safe Links",
+                "EnableSafeLinksForOffice": True,
+                "TrackClicks": True,
+                "AllowClickThrough": False,
+            }
+        ]},
+    ):
+        result = await bp_service._check_safe_links_office_apps("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+    assert "Strict Safe Links" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_safe_links_office_apps_fail_when_disabled():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {
+                "Name": "Default",
+                "EnableSafeLinksForOffice": False,
+                "TrackClicks": True,
+                "AllowClickThrough": True,
+            }
+        ]},
+    ):
+        result = await bp_service._check_safe_links_office_apps("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_safe_links_office_apps_unknown_on_exo_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("timeout"),
+    ):
+        result = await bp_service._check_safe_links_office_apps("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_zap_teams_on_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"Name": "Teams Protection Policy", "ZapEnabled": True}]},
+    ):
+        result = await bp_service._check_zap_teams_on("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_zap_teams_on_fail():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"Name": "Teams Protection Policy", "ZapEnabled": False}]},
+    ):
+        result = await bp_service._check_zap_teams_on("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_zap_teams_on_unknown_on_exo_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("not found"),
+    ):
+        result = await bp_service._check_zap_teams_on("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# DNS checks (SPF / DMARC)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_spf_records_published_pass():
+    domains = [
+        {"id": "contoso.com", "isVerified": True},
+    ]
+    with (
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=domains,
+        ),
+        patch(
+            "app.services.m365_best_practices._dns_txt_records",
+            new_callable=AsyncMock,
+            return_value=["v=spf1 include:spf.protection.outlook.com -all"],
+        ),
+    ):
+        result = await bp_service._check_spf_records_published("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_spf_records_published_fail_when_missing():
+    domains = [{"id": "contoso.com", "isVerified": True}]
+    with (
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=domains,
+        ),
+        patch(
+            "app.services.m365_best_practices._dns_txt_records",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        result = await bp_service._check_spf_records_published("token")
+    assert result["status"] == "fail"
+    assert re.search(r"\bcontoso\.com\b", result["details"])
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_spf_records_published_skips_onmicrosoft_domains():
+    domains = [
+        {"id": "contoso.onmicrosoft.com", "isVerified": True},
+    ]
+    with patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        return_value=domains,
+    ):
+        result = await bp_service._check_spf_records_published("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_dmarc_records_published_pass():
+    domains = [{"id": "contoso.com", "isVerified": True}]
+    with (
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=domains,
+        ),
+        patch(
+            "app.services.m365_best_practices._dns_txt_records",
+            new_callable=AsyncMock,
+            return_value=["v=DMARC1; p=quarantine; rua=mailto:dmarc@contoso.com"],
+        ),
+    ):
+        result = await bp_service._check_dmarc_records_published("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_dmarc_records_published_fail_when_missing():
+    domains = [{"id": "contoso.com", "isVerified": True}]
+    with (
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=domains,
+        ),
+        patch(
+            "app.services.m365_best_practices._dns_txt_records",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        result = await bp_service._check_dmarc_records_published("token")
+    assert result["status"] == "fail"
+    assert re.search(r"\bcontoso\.com\b", result["details"])
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_dmarc_records_published_unknown_on_dns_failure():
+    domains = [{"id": "contoso.com", "isVerified": True}]
+    with (
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=domains,
+        ),
+        patch(
+            "app.services.m365_best_practices._dns_txt_records",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        result = await bp_service._check_dmarc_records_published("token")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_spf_records_published_unknown_on_graph_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Graph error"),
+    ):
+        result = await bp_service._check_spf_records_published("token")
+    assert result["status"] == "unknown"

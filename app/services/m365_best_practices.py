@@ -34,6 +34,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Union
 
+import httpx
+
 from app.core.logging import log_error, log_info
 from app.repositories import m365_best_practices as bp_repo
 from app.services.cis_benchmark import (
@@ -458,6 +460,7 @@ _DIRECTORY_SETTINGS_URL = "https://graph.microsoft.com/beta/groupSettings"
 _SECURITY_DEFAULTS_URL = (
     "https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy"
 )
+_SPO_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/sharepoint/settings"
 
 # Well-known directory role template IDs used by several checks
 _ROLE_TEMPLATE_GLOBAL_ADMIN = "62e90394-69f5-4237-9190-012177145e10"
@@ -523,11 +526,10 @@ def _manual_review_factory(
 ) -> Callable[..., Awaitable[dict[str, Any]]]:
     """Return a runner that always yields STATUS_UNKNOWN with manual instructions.
 
-    Used for checks whose source surface (SharePoint Online PowerShell, Teams
-    PowerShell, Security & Compliance PowerShell, public DNS, on-prem AD)
-    requires infrastructure beyond the current Graph/EXO clients.  Admins see
-    the catalog entry, the full remediation script, and a clear note that
-    manual verification is required.
+    Used for checks whose source surface (Teams PowerShell, Security &
+    Compliance PowerShell, on-prem AD) requires infrastructure beyond the
+    current Graph/EXO clients.  Admins see the catalog entry, the full
+    remediation script, and a clear note that manual verification is required.
     """
 
     async def _runner(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
@@ -535,6 +537,348 @@ def _manual_review_factory(
 
     _runner.__name__ = f"_check_{check_id}_manual"
     return _runner
+
+
+# ---------------------------------------------------------------------------
+# DNS-over-HTTPS helper (used by SPF / DMARC checks)
+# ---------------------------------------------------------------------------
+
+async def _dns_txt_records(domain: str) -> list[str] | None:
+    """Return all TXT record strings for *domain* using Google DNS-over-HTTPS.
+
+    Returns ``None`` if the lookup fails for any reason.  Each element of the
+    returned list is the full quoted TXT record value (with enclosing quotes
+    stripped), e.g. ``"v=spf1 include:spf.protection.outlook.com -all"``.
+    """
+    domain = domain.rstrip(".")
+    url = f"https://dns.google/resolve?name={domain}&type=TXT"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers={"Accept": "application/dns-json"})
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        answers = data.get("Answer") or []
+        records: list[str] = []
+        for ans in answers:
+            rdata = str(ans.get("data") or "").strip()
+            if rdata.startswith('"') and rdata.endswith('"'):
+                rdata = rdata[1:-1]
+            if rdata:
+                records.append(rdata)
+        return records
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# SharePoint Online checks (via Microsoft Graph /admin/sharepoint/settings)
+# ---------------------------------------------------------------------------
+
+_SPO_MISSING_PERM_MSG = (
+    "The enterprise app is missing the SharePointTenantSettings.Read.All "
+    "permission required to read /admin/sharepoint/settings. "
+    "Re-authorise portal access on the M365 settings page to grant this permission."
+)
+
+
+async def _get_spo_settings(token: str) -> dict[str, Any] | None:
+    """Fetch the SharePoint Online tenant settings from the Graph API."""
+    try:
+        return await _graph_get(token, _SPO_SETTINGS_URL)
+    except M365Error:
+        return None
+
+
+async def _check_external_content_sharing_restricted(token: str) -> dict[str, Any]:
+    check_id = "bp_external_content_sharing_restricted"
+    check_name = "External content sharing is restricted"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    capability = str(settings.get("sharingCapability") or "").lower()
+    if not capability:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read sharingCapability from SharePoint tenant settings.")
+    passing = {"disabled", "existingexternalusersharingonly"}
+    if capability in passing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"SharePoint tenant sharing capability is '{capability}'.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"SharePoint tenant sharing capability is '{capability}'; "
+                   "restrict to 'ExistingExternalUserSharingOnly' or 'Disabled'.")
+
+
+async def _check_sp_guests_cannot_share_unowned(token: str) -> dict[str, Any]:
+    check_id = "bp_sp_guests_cannot_share_unowned"
+    check_name = "SharePoint guest users cannot share items they don't own"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    # Graph property isResharingByExternalUsersEnabled is the inverse of
+    # SPO PowerShell's PreventExternalUsersFromResharing: True means resharing
+    # IS allowed (bad), False means it is blocked (good).
+    resharing = settings.get("isResharingByExternalUsersEnabled")
+    if resharing is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read isResharingByExternalUsersEnabled from SharePoint tenant settings.")
+    if resharing is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "External users cannot re-share items they do not own (resharing is disabled).")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "External users can re-share items they do not own. "
+                   "Run: Set-SPOTenant -PreventExternalUsersFromResharing $true")
+
+
+async def _check_onedrive_content_sharing_restricted(token: str) -> dict[str, Any]:
+    check_id = "bp_onedrive_content_sharing_restricted"
+    check_name = "OneDrive content sharing is restricted"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    # The Graph API exposes the OneDrive sharing capability under
+    # oneDriveSharingCapability (may appear alongside v1.0 fields)
+    capability = str(settings.get("oneDriveSharingCapability") or "").lower()
+    if not capability:
+        # Fall back to the tenant-wide sharingCapability as an indicator
+        tenant_cap = str(settings.get("sharingCapability") or "").lower()
+        if not tenant_cap:
+            return _result(check_id, check_name, STATUS_UNKNOWN,
+                           "Unable to read OneDrive sharing capability from SharePoint tenant settings.")
+        capability = tenant_cap
+    passing = {"disabled", "existingexternalusersharingonly"}
+    if capability in passing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"OneDrive sharing capability is '{capability}'.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"OneDrive sharing capability is '{capability}'; "
+                   "restrict to 'ExistingExternalUserSharingOnly' or 'Disabled'. "
+                   "Run: Set-SPOTenant -OneDriveSharingCapability ExistingExternalUserSharingOnly")
+
+
+async def _check_link_sharing_restricted_spo_od(token: str) -> dict[str, Any]:
+    check_id = "bp_link_sharing_restricted_spo_od"
+    check_name = "Link sharing is restricted in SharePoint and OneDrive"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    link_type = str(settings.get("defaultSharingLinkType") or "").lower()
+    link_perm = str(settings.get("defaultLinkPermission") or "").lower()
+    if not link_type and not link_perm:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read defaultSharingLinkType/defaultLinkPermission from SharePoint tenant settings.")
+    issues: list[str] = []
+    if link_type and link_type not in {"direct", "none"}:
+        issues.append(f"defaultSharingLinkType is '{link_type}' (should be 'direct')")
+    if link_perm and link_perm not in {"view", "none"}:
+        issues.append(f"defaultLinkPermission is '{link_perm}' (should be 'view')")
+    if not issues:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Default sharing link type is '{link_type}' with '{link_perm}' permission.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Sharing link defaults are too permissive: " + "; ".join(issues) + ". "
+                   "Run: Set-SPOTenant -DefaultSharingLinkType Direct -DefaultLinkPermission View")
+
+
+async def _check_modern_auth_sp_apps(token: str) -> dict[str, Any]:
+    check_id = "bp_modern_auth_sp_apps"
+    check_name = "Modern authentication for SharePoint applications is required"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    legacy = settings.get("isLegacyAuthProtocolsEnabled")
+    if legacy is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read isLegacyAuthProtocolsEnabled from SharePoint tenant settings.")
+    if legacy is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Legacy authentication protocols are disabled for SharePoint Online.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Legacy authentication protocols are enabled for SharePoint Online. "
+                   "Run: Set-SPOTenant -LegacyAuthProtocolsEnabled $false")
+
+
+async def _check_sharepoint_infected_files_block(token: str) -> dict[str, Any]:
+    check_id = "bp_sharepoint_infected_files_block"
+    check_name = "Office 365 SharePoint infected files are disallowed for download"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    # The Graph API property may appear as isDisableInfectedFileDownload or
+    # preventDownloadForInfectedFiles depending on the API version
+    disallow = settings.get("isDisableInfectedFileDownload")
+    if disallow is None:
+        disallow = settings.get("preventDownloadForInfectedFiles")
+    if disallow is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read infected-file download restriction from SharePoint tenant settings. "
+                       "Run: Get-SPOTenant | Select DisallowInfectedFileDownload to verify manually.")
+    if disallow is True:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Infected file download is blocked in SharePoint/OneDrive.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Infected files can be downloaded from SharePoint/OneDrive. "
+                   "Run: Set-SPOTenant -DisallowInfectedFileDownload $true")
+
+
+# ---------------------------------------------------------------------------
+# Defender for Office 365 checks (EXO InvokeCommand)
+# ---------------------------------------------------------------------------
+
+
+async def _check_safe_links_office_apps(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_safe_links_office_apps"
+    check_name = "Safe Links for Office applications is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-SafeLinksPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-SafeLinksPolicy: {exc}")
+    rows = data.get("value") or []
+    if not rows:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Safe Links policies found; create a policy that enables "
+                       "Safe Links for Office applications.")
+    passing = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict)
+        and r.get("EnableSafeLinksForOffice") is True
+        and r.get("TrackClicks") is True
+        and r.get("AllowClickThrough") is False
+    ]
+    if passing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Safe Links for Office applications is properly configured in: "
+                       + ", ".join(passing[:5]))
+    failing = [
+        f"{r.get('Name') or r.get('Identity') or '?'} "
+        f"(EnableSafeLinksForOffice={r.get('EnableSafeLinksForOffice')}, "
+        f"TrackClicks={r.get('TrackClicks')}, "
+        f"AllowClickThrough={r.get('AllowClickThrough')})"
+        for r in rows
+        if isinstance(r, dict)
+    ]
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No Safe Links policy has EnableSafeLinksForOffice=True, "
+                   "TrackClicks=True, AllowClickThrough=False. "
+                   f"Policies found: {'; '.join(failing[:3])}")
+
+
+async def _check_zap_teams_on(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_zap_teams_on"
+    check_name = "Zero-hour auto purge for Microsoft Teams is on"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-TeamsProtectionPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-TeamsProtectionPolicy: {exc}")
+    rows = data.get("value") or []
+    if not rows:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Teams Protection Policy found; ZAP may not be configured.")
+    zap_enabled = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("ZapEnabled") is True
+    ]
+    if zap_enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Zero-hour auto purge is enabled in: {', '.join(zap_enabled[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No Teams Protection Policy has ZapEnabled set to True. "
+                   "Run: Set-TeamsProtectionPolicy -Identity 'Teams Protection Policy' -ZapEnabled $true")
+
+
+# ---------------------------------------------------------------------------
+# DNS checks (SPF / DMARC via DNS-over-HTTPS)
+# ---------------------------------------------------------------------------
+
+
+async def _check_spf_records_published(token: str) -> dict[str, Any]:
+    check_id = "bp_spf_records_published"
+    check_name = "SPF records are published for all Exchange Online domains"
+    domains_data = await _safe_graph_get_all(token, _DOMAINS_URL)
+    if domains_data is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to enumerate accepted domains from Microsoft Graph.")
+    exchange_domains = [
+        d.get("id") or d.get("name") or ""
+        for d in domains_data
+        if isinstance(d, dict)
+        and d.get("isVerified") is True
+        and not str(d.get("id") or "").endswith(".onmicrosoft.com")
+    ]
+    if not exchange_domains:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "No custom verified domains found; SPF records are not required.")
+    missing: list[str] = []
+    errored: list[str] = []
+    for domain in exchange_domains:
+        records = await _dns_txt_records(domain)
+        if records is None:
+            errored.append(domain)
+            continue
+        has_spf = any(r.lower().startswith("v=spf1") for r in records)
+        if not has_spf:
+            missing.append(domain)
+    if errored and not missing:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"DNS lookup failed for {len(errored)} domain(s); "
+                       "verify SPF records manually: " + ", ".join(errored[:5]))
+    if not missing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"SPF records found for all {len(exchange_domains)} verified domain(s).")
+    suffix = f" (DNS errors for {len(errored)} domain(s))" if errored else ""
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"SPF TXT record missing for {len(missing)} domain(s): "
+                   + ", ".join(missing[:5]) + suffix
+                   + ". Publish: v=spf1 include:spf.protection.outlook.com -all")
+
+
+async def _check_dmarc_records_published(token: str) -> dict[str, Any]:
+    check_id = "bp_dmarc_records_published"
+    check_name = "DMARC records for all Exchange Online domains are published"
+    domains_data = await _safe_graph_get_all(token, _DOMAINS_URL)
+    if domains_data is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to enumerate accepted domains from Microsoft Graph.")
+    exchange_domains = [
+        d.get("id") or d.get("name") or ""
+        for d in domains_data
+        if isinstance(d, dict)
+        and d.get("isVerified") is True
+        and not str(d.get("id") or "").endswith(".onmicrosoft.com")
+    ]
+    if not exchange_domains:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "No custom verified domains found; DMARC records are not required.")
+    missing: list[str] = []
+    errored: list[str] = []
+    for domain in exchange_domains:
+        records = await _dns_txt_records(f"_dmarc.{domain}")
+        if records is None:
+            errored.append(domain)
+            continue
+        has_dmarc = any(r.lower().startswith("v=dmarc1") for r in records)
+        if not has_dmarc:
+            missing.append(domain)
+    if errored and not missing:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"DNS lookup failed for {len(errored)} domain(s); "
+                       "verify DMARC records manually: " + ", ".join(errored[:5]))
+    if not missing:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"DMARC records found for all {len(exchange_domains)} verified domain(s).")
+    suffix = f" (DNS errors for {len(errored)} domain(s))" if errored else ""
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"DMARC TXT record missing for {len(missing)} domain(s): "
+                   + ", ".join(missing[:5]) + suffix
+                   + ". Publish _dmarc.<domain> TXT: v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>")
 
 
 # ---------------------------------------------------------------------------
@@ -2996,6 +3340,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
         "id": "bp_quarantine_notification_enabled",
         "name": "End-user spam quarantine notifications are enabled with a daily frequency",
         "description": (
@@ -3037,12 +3384,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Connect-SPOService -Url https://<tenant>-admin.sharepoint.com\n"
             "Set-SPOTenant -SharingCapability ExistingExternalUserSharingOnly"
         ),
-        "source": _manual_review_factory(
-            "bp_external_content_sharing_restricted",
-            "External content sharing is restricted",
-            "Manual verification required. Run: Get-SPOTenant | Select SharingCapability "
-            "and confirm it is set to 'Disabled' or 'ExistingExternalUserSharingOnly'.",
-        ),
+        "source": _check_external_content_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3077,11 +3419,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "not own, preventing data sprawl."
         ),
         "remediation": "Set-SPOTenant -PreventExternalUsersFromResharing $true",
-        "source": _manual_review_factory(
-            "bp_sp_guests_cannot_share_unowned",
-            "SharePoint guest users cannot share items they don't own",
-            "Manual verification required. Run: Get-SPOTenant | Select PreventExternalUsersFromResharing",
-        ),
+        "source": _check_sp_guests_cannot_share_unowned,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3095,11 +3433,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "match the SharePoint posture."
         ),
         "remediation": "Set-SPOTenant -OneDriveSharingCapability ExistingExternalUserSharingOnly",
-        "source": _manual_review_factory(
-            "bp_onedrive_content_sharing_restricted",
-            "OneDrive content sharing is restricted",
-            "Manual verification required. Run: Get-SPOTenant | Select OneDriveSharingCapability",
-        ),
+        "source": _check_onedrive_content_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3113,11 +3447,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "minimise accidental over-sharing."
         ),
         "remediation": "Set-SPOTenant -DefaultSharingLinkType Direct -DefaultLinkPermission View",
-        "source": _manual_review_factory(
-            "bp_link_sharing_restricted_spo_od",
-            "Link sharing is restricted in SharePoint and OneDrive",
-            "Manual verification required. Run: Get-SPOTenant | Select DefaultSharingLinkType,DefaultLinkPermission",
-        ),
+        "source": _check_link_sharing_restricted_spo_od,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3131,11 +3461,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "older clients from bypassing Conditional Access."
         ),
         "remediation": "Set-SPOTenant -LegacyAuthProtocolsEnabled $false",
-        "source": _manual_review_factory(
-            "bp_modern_auth_sp_apps",
-            "Modern authentication for SharePoint applications is required",
-            "Manual verification required. Run: Get-SPOTenant | Select LegacyAuthProtocolsEnabled",
-        ),
+        "source": _check_modern_auth_sp_apps,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3149,11 +3475,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "prevents Defender-detected malware from spreading further."
         ),
         "remediation": "Set-SPOTenant -DisallowInfectedFileDownload $true",
-        "source": _manual_review_factory(
-            "bp_sharepoint_infected_files_block",
-            "Office 365 SharePoint infected files are disallowed for download",
-            "Manual verification required. Run: Get-SPOTenant | Select DisallowInfectedFileDownload",
-        ),
+        "source": _check_sharepoint_infected_files_block,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3285,7 +3607,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_TEAMS],
     },
     # ------------------------------------------------------------------
-    # Defender / Purview (manual-review pending Security & Compliance client)
+    # Defender / Purview
     # ------------------------------------------------------------------
     {
         "id": "bp_safe_links_office_apps",
@@ -3300,12 +3622,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "New-SafeLinksRule -Name 'Strict Safe Links' -SafeLinksPolicy 'Strict Safe Links' "
             "-RecipientDomainIs (Get-AcceptedDomain).Name"
         ),
-        "source": _manual_review_factory(
-            "bp_safe_links_office_apps",
-            "Safe Links for Office applications is enabled",
-            "Manual verification required. Run: Get-SafeLinksPolicy | Select Name,EnableSafeLinksForOffice,TrackClicks,AllowClickThrough",
-        ),
-        "source_type": "graph",
+        "source": _check_safe_links_office_apps,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_DEFENDER_O365_P1],
@@ -3360,18 +3678,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "delivery, reducing dwell time of Teams-borne threats."
         ),
         "remediation": "Set-TeamsProtectionPolicy -Identity 'Teams Protection Policy' -ZapEnabled $true",
-        "source": _manual_review_factory(
-            "bp_zap_teams_on",
-            "Zero-hour auto purge for Microsoft Teams is on",
-            "Manual verification required. Run: Get-TeamsProtectionPolicy | Select Name,ZapEnabled",
-        ),
-        "source_type": "graph",
+        "source": _check_zap_teams_on,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_DEFENDER_O365_P2, CAP_TEAMS],
     },
     # ------------------------------------------------------------------
-    # DNS / on-prem (manual-review)
+    # DNS / on-prem
     # ------------------------------------------------------------------
     {
         "id": "bp_spf_records_published",
@@ -3384,12 +3698,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "At your DNS registrar publish a TXT record for the domain root: "
             "v=spf1 include:spf.protection.outlook.com -all"
         ),
-        "source": _manual_review_factory(
-            "bp_spf_records_published",
-            "SPF records are published for all Exchange Online domains",
-            "Manual verification required. For each accepted domain query: "
-            "dig +short TXT <domain> | grep 'v=spf1'",
-        ),
+        "source": _check_spf_records_published,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -3406,12 +3715,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "At your DNS registrar publish a TXT record at _dmarc.<domain>: "
             "v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>"
         ),
-        "source": _manual_review_factory(
-            "bp_dmarc_records_published",
-            "DMARC records for all Exchange Online domains are published",
-            "Manual verification required. For each accepted domain query: "
-            "dig +short TXT _dmarc.<domain> | grep 'v=DMARC1'",
-        ),
+        "source": _check_dmarc_records_published,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
