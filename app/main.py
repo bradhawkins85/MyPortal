@@ -8749,7 +8749,7 @@ async def portal_tickets_new_redirect(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
-    return RedirectResponse(url="/tickets", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/tickets", response_class=HTMLResponse)
