@@ -1,6 +1,7 @@
 """Tests for the Microsoft 365 Best Practices service."""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -2028,7 +2029,11 @@ async def test_check_password_expiry_fail_when_any_domain_expires():
     ):
         result = await bp_service._check_password_expiry_never_expire("token")
     assert result["status"] == "fail"
-    assert "contoso.com" in result["details"]
+    # Use a regex with word boundaries to verify the domain identifier is
+    # present in the details message; this avoids CodeQL
+    # py/incomplete-url-substring-sanitization warnings about plain `in`
+    # substring checks against URL-like strings.
+    assert re.search(r"\bcontoso\.com\b", result["details"])
 
 
 @pytest.mark.anyio("asyncio")
