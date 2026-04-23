@@ -1952,6 +1952,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_external_users_cannot_initiate",
     "bp_teams_external_files_approved_storage",
     "bp_restrict_anon_users_join_meeting",
+    "bp_restrict_anon_users_start_meeting",
     # Defender / Purview
     "bp_safe_links_office_apps",
     "bp_dlp_policies_enabled",
