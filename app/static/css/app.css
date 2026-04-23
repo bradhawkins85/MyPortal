@@ -9038,6 +9038,8 @@ textarea:focus-visible,
     padding-top: 0.55rem;
     padding-bottom: 0.55rem;
   }
+}
+
 /* ===========================================================================
  * Standardised page-layout primitives.
  * See docs/ui_layout_standards.md and templates/macros/{header,counters,tables}.html.
