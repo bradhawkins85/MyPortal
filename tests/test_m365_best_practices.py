@@ -1176,6 +1176,112 @@ async def test_remediate_concealed_names_failure_on_token_acquisition_error():
 
 
 # ---------------------------------------------------------------------------
+# bp_self_service_password_reset – catalog & Graph remediation
+# ---------------------------------------------------------------------------
+
+
+def test_sspr_in_catalog():
+    """bp_self_service_password_reset must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_self_service_password_reset" in ids
+
+
+def test_sspr_catalog_entry_has_remediation():
+    """bp_self_service_password_reset must advertise automated remediation support."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_self_service_password_reset")
+    assert entry.get("has_remediation") is True
+    # Internal implementation keys must not be exposed in the public catalog
+    assert "source" not in entry
+    assert "remediation_url" not in entry
+    assert "remediation_payload" not in entry
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_sspr_success():
+    """Successful Graph PATCH remediation for SSPR updates DB and returns success."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=1, check_id="bp_self_service_password_reset")
+
+    assert result["success"] is True
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 1
+    assert upserts[0]["check_id"] == "bp_self_service_password_reset"
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_sspr_failure_on_graph_error():
+    """If the Graph PATCH fails for SSPR, remediation status is recorded as 'failed'."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            side_effect=M365Error("PATCH failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=1, check_id="bp_self_service_password_reset")
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_sspr_failure_on_token_acquisition_error():
+    """If Graph token acquisition fails for SSPR, remediation status is recorded as 'failed'."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Invalid client secret"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(company_id=1, check_id="bp_self_service_password_reset")
+
+    assert result["success"] is False
+    assert result["message"] == "Unable to acquire Microsoft Graph token. Check that the app credentials are correct."
+    assert len(upserts) == 1
+    assert upserts[0]["company_id"] == 1
+    assert upserts[0]["check_id"] == "bp_self_service_password_reset"
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
 # Tenant capability detection / N/A marking
 # ---------------------------------------------------------------------------
 
