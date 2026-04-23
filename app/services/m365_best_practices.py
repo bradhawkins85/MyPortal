@@ -721,6 +721,35 @@ async def _check_sharepoint_infected_files_block(token: str) -> dict[str, Any]:
                    "Run: Set-SPOTenant -DisallowInfectedFileDownload $true")
 
 
+async def _check_sharepoint_sign_out_inactive_users(token: str) -> dict[str, Any]:
+    check_id = "bp_sharepoint_sign_out_inactive_users"
+    check_name = "Inactive users are signed out of SharePoint Online"
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+    enabled = settings.get("idleSignOutEnabled")
+    if enabled is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read idleSignOutEnabled from SharePoint tenant settings. "
+                       "Run: Get-SPOTenant | Select SignOutInactiveUsersAfter to verify manually.")
+    if not enabled:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "Idle session sign-out is not enabled for SharePoint Online. "
+                       "Run: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00")
+    # CIS recommends the combined timeout (warn + sign-out) does not exceed 1 hour (3600 s).
+    warn_secs = settings.get("idleSignOutWarnAfterSeconds") or 0
+    signout_secs = settings.get("idleSignOutSignOutAfterSeconds") or 0
+    total_secs = int(warn_secs) + int(signout_secs)
+    if total_secs > 3600:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       f"Idle session sign-out is enabled but the total timeout "
+                       f"({total_secs // 60} min) exceeds the recommended 60 minutes. "
+                       "Run: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00")
+    return _result(check_id, check_name, STATUS_PASS,
+                   f"Idle session sign-out is enabled with a total timeout of "
+                   f"{total_secs // 60} min for SharePoint Online.")
+
+
 # ---------------------------------------------------------------------------
 # Defender for Office 365 checks (EXO InvokeCommand)
 # ---------------------------------------------------------------------------
@@ -3611,6 +3640,26 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_SHAREPOINT_ONLINE, CAP_DEFENDER_O365_P1],
+    },
+    {
+        "id": "bp_sharepoint_sign_out_inactive_users",
+        "name": "Inactive users are signed out of SharePoint Online",
+        "description": (
+            "Enabling idle session sign-out in SharePoint Online automatically "
+            "terminates browser sessions that have been inactive, reducing the "
+            "risk of unauthorised access on shared or unattended devices."
+        ),
+        "remediation": (
+            "SharePoint admin centre → Policies → Access control → "
+            "Idle session sign-out → Sign out users after: 1 hour. "
+            "Or via PowerShell: Set-SPOTenant -SignOutInactiveUsersAfter 01:00:00"
+        ),
+        "source": _check_sharepoint_sign_out_inactive_users,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+        "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
     # Microsoft Teams (manual-review pending Teams PowerShell client)
