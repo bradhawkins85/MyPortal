@@ -3,5 +3,5 @@
   "occurred_at": "2026-04-22T06:25Z",
   "change_type": "Feature",
   "summary": "Auto-mark M365 best-practice checks as Not Applicable when the tenant lacks the required licenses (e.g., Block legacy authentication requires Entra ID P1, Identity Protection checks require Entra ID P2, Intune checks require an Intune license).",
-  "content_hash": "2b72a45f411ee889a7da232e1fe28699a988f7c4f1afe005e090ee1cbc5c25c9"
+  "content_hash": "92c9d07a466acff117e9ab745a930a9a8506a29d208fd3c85699a29b4812b166"
 }
