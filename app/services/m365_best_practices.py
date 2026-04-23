@@ -3756,6 +3756,29 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
     },
+    {
+        "id": "bp_restrict_anon_users_join_meeting",
+        "name": "Restrict anonymous users from joining meetings",
+        "description": (
+            "AllowAnonymousUsersToJoinMeeting should be set to $false so that "
+            "unauthenticated participants cannot join Teams meetings, reducing "
+            "the risk of uninvited attendees and data exposure."
+        ),
+        "remediation": (
+            "Set-CsTeamsMeetingPolicy -Identity Global "
+            "-AllowAnonymousUsersToJoinMeeting $false"
+        ),
+        "source": _manual_review_factory(
+            "bp_restrict_anon_users_join_meeting",
+            "Restrict anonymous users from joining meetings",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
+            "Select AllowAnonymousUsersToJoinMeeting",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
     # ------------------------------------------------------------------
     # Defender / Purview
     # ------------------------------------------------------------------
