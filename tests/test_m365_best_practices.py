@@ -1922,6 +1922,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_smtp_auth_disabled",
     "bp_dkim_enabled_all_domains",
     "bp_third_party_storage_owa",
+    "bp_outlook_addins_disabled",
     "bp_idle_session_timeout_3h",
     "bp_mailtips_enabled",
     "bp_shared_mailbox_signin_blocked",
@@ -2321,12 +2322,20 @@ def test_service_plan_to_capabilities_includes_new_capabilities():
 
 
 # ---------------------------------------------------------------------------
+# bp_outlook_addins_disabled
 # Anti-phishing impersonation checks
 # _check_mailbox_auditing_enabled_all_users
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio("asyncio")
+async def test_check_outlook_addins_disabled_pass_when_disabled():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"Identity": "OwaMailboxPolicy-Default", "WebPartsFrameworkEnabled": False}]},
+    ):
+        result = await bp_service._check_outlook_addins_disabled("exo-token", "tenant-id")
 async def test_antiphish_impersonated_domain_protection_pass():
     """Pass when at least one policy has EnableTargetedDomainsProtection True."""
     with patch(
@@ -2345,6 +2354,40 @@ async def test_antiphish_impersonated_domain_protection_pass():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_check_outlook_addins_disabled_fail_when_enabled():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"Identity": "OwaMailboxPolicy-Default", "WebPartsFrameworkEnabled": True}]},
+    ):
+        result = await bp_service._check_outlook_addins_disabled("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "OwaMailboxPolicy-Default" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_outlook_addins_disabled_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("EXO error"),
+    ):
+        result = await bp_service._check_outlook_addins_disabled("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+    assert "EXO error" in result["details"]
+
+
+def test_outlook_addins_disabled_in_catalog():
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_outlook_addins_disabled" in ids
+
+
+def test_outlook_addins_disabled_has_remediation():
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_outlook_addins_disabled")
+    assert entry.get("has_remediation") is True
+    assert "source" not in entry
 async def test_antiphish_impersonated_domain_protection_fail():
     """Fail when no policy has EnableTargetedDomainsProtection True."""
     with patch(
