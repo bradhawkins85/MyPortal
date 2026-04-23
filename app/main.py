@@ -8744,6 +8744,14 @@ async def search_by_phone_number(request: Request):
     )
 
 
+@app.get("/tickets/new", response_class=HTMLResponse)
+async def portal_tickets_new_redirect(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @app.get("/tickets", response_class=HTMLResponse)
 async def portal_tickets_page(request: Request):
     user, redirect = await _require_authenticated_user(request)

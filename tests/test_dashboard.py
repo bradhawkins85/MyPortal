@@ -133,7 +133,8 @@ async def test_build_dashboard_regular_user_excludes_admin_sections(monkeypatch)
         return []
 
     async def fake_changes(*args, **kwargs):
-        return []
+        # Should NOT be called for non-admin
+        raise AssertionError("list_change_log_entries must not be called for non-admin")
 
     monkeypatch.setattr(dashboard_service.tickets_repo, "count_tickets_for_user", fake_count_for_user)
     monkeypatch.setattr(dashboard_service.tickets_repo, "count_tickets", fake_count_tickets)
@@ -149,6 +150,7 @@ async def test_build_dashboard_regular_user_excludes_admin_sections(monkeypatch)
     assert "tickets.my_open" in keys
     assert "tickets.unassigned" not in keys
     assert "webhooks.failed" not in keys
+    assert payload["recent_activity"]["changes"] == []
 
 
 @pytest.mark.asyncio
@@ -198,7 +200,7 @@ async def test_build_dashboard_handles_repository_failures(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_quick_actions_includes_switch_company_when_multiple_available(monkeypatch):
+async def test_quick_actions_does_not_include_switch_company(monkeypatch):
     async def zero(*args, **kwargs):
         return 0
 
@@ -222,7 +224,7 @@ async def test_quick_actions_includes_switch_company_when_multiple_available(mon
         _user(),
     )
     labels = {a["label"] for a in payload["quick_actions"]["actions"]}
-    assert "Switch company" in labels
+    assert "Switch company" not in labels
     assert payload["greeting"]["can_switch_company"] is True
 
 
@@ -397,4 +399,3 @@ def test_home_shows_attention_items(authenticated_user, stub_base_context, monke
     assert "Unassigned tickets" in body
     assert "/admin/tickets?assigned=unassigned" in body
     assert "System health" in body
-    assert "Switch company" in body
