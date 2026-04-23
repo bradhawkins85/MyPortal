@@ -984,16 +984,23 @@ async def _post_app_role_assignment_with_retry(
     url: str,
     payload: dict[str, Any],
     *,
-    max_attempts: int = 6,
+    max_attempts: int = 10,
     initial_delay_seconds: float = 2.0,
+    max_delay_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """POST an ``appRoleAssignments`` payload, retrying transient propagation errors.
 
-    Microsoft Graph can take several seconds after a new service principal is
-    created before ``appRoleAssignments`` accepts role grants for it.  This
-    helper retries with exponential backoff (capped at 16s per sleep) on the
-    well-known transient ``Request_BadRequest`` / 404 responses, and propagates
-    any other error unchanged.
+    Microsoft Graph can take a substantial amount of time (occasionally well
+    over a minute) after a new service principal is created before
+    ``appRoleAssignments`` accepts role grants for it.  This helper retries
+    with exponential backoff (capped at ``max_delay_seconds`` per sleep) on
+    the well-known transient ``Request_BadRequest`` / 404 responses, and
+    propagates any other error unchanged.
+
+    The defaults give roughly three minutes of total wall-clock waiting
+    (2 + 4 + 8 + 16 + 30 + 30 + 30 + 30 + 30 ≈ 180s across 10 attempts), which
+    has been observed to be sufficient for tenants where Graph replication is
+    slower than the Microsoft-documented "few seconds" mitigation window.
     """
     delay = initial_delay_seconds
     last_exc: M365Error | None = None
@@ -1013,7 +1020,7 @@ async def _post_app_role_assignment_with_retry(
                 status=exc.http_status,
             )
             await asyncio.sleep(delay)
-            delay = min(delay * 2, 16.0)
+            delay = min(delay * 2, max_delay_seconds)
     assert last_exc is not None  # for type-checkers; loop always assigns on failure
     raise last_exc
 
