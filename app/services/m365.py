@@ -90,6 +90,8 @@ _PROVISION_APP_ROLES: list[str] = [
     "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",  # Application.Read.All
     "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
     "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
+    # SharePoint Online tenant settings (required for SPO best-practice checks)
+    "a8ead177-1889-4546-9387-f25e658e2a79",  # SharePointTenantSettings.Read.All
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
