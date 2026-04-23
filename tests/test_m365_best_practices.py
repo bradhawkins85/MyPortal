@@ -1930,6 +1930,9 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_antiphish_impersonated_user_protection",
     "bp_antiphish_quarantine_impersonated_domain",
     "bp_antiphish_quarantine_impersonated_user",
+    "bp_antiphish_domain_impersonation_safety_tip",
+    "bp_antiphish_user_impersonation_safety_tip",
+    "bp_antiphish_unusual_characters_safety_tip",
     # SharePoint Online / OneDrive
     "bp_external_content_sharing_restricted",
     "bp_sharepoint_external_sharing_restricted",
@@ -2647,6 +2650,191 @@ async def test_antiphish_quarantine_impersonated_user_unknown_on_error():
             "exo-token", "tenant-123"
         )
     assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _check_antiphish_domain_impersonation_safety_tip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_domain_impersonation_safety_tip_pass():
+    """Pass when at least one policy has EnableSimilarDomainsSafetyTips == True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableSimilarDomainsSafetyTips": True,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_domain_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_domain_impersonation_safety_tip_fail():
+    """Fail when no policy has EnableSimilarDomainsSafetyTips == True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableSimilarDomainsSafetyTips": False,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_domain_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_domain_impersonation_safety_tip_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("internal server error"),
+    ):
+        result = await bp_service._check_antiphish_domain_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _check_antiphish_user_impersonation_safety_tip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_user_impersonation_safety_tip_pass():
+    """Pass when at least one policy has EnableSimilarUsersSafetyTips == True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableSimilarUsersSafetyTips": True,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_user_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_user_impersonation_safety_tip_fail():
+    """Fail when no policy has EnableSimilarUsersSafetyTips == True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableSimilarUsersSafetyTips": False,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_user_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_user_impersonation_safety_tip_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("internal server error"),
+    ):
+        result = await bp_service._check_antiphish_user_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _check_antiphish_unusual_characters_safety_tip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_unusual_characters_safety_tip_pass():
+    """Pass when at least one policy has EnableUnusualCharactersSafetyTips == True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableUnusualCharactersSafetyTips": True,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_unusual_characters_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_unusual_characters_safety_tip_fail():
+    """Fail when no policy has EnableUnusualCharactersSafetyTips == True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableUnusualCharactersSafetyTips": False,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_unusual_characters_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_unusual_characters_safety_tip_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("internal server error"),
+    ):
+        result = await bp_service._check_antiphish_unusual_characters_safety_tip(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
+
+
 # ---------------------------------------------------------------------------
 # _remediate_foreach_mailbox
 # ---------------------------------------------------------------------------
