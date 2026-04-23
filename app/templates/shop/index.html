@@ -21,7 +21,8 @@
   {% if cart_allowed %}
     {% set _ = shop_index_actions.append({
       "label": ("View cart (" ~ cart_summary.total_quantity ~ ")") if cart_summary.total_quantity else "View cart",
-      "type": "link", "href": "/cart"
+      "type": "link", "href": "/cart",
+      "variant": "primary"
     }) %}
   {% endif %}
   {% if is_shop_super_admin %}
