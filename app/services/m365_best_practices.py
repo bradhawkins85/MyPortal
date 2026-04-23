@@ -3889,6 +3889,30 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
     },
     {
+        "id": "bp_restrict_dialin_bypass_lobby",
+        "name": "Restrict dial-in users from bypassing a meeting lobby",
+        "description": (
+            "AllowPSTNUsersToBypassLobby should be set to $false so that "
+            "PSTN dial-in participants are held in the lobby and must be "
+            "explicitly admitted, preventing unauthorised access to meetings."
+        ),
+        "remediation": (
+            "Set-CsTeamsMeetingPolicy -Identity Global "
+            "-AllowPSTNUsersToBypassLobby $false"
+        ),
+        "source": _manual_review_factory(
+            "bp_restrict_dialin_bypass_lobby",
+            "Restrict dial-in users from bypassing a meeting lobby",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
+            "Select AllowPSTNUsersToBypassLobby",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
+        "is_cis_benchmark": True,
+    },
+    {
         "id": "bp_external_participants_no_control",
         "name": "External participants can't give or request control",
         "description": (
