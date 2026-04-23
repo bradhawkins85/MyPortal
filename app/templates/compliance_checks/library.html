@@ -1,30 +1,16 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Compliance Checks Library{% endblock %}
 {% block title %}Compliance Checks Library{% endblock %}
 
 {% block header_actions %}
-  <div class="header-actions">
-    <select id="lib-category-filter" class="form-input form-input--sm" aria-label="Filter by category">
-      <option value="">All categories</option>
-      {% for cat in categories %}
-      <option value="{{ cat.id }}">{{ cat.name }}</option>
-      {% endfor %}
-    </select>
-    <input
-      type="search"
-      id="lib-text-filter"
-      class="form-input form-input--sm"
-      placeholder="Search library…"
-      aria-label="Search library"
-    />
-    <button type="button" class="button button--secondary button--small" id="seed-btn">
-      Re-seed GMP/GLP
-    </button>
-    <button type="button" class="button button--primary button--small" id="add-check-btn">
-      Add check
-    </button>
-  </div>
+  {{ page_header_actions([
+    {"label": "Add check", "type": "button", "variant": "primary",
+     "attrs": {"id": "add-check-btn", "aria-haspopup": "dialog"}},
+    {"label": "Re-seed GMP/GLP", "type": "button",
+     "attrs": {"id": "seed-btn"}}
+  ]) }}
 {% endblock %}
 
 {% block content %}
@@ -38,6 +24,23 @@
     </header>
 
     <div class="card card--panel">
+      <header class="card__header">
+        <div class="card__controls">
+          <select id="lib-category-filter" class="form-input form-input--sm" aria-label="Filter by category">
+            <option value="">All categories</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+          <input
+            type="search"
+            id="lib-text-filter"
+            class="form-input form-input--sm"
+            placeholder="Search library…"
+            aria-label="Search library"
+          />
+        </div>
+      </header>
       <div class="table-wrapper">
         <table class="table" id="lib-table">
           <thead>

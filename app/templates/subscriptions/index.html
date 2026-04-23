@@ -4,21 +4,14 @@
 
 {% block title %}Subscriptions{% endblock %}
 
-{% block header_actions %}
-  <div class="header-actions">
-    <input type="search" id="subscription-filter" class="input" placeholder="Filter subscriptions" aria-label="Filter subscriptions" />
-  </div>
-{% endblock %}
-
 {% block content %}
 <section class="panel">
-  {% if company %}
   <header class="panel__header">
     <div class="panel__meta">
-      <span class="tag">{{ company.name }}</span>
+      {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
+      <input type="search" id="subscription-filter" class="form-input" placeholder="Filter subscriptions" aria-label="Filter subscriptions" />
     </div>
   </header>
-  {% endif %}
   <div class="panel__body">
     <div class="table-responsive">
       <table class="table" data-subscription-table>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Business continuity plans{% endblock %}
 
@@ -15,12 +16,9 @@
 } %}
 
 {% block header_actions %}
-  <a class="button" href="/admin/business-continuity-plans/new">
-    <span class="button__icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" focusable="false"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-    </span>
-    <span class="button__label">New plan</span>
-  </a>
+  {{ page_header_actions([
+    {"label": "New plan", "type": "link", "variant": "primary", "href": "/admin/business-continuity-plans/new"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

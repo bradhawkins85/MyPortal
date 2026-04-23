@@ -1,11 +1,14 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Asset settings{% endblock %}
 
 {% block title %}Asset Custom Fields Settings{% endblock %}
 
 {% block header_actions %}
-  <a href="/assets" class="button button--ghost">Back to Assets</a>
+  {{ page_header_actions([
+    {"label": "Back to Assets", "type": "link", "href": "/assets"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

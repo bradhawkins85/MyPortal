@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Office 365{% endblock %}
 
@@ -24,8 +25,10 @@
 
 {% block header_actions %}
   {% if has_credentials %}
-    <a class="button button--ghost" href="/m365/mailboxes/users">User Mailboxes</a>
-    <a class="button button--ghost" href="/m365/mailboxes/shared">Shared Mailboxes</a>
+    {{ page_header_actions([
+      {"label": "User Mailboxes", "type": "link", "href": "/m365/mailboxes/users"},
+      {"label": "Shared Mailboxes", "type": "link", "href": "/m365/mailboxes/shared"}
+    ]) }}
   {% endif %}
 {% endblock %}
 
