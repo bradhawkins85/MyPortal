@@ -2261,6 +2261,137 @@ async def get_all_users(
     return users
 
 
+async def _lookup_user_by_email(access_token: str, email: str) -> dict[str, Any]:
+    """Return the M365 user whose ``mail`` or ``userPrincipalName`` matches *email*.
+
+    Raises :exc:`M365Error` if no matching user is found.
+    """
+    normalized = email.strip().lower()
+    # Try a direct filter first for efficiency
+    filter_url = (
+        "https://graph.microsoft.com/v1.0/users?"
+        f"$filter=mail eq '{normalized}' or userPrincipalName eq '{normalized}'&"
+        "$select=id,mail,userPrincipalName,accountEnabled"
+    )
+    try:
+        result = await _graph_get(access_token, filter_url)
+        users = result.get("value", [])
+        matched = next(
+            (
+                u
+                for u in users
+                if str(u.get("mail") or u.get("userPrincipalName") or "").strip().lower()
+                == normalized
+            ),
+            None,
+        )
+        if matched:
+            return matched
+    except M365Error:
+        pass
+
+    # Fall back to a full list scan (handles edge cases with filter support)
+    all_users = await _graph_get_all(
+        access_token,
+        "https://graph.microsoft.com/v1.0/users?$select=id,mail,userPrincipalName,accountEnabled",
+    )
+    matched = next(
+        (
+            u
+            for u in all_users
+            if str(u.get("mail") or u.get("userPrincipalName") or "").strip().lower()
+            == normalized
+        ),
+        None,
+    )
+    if not matched:
+        raise M365Error(f"M365 user not found for email: {email}")
+    return matched
+
+
+async def reset_user_password(company_id: int, staff_email: str) -> str:
+    """Reset the Microsoft 365 password for *staff_email* and return the new password.
+
+    Generates a strong random password, PATCHes the user's ``passwordProfile``
+    with ``forceChangePasswordNextSignIn`` set to ``True``, and returns the
+    new password so the caller can display it to the admin.
+
+    Raises :exc:`M365Error` if the tenant credentials are missing, the user
+    cannot be located, or the Graph API call fails.
+    """
+    import string as _string
+
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
+    user_id = str(user["id"]).strip()
+
+    # Generate a strong password meeting M365 complexity requirements
+    lower = _string.ascii_lowercase
+    upper = _string.ascii_uppercase
+    digits = _string.digits
+    symbols = "!@#$%^&*-_=+?"
+    alphabet = lower + upper + digits + symbols
+    required: list[str] = [
+        secrets.choice(lower),
+        secrets.choice(upper),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    remaining = [secrets.choice(alphabet) for _ in range(16 - len(required))]
+    password_chars = required + remaining
+    for i in range(len(password_chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        password_chars[i], password_chars[j] = password_chars[j], password_chars[i]
+    new_password = "".join(password_chars)
+
+    encoded_user_id = quote(user_id, safe="")
+    await _graph_patch(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+        {
+            "passwordProfile": {
+                "forceChangePasswordNextSignIn": True,
+                "password": new_password,
+            }
+        },
+    )
+    return new_password
+
+
+async def set_user_sign_in_enabled(
+    company_id: int,
+    staff_email: str,
+    *,
+    enabled: bool,
+) -> None:
+    """Enable or disable sign-in for the M365 user matching *staff_email*.
+
+    Sets ``accountEnabled`` to *enabled* via a PATCH to the Graph ``/users``
+    endpoint.
+
+    Raises :exc:`M365Error` if the tenant credentials are missing, the user
+    cannot be located, or the Graph API call fails.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
+    user_id = str(user["id"]).strip()
+
+    encoded_user_id = quote(user_id, safe="")
+    await _graph_patch(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+        {"accountEnabled": enabled},
+    )
+
+
 async def verify_tenant_permissions(
     company_id: int,
 ) -> dict[str, Any]:

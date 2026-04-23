@@ -730,6 +730,9 @@
           <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Workflow force-complete</button>
+          <button type="button" class="button button--ghost" id="edit-action-m365-reset-password" data-edit-action="m365-reset-password" hidden>Reset O365 Password</button>
+          <button type="button" class="button button--ghost" id="edit-action-m365-enable-sign-in" data-edit-action="m365-enable-sign-in" hidden>Enable O365 Sign-in</button>
+          <button type="button" class="button button--ghost" id="edit-action-m365-disable-sign-in" data-edit-action="m365-disable-sign-in" hidden>Disable O365 Sign-in</button>
         </div>
         <div class="staff-danger-panel">
           <h3 class="staff-danger-panel__title">Danger zone</h3>
@@ -759,7 +762,8 @@
   'isSuperAdmin': is_super_admin,
   'isAdmin': is_admin,
   'canApproveOnboarding': can_approve_onboarding,
-  'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled
+  'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled,
+  'hasM365': has_m365
 } | tojson }}</script>
 <script type="application/json" id="active-staff-for-offboarding">{{ active_staff_for_offboarding | tojson }}</script>
 {% endblock %}
