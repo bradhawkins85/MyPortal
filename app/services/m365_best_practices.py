@@ -2051,6 +2051,83 @@ async def _check_antiphish_quarantine_impersonated_user(
                    "No anti-phishing policy has TargetedUserProtectionAction set to Quarantine. "
                    "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
                    "-TargetedUserProtectionAction Quarantine")
+
+
+async def _check_antiphish_domain_impersonation_safety_tip(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_domain_impersonation_safety_tip"
+    check_name = "Domain impersonation safety tip is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    enabled = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("EnableSimilarDomainsSafetyTips") is True
+    ]
+    if enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Domain impersonation safety tip is enabled in: {', '.join(enabled[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has EnableSimilarDomainsSafetyTips set to True. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-EnableSimilarDomainsSafetyTips $true")
+
+
+async def _check_antiphish_user_impersonation_safety_tip(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_user_impersonation_safety_tip"
+    check_name = "User impersonation safety tip is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    enabled = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("EnableSimilarUsersSafetyTips") is True
+    ]
+    if enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"User impersonation safety tip is enabled in: {', '.join(enabled[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has EnableSimilarUsersSafetyTips set to True. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-EnableSimilarUsersSafetyTips $true")
+
+
+async def _check_antiphish_unusual_characters_safety_tip(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_unusual_characters_safety_tip"
+    check_name = "User impersonation unusual characters safety tip is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    enabled = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("EnableUnusualCharactersSafetyTips") is True
+    ]
+    if enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Unusual characters safety tip is enabled in: {', '.join(enabled[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has EnableUnusualCharactersSafetyTips set to True. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-EnableUnusualCharactersSafetyTips $true")
+
+
 async def _check_mailbox_auditing_enabled_all_users(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -3337,6 +3414,60 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-TargetedUserProtectionAction Quarantine"
         ),
         "source": _check_antiphish_quarantine_impersonated_user,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_antiphish_domain_impersonation_safety_tip",
+        "name": "Domain impersonation safety tip is enabled",
+        "description": (
+            "Enabling the domain impersonation safety tip shows users a warning "
+            "banner when a message appears to come from a domain that looks similar "
+            "to a protected domain, helping users identify spoofed senders."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-EnableSimilarDomainsSafetyTips $true"
+        ),
+        "source": _check_antiphish_domain_impersonation_safety_tip,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_antiphish_user_impersonation_safety_tip",
+        "name": "User impersonation safety tip is enabled",
+        "description": (
+            "Enabling the user impersonation safety tip displays a warning to "
+            "recipients when a message appears to come from a user that looks "
+            "similar to a protected user, reducing the risk of impersonation attacks."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-EnableSimilarUsersSafetyTips $true"
+        ),
+        "source": _check_antiphish_user_impersonation_safety_tip,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_antiphish_unusual_characters_safety_tip",
+        "name": "User impersonation unusual characters safety tip is enabled",
+        "description": (
+            "Enabling the unusual characters safety tip alerts users when a "
+            "message contains unusual character sets in the sender address, "
+            "a common tactic used in look-alike domain impersonation attacks."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-EnableUnusualCharactersSafetyTips $true"
+        ),
+        "source": _check_antiphish_unusual_characters_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
