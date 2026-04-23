@@ -69,7 +69,9 @@ from app.services.m365 import (
     _acquire_exo_access_token,
     _exo_invoke_command,
     _graph_get,
+    _graph_get_all,
     _graph_patch,
+    _graph_post,
     acquire_access_token,
     acquire_delegated_token,
     try_grant_missing_permissions,
@@ -105,23 +107,65 @@ from app.services.m365 import (
 CAP_ENTRA_ID_P1 = "entra_id_p1"
 CAP_ENTRA_ID_P2 = "entra_id_p2"
 CAP_INTUNE = "intune"
+CAP_EXCHANGE_ONLINE = "exchange_online"
+CAP_SHAREPOINT_ONLINE = "sharepoint_online"
+CAP_TEAMS = "teams"
+CAP_TEAMS_AUDIO_CONF = "teams_audio_conferencing"
+CAP_DEFENDER_O365_P1 = "defender_o365_p1"
+CAP_DEFENDER_O365_P2 = "defender_o365_p2"
+CAP_PURVIEW_DLP = "purview_dlp"
+CAP_INTUNE_LAPS = "intune_laps"
 
 # Friendly names used in the "not applicable" details message
 _CAPABILITY_FRIENDLY_NAMES: dict[str, str] = {
     CAP_ENTRA_ID_P1: "Microsoft Entra ID P1",
     CAP_ENTRA_ID_P2: "Microsoft Entra ID P2",
     CAP_INTUNE: "Microsoft Intune",
+    CAP_EXCHANGE_ONLINE: "Exchange Online",
+    CAP_SHAREPOINT_ONLINE: "SharePoint Online",
+    CAP_TEAMS: "Microsoft Teams",
+    CAP_TEAMS_AUDIO_CONF: "Microsoft Teams Audio Conferencing",
+    CAP_DEFENDER_O365_P1: "Microsoft Defender for Office 365 P1",
+    CAP_DEFENDER_O365_P2: "Microsoft Defender for Office 365 P2",
+    CAP_PURVIEW_DLP: "Microsoft Purview DLP (Information Protection & Governance)",
+    CAP_INTUNE_LAPS: "Microsoft Intune (with Windows LAPS support)",
 }
 
 # Service plan GUIDs (lower-case) that grant each capability.  Entra ID P2
-# always includes Entra ID P1 features.
+# always includes Entra ID P1 features.  Service plan IDs are stable
+# identifiers published by Microsoft – see
+# https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference
 _SERVICE_PLAN_TO_CAPABILITIES: dict[str, set[str]] = {
     # AAD_PREMIUM (Entra ID P1)
     "41781fb2-bc02-4b7c-bd55-b576c07bb09d": {CAP_ENTRA_ID_P1},
     # AAD_PREMIUM_P2 (Entra ID P2 – includes P1)
     "eec0eb4f-6444-4f95-aba0-50c24d67f998": {CAP_ENTRA_ID_P1, CAP_ENTRA_ID_P2},
-    # INTUNE_A (Microsoft Intune)
-    "c1ec4a95-1f05-45b3-a911-aa3fa01094f5": {CAP_INTUNE},
+    # INTUNE_A (Microsoft Intune) – also grants the LAPS capability
+    "c1ec4a95-1f05-45b3-a911-aa3fa01094f5": {CAP_INTUNE, CAP_INTUNE_LAPS},
+    # EXCHANGE_S_STANDARD (Exchange Online Plan 1)
+    "9aaf7827-d63c-4b61-89c3-182f06f82e5c": {CAP_EXCHANGE_ONLINE},
+    # EXCHANGE_S_ENTERPRISE (Exchange Online Plan 2)
+    "efb87545-963c-4e0d-99df-69c6916d9eb0": {CAP_EXCHANGE_ONLINE},
+    # EXCHANGE_S_FOUNDATION (bundled in many plans – also enables EXO)
+    "113feb6c-3fe4-4440-bddc-54d774bf0318": {CAP_EXCHANGE_ONLINE},
+    # SHAREPOINTSTANDARD (SharePoint Online Plan 1)
+    "c7699d2e-19aa-44de-8edf-1736da088ca1": {CAP_SHAREPOINT_ONLINE},
+    # SHAREPOINTENTERPRISE (SharePoint Online Plan 2)
+    "5dbe027f-2339-4123-9542-606e4d348a72": {CAP_SHAREPOINT_ONLINE},
+    # TEAMS1 (Microsoft Teams)
+    "57ff2da0-773e-42df-b2af-ffb7a2317929": {CAP_TEAMS},
+    # MCOMEETADV (Audio Conferencing)
+    "3e26ee1f-8a5f-4d52-aee2-b81ce45c8f40": {CAP_TEAMS_AUDIO_CONF},
+    # ATP_ENTERPRISE (Microsoft Defender for Office 365 P1)
+    "f20fedf3-f3c3-43c3-8267-2bfdd51c0939": {CAP_DEFENDER_O365_P1},
+    # THREAT_INTELLIGENCE (Microsoft Defender for Office 365 P2 – includes P1)
+    "8e0c0a52-6a6c-4d40-8370-dd62790dcd70": {CAP_DEFENDER_O365_P1, CAP_DEFENDER_O365_P2},
+    # INFORMATION_PROTECTION_AND_GOVERNANCE_STANDARD (Purview – DLP-capable)
+    "8f0c0a52-6a6c-4d40-8370-dd62790dcd71": {CAP_PURVIEW_DLP},
+    # MIP_S_CLP1 (Information Protection for O365 – Standard)
+    "5136a095-5cf0-4aff-bec3-e84448b38ea5": {CAP_PURVIEW_DLP},
+    # INFORMATION_BARRIERS / E5 compliance plan (also DLP-capable)
+    "c4801e8a-cb58-4c35-aca6-f2dcc106f287": {CAP_PURVIEW_DLP},
 }
 
 
@@ -352,6 +396,1176 @@ async def _check_concealed_names(token: str) -> dict[str, Any]:
             "details": f"Unable to query report settings: {exc}",
         }
 
+
+# ---------------------------------------------------------------------------
+# Helpers for new best-practice checks
+# ---------------------------------------------------------------------------
+#
+# The helpers below cover the second-wave checks added per the approved
+# expansion plan.  They follow the same conventions as the original CIS /
+# best-practice helpers:
+#
+# * Each function takes ``token: str`` (Graph) or ``(exo_token, tenant_id)``.
+# * Each returns a dict with ``check_id``, ``check_name``, ``status`` and
+#   ``details`` (and only those keys – per-entry catalog metadata such as
+#   ``has_remediation`` is enriched from the catalog later).
+# * Graph errors are caught and translated into ``STATUS_UNKNOWN`` so the
+#   runner does not see ``M365Error`` propagate; the runner has its own
+#   retry/transient-error handling on top of that.
+
+_AUTH_METHODS_POLICY_URL = (
+    "https://graph.microsoft.com/beta/policies/authenticationMethodsPolicy"
+)
+_DOMAINS_URL = "https://graph.microsoft.com/v1.0/domains"
+_DIRECTORY_ROLES_URL = "https://graph.microsoft.com/v1.0/directoryRoles"
+_AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
+    "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
+)
+_USERS_LIST_URL = (
+    "https://graph.microsoft.com/v1.0/users"
+    "?$select=id,displayName,userPrincipalName,userType,onPremisesSyncEnabled"
+    ",accountEnabled,assignedLicenses"
+    "&$top=999"
+)
+_GROUPS_LIST_URL = (
+    "https://graph.microsoft.com/v1.0/groups"
+    "?$select=id,displayName,visibility,groupTypes,membershipRule"
+    "&$top=999"
+)
+_CA_POLICIES_URL = (
+    "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
+)
+_ACCESS_REVIEWS_URL = (
+    "https://graph.microsoft.com/v1.0/identityGovernance/accessReviews/definitions"
+)
+_PIM_ASSIGNMENTS_URL = (
+    "https://graph.microsoft.com/v1.0/roleManagement/directory/"
+    "roleEligibilityScheduleInstances?$top=999"
+)
+_PIM_POLICIES_URL = (
+    "https://graph.microsoft.com/v1.0/policies/roleManagementPolicyAssignments"
+    "?$filter=scopeId eq '/' and scopeType eq 'DirectoryRole'"
+)
+_USER_REGISTRATION_DETAILS_URL = (
+    "https://graph.microsoft.com/v1.0/reports/authenticationMethods/userRegistrationDetails"
+    "?$top=999"
+)
+_DEVICE_REG_POLICY_URL = (
+    "https://graph.microsoft.com/beta/policies/deviceRegistrationPolicy"
+)
+_FORMS_SETTINGS_URL = "https://graph.microsoft.com/beta/admin/forms/settings"
+_DIRECTORY_SETTINGS_URL = "https://graph.microsoft.com/beta/groupSettings"
+_SECURITY_DEFAULTS_URL = (
+    "https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy"
+)
+
+# Well-known directory role template IDs used by several checks
+_ROLE_TEMPLATE_GLOBAL_ADMIN = "62e90394-69f5-4237-9190-012177145e10"
+_ROLE_TEMPLATE_PRIVILEGED_ROLE_ADMIN = "e8611ab8-c189-46e8-94e1-60213ab1f814"
+_ROLE_TEMPLATE_SECURITY_ADMIN = "194ae4cb-b126-40b2-bd5b-6091b380977d"
+_ROLE_TEMPLATE_EXCHANGE_ADMIN = "29232cdf-9323-42fd-ade2-1d097af3e4de"
+_ROLE_TEMPLATE_BILLING_ADMIN = "b0f54661-2d74-4c50-afa3-1ec803f12efe"
+_ADMIN_ROLE_TEMPLATES = {
+    _ROLE_TEMPLATE_GLOBAL_ADMIN,
+    _ROLE_TEMPLATE_PRIVILEGED_ROLE_ADMIN,
+    _ROLE_TEMPLATE_SECURITY_ADMIN,
+    _ROLE_TEMPLATE_EXCHANGE_ADMIN,
+    _ROLE_TEMPLATE_BILLING_ADMIN,
+}
+
+# Phishing-resistant MFA built-in authentication strength
+# Microsoft Authenticator feature settings that defeat MFA-fatigue / consent
+# spam: number matching, app-context, and location-context displays.  Keep in
+# sync with /authenticationMethodConfigurations/MicrosoftAuthenticator.
+_MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
+    "numberMatchingRequiredState",
+    "displayAppInformationRequiredState",
+    "displayLocationInformationRequiredState",
+)
+
+
+_PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
+
+# Maximum admin browser session length (in hours) for the sign-in frequency
+# best-practice; CIS recommends ≤ 4 hours for privileged role browser sessions.
+_ADMIN_SIGNIN_FREQ_MAX_HOURS = 4
+
+
+async def _safe_graph_get(token: str, url: str) -> dict[str, Any] | None:
+    """GET a Graph URL, swallowing M365Error and returning None on failure."""
+    try:
+        return await _graph_get(token, url)
+    except M365Error:
+        return None
+
+
+async def _safe_graph_get_all(token: str, url: str) -> list[dict[str, Any]] | None:
+    """Paginated GET, swallowing M365Error and returning None on failure."""
+    try:
+        return await _graph_get_all(token, url)
+    except M365Error:
+        return None
+
+
+def _result(
+    check_id: str, check_name: str, status: str, details: str
+) -> dict[str, Any]:
+    return {
+        "check_id": check_id,
+        "check_name": check_name,
+        "status": status,
+        "details": details,
+    }
+
+
+def _manual_review_factory(
+    check_id: str, check_name: str, instructions: str
+) -> Callable[..., Awaitable[dict[str, Any]]]:
+    """Return a runner that always yields STATUS_UNKNOWN with manual instructions.
+
+    Used for checks whose source surface (SharePoint Online PowerShell, Teams
+    PowerShell, Security & Compliance PowerShell, public DNS, on-prem AD)
+    requires infrastructure beyond the current Graph/EXO clients.  Admins see
+    the catalog entry, the full remediation script, and a clear note that
+    manual verification is required.
+    """
+
+    async def _runner(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return _result(check_id, check_name, STATUS_UNKNOWN, instructions)
+
+    _runner.__name__ = f"_check_{check_id}_manual"
+    return _runner
+
+
+# ---------------------------------------------------------------------------
+# Graph-based check runners (real auto-detection)
+# ---------------------------------------------------------------------------
+
+
+async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
+    check_id = "bp_per_user_mfa_disabled"
+    check_name = "Per-user MFA is disabled (replaced by Conditional Access)"
+    users = await _safe_graph_get_all(token, _USERS_LIST_URL)
+    if users is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate users to inspect per-user MFA state.",
+        )
+    enabled_users: list[str] = []
+    inspected = 0
+    # Limit to a reasonable sample to avoid O(n) Graph calls on large tenants
+    for user in users[:200]:
+        user_id = user.get("id")
+        if not user_id or not user.get("accountEnabled", True):
+            continue
+        url = _AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id=user_id)
+        data = await _safe_graph_get(token, url)
+        if data is None:
+            continue
+        inspected += 1
+        state = str(data.get("perUserMfaState") or "").lower()
+        if state and state != "disabled":
+            enabled_users.append(
+                user.get("userPrincipalName") or user.get("displayName") or user_id
+            )
+    if inspected == 0:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to determine per-user MFA state for any user (insufficient permissions?).",
+        )
+    if not enabled_users:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            f"Per-user MFA is disabled across {inspected} sampled accounts.",
+        )
+    sample = ", ".join(enabled_users[:5])
+    suffix = "" if len(enabled_users) <= 5 else f" (and {len(enabled_users) - 5} more)"
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"Per-user MFA is still enabled on {len(enabled_users)} accounts: {sample}{suffix}. "
+        "Migrate these users to Conditional Access-driven MFA and disable per-user MFA.",
+    )
+
+
+async def _check_dynamic_group_for_guests(token: str) -> dict[str, Any]:
+    check_id = "bp_dynamic_group_for_guests"
+    check_name = "A dynamic group for guest users is created"
+    groups = await _safe_graph_get_all(token, _GROUPS_LIST_URL)
+    if groups is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate groups via Microsoft Graph.",
+        )
+    for grp in groups:
+        types = grp.get("groupTypes") or []
+        if "DynamicMembership" not in types:
+            continue
+        rule = (grp.get("membershipRule") or "").lower()
+        if "user.usertype" in rule and "guest" in rule:
+            return _result(
+                check_id, check_name, STATUS_PASS,
+                f"Dynamic group '{grp.get('displayName')}' targets guest users.",
+            )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "No dynamic group with a membership rule targeting guest users was found.",
+    )
+
+
+def _ca_policy_grants_compliant_or_hybrid_joined(policy: dict[str, Any]) -> bool:
+    grant = policy.get("grantControls") or {}
+    controls = [str(c).lower() for c in (grant.get("builtInControls") or [])]
+    return "compliantdevice" in controls or "domainjoineddevice" in controls
+
+
+def _ca_policy_targets_all_users(policy: dict[str, Any]) -> bool:
+    cond = policy.get("conditions") or {}
+    users = cond.get("users") or {}
+    include = users.get("includeUsers") or []
+    return "All" in include or "all" in [str(u).lower() for u in include]
+
+
+async def _check_ca_managed_device_required(token: str) -> dict[str, Any]:
+    check_id = "bp_managed_device_required_auth"
+    check_name = "A managed device is required for authentication"
+    policies = await _safe_graph_get_all(token, _CA_POLICIES_URL)
+    if policies is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate Conditional Access policies.",
+        )
+    for pol in policies:
+        if str(pol.get("state") or "").lower() != "enabled":
+            continue
+        if not _ca_policy_targets_all_users(pol):
+            continue
+        if _ca_policy_grants_compliant_or_hybrid_joined(pol):
+            return _result(
+                check_id, check_name, STATUS_PASS,
+                f"CA policy '{pol.get('displayName')}' requires a compliant or hybrid-joined device for sign-in.",
+            )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "No enabled Conditional Access policy requires a managed/compliant device for authentication.",
+    )
+
+
+async def _check_ca_managed_device_for_secinfo(token: str) -> dict[str, Any]:
+    check_id = "bp_managed_device_required_secinfo_reg"
+    check_name = "A managed device is required to register security information"
+    policies = await _safe_graph_get_all(token, _CA_POLICIES_URL)
+    if policies is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate Conditional Access policies.",
+        )
+    for pol in policies:
+        if str(pol.get("state") or "").lower() != "enabled":
+            continue
+        cond = pol.get("conditions") or {}
+        actions = [str(a).lower() for a in ((cond.get("applications") or {}).get("includeUserActions") or [])]
+        if "urn:user:registersecurityinfo" not in actions:
+            continue
+        if _ca_policy_grants_compliant_or_hybrid_joined(pol):
+            return _result(
+                check_id, check_name, STATUS_PASS,
+                f"CA policy '{pol.get('displayName')}' requires a managed device to register security info.",
+            )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "No enabled Conditional Access policy on the 'Register security information' user action requires a managed device.",
+    )
+
+
+async def _check_access_reviews_for_guests(token: str) -> dict[str, Any]:
+    check_id = "bp_access_reviews_guest_users"
+    check_name = "Access reviews for guest users are configured"
+    defs = await _safe_graph_get_all(token, _ACCESS_REVIEWS_URL)
+    if defs is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate access review definitions.",
+        )
+    for d in defs:
+        scope = (d.get("scope") or {})
+        principal_scopes = scope.get("principalScopes") or []
+        for ps in principal_scopes:
+            query = (ps.get("query") or "").lower()
+            if "guest" in query:
+                return _result(
+                    check_id, check_name, STATUS_PASS,
+                    f"Access review '{d.get('displayName')}' targets guest users.",
+                )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "No access review definition targets guest users; create a recurring guest access review.",
+    )
+
+
+async def _check_access_reviews_for_privileged_roles(token: str) -> dict[str, Any]:
+    check_id = "bp_access_reviews_privileged_roles"
+    check_name = "Access reviews for privileged roles are configured"
+    defs = await _safe_graph_get_all(token, _ACCESS_REVIEWS_URL)
+    if defs is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate access review definitions.",
+        )
+    role_targets_found: set[str] = set()
+    for d in defs:
+        scope = (d.get("scope") or {})
+        for ps in scope.get("principalScopes") or []:
+            query = (ps.get("query") or "").lower()
+            for role_id in _ADMIN_ROLE_TEMPLATES:
+                if role_id.lower() in query:
+                    role_targets_found.add(role_id)
+    missing = _ADMIN_ROLE_TEMPLATES - role_targets_found
+    if not missing:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            "Access reviews are configured for all critical privileged roles.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"Access reviews are missing for {len(missing)} of {len(_ADMIN_ROLE_TEMPLATES)} critical privileged roles. "
+        "Configure recurring reviews under Identity Governance → Access reviews.",
+    )
+
+
+async def _admin_user_ids(token: str) -> set[str] | None:
+    """Return the set of user IDs holding an admin role in the tenant."""
+    roles = await _safe_graph_get_all(token, _DIRECTORY_ROLES_URL)
+    if roles is None:
+        return None
+    admins: set[str] = set()
+    for role in roles:
+        template = str(role.get("roleTemplateId") or "").lower()
+        if template not in {r.lower() for r in _ADMIN_ROLE_TEMPLATES}:
+            continue
+        role_id = role.get("id")
+        if not role_id:
+            continue
+        members = await _safe_graph_get_all(
+            token, f"https://graph.microsoft.com/v1.0/directoryRoles/{role_id}/members"
+        )
+        if members is None:
+            continue
+        for m in members:
+            uid = m.get("id")
+            if uid:
+                admins.add(uid)
+    return admins
+
+
+async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
+    check_id = "bp_admin_accounts_cloud_only"
+    check_name = "Administrative accounts are cloud-only"
+    admin_ids = await _admin_user_ids(token)
+    if admin_ids is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate directory role memberships.",
+        )
+    if not admin_ids:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "No privileged role members found to inspect.",
+        )
+    synced: list[str] = []
+    for uid in admin_ids:
+        data = await _safe_graph_get(
+            token,
+            f"https://graph.microsoft.com/v1.0/users/{uid}"
+            "?$select=userPrincipalName,onPremisesSyncEnabled",
+        )
+        if data and data.get("onPremisesSyncEnabled"):
+            synced.append(data.get("userPrincipalName") or uid)
+    if not synced:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            f"All {len(admin_ids)} admin accounts are cloud-only.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"{len(synced)} admin account(s) are synced from on-premises AD: " + ", ".join(synced[:5]),
+    )
+
+
+async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
+    check_id = "bp_admin_accounts_reduced_license"
+    check_name = "Administrative accounts use licenses with reduced footprint"
+    admin_ids = await _admin_user_ids(token)
+    if admin_ids is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate directory role memberships.",
+        )
+    overlicensed: list[str] = []
+    for uid in admin_ids:
+        data = await _safe_graph_get(
+            token,
+            f"https://graph.microsoft.com/v1.0/users/{uid}"
+            "?$select=userPrincipalName,assignedLicenses",
+        )
+        if not data:
+            continue
+        skus = data.get("assignedLicenses") or []
+        # Heuristic: more than one SKU assigned to an admin is *potentially*
+        # over-licensed and worth manual review.  Some admins legitimately
+        # require multiple SKUs (e.g. Entra ID P2 + an O365 plan to access a
+        # mailbox); the catalog remediation text and the FAIL details below
+        # both make clear this is an indicative finding and admins should
+        # confirm before removing licenses.
+        if len(skus) > 1:
+            overlicensed.append(data.get("userPrincipalName") or uid)
+    if not overlicensed:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            "Admin accounts hold a single license SKU.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"Heuristic: {len(overlicensed)} admin account(s) hold multiple license SKUs and "
+        "may be candidates for license reduction (manual verification recommended – some "
+        "accounts may legitimately require multiple SKUs): " + ", ".join(overlicensed[:5]),
+    )
+
+
+async def _check_all_members_mfa_capable(token: str) -> dict[str, Any]:
+    check_id = "bp_all_members_mfa_capable"
+    check_name = "All member users are 'MFA capable'"
+    rows = await _safe_graph_get_all(token, _USER_REGISTRATION_DETAILS_URL)
+    if rows is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to read authentication-methods user registration details report.",
+        )
+    not_capable: list[str] = []
+    for row in rows:
+        if str(row.get("userType") or "").lower() != "member":
+            continue
+        if not row.get("isMfaCapable"):
+            not_capable.append(row.get("userPrincipalName") or row.get("id") or "?")
+    if not not_capable:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            "All member users are MFA capable.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"{len(not_capable)} member user(s) are not MFA capable: " + ", ".join(not_capable[:5]),
+    )
+
+
+async def _check_pim_approval_required(
+    token: str, role_template_id: str, friendly_name: str, check_id: str
+) -> dict[str, Any]:
+    check_name = f"Approval is required for {friendly_name} role activation"
+    assignments = await _safe_graph_get_all(token, _PIM_POLICIES_URL)
+    if assignments is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate PIM role-management policy assignments.",
+        )
+    target_policy_id: str | None = None
+    for a in assignments:
+        if str(a.get("roleDefinitionId") or "").lower() == role_template_id.lower():
+            target_policy_id = a.get("policyId")
+            break
+    if not target_policy_id:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            f"No PIM role-management policy assignment found for {friendly_name}.",
+        )
+    rules = await _safe_graph_get_all(
+        token,
+        f"https://graph.microsoft.com/v1.0/policies/roleManagementPolicies/{target_policy_id}/rules",
+    )
+    if rules is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to read PIM role-management policy rules.",
+        )
+    for rule in rules:
+        if rule.get("id") != "Approval_EndUser_Assignment":
+            continue
+        setting = rule.get("setting") or {}
+        if setting.get("isApprovalRequired"):
+            return _result(
+                check_id, check_name, STATUS_PASS,
+                f"Approval is required to activate the {friendly_name} role.",
+            )
+        return _result(
+            check_id, check_name, STATUS_FAIL,
+            f"Approval is NOT required to activate the {friendly_name} role.",
+        )
+    return _result(
+        check_id, check_name, STATUS_UNKNOWN,
+        f"Could not locate the Approval_EndUser_Assignment rule for {friendly_name}.",
+    )
+
+
+async def _check_approval_required_ga(token: str) -> dict[str, Any]:
+    return await _check_pim_approval_required(
+        token, _ROLE_TEMPLATE_GLOBAL_ADMIN, "Global Administrator",
+        "bp_approval_required_ga_activation",
+    )
+
+
+async def _check_approval_required_pra(token: str) -> dict[str, Any]:
+    return await _check_pim_approval_required(
+        token, _ROLE_TEMPLATE_PRIVILEGED_ROLE_ADMIN, "Privileged Role Administrator",
+        "bp_approval_required_pra_activation",
+    )
+
+
+async def _check_collab_invitations_allowed_domains(token: str) -> dict[str, Any]:
+    check_id = "bp_collab_invitations_allowed_domains"
+    check_name = "Collaboration invitations are sent to allowed domains only"
+    auth = await _safe_graph_get(token, _AUTHORIZATION_POLICY_URL)
+    if auth is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to read authorization policy.",
+        )
+    invites = str(auth.get("allowInvitesFrom") or "").lower()
+    if invites in {"none", "adminsandguestinviters"}:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            f"Invitation policy is restricted to '{invites}'. Verify B2B allowed-domain list at the cross-tenant access policy.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"allowInvitesFrom is '{invites}'; restrict to 'adminsAndGuestInviters' and configure an allowed-domains list.",
+    )
+
+
+async def _check_custom_banned_passwords(token: str) -> dict[str, Any]:
+    check_id = "bp_custom_banned_passwords"
+    check_name = "Custom banned passwords lists are used"
+    settings = await _safe_graph_get_all(token, _DIRECTORY_SETTINGS_URL)
+    if settings is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to read directory settings.",
+        )
+    for s in settings:
+        if (s.get("displayName") or "").lower() != "password rule settings":
+            continue
+        values = {v.get("name"): v.get("value") for v in s.get("values") or []}
+        enable = str(values.get("EnableBannedPasswordCheck") or "").lower()
+        custom_list = (values.get("BannedPasswordList") or "").strip()
+        if enable == "true" and custom_list:
+            return _result(
+                check_id, check_name, STATUS_PASS,
+                "Custom banned password list is enforced.",
+            )
+        return _result(
+            check_id, check_name, STATUS_FAIL,
+            "Password Rule Settings exist but custom banned password list is not configured.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "Password Rule Settings have not been created; custom banned passwords are not in effect.",
+    )
+
+
+async def _check_password_expiry_never_expire(token: str) -> dict[str, Any]:
+    check_id = "bp_password_expiry_never_expire"
+    check_name = "Password expiration policy is set to 'Set passwords to never expire'"
+    domains = await _safe_graph_get_all(token, _DOMAINS_URL)
+    if domains is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate verified domains.",
+        )
+    bad: list[str] = []
+    for d in domains:
+        if not d.get("isVerified", True):
+            continue
+        validity = d.get("passwordValidityPeriodInDays")
+        if validity is not None and int(validity) < 2147483647:
+            bad.append(f"{d.get('id')} ({validity}d)")
+    if not bad:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            "All verified domains are configured for non-expiring passwords.",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"{len(bad)} domain(s) still expire passwords: " + ", ".join(bad),
+    )
+
+
+async def _check_email_otp_disabled(token: str) -> dict[str, Any]:
+    check_id = "bp_email_otp_disabled"
+    check_name = "The email OTP authentication method is disabled"
+    data = await _safe_graph_get(
+        token,
+        f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email",
+    )
+    if data is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to read Email authentication method configuration.",
+        )
+    state = str(data.get("state") or "").lower()
+    if state == "disabled":
+        return _result(check_id, check_name, STATUS_PASS, "Email OTP authentication method is disabled.")
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"Email OTP method state is '{state}'; should be 'disabled'.",
+    )
+
+
+async def _check_user_consent_disallowed(token: str) -> dict[str, Any]:
+    check_id = "bp_user_consent_apps_disallowed"
+    check_name = "User consent to apps accessing company data is not allowed"
+    auth = await _safe_graph_get(token, _AUTHORIZATION_POLICY_URL)
+    if auth is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read authorization policy.")
+    perms = (auth.get("defaultUserRolePermissions") or {}).get(
+        "permissionGrantPoliciesAssigned"
+    ) or []
+    legacy_present = any("microsoft-user-default-legacy" in str(p) for p in perms)
+    if legacy_present:
+        return _result(
+            check_id, check_name, STATUS_FAIL,
+            "User consent to apps is allowed via the legacy default permission grant policy.",
+        )
+    return _result(check_id, check_name, STATUS_PASS, "User consent to apps is not granted by default.")
+
+
+async def _check_users_cannot_create_security_groups(token: str) -> dict[str, Any]:
+    check_id = "bp_users_cannot_create_security_groups"
+    check_name = "Users cannot create security groups"
+    auth = await _safe_graph_get(token, _AUTHORIZATION_POLICY_URL)
+    if auth is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read authorization policy.")
+    perms = auth.get("defaultUserRolePermissions") or {}
+    if perms.get("allowedToCreateSecurityGroups") is False:
+        return _result(check_id, check_name, STATUS_PASS, "Users are not allowed to create security groups.")
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "Default user role permits creating security groups; restrict to admins only.",
+    )
+
+
+async def _check_users_restricted_bitlocker_recovery(token: str) -> dict[str, Any]:
+    check_id = "bp_users_restricted_bitlocker_recovery"
+    check_name = "Users are restricted from recovering BitLocker keys"
+    auth = await _safe_graph_get(token, _AUTHORIZATION_POLICY_URL)
+    if auth is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read authorization policy.")
+    perms = auth.get("defaultUserRolePermissions") or {}
+    if perms.get("allowedToReadBitlockerKeysForOwnedDevice") is False:
+        return _result(check_id, check_name, STATUS_PASS, "Users cannot self-recover BitLocker keys.")
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "Default user role permits self-reading BitLocker keys; restrict to admins.",
+    )
+
+
+async def _check_only_managed_public_groups(token: str) -> dict[str, Any]:
+    check_id = "bp_only_managed_public_groups"
+    check_name = "Only organizationally managed/approved public groups exist"
+    groups = await _safe_graph_get_all(token, _GROUPS_LIST_URL)
+    if groups is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate groups.")
+    public = [
+        g for g in groups
+        if str(g.get("visibility") or "").lower() == "public"
+        and "Unified" in (g.get("groupTypes") or [])
+    ]
+    if not public:
+        return _result(check_id, check_name, STATUS_PASS, "No public Microsoft 365 groups exist.")
+    names = ", ".join(g.get("displayName") or "?" for g in public[:5])
+    suffix = "" if len(public) <= 5 else f" (and {len(public) - 5} more)"
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        f"{len(public)} public Microsoft 365 group(s) exist – review and convert unapproved ones to Private: {names}{suffix}.",
+    )
+
+
+async def _check_pim_used(token: str) -> dict[str, Any]:
+    check_id = "bp_pim_used_to_manage_roles"
+    check_name = "Privileged Identity Management is used to manage roles"
+    eligible = await _safe_graph_get_all(token, _PIM_ASSIGNMENTS_URL)
+    if eligible is None:
+        return _result(
+            check_id, check_name, STATUS_UNKNOWN,
+            "Unable to enumerate PIM eligible role assignments.",
+        )
+    if eligible:
+        return _result(
+            check_id, check_name, STATUS_PASS,
+            f"PIM is in use ({len(eligible)} eligible role assignments).",
+        )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "No eligible (PIM-managed) role assignments exist; convert active assignments to eligible.",
+    )
+
+
+async def _check_phishing_resistant_mfa_admins(token: str) -> dict[str, Any]:
+    check_id = "bp_phishing_resistant_mfa_admins"
+    check_name = "Phishing-resistant MFA strength is required for administrators"
+    policies = await _safe_graph_get_all(token, _CA_POLICIES_URL)
+    if policies is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate CA policies.")
+    for pol in policies:
+        if str(pol.get("state") or "").lower() != "enabled":
+            continue
+        cond_users = (pol.get("conditions") or {}).get("users") or {}
+        included_roles = [str(r).lower() for r in cond_users.get("includeRoles") or []]
+        if not any(r in included_roles for r in (t.lower() for t in _ADMIN_ROLE_TEMPLATES)):
+            continue
+        grant = pol.get("grantControls") or {}
+        strength = (grant.get("authenticationStrength") or {}).get("id") or ""
+        if str(strength).lower() == _PHISHING_RESISTANT_AUTH_STRENGTH_ID:
+            return _result(
+                check_id, check_name, STATUS_PASS,
+                f"CA policy '{pol.get('displayName')}' enforces phishing-resistant MFA for admins.",
+            )
+    return _result(
+        check_id, check_name, STATUS_FAIL,
+        "No enabled CA policy targeting admin roles requires the Phishing-Resistant MFA authentication strength.",
+    )
+
+
+async def _check_security_defaults_appropriate(token: str) -> dict[str, Any]:
+    check_id = "bp_security_defaults_appropriate"
+    check_name = "Security Defaults are appropriately configured"
+    sd = await _safe_graph_get(token, _SECURITY_DEFAULTS_URL)
+    if sd is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read security defaults policy.")
+    policies = await _safe_graph_get_all(token, _CA_POLICIES_URL)
+    has_ca = bool(
+        policies and any(str(p.get("state") or "").lower() == "enabled" for p in policies)
+    )
+    enabled = bool(sd.get("isEnabled"))
+    if has_ca and not enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Tenant has Conditional Access policies and Security Defaults are correctly disabled.")
+    if not has_ca and enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Tenant lacks Conditional Access and Security Defaults are correctly enabled.")
+    if has_ca and enabled:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "Both Conditional Access and Security Defaults are enabled; disable Security Defaults.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Tenant has neither Conditional Access nor Security Defaults; enable Security Defaults at minimum.")
+
+
+def _ca_policy_targets_admin_roles(policy: dict[str, Any]) -> bool:
+    cond_users = (policy.get("conditions") or {}).get("users") or {}
+    included_roles = [str(r).lower() for r in cond_users.get("includeRoles") or []]
+    return any(r in included_roles for r in (t.lower() for t in _ADMIN_ROLE_TEMPLATES))
+
+
+async def _check_signin_freq_intune_enrollment(token: str) -> dict[str, Any]:
+    check_id = "bp_signin_freq_intune_enrollment"
+    check_name = "Sign-in frequency for Intune enrollment is set to 'every time'"
+    policies = await _safe_graph_get_all(token, _CA_POLICIES_URL)
+    if policies is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate CA policies.")
+    for pol in policies:
+        if str(pol.get("state") or "").lower() != "enabled":
+            continue
+        actions = [
+            str(a).lower()
+            for a in (((pol.get("conditions") or {}).get("applications") or {}).get(
+                "includeUserActions"
+            ) or [])
+        ]
+        if "urn:user:registerdevice" not in actions:
+            continue
+        sif = (pol.get("sessionControls") or {}).get("signInFrequency") or {}
+        if str(sif.get("frequencyInterval") or "").lower() == "everytime":
+            return _result(check_id, check_name, STATUS_PASS,
+                           f"CA policy '{pol.get('displayName')}' enforces every-time sign-in for Intune enrollment.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No CA policy targeting the 'Register or join devices' user action enforces 'every time' sign-in.")
+
+
+async def _check_signin_freq_admin_browser(token: str) -> dict[str, Any]:
+    check_id = "bp_signin_freq_admin_browser_no_persist"
+    check_name = "Sign-in frequency is enabled and browser sessions are not persistent for admins"
+    policies = await _safe_graph_get_all(token, _CA_POLICIES_URL)
+    if policies is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate CA policies.")
+    for pol in policies:
+        if str(pol.get("state") or "").lower() != "enabled":
+            continue
+        if not _ca_policy_targets_admin_roles(pol):
+            continue
+        sc = pol.get("sessionControls") or {}
+        sif = sc.get("signInFrequency") or {}
+        pb = sc.get("persistentBrowser") or {}
+        sif_ok = bool(sif.get("isEnabled")) and (
+            (sif.get("type") == "hours" and (sif.get("value") or 0) <= _ADMIN_SIGNIN_FREQ_MAX_HOURS)
+            or sif.get("frequencyInterval") == "everyTime"
+        )
+        pb_ok = str(pb.get("mode") or "").lower() == "never" and pb.get("isEnabled")
+        if sif_ok and pb_ok:
+            return _result(check_id, check_name, STATUS_PASS,
+                           f"CA policy '{pol.get('displayName')}' enforces sign-in frequency and non-persistent browser for admins.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No enabled CA policy targeting admin roles enforces both sign-in frequency and non-persistent browser sessions.")
+
+
+async def _check_system_preferred_mfa(token: str) -> dict[str, Any]:
+    check_id = "bp_system_preferred_mfa"
+    check_name = "System-preferred multifactor authentication is enabled"
+    policy = await _safe_graph_get(token, _AUTH_METHODS_POLICY_URL)
+    if policy is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read authentication methods policy.")
+    state = str(((policy.get("systemCredentialPreferences") or {}).get("state")) or "").lower()
+    if state == "enabled":
+        return _result(check_id, check_name, STATUS_PASS, "System-preferred MFA is enabled.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"System-preferred MFA state is '{state}'; should be 'enabled'.")
+
+
+async def _check_authenticator_mfa_fatigue(token: str) -> dict[str, Any]:
+    check_id = "bp_authenticator_mfa_fatigue"
+    check_name = "Microsoft Authenticator is configured to protect against MFA fatigue"
+    data = await _safe_graph_get(
+        token, f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/MicrosoftAuthenticator"
+    )
+    if data is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Authenticator policy.")
+    fs = data.get("featureSettings") or {}
+    missing = [
+        k for k in _MFA_FATIGUE_PROTECTION_KEYS
+        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
+    ]
+    if not missing:
+        return _result(check_id, check_name, STATUS_PASS, "All MFA-fatigue protections are enabled.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Disabled MFA-fatigue protections: " + ", ".join(missing))
+
+
+async def _check_weak_auth_methods_disabled(token: str) -> dict[str, Any]:
+    check_id = "bp_weak_auth_methods_disabled"
+    check_name = "Weak authentication methods are disabled"
+    issues: list[str] = []
+    for method in ("Sms", "Voice", "Email"):
+        data = await _safe_graph_get(
+            token, f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/{method}"
+        )
+        if data is None:
+            continue
+        if str(data.get("state") or "").lower() != "disabled":
+            issues.append(method)
+    if not issues:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "SMS, Voice, and Email authentication methods are disabled.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Weak methods still enabled: " + ", ".join(issues))
+
+
+async def _check_internal_phishing_forms(token: str) -> dict[str, Any]:
+    check_id = "bp_internal_phishing_forms"
+    check_name = "Internal phishing protection for Microsoft Forms is enabled"
+    data = await _safe_graph_get(token, _FORMS_SETTINGS_URL)
+    if data is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Forms settings.")
+    if data.get("internalPhishingProtectionEnabled"):
+        return _result(check_id, check_name, STATUS_PASS, "Internal phishing protection for Forms is enabled.")
+    return _result(check_id, check_name, STATUS_FAIL, "Internal phishing protection for Forms is disabled.")
+
+
+async def _check_laps_enabled(token: str) -> dict[str, Any]:
+    check_id = "bp_laps_enabled"
+    check_name = "Local Administrator Password Solution (LAPS) is enabled"
+    data = await _safe_graph_get(token, _DEVICE_REG_POLICY_URL)
+    if data is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read device registration policy.")
+    laps = (data.get("localAdminPassword") or {}).get("isEnabled")
+    if laps:
+        return _result(check_id, check_name, STATUS_PASS, "LAPS is enabled at the tenant level.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "LAPS is not enabled; enable it under Devices → All Devices → Device Settings → Enable Local Admin Password Solution.")
+
+
+async def _check_two_emergency_access_accounts(token: str) -> dict[str, Any]:
+    check_id = "bp_two_emergency_access_accounts"
+    check_name = "Two emergency access (break-glass) accounts are defined"
+    roles = await _safe_graph_get_all(token, _DIRECTORY_ROLES_URL)
+    if roles is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate directory roles.")
+    ga_role_id: str | None = None
+    for role in roles:
+        if str(role.get("roleTemplateId") or "").lower() == _ROLE_TEMPLATE_GLOBAL_ADMIN.lower():
+            ga_role_id = role.get("id")
+            break
+    if not ga_role_id:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Global Administrator role is not currently activated in this tenant.")
+    members = await _safe_graph_get_all(
+        token, f"https://graph.microsoft.com/v1.0/directoryRoles/{ga_role_id}/members"
+    )
+    if members is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate Global Administrator members.")
+    cloud_only = 0
+    for m in members:
+        data = await _safe_graph_get(
+            token, f"https://graph.microsoft.com/v1.0/users/{m.get('id')}"
+            "?$select=onPremisesSyncEnabled,accountEnabled"
+        )
+        if data and not data.get("onPremisesSyncEnabled") and data.get("accountEnabled"):
+            cloud_only += 1
+    if cloud_only >= 2:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"At least two cloud-only Global Administrator accounts are defined ({cloud_only} found). "
+                       "Verify that two of these are dedicated break-glass accounts excluded from MFA enforcement per the tenant runbook.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"Only {cloud_only} cloud-only Global Administrator account(s) found. "
+                   "Create at least two dedicated break-glass accounts.")
+
+
+# ---------------------------------------------------------------------------
+# Exchange Online check runners (real auto-detection)
+# ---------------------------------------------------------------------------
+
+
+def _exo_first_value(payload: dict[str, Any]) -> dict[str, Any]:
+    val = payload.get("value")
+    if isinstance(val, list) and val:
+        return val[0] if isinstance(val[0], dict) else {}
+    return {}
+
+
+async def _check_audit_bypass_disabled_mailboxes(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_audit_bypass_disabled_mailboxes"
+    check_name = "'AuditBypassEnabled' is not enabled on mailboxes"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-MailboxAuditBypassAssociation",
+            {"ResultSize": "Unlimited"},
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-MailboxAuditBypassAssociation: {exc}")
+    rows = data.get("value") or []
+    bypassed = [
+        r.get("Identity") or r.get("DisplayName") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("AuditBypassEnabled") is True
+    ]
+    if not bypassed:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"No mailboxes have AuditBypassEnabled set; checked {len(rows)} associations.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(bypassed)} mailbox(es) bypass auditing: " + ", ".join(bypassed[:5]))
+
+
+async def _check_audit_disabled_org_false(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_audit_disabled_org_false"
+    check_name = "'AuditDisabled' organizationally is set to 'False'"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    val = cfg.get("AuditDisabled")
+    if val is False:
+        return _result(check_id, check_name, STATUS_PASS, "Organization-level AuditDisabled is False.")
+    if val is True:
+        return _result(check_id, check_name, STATUS_FAIL, "Organization-level AuditDisabled is True; mailbox auditing is suppressed.")
+    return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to determine AuditDisabled state.")
+
+
+async def _check_audit_log_search_enabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_audit_log_search_enabled"
+    check_name = "Microsoft 365 audit log search is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AdminAuditLogConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AdminAuditLogConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("UnifiedAuditLogIngestionEnabled") is True:
+        return _result(check_id, check_name, STATUS_PASS, "Unified audit log ingestion is enabled.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "UnifiedAuditLogIngestionEnabled is not True; enable audit log search in the Purview portal.")
+
+
+async def _check_modern_auth_exo(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_modern_auth_exo"
+    check_name = "Modern authentication for Exchange Online is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("OAuth2ClientProfileEnabled") is True:
+        return _result(check_id, check_name, STATUS_PASS, "OAuth2ClientProfileEnabled is True.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Modern authentication is disabled for Exchange Online (OAuth2ClientProfileEnabled is not True).")
+
+
+async def _check_smtp_auth_disabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_smtp_auth_disabled"
+    check_name = "SMTP AUTH is disabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-TransportConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-TransportConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("SmtpClientAuthenticationDisabled") is True:
+        return _result(check_id, check_name, STATUS_PASS, "SmtpClientAuthenticationDisabled is True.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "SMTP AUTH is enabled tenant-wide; disable via Set-TransportConfig -SmtpClientAuthenticationDisabled $true.")
+
+
+async def _check_dkim_enabled_all_domains(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_dkim_enabled_all_domains"
+    check_name = "DKIM is enabled for all Exchange Online domains"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-DkimSigningConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-DkimSigningConfig: {exc}")
+    rows = data.get("value") or []
+    disabled = [
+        r.get("Domain") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("Enabled") is not True
+    ]
+    if not disabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"DKIM is enabled for all {len(rows)} configured domains.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"DKIM is disabled on {len(disabled)} domain(s): " + ", ".join(disabled[:5]))
+
+
+async def _check_third_party_storage_owa(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_third_party_storage_owa"
+    check_name = "Additional storage providers are restricted in Outlook on the Web"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OwaMailboxPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OwaMailboxPolicy: {exc}")
+    rows = data.get("value") or []
+    bad = [
+        r.get("Identity") or r.get("Name") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("AdditionalStorageProvidersAvailable") is True
+    ]
+    if not bad:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Additional storage providers are restricted in all OWA mailbox policies.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"OWA policies allowing third-party storage: " + ", ".join(bad))
+
+
+async def _check_idle_session_timeout(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_idle_session_timeout_3h"
+    check_name = "Idle session timeout is 3 hours or less for unmanaged devices"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    enabled = cfg.get("ActivityBasedAuthenticationTimeoutEnabled")
+    interval = str(cfg.get("ActivityBasedAuthenticationTimeoutInterval") or "")
+    # Format hh:mm:ss – compare hours
+    try:
+        hours = int(interval.split(":")[0]) if interval else 99
+    except ValueError:
+        hours = 99
+    if enabled is True and hours <= 3:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Idle session timeout enabled at {interval}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"Idle session timeout enabled={enabled}, interval={interval or 'unset'}; set ≤ 03:00:00.")
+
+
+async def _check_shared_mailbox_signin_blocked(token: str) -> dict[str, Any]:
+    """Identify shared-mailbox user accounts that have not been disabled.
+
+    Uses Microsoft Graph (not EXO) – Graph exposes a stable shape and the
+    tenant has Directory.Read.All from existing best-practices grants.
+    """
+    check_id = "bp_shared_mailbox_signin_blocked"
+    check_name = "Sign-in to shared mailboxes is blocked"
+    # ``mailboxSettings`` does not expose the SharedMailbox flag via Graph; the
+    # closest portable signal is `userType=Member` users with no licenses
+    # whose accountEnabled is True – combined with the fact that admin-portal
+    # shared mailboxes always lack a license. We surface this as a heuristic
+    # check; admins with EXO PowerShell can confirm via Get-Mailbox.
+    users = await _safe_graph_get_all(token, _USERS_LIST_URL)
+    if users is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate users.")
+    candidates = [
+        u for u in users
+        if (u.get("userType") or "").lower() == "member"
+        and not (u.get("assignedLicenses") or [])
+        and u.get("accountEnabled") is True
+    ]
+    if not candidates:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "No unlicensed member accounts are sign-in enabled (likely no shared mailbox is sign-in enabled).")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(candidates)} unlicensed member account(s) appear to be sign-in enabled (likely shared mailboxes). "
+                   "Disable each via Update-MgUser -UserId <id> -AccountEnabled:$false. "
+                   "First sample: " + ", ".join((u.get("userPrincipalName") or u.get("id") or "?") for u in candidates[:5]))
+
+
+async def _check_mailbox_audit_actions(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_mailbox_audit_actions"
+    check_name = "Mailbox audit actions are configured"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-Mailbox",
+            {"ResultSize": 100, "Filter": "RecipientTypeDetails -eq 'UserMailbox'"},
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-Mailbox: {exc}")
+    rows = data.get("value") or []
+    bad: list[str] = []
+    required_owner = {"MailboxLogin", "HardDelete", "SoftDelete", "Update"}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if r.get("AuditEnabled") is not True:
+            bad.append(r.get("UserPrincipalName") or r.get("Identity") or "?")
+            continue
+        owner = set(r.get("AuditOwner") or [])
+        if not required_owner.issubset(owner):
+            bad.append(r.get("UserPrincipalName") or r.get("Identity") or "?")
+    if not bad:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Audit actions properly configured on {len(rows)} sampled mailboxes.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(bad[:5]))
+
+
 _BEST_PRACTICES: list[dict[str, Any]] = [
     {
         "id": "bp_security_defaults",
@@ -526,6 +1740,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_cmdlet": "Set-OrganizationConfig",
         "remediation_params": {"RejectDirectSend": True},
         "default_enabled": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     # ------------------------------------------------------------------
     # Monitoring best practices
@@ -714,6 +1929,1138 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_url": _REPORT_SETTINGS_URL,
         "remediation_payload": {"displayConcealedNames": True},
+    },
+    # ------------------------------------------------------------------
+    # Identity & Conditional Access (Microsoft Graph)
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_per_user_mfa_disabled",
+        "name": "'Per-user MFA' is disabled",
+        "description": (
+            "Per-user MFA is the legacy way of enforcing MFA. Microsoft recommends "
+            "migrating users to Conditional Access-driven MFA and disabling per-user MFA."
+        ),
+        "remediation": (
+            "For each affected user run: "
+            "Update-MgBetaUserAuthenticationRequirement -UserId <upn> "
+            "-PerUserMfaState Disabled. Ensure a Conditional Access policy "
+            "requiring MFA is in place first."
+        ),
+        "source": _check_per_user_mfa_disabled,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_dynamic_group_for_guests",
+        "name": "A dynamic group for guest users is created",
+        "description": (
+            "A dynamic Entra ID group whose membership rule targets guest users "
+            "lets administrators easily scope access reviews and Conditional "
+            "Access policies to all guests."
+        ),
+        "remediation": (
+            "Entra portal → Groups → New group → Group type: Security, "
+            "Membership type: Dynamic User, "
+            "Dynamic query: (user.userType -eq \"Guest\")."
+        ),
+        "source": _check_dynamic_group_for_guests,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_managed_device_required_auth",
+        "name": "A managed device is required for authentication",
+        "description": (
+            "Conditional Access should require a compliant or hybrid Azure AD "
+            "joined device for all sign-ins to ensure only managed endpoints "
+            "can access corporate resources."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Conditional Access → New policy → "
+            "Users: All users → Cloud apps: All cloud apps → "
+            "Grant: Require device to be marked as compliant OR Require "
+            "Hybrid Azure AD joined device."
+        ),
+        "source": _check_ca_managed_device_required,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_managed_device_required_secinfo_reg",
+        "name": "A managed device is required to register security information",
+        "description": (
+            "Restricting security info registration to managed devices prevents "
+            "attackers who phish credentials from registering their own MFA method."
+        ),
+        "remediation": (
+            "Conditional Access → New policy → Cloud apps → User actions → "
+            "'Register security information' → Grant: Require compliant device."
+        ),
+        "source": _check_ca_managed_device_for_secinfo,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_access_reviews_guest_users",
+        "name": "Access reviews for guest users are configured",
+        "description": (
+            "Recurring access reviews of guest accounts ensure stale guests "
+            "are removed promptly, reducing data-exposure risk."
+        ),
+        "remediation": (
+            "Entra portal → Identity Governance → Access reviews → New access "
+            "review → Users: Guest users only → recurrence: quarterly."
+        ),
+        "source": _check_access_reviews_for_guests,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
+    },
+    {
+        "id": "bp_access_reviews_privileged_roles",
+        "name": "Access reviews for privileged roles are configured",
+        "description": (
+            "Recurring access reviews of admins (GA, PRA, SA, Exchange Admin, "
+            "Billing Admin) prevent role accumulation and unauthorised retention."
+        ),
+        "remediation": (
+            "Entra portal → Identity Governance → Privileged Identity Management "
+            "→ Roles → for each privileged role click 'Access reviews' → New."
+        ),
+        "source": _check_access_reviews_for_privileged_roles,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
+    },
+    {
+        "id": "bp_admin_accounts_cloud_only",
+        "name": "Administrative accounts are cloud-only",
+        "description": (
+            "Privileged accounts must not be synced from on-premises AD so that "
+            "an on-premises compromise cannot escalate to the cloud."
+        ),
+        "remediation": (
+            "Create dedicated cloud-only admin accounts in Entra ID and remove "
+            "privileged role assignments from any synced accounts."
+        ),
+        "source": _check_admin_accounts_cloud_only,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_admin_accounts_reduced_license",
+        "name": "Administrative accounts use licenses with reduced footprint",
+        "description": (
+            "Admin accounts should only carry the minimum licensing required "
+            "(typically Entra ID P1/P2) to reduce attack surface and cost."
+        ),
+        "remediation": (
+            "Microsoft 365 admin center → Users → select admin → Licenses → "
+            "remove all but the minimum required license."
+        ),
+        "source": _check_admin_accounts_reduced_license,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_all_members_mfa_capable",
+        "name": "All member users are 'MFA capable'",
+        "description": (
+            "A user is MFA-capable when they are licensed for and registered for "
+            "at least one strong authentication method. Drive registration to 100%."
+        ),
+        "remediation": (
+            "Use the Authentication methods activity report to identify users "
+            "without a registered method, then drive registration via "
+            "MyAccount → Security info → Add method."
+        ),
+        "source": _check_all_members_mfa_capable,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_approval_required_ga_activation",
+        "name": "Approval is required for Global Administrator role activation",
+        "description": (
+            "Requiring approval for GA activation in PIM ensures a second "
+            "person reviews every privilege escalation."
+        ),
+        "remediation": (
+            "Entra portal → Identity Governance → PIM → Microsoft Entra roles "
+            "→ Settings → Global Administrator → Edit → Activation → Require approval to activate."
+        ),
+        "source": _check_approval_required_ga,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
+    },
+    {
+        "id": "bp_approval_required_pra_activation",
+        "name": "Approval is required for Privileged Role Administrator activation",
+        "description": (
+            "Requiring approval for PRA activation prevents a single compromised "
+            "privileged role administrator from granting roles unilaterally."
+        ),
+        "remediation": (
+            "Entra portal → PIM → Microsoft Entra roles → Settings → Privileged "
+            "Role Administrator → Edit → Require approval to activate."
+        ),
+        "source": _check_approval_required_pra,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
+    },
+    {
+        "id": "bp_collab_invitations_allowed_domains",
+        "name": "Collaboration invitations are sent to allowed domains only",
+        "description": (
+            "Restricting B2B invitations to a curated allow-list of partner "
+            "domains prevents accidental collaboration with unknown organisations."
+        ),
+        "remediation": (
+            "Entra portal → External Identities → Cross-tenant access settings "
+            "→ Default settings → B2B collaboration → Allow specific domains."
+        ),
+        "source": _check_collab_invitations_allowed_domains,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {"allowInvitesFrom": "adminsAndGuestInviters"},
+    },
+    {
+        "id": "bp_custom_banned_passwords",
+        "name": "Custom banned passwords lists are used",
+        "description": (
+            "A custom banned-password list (company-name, products, etc.) "
+            "prevents users from selecting predictable passwords."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Authentication methods → Password "
+            "protection → set 'Enforce custom list' to Yes and add company-specific terms."
+        ),
+        "source": _check_custom_banned_passwords,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_password_expiry_never_expire",
+        "name": "Password expiration policy is set to 'Set passwords to never expire'",
+        "description": (
+            "When MFA is in place, NIST/Microsoft recommend not expiring "
+            "passwords. Forced rotations weaken password quality."
+        ),
+        "remediation": (
+            "Microsoft 365 admin center → Settings → Org settings → Security "
+            "& privacy → Password expiration policy → Set passwords to never expire."
+        ),
+        "source": _check_password_expiry_never_expire,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_email_otp_disabled",
+        "name": "The email OTP authentication method is disabled",
+        "description": (
+            "Email OTP is a weak authentication method that should be disabled "
+            "in favour of phishing-resistant or push-based methods."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Authentication methods → Policies → "
+            "Email OTP → Enable: No, Target: All users."
+        ),
+        "source": _check_email_otp_disabled,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": (
+            f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email"
+        ),
+        "remediation_payload": {"state": "disabled"},
+    },
+    {
+        "id": "bp_user_consent_apps_disallowed",
+        "name": "User consent to apps accessing company data on their behalf is not allowed",
+        "description": (
+            "Allowing arbitrary user consent to OAuth apps is a primary vector "
+            "for illicit consent attacks. Restrict consent to admins."
+        ),
+        "remediation": (
+            "Entra portal → Enterprise applications → Consent and permissions "
+            "→ User consent settings → Do not allow user consent."
+        ),
+        "source": _check_user_consent_disallowed,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {
+            "defaultUserRolePermissions": {"permissionGrantPoliciesAssigned": []}
+        },
+    },
+    {
+        "id": "bp_users_cannot_create_security_groups",
+        "name": "Users cannot create security groups",
+        "description": (
+            "Allowing arbitrary group creation makes group sprawl and "
+            "unintended permission grants more likely."
+        ),
+        "remediation": (
+            "Entra portal → Groups → General → Users can create security groups → No."
+        ),
+        "source": _check_users_cannot_create_security_groups,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {
+            "defaultUserRolePermissions": {"allowedToCreateSecurityGroups": False}
+        },
+    },
+    {
+        "id": "bp_users_restricted_bitlocker_recovery",
+        "name": "Users are restricted from recovering BitLocker keys",
+        "description": (
+            "Allowing users to retrieve BitLocker recovery keys from MyAccount "
+            "creates an attack path for a phished account to decrypt a stolen device."
+        ),
+        "remediation": (
+            "Entra portal → Devices → Device settings → Restrict users from "
+            "recovering BitLocker key(s) for their owned devices → Yes."
+        ),
+        "source": _check_users_restricted_bitlocker_recovery,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {
+            "defaultUserRolePermissions": {
+                "allowedToReadBitlockerKeysForOwnedDevice": False
+            }
+        },
+        "requires_licenses": [CAP_INTUNE],
+    },
+    {
+        "id": "bp_only_managed_public_groups",
+        "name": "Only organisationally managed/approved public groups exist",
+        "description": (
+            "Public Microsoft 365 groups expose conversations and files to all "
+            "tenant users; convert unapproved groups to Private."
+        ),
+        "remediation": (
+            "Entra portal → Groups → All groups → for each public group click "
+            "Properties → Privacy: Private."
+        ),
+        "source": _check_only_managed_public_groups,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_pim_used_to_manage_roles",
+        "name": "Privileged Identity Management is used to manage roles",
+        "description": (
+            "Standing privileged role assignments should be converted to "
+            "eligible PIM assignments so admins must explicitly activate roles."
+        ),
+        "remediation": (
+            "Entra portal → PIM → Microsoft Entra roles → Roles → for each "
+            "active assignment, choose 'Make eligible' and require activation."
+        ),
+        "source": _check_pim_used,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P2],
+    },
+    {
+        "id": "bp_phishing_resistant_mfa_admins",
+        "name": "Phishing-resistant MFA strength is required for administrators",
+        "description": (
+            "Administrators must authenticate with phishing-resistant methods "
+            "(FIDO2 keys, Windows Hello for Business, certificate-based) to "
+            "defeat AiTM phishing kits."
+        ),
+        "remediation": (
+            "Conditional Access → New policy → Users: include privileged "
+            "directory roles → Cloud apps: All cloud apps → "
+            "Grant: Require authentication strength → Phishing-resistant MFA."
+        ),
+        "source": _check_phishing_resistant_mfa_admins,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_security_defaults_appropriate",
+        "name": "Security Defaults are appropriately configured",
+        "description": (
+            "Security Defaults should be enabled on tenants without "
+            "Conditional Access, and disabled when Conditional Access is in use "
+            "to avoid duplicate enforcement."
+        ),
+        "remediation": (
+            "Entra portal → Properties → Manage security defaults → toggle "
+            "based on whether Conditional Access policies are in place."
+        ),
+        "source": _check_security_defaults_appropriate,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_signin_freq_intune_enrollment",
+        "name": "Sign-in frequency for Intune enrollment is set to 'every time'",
+        "description": (
+            "Requiring re-authentication every time a device enrolls into "
+            "Intune prevents stale tokens from being abused for device join."
+        ),
+        "remediation": (
+            "Conditional Access → New policy → Cloud apps → User actions → "
+            "'Register or join devices' → Session → Sign-in frequency: Every time."
+        ),
+        "source": _check_signin_freq_intune_enrollment,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1, CAP_INTUNE],
+    },
+    {
+        "id": "bp_signin_freq_admin_browser_no_persist",
+        "name": "Sign-in frequency is enabled and browser sessions are not persistent for admins",
+        "description": (
+            "Limit administrator browser sessions to a few hours and disable "
+            "persistent browser sessions to reduce token-theft impact."
+        ),
+        "remediation": (
+            "Conditional Access → New policy → Users: privileged roles → "
+            "Session → Sign-in frequency: 4 hours, Persistent browser: Never persistent."
+        ),
+        "source": _check_signin_freq_admin_browser,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
+    },
+    {
+        "id": "bp_system_preferred_mfa",
+        "name": "System-preferred multifactor authentication is enabled",
+        "description": (
+            "System-preferred MFA prompts users with their strongest registered "
+            "method first, reducing the use of weaker methods."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Authentication methods → Settings → "
+            "System-preferred multifactor authentication → Enabled."
+        ),
+        "source": _check_system_preferred_mfa,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _AUTH_METHODS_POLICY_URL,
+        "remediation_payload": {
+            "systemCredentialPreferences": {"state": "enabled"}
+        },
+    },
+    {
+        "id": "bp_authenticator_mfa_fatigue",
+        "name": "Microsoft Authenticator is configured to protect against MFA fatigue",
+        "description": (
+            "Number matching, app context and location context defeat MFA "
+            "fatigue and consent-spam attacks against Microsoft Authenticator."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Authentication methods → Microsoft "
+            "Authenticator → Configure → enable Number matching, Show app "
+            "name and Show location for all users."
+        ),
+        "source": _check_authenticator_mfa_fatigue,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_weak_auth_methods_disabled",
+        "name": "Weak authentication methods are disabled",
+        "description": (
+            "SMS, Voice and Email OTP are vulnerable to SIM-swapping and "
+            "phishing; disable in favour of Microsoft Authenticator and FIDO2."
+        ),
+        "remediation": (
+            "Entra portal → Protection → Authentication methods → Policies → "
+            "for SMS, Voice, Email OTP → Enable: No."
+        ),
+        "source": _check_weak_auth_methods_disabled,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    {
+        "id": "bp_internal_phishing_forms",
+        "name": "Internal phishing protection for Microsoft Forms is enabled",
+        "description": (
+            "Forms can include keyword-based phishing protection that warns "
+            "users when a form attempts to harvest credentials."
+        ),
+        "remediation": (
+            "Microsoft 365 admin center → Settings → Org settings → Microsoft "
+            "Forms → Phishing protection → Add internal phishing protection."
+        ),
+        "source": _check_internal_phishing_forms,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_url": _FORMS_SETTINGS_URL,
+        "remediation_payload": {"internalPhishingProtectionEnabled": True},
+    },
+    {
+        "id": "bp_laps_enabled",
+        "name": "Local Administrator Password Solution (LAPS) is enabled",
+        "description": (
+            "LAPS rotates each managed Windows device's local administrator "
+            "password and stores it securely in Entra ID/Intune."
+        ),
+        "remediation": (
+            "Entra portal → Devices → All devices → Device settings → Enable "
+            "Microsoft Entra Local Administrator Password Solution (LAPS): Yes. "
+            "Then create an Intune Account Protection policy from the LAPS template."
+        ),
+        "source": _check_laps_enabled,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1, CAP_INTUNE_LAPS],
+    },
+    {
+        "id": "bp_two_emergency_access_accounts",
+        "name": "Two emergency access (break-glass) accounts are defined",
+        "description": (
+            "Maintain at least two cloud-only Global Administrator accounts "
+            "with strong, well-protected credentials so admins can recover "
+            "access if MFA, identity-provider, or federation fails."
+        ),
+        "remediation": (
+            "Create two cloud-only GA accounts (e.g. emergency1@<tenant>.onmicrosoft.com, "
+            "emergency2@…), exclude them from all CA policies (storing credentials "
+            "in physical safes), and document the recovery runbook."
+        ),
+        "source": _check_two_emergency_access_accounts,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+    },
+    # ------------------------------------------------------------------
+    # Exchange Online (real auto-detection via EXO REST)
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_audit_bypass_disabled_mailboxes",
+        "name": "'AuditBypassEnabled' is not enabled on mailboxes",
+        "description": (
+            "Mailboxes with AuditBypassEnabled bypass the unified audit log, "
+            "leaving no trace of suspicious activity."
+        ),
+        "remediation": (
+            "For each affected mailbox: "
+            "Set-MailboxAuditBypassAssociation -Identity <upn> -AuditBypassEnabled $false"
+        ),
+        "source": _check_audit_bypass_disabled_mailboxes,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_audit_disabled_org_false",
+        "name": "'AuditDisabled' organizationally is set to 'False'",
+        "description": (
+            "When OrganizationConfig.AuditDisabled is True, mailbox auditing "
+            "is suppressed for every mailbox in the tenant."
+        ),
+        "remediation": "Set-OrganizationConfig -AuditDisabled $false",
+        "source": _check_audit_disabled_org_false,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {"AuditDisabled": False},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_audit_log_search_enabled",
+        "name": "Microsoft 365 audit log search is enabled",
+        "description": (
+            "The unified audit log is the primary source for incident "
+            "investigation; ingestion must be enabled for events to be searchable."
+        ),
+        "remediation": "Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true",
+        "source": _check_audit_log_search_enabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-AdminAuditLogConfig",
+        "remediation_params": {"UnifiedAuditLogIngestionEnabled": True},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_mailbox_audit_actions",
+        "name": "Mailbox audit actions are configured",
+        "description": (
+            "Per-mailbox audit actions (MailboxLogin, HardDelete, SendAs, …) "
+            "should be configured so audit log records contain rich context."
+        ),
+        "remediation": (
+            "For each mailbox: Set-Mailbox -Identity <upn> -AuditEnabled $true "
+            "-AuditOwner @{Add='MailboxLogin','HardDelete','SoftDelete','Update'}"
+        ),
+        "source": _check_mailbox_audit_actions,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_modern_auth_exo",
+        "name": "Modern authentication for Exchange Online is enabled",
+        "description": (
+            "OAuth2-based modern authentication is required for MFA, "
+            "Conditional Access, and modern Outlook clients."
+        ),
+        "remediation": "Set-OrganizationConfig -OAuth2ClientProfileEnabled $true",
+        "source": _check_modern_auth_exo,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {"OAuth2ClientProfileEnabled": True},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_smtp_auth_disabled",
+        "name": "SMTP AUTH is disabled",
+        "description": (
+            "SMTP basic-auth submission is a primary vector for password-spray "
+            "and credential-stuffing; disable it tenant-wide."
+        ),
+        "remediation": "Set-TransportConfig -SmtpClientAuthenticationDisabled $true",
+        "source": _check_smtp_auth_disabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-TransportConfig",
+        "remediation_params": {"SmtpClientAuthenticationDisabled": True},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_dkim_enabled_all_domains",
+        "name": "DKIM is enabled for all Exchange Online domains",
+        "description": (
+            "DKIM signs outbound mail with a tenant-controlled key, allowing "
+            "recipients to verify authenticity and reject spoofed messages."
+        ),
+        "remediation": (
+            "Publish the two CNAME records reported by Get-DkimSigningConfig "
+            "at your DNS registrar, then run "
+            "Set-DkimSigningConfig -Identity <domain> -Enabled $true."
+        ),
+        "source": _check_dkim_enabled_all_domains,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_third_party_storage_owa",
+        "name": "Additional storage providers are restricted in Outlook on the Web",
+        "description": (
+            "Disabling third-party cloud storage providers in OWA prevents "
+            "accidental data exfiltration to consumer storage services."
+        ),
+        "remediation": (
+            "For each OWA mailbox policy: "
+            "Set-OwaMailboxPolicy -Identity <name> -AdditionalStorageProvidersAvailable $false"
+        ),
+        "source": _check_third_party_storage_owa,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_idle_session_timeout_3h",
+        "name": "Idle session timeout is set to 3 hours or less for unmanaged devices",
+        "description": (
+            "Activity-based authentication timeout reduces session-hijack "
+            "exposure on unmanaged or shared devices."
+        ),
+        "remediation": (
+            "Set-OrganizationConfig -ActivityBasedAuthenticationTimeoutEnabled $true "
+            "-ActivityBasedAuthenticationTimeoutInterval 03:00:00"
+        ),
+        "source": _check_idle_session_timeout,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OrganizationConfig",
+        "remediation_params": {
+            "ActivityBasedAuthenticationTimeoutEnabled": True,
+            "ActivityBasedAuthenticationTimeoutInterval": "03:00:00",
+        },
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_shared_mailbox_signin_blocked",
+        "name": "Sign-in to shared mailboxes is blocked",
+        "description": (
+            "Shared mailboxes should be sign-in disabled so attackers cannot "
+            "log in to them directly even if they obtain credentials."
+        ),
+        "remediation": (
+            "For each shared mailbox: "
+            "Update-MgUser -UserId <upn> -AccountEnabled:$false"
+        ),
+        "source": _check_shared_mailbox_signin_blocked,
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    # ------------------------------------------------------------------
+    # SharePoint Online / OneDrive (manual-review pending SPO PowerShell client)
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_external_content_sharing_restricted",
+        "name": "External content sharing is restricted",
+        "description": (
+            "Limiting external sharing to existing external users only prevents "
+            "accidental sharing with anonymous parties."
+        ),
+        "remediation": (
+            "Connect-SPOService -Url https://<tenant>-admin.sharepoint.com\n"
+            "Set-SPOTenant -SharingCapability ExistingExternalUserSharingOnly"
+        ),
+        "source": _manual_review_factory(
+            "bp_external_content_sharing_restricted",
+            "External content sharing is restricted",
+            "Manual verification required. Run: Get-SPOTenant | Select SharingCapability "
+            "and confirm it is set to 'Disabled' or 'ExistingExternalUserSharingOnly'.",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+    },
+    {
+        "id": "bp_sharepoint_external_sharing_restricted",
+        "name": "SharePoint external sharing is restricted",
+        "description": (
+            "Per-site sharing capability should match or be more restrictive "
+            "than the tenant-wide setting."
+        ),
+        "remediation": (
+            "Get-SPOSite -Limit All | Where-Object {$_.SharingCapability -eq 'ExternalUserAndGuestSharing'} "
+            "| Set-SPOSite -SharingCapability ExistingExternalUserSharingOnly"
+        ),
+        "source": _manual_review_factory(
+            "bp_sharepoint_external_sharing_restricted",
+            "SharePoint external sharing is restricted",
+            "Manual verification required. Run: Get-SPOSite -Limit All | Select Url,SharingCapability",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+    },
+    {
+        "id": "bp_sp_guests_cannot_share_unowned",
+        "name": "SharePoint guest users cannot share items they don't own",
+        "description": (
+            "External users should not be permitted to re-share items they do "
+            "not own, preventing data sprawl."
+        ),
+        "remediation": "Set-SPOTenant -PreventExternalUsersFromResharing $true",
+        "source": _manual_review_factory(
+            "bp_sp_guests_cannot_share_unowned",
+            "SharePoint guest users cannot share items they don't own",
+            "Manual verification required. Run: Get-SPOTenant | Select PreventExternalUsersFromResharing",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+    },
+    {
+        "id": "bp_onedrive_content_sharing_restricted",
+        "name": "OneDrive content sharing is restricted",
+        "description": (
+            "OneDrive sharing should be limited to existing external users to "
+            "match the SharePoint posture."
+        ),
+        "remediation": "Set-SPOTenant -OneDriveSharingCapability ExistingExternalUserSharingOnly",
+        "source": _manual_review_factory(
+            "bp_onedrive_content_sharing_restricted",
+            "OneDrive content sharing is restricted",
+            "Manual verification required. Run: Get-SPOTenant | Select OneDriveSharingCapability",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+    },
+    {
+        "id": "bp_link_sharing_restricted_spo_od",
+        "name": "Link sharing is restricted in SharePoint and OneDrive",
+        "description": (
+            "Default to 'Specific people' links with View-only permission to "
+            "minimise accidental over-sharing."
+        ),
+        "remediation": "Set-SPOTenant -DefaultSharingLinkType Direct -DefaultLinkPermission View",
+        "source": _manual_review_factory(
+            "bp_link_sharing_restricted_spo_od",
+            "Link sharing is restricted in SharePoint and OneDrive",
+            "Manual verification required. Run: Get-SPOTenant | Select DefaultSharingLinkType,DefaultLinkPermission",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+    },
+    {
+        "id": "bp_modern_auth_sp_apps",
+        "name": "Modern authentication for SharePoint applications is required",
+        "description": (
+            "Disabling legacy auth protocols on SharePoint Online prevents "
+            "older clients from bypassing Conditional Access."
+        ),
+        "remediation": "Set-SPOTenant -LegacyAuthProtocolsEnabled $false",
+        "source": _manual_review_factory(
+            "bp_modern_auth_sp_apps",
+            "Modern authentication for SharePoint applications is required",
+            "Manual verification required. Run: Get-SPOTenant | Select LegacyAuthProtocolsEnabled",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE],
+    },
+    {
+        "id": "bp_sharepoint_infected_files_block",
+        "name": "Office 365 SharePoint infected files are disallowed for download",
+        "description": (
+            "Blocking download of infected files from SharePoint/OneDrive "
+            "prevents Defender-detected malware from spreading further."
+        ),
+        "remediation": "Set-SPOTenant -DisallowInfectedFileDownload $true",
+        "source": _manual_review_factory(
+            "bp_sharepoint_infected_files_block",
+            "Office 365 SharePoint infected files are disallowed for download",
+            "Manual verification required. Run: Get-SPOTenant | Select DisallowInfectedFileDownload",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_SHAREPOINT_ONLINE, CAP_DEFENDER_O365_P1],
+    },
+    # ------------------------------------------------------------------
+    # Microsoft Teams (manual-review pending Teams PowerShell client)
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_anon_dialin_cannot_start_meeting",
+        "name": "Anonymous users and dial-in callers can't start a meeting",
+        "description": (
+            "Anonymous and PSTN dial-in participants must wait in the lobby "
+            "rather than start meetings unsupervised."
+        ),
+        "remediation": (
+            "Set-CsTeamsMeetingPolicy -Identity Global "
+            "-AllowAnonymousUsersToStartMeeting $false "
+            "-AllowPSTNUsersToBypassLobby $false"
+        ),
+        "source": _manual_review_factory(
+            "bp_anon_dialin_cannot_start_meeting",
+            "Anonymous users and dial-in callers can't start a meeting",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
+            "Select AllowAnonymousUsersToStartMeeting,AllowPSTNUsersToBypassLobby",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
+    {
+        "id": "bp_only_org_can_bypass_lobby",
+        "name": "Only people in my org can bypass the lobby",
+        "description": (
+            "AutoAdmittedUsers should be restricted to EveryoneInCompany so "
+            "external participants always wait in the lobby."
+        ),
+        "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers EveryoneInCompany",
+        "source": _manual_review_factory(
+            "bp_only_org_can_bypass_lobby",
+            "Only people in my org can bypass the lobby",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AutoAdmittedUsers",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
+    {
+        "id": "bp_dialin_cannot_bypass_lobby",
+        "name": "Users dialing in can't bypass the lobby",
+        "description": (
+            "Dial-in callers must wait in the lobby for explicit admission, "
+            "preventing unauthorised drop-ins via PSTN."
+        ),
+        "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowPSTNUsersToBypassLobby $false",
+        "source": _manual_review_factory(
+            "bp_dialin_cannot_bypass_lobby",
+            "Users dialing in can't bypass the lobby",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AllowPSTNUsersToBypassLobby",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS, CAP_TEAMS_AUDIO_CONF],
+    },
+    {
+        "id": "bp_external_participants_no_control",
+        "name": "External participants can't give or request control",
+        "description": (
+            "Preventing external participants from taking control of shared "
+            "screens stops a primary social-engineering vector."
+        ),
+        "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowExternalParticipantGiveRequestControl $false",
+        "source": _manual_review_factory(
+            "bp_external_participants_no_control",
+            "External participants can't give or request control",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AllowExternalParticipantGiveRequestControl",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
+    {
+        "id": "bp_external_users_cannot_initiate",
+        "name": "External Teams users cannot initiate conversations",
+        "description": (
+            "Restricting federation prevents unsolicited messages from "
+            "arbitrary external Teams tenants from reaching internal users."
+        ),
+        "remediation": (
+            "Set-CsTenantFederationConfiguration -AllowFederatedUsers $false "
+            "(or restrict via -AllowedDomains to a managed list)"
+        ),
+        "source": _manual_review_factory(
+            "bp_external_users_cannot_initiate",
+            "External Teams users cannot initiate conversations",
+            "Manual verification required. Run: Get-CsTenantFederationConfiguration | "
+            "Select AllowFederatedUsers,AllowedDomains",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
+    {
+        "id": "bp_teams_external_files_approved_storage",
+        "name": "External file sharing in Teams is enabled for only approved cloud storage services",
+        "description": (
+            "Disabling third-party storage providers in Teams keeps file "
+            "sharing within OneDrive/SharePoint where DLP applies."
+        ),
+        "remediation": (
+            "Set-CsTeamsClientConfiguration -Identity Global "
+            "-AllowDropBox $false -AllowGoogleDrive $false -AllowBox $false "
+            "-AllowShareFile $false -AllowEgnyte $false"
+        ),
+        "source": _manual_review_factory(
+            "bp_teams_external_files_approved_storage",
+            "External file sharing in Teams is enabled for only approved cloud storage services",
+            "Manual verification required. Run: Get-CsTeamsClientConfiguration -Identity Global | "
+            "Select AllowDropBox,AllowGoogleDrive,AllowBox,AllowShareFile,AllowEgnyte",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
+    # ------------------------------------------------------------------
+    # Defender / Purview (manual-review pending Security & Compliance client)
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_safe_links_office_apps",
+        "name": "Safe Links for Office applications is enabled",
+        "description": (
+            "Defender for Office 365 Safe Links rewrites URLs in Office apps "
+            "and Teams so they are scanned at click-time."
+        ),
+        "remediation": (
+            "New-SafeLinksPolicy -Name 'Strict Safe Links' "
+            "-EnableSafeLinksForOffice $true -TrackClicks $true -AllowClickThrough $false; "
+            "New-SafeLinksRule -Name 'Strict Safe Links' -SafeLinksPolicy 'Strict Safe Links' "
+            "-RecipientDomainIs (Get-AcceptedDomain).Name"
+        ),
+        "source": _manual_review_factory(
+            "bp_safe_links_office_apps",
+            "Safe Links for Office applications is enabled",
+            "Manual verification required. Run: Get-SafeLinksPolicy | Select Name,EnableSafeLinksForOffice,TrackClicks,AllowClickThrough",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
+    },
+    {
+        "id": "bp_dlp_policies_enabled",
+        "name": "DLP policies are enabled",
+        "description": (
+            "At least one Microsoft Purview DLP policy must be enabled to "
+            "protect sensitive information across Microsoft 365 workloads."
+        ),
+        "remediation": (
+            "Microsoft Purview portal → Data loss prevention → Policies → "
+            "Create policy → use the recommended templates for your jurisdiction."
+        ),
+        "source": _manual_review_factory(
+            "bp_dlp_policies_enabled",
+            "DLP policies are enabled",
+            "Manual verification required. Run: Get-DlpCompliancePolicy | Where Mode -eq 'Enable'",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_PURVIEW_DLP],
+    },
+    {
+        "id": "bp_dlp_policies_teams",
+        "name": "DLP policies are enabled for Microsoft Teams",
+        "description": (
+            "DLP coverage of Teams chat and channel messages prevents "
+            "sensitive data leakage via collaboration."
+        ),
+        "remediation": (
+            "Microsoft Purview → DLP → New policy → include Teams chat and "
+            "channel messages location → enable in production mode."
+        ),
+        "source": _manual_review_factory(
+            "bp_dlp_policies_teams",
+            "DLP policies are enabled for Microsoft Teams",
+            "Manual verification required. Run: Get-DlpCompliancePolicy | Where TeamsLocation -ne $null",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_PURVIEW_DLP, CAP_TEAMS],
+    },
+    {
+        "id": "bp_zap_teams_on",
+        "name": "Zero-hour auto purge for Microsoft Teams is on",
+        "description": (
+            "ZAP retroactively removes malicious messages discovered after "
+            "delivery, reducing dwell time of Teams-borne threats."
+        ),
+        "remediation": "Set-TeamsProtectionPolicy -Identity 'Teams Protection Policy' -ZapEnabled $true",
+        "source": _manual_review_factory(
+            "bp_zap_teams_on",
+            "Zero-hour auto purge for Microsoft Teams is on",
+            "Manual verification required. Run: Get-TeamsProtectionPolicy | Select Name,ZapEnabled",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_DEFENDER_O365_P2, CAP_TEAMS],
+    },
+    # ------------------------------------------------------------------
+    # DNS / on-prem (manual-review)
+    # ------------------------------------------------------------------
+    {
+        "id": "bp_spf_records_published",
+        "name": "SPF records are published for all Exchange Online domains",
+        "description": (
+            "An SPF TXT record must exist for every sending domain so "
+            "recipients can verify that mail is sent from authorised servers."
+        ),
+        "remediation": (
+            "At your DNS registrar publish a TXT record for the domain root: "
+            "v=spf1 include:spf.protection.outlook.com -all"
+        ),
+        "source": _manual_review_factory(
+            "bp_spf_records_published",
+            "SPF records are published for all Exchange Online domains",
+            "Manual verification required. For each accepted domain query: "
+            "dig +short TXT <domain> | grep 'v=spf1'",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_dmarc_records_published",
+        "name": "DMARC records for all Exchange Online domains are published",
+        "description": (
+            "DMARC policies tell receivers what to do with mail that fails "
+            "SPF/DKIM and provides aggregate reporting on spoof attempts."
+        ),
+        "remediation": (
+            "At your DNS registrar publish a TXT record at _dmarc.<domain>: "
+            "v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>"
+        ),
+        "source": _manual_review_factory(
+            "bp_dmarc_records_published",
+            "DMARC records for all Exchange Online domains are published",
+            "Manual verification required. For each accepted domain query: "
+            "dig +short TXT _dmarc.<domain> | grep 'v=DMARC1'",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_onprem_password_protection",
+        "name": "Password protection is enabled for on-prem Active Directory",
+        "description": (
+            "Microsoft Entra Password Protection extends global and custom "
+            "banned password lists to on-prem AD via DC agents."
+        ),
+        "remediation": (
+            "Install the Azure AD Password Protection proxy and DC agents on "
+            "every domain controller, then in Entra portal → Authentication "
+            "methods → Password protection → set 'Mode' to Enforced and "
+            "'Enable password protection on Windows Server Active Directory' to Yes."
+        ),
+        "source": _manual_review_factory(
+            "bp_onprem_password_protection",
+            "Password protection is enabled for on-prem Active Directory",
+            "Manual verification required. On a domain controller run: "
+            "Get-AzureADPasswordProtectionDCAgent. Mark this check as N/A on "
+            "the company's exclusion list if the tenant is cloud-only.",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     # ------------------------------------------------------------------
     # CIS Microsoft Intune for Windows Benchmark checks
