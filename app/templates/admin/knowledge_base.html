@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Knowledge base admin{% endblock %}
 
@@ -11,12 +12,9 @@
 } %}
 
 {% block header_actions %}
-  <a class="button" href="/admin/knowledge-base/new">
-    <span class="button__icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a4 4 0 0 1 4 4v2h1.5a2.5 2.5 0 0 1 0 5H16v1h1.5a2.5 2.5 0 0 1 0 5H16v1a4 4 0 0 1-8 0v-1H6.5a2.5 2.5 0 0 1 0-5H8v-1H6.5a2.5 2.5 0 0 1 0-5H8V6a4 4 0 0 1 4-4zm-1 6V6a1 1 0 0 1 2 0v2h2a1 1 0 0 1 0 2h-2v3h2a1 1 0 0 1 0 2h-2v2a1 1 0 0 1-2 0v-2H9a1 1 0 0 1 0-2h2V8H9a1 1 0 0 1 0-2z"/></svg>
-    </span>
-    <span class="button__label">New article</span>
-  </a>
+  {{ page_header_actions([
+    {"label": "New article", "type": "link", "variant": "primary", "href": "/admin/knowledge-base/new"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

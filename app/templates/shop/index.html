@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 {% import "partials/stock_status.html" as stock_helpers %}
 
 {% set cart_allowed = (can_access_cart | default(false)) %}
@@ -16,14 +17,19 @@
 {% endblock %}
 
 {% block header_actions %}
+  {% set shop_index_actions = [] %}
   {% if cart_allowed %}
-    <a class="button button--ghost" href="/cart">
-      View cart{% if cart_summary.total_quantity %} ({{ cart_summary.total_quantity }}){% endif %}
-    </a>
+    {% set _ = shop_index_actions.append({
+      "label": ("View cart (" ~ cart_summary.total_quantity ~ ")") if cart_summary.total_quantity else "View cart",
+      "type": "link", "href": "/cart"
+    }) %}
   {% endif %}
   {% if is_shop_super_admin %}
-    <a class="button button--ghost" href="/admin/shop">Shop admin</a>
+    {% set _ = shop_index_actions.append({
+      "label": "Shop admin", "type": "link", "href": "/admin/shop"
+    }) %}
   {% endif %}
+  {{ page_header_actions(shop_index_actions) }}
 {% endblock %}
 
 {% block content %}

@@ -1,37 +1,18 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Compliance Checks{% endblock %}
 {% block title %}Compliance Checks{% endblock %}
 
 {% block header_actions %}
-  <div class="header-actions">
-    <select id="category-filter" class="form-input form-input--sm" aria-label="Filter by category">
-      <option value="">All categories</option>
-      {% for cat in categories %}
-      <option value="{{ cat.code }}">{{ cat.name }}</option>
-      {% endfor %}
-    </select>
-    <select id="status-filter" class="form-input form-input--sm" aria-label="Filter by status">
-      <option value="">All statuses</option>
-      <option value="not_started">Not started</option>
-      <option value="in_progress">In progress</option>
-      <option value="compliant">Compliant</option>
-      <option value="non_compliant">Non-compliant</option>
-      <option value="not_applicable">Not applicable</option>
-    </select>
-    <input
-      type="search"
-      id="text-filter"
-      class="form-input form-input--sm"
-      placeholder="Search checks…"
-      aria-label="Search checks"
-    />
-    {% if can_manage %}
-    <button type="button" class="button button--primary button--small" id="assign-check-btn">
-      Assign check
-    </button>
-    {% endif %}
-  </div>
+  {% set compliance_check_actions = [] %}
+  {% if can_manage %}
+    {% set _ = compliance_check_actions.append({
+      "label": "Assign check", "type": "button", "variant": "primary",
+      "attrs": {"id": "assign-check-btn", "aria-haspopup": "dialog", "aria-controls": "assign-modal"}
+    }) %}
+  {% endif %}
+  {{ page_header_actions(compliance_check_actions) }}
 {% endblock %}
 
 {% block content %}
@@ -66,6 +47,31 @@
 
     {# Assignments table #}
     <div class="card card--panel">
+      <header class="card__header">
+        <div class="card__controls">
+          <select id="category-filter" class="form-input form-input--sm" aria-label="Filter by category">
+            <option value="">All categories</option>
+            {% for cat in categories %}
+            <option value="{{ cat.code }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+          <select id="status-filter" class="form-input form-input--sm" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="not_started">Not started</option>
+            <option value="in_progress">In progress</option>
+            <option value="compliant">Compliant</option>
+            <option value="non_compliant">Non-compliant</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+          <input
+            type="search"
+            id="text-filter"
+            class="form-input form-input--sm"
+            placeholder="Search checks…"
+            aria-label="Search checks"
+          />
+        </div>
+      </header>
       <div class="table-wrapper">
         <table class="table compliance-checks-table" id="checks-table">
           <thead>

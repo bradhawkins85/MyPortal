@@ -1,11 +1,14 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Best Practices Settings{% endblock %}
 
 {% block title %}Best Practices Settings – Office 365{% endblock %}
 
 {% block header_actions %}
-  <a href="/m365/best-practices" class="button button--ghost">Back to Best Practices</a>
+  {{ page_header_actions([
+    {"label": "Back to Best Practices", "type": "link", "href": "/m365/best-practices"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}CIS benchmarks{% endblock %}
 
@@ -6,12 +7,10 @@
 
 {% block header_actions %}
   {% if has_credentials %}
-  <form method="post" action="/m365/benchmarks/run" style="display:inline">
-    {% if csrf_token %}
-    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-    {% endif %}
-    <button type="submit" class="button">Run benchmarks</button>
-  </form>
+    {{ page_header_actions([
+      {"label": "Run benchmarks", "type": "form", "variant": "primary",
+       "action": "/m365/benchmarks/run", "method": "post"}
+    ]) }}
   {% endif %}
 {% endblock %}
 

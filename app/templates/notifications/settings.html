@@ -1,9 +1,12 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block title %}Notification settings{% endblock %}
 
 {% block header_actions %}
-  <a href="/notifications" class="button button--ghost">Back to feed</a>
+  {{ page_header_actions([
+    {"label": "Back to feed", "type": "link", "href": "/notifications"}
+  ]) }}
 {% endblock %}
 
 {% block content %}
