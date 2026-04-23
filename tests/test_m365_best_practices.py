@@ -2193,6 +2193,67 @@ async def test_check_users_cannot_create_security_groups_fail():
 
 
 # ---------------------------------------------------------------------------
+# User consent to apps check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_user_consent_disallowed_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "defaultUserRolePermissions": {"permissionGrantPoliciesAssigned": []}
+        },
+    ):
+        result = await bp_service._check_user_consent_disallowed("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_user_consent_disallowed_fail_legacy_policy():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "defaultUserRolePermissions": {
+                "permissionGrantPoliciesAssigned": ["microsoft-user-default-legacy"]
+            }
+        },
+    ):
+        result = await bp_service._check_user_consent_disallowed("token")
+    assert result["status"] == "fail"
+    assert "microsoft-user-default-legacy" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_user_consent_disallowed_fail_lowrisk_policy():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "defaultUserRolePermissions": {
+                "permissionGrantPoliciesAssigned": ["microsoft-user-default-lowrisk"]
+            }
+        },
+    ):
+        result = await bp_service._check_user_consent_disallowed("token")
+    assert result["status"] == "fail"
+    assert "microsoft-user-default-lowrisk" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_user_consent_disallowed_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("network error"),
+    ):
+        result = await bp_service._check_user_consent_disallowed("token")
+    assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Quarantine notification check
 # ---------------------------------------------------------------------------
 
