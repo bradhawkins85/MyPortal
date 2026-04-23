@@ -1,13 +1,12 @@
 """Tests for the Microsoft 365 enterprise app provisioning service."""
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from unittest.mock import AsyncMock, patch
 from typing import Any
 
 from app.services import m365 as m365_service
+from tests.conftest import drain_provision_background_tasks
 
 
 @pytest.fixture
@@ -37,19 +36,6 @@ def _make_role_assignment() -> dict[str, Any]:
 
 def _make_secret_data(secret: str = "plain-text-secret") -> dict[str, Any]:
     return {"secretText": secret}
-
-
-async def _drain_provision_background_tasks() -> None:
-    """Await any pending ``provision_roles_*`` background tasks created by
-    :func:`provision_app_registration`.  Only waits for our own named tasks so
-    that long-running test-framework tasks are not accidentally gathered."""
-    tasks = [
-        t for t in asyncio.all_tasks()
-        if (t.get_name() or "").startswith("provision_roles_")
-        and not t.done()
-    ]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +122,7 @@ async def test_provision_app_registration_success():
             display_name="MyPortal – Acme Corp",
         )
         # Drain the background role-grant task while mocks are still active
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     assert result["client_id"] == "provisioned-client-id"
     assert result["client_secret"] == "provisioned-secret"
@@ -208,7 +194,7 @@ async def test_provision_app_registration_default_display_name():
     ):
         await m365_service.provision_app_registration(access_token="token")
         # Drain background role-grant task while mocks are still active
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     app_create = next(
         p for p in captured_payloads
@@ -252,7 +238,7 @@ async def test_provision_app_registration_registers_redirect_uri():
             redirect_uri=redirect_uri,
         )
         # Drain background role-grant task while mocks are still active
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     app_create = next(
         p for p in captured_payloads
@@ -294,7 +280,7 @@ async def test_provision_app_registration_no_redirect_uri_when_not_provided():
     ):
         await m365_service.provision_app_registration(access_token="token")
         # Drain background role-grant task while mocks are still active
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     app_create = next(
         p for p in captured_payloads

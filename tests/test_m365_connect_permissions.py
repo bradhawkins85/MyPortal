@@ -5,7 +5,6 @@ mailbox sync) are added to existing app registrations automatically.
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -13,24 +12,12 @@ import pytest
 
 from app.services import m365 as m365_service
 from app.services.m365 import _PROVISION_APP_ROLES, M365Error, _EXO_MANAGE_AS_APP_ROLE
+from tests.conftest import drain_provision_background_tasks
 
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-async def _drain_provision_background_tasks() -> None:
-    """Await any pending ``provision_roles_*`` background tasks created by
-    :func:`provision_app_registration` so assertions can check calls made
-    inside the background task while mocks are still active."""
-    tasks = [
-        t for t in asyncio.all_tasks()
-        if (t.get_name() or "").startswith("provision_roles_")
-        and not t.done()
-    ]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +292,7 @@ async def test_provision_app_registration_skips_409_role_assignments():
             access_token="admin-token",
             display_name="Test App",
         )
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     assert result["client_id"] == "new-client-id"
     assert result["client_secret"] == "test-secret"

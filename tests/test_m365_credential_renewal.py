@@ -1,32 +1,18 @@
 """Tests for Microsoft 365 client credential automatic renewal."""
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from datetime import date, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services import m365 as m365_service
+from tests.conftest import drain_provision_background_tasks
 
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-async def _drain_provision_background_tasks() -> None:
-    """Await any pending ``provision_roles_*`` background tasks created by
-    :func:`provision_app_registration` so that assertions can check calls made
-    inside the background task while mocks are still active."""
-    tasks = [
-        t for t in asyncio.all_tasks()
-        if (t.get_name() or "").startswith("provision_roles_")
-        and not t.done()
-    ]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +102,7 @@ async def test_provision_uses_configurable_lifetime():
         patch("app.services.m365.get_settings", return_value=mock_settings),
     ):
         result = await m365_service.provision_app_registration(access_token="tok")
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     # The secret expiry passed to addPassword should be ~365 days from today
     add_password_call = next(
@@ -160,7 +146,7 @@ async def test_provision_adds_sp_as_owner():
         patch.object(m365_service, "_graph_get", side_effect=mock_get),
     ):
         await m365_service.provision_app_registration(access_token="tok")
-        await _drain_provision_background_tasks()
+        await drain_provision_background_tasks()
 
     assert len(owner_calls) == 1
     owner_payload = owner_calls[0]["payload"]
