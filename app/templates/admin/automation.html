@@ -1,18 +1,15 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}
-  <div class="header__title-content">
-    <span class="header__title-text">{{ title | default('System Automation') }}</span>
-    <button
-      type="button"
-      class="button button--primary button--small header__title-button"
-      data-task-create
-      aria-haspopup="dialog"
-      aria-controls="task-editor-modal"
-    >
-      New task
-    </button>
-  </div>
+  <span class="header__title-text">{{ title | default('System Automation') }}</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New task", "type": "button", "variant": "primary",
+     "attrs": {"data-task-create": "", "aria-haspopup": "dialog", "aria-controls": "task-editor-modal"}}
+  ]) }}
 {% endblock %}
 
 {% block content %}

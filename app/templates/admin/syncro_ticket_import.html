@@ -1,6 +1,13 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Syncro ticket import{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Modules", "type": "link", "href": "/admin/modules"}
+  ]) }}
+{% endblock %}
 
 {% block content %}
   {% set module = syncro_module or {} %}
