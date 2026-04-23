@@ -1805,6 +1805,53 @@ async def _check_smtp_auth_disabled(
                    "SMTP AUTH is enabled tenant-wide; disable via Set-TransportConfig -SmtpClientAuthenticationDisabled $true.")
 
 
+async def _check_automatic_email_forwarding(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that automatic email forwarding to external recipients is system-controlled.
+
+    Calls ``Get-RemoteDomain`` and inspects the ``AutoForwardEnabled`` property
+    on the Default remote domain.  When ``AutoForwardEnabled`` is ``False`` the
+    tenant blocks users from automatically forwarding email to external addresses,
+    ensuring that forwarding rules are set only by administrators.
+
+    This is the CIS Microsoft 365 Foundations Benchmark recommendation for
+    "Set automatic email forwarding rules to be system controlled."
+    """
+    check_id = "bp_automatic_email_forwarding"
+    check_name = "Automatic email forwarding to external recipients is system-controlled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-RemoteDomain")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-RemoteDomain: {exc}")
+    rows = data.get("value") or []
+    # Find the Default remote domain entry
+    default_domain = next(
+        (r for r in rows if isinstance(r, dict)
+         and str(r.get("Identity") or r.get("Name") or "").lower() == "default"),
+        None,
+    )
+    if default_domain is None:
+        # Fall back to inspecting all domains if Default is not explicitly labelled
+        if not rows:
+            return _result(check_id, check_name, STATUS_UNKNOWN,
+                           "No remote domain entries returned by Get-RemoteDomain.")
+        default_domain = rows[0] if isinstance(rows[0], dict) else {}
+    auto_forward = default_domain.get("AutoForwardEnabled")
+    if auto_forward is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AutoForwardEnabled is False on the Default remote domain; "
+                       "automatic email forwarding to external recipients is blocked.")
+    if auto_forward is True:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "AutoForwardEnabled is True on the Default remote domain. "
+                       "Users can automatically forward mail to external addresses. "
+                       "Run: Set-RemoteDomain -Identity Default -AutoForwardEnabled $false")
+    return _result(check_id, check_name, STATUS_UNKNOWN,
+                   "Unable to determine AutoForwardEnabled state for the Default remote domain.")
+
+
 async def _check_dkim_enabled_all_domains(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -3328,6 +3375,31 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_cmdlet": "Set-TransportConfig",
         "remediation_params": {"SmtpClientAuthenticationDisabled": True},
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_automatic_email_forwarding",
+        "name": "Automatic email forwarding to external recipients is system-controlled",
+        "description": (
+            "When AutoForwardEnabled is True on the Default remote domain, users "
+            "can configure inbox rules or mailbox settings to silently forward all "
+            "email to an external address. This is a common data-exfiltration "
+            "technique used by attackers after gaining access to a mailbox. "
+            "Disabling automatic forwarding at the transport layer ensures that "
+            "only administrators can establish legitimate forwarding, giving the "
+            "organisation full control over outbound mail flow."
+        ),
+        "remediation": (
+            "Disable automatic external forwarding for the Default remote domain:\n"
+            "Set-RemoteDomain -Identity Default -AutoForwardEnabled $false"
+        ),
+        "source": _check_automatic_email_forwarding,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-RemoteDomain",
+        "remediation_params": {"Identity": "Default", "AutoForwardEnabled": False},
+        "is_cis_benchmark": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {

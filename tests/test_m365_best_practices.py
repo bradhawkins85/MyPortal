@@ -3464,3 +3464,90 @@ def test_block_users_message_limit_catalog_entry():
     assert "source" not in entry
     assert "remediation_cmdlet" not in entry
     assert "remediation_params" not in entry
+
+
+# ---------------------------------------------------------------------------
+# _check_automatic_email_forwarding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_automatic_email_forwarding_pass_when_disabled():
+    """PASS when AutoForwardEnabled is False on the Default remote domain."""
+    from app.services.m365_best_practices import _check_automatic_email_forwarding
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"Identity": "Default", "AutoForwardEnabled": False}]},
+    ):
+        result = await _check_automatic_email_forwarding("exo-token", "tenant-id")
+
+    assert result["status"] == "pass"
+    assert result["check_id"] == "bp_automatic_email_forwarding"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_automatic_email_forwarding_fail_when_enabled():
+    """FAIL when AutoForwardEnabled is True on the Default remote domain."""
+    from app.services.m365_best_practices import _check_automatic_email_forwarding
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"Identity": "Default", "AutoForwardEnabled": True}]},
+    ):
+        result = await _check_automatic_email_forwarding("exo-token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "AutoForwardEnabled" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_automatic_email_forwarding_unknown_on_exo_error():
+    """UNKNOWN when EXO command raises M365Error."""
+    from app.services.m365_best_practices import _check_automatic_email_forwarding
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=bp_service.M365Error("EXO unavailable"),
+    ):
+        result = await _check_automatic_email_forwarding("exo-token", "tenant-id")
+
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_automatic_email_forwarding_unknown_when_empty():
+    """UNKNOWN when no remote domain rows are returned."""
+    from app.services.m365_best_practices import _check_automatic_email_forwarding
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": []},
+    ):
+        result = await _check_automatic_email_forwarding("exo-token", "tenant-id")
+
+    assert result["status"] == "unknown"
+
+
+def test_automatic_email_forwarding_in_catalog():
+    """bp_automatic_email_forwarding must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp.get("id") for bp in catalog}
+    assert "bp_automatic_email_forwarding" in ids
+
+
+def test_automatic_email_forwarding_catalog_entry():
+    """bp_automatic_email_forwarding catalog entry must have the expected fields."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_automatic_email_forwarding")
+    assert entry.get("has_remediation") is True
+    assert entry.get("default_enabled") is True
+    assert "AutoForwardEnabled" in entry["remediation"]
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
