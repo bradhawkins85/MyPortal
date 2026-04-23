@@ -283,6 +283,13 @@ _REMEDIATION: dict[str, str] = {
         "Entra portal → Protection → Authentication methods → Policies → enable "
         "modern methods such as Microsoft Authenticator and FIDO2 security keys."
     ),
+    "bp_restrict_anon_users_start_meeting": (
+        "Prevent anonymous users from starting Teams meetings: "
+        "Teams admin centre → Meetings → Meeting policies → Global → Participants & guests → "
+        "set 'Let anonymous people start a meeting' to Off. "
+        "Or via PowerShell: Set-CsTeamsMeetingPolicy -Identity Global "
+        "-AllowAnonymousUsersToStartMeeting $false"
+    ),
 }
 
 
