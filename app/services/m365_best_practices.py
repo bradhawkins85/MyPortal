@@ -2456,8 +2456,15 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "reset enabled = All."
         ),
         "source": _check_sspr_enabled,
+        "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _AUTHORIZATION_POLICY_URL,
+        "remediation_payload": {
+            "defaultUserRolePermissions": {
+                "allowedToUseSspr": True,
+            },
+        },
         "is_cis_benchmark": True,
     },
     {
