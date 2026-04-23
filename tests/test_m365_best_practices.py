@@ -1924,6 +1924,10 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_third_party_storage_owa",
     "bp_idle_session_timeout_3h",
     "bp_shared_mailbox_signin_blocked",
+    "bp_antiphish_impersonated_domain_protection",
+    "bp_antiphish_impersonated_user_protection",
+    "bp_antiphish_quarantine_impersonated_domain",
+    "bp_antiphish_quarantine_impersonated_user",
     # SharePoint Online / OneDrive
     "bp_external_content_sharing_restricted",
     "bp_sharepoint_external_sharing_restricted",
@@ -2294,11 +2298,59 @@ def test_service_plan_to_capabilities_includes_new_capabilities():
 
 
 # ---------------------------------------------------------------------------
+# Anti-phishing impersonation checks
 # _check_mailbox_auditing_enabled_all_users
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio("asyncio")
+async def test_antiphish_impersonated_domain_protection_pass():
+    """Pass when at least one policy has EnableTargetedDomainsProtection True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {"Name": "Office365 AntiPhish Default", "EnableTargetedDomainsProtection": True}
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_impersonated_domain_protection(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_impersonated_domain_protection_fail():
+    """Fail when no policy has EnableTargetedDomainsProtection True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {"Name": "Office365 AntiPhish Default", "EnableTargetedDomainsProtection": False}
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_impersonated_domain_protection(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_impersonated_domain_protection_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    from app.services.m365 import M365Error
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("connection refused"),
+    ):
+        result = await bp_service._check_antiphish_impersonated_domain_protection(
+            "exo-token", "tenant-123"
 async def test_check_mailbox_auditing_enabled_pass_when_all_enabled():
     with patch(
         "app.services.m365_best_practices._exo_invoke_command",
@@ -2346,6 +2398,53 @@ async def test_check_mailbox_auditing_enabled_unknown_when_no_mailboxes():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_antiphish_impersonated_user_protection_pass():
+    """Pass when at least one policy has EnableTargetedUserProtection True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {"Name": "Office365 AntiPhish Default", "EnableTargetedUserProtection": True}
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_impersonated_user_protection(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_impersonated_user_protection_fail():
+    """Fail when no policy has EnableTargetedUserProtection True."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {"Name": "Office365 AntiPhish Default", "EnableTargetedUserProtection": False}
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_impersonated_user_protection(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_impersonated_user_protection_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    from app.services.m365 import M365Error
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("timeout"),
+    ):
+        result = await bp_service._check_antiphish_impersonated_user_protection(
+            "exo-token", "tenant-123"
 async def test_check_mailbox_auditing_enabled_unknown_on_exo_error():
     with patch(
         "app.services.m365_best_practices._exo_invoke_command",
@@ -2358,6 +2457,120 @@ async def test_check_mailbox_auditing_enabled_unknown_on_exo_error():
     assert result["status"] == "unknown"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_quarantine_impersonated_domain_pass():
+    """Pass when at least one policy has TargetedDomainProtectionAction == Quarantine."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "TargetedDomainProtectionAction": "Quarantine",
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_quarantine_impersonated_domain(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_quarantine_impersonated_domain_fail():
+    """Fail when no policy has TargetedDomainProtectionAction == Quarantine."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "TargetedDomainProtectionAction": "MoveToJmf",
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_quarantine_impersonated_domain(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_quarantine_impersonated_domain_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    from app.services.m365 import M365Error
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("service unavailable"),
+    ):
+        result = await bp_service._check_antiphish_quarantine_impersonated_domain(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_quarantine_impersonated_user_pass():
+    """Pass when at least one policy has TargetedUserProtectionAction == Quarantine."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "TargetedUserProtectionAction": "Quarantine",
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_quarantine_impersonated_user(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_quarantine_impersonated_user_fail():
+    """Fail when no policy has TargetedUserProtectionAction == Quarantine."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "TargetedUserProtectionAction": "MoveToJmf",
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_quarantine_impersonated_user(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_antiphish_quarantine_impersonated_user_unknown_on_error():
+    """Return unknown when the EXO command raises M365Error."""
+    from app.services.m365 import M365Error
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("internal server error"),
+    ):
+        result = await bp_service._check_antiphish_quarantine_impersonated_user(
+            "exo-token", "tenant-123"
+        )
+    assert result["status"] == "unknown"
 # ---------------------------------------------------------------------------
 # _remediate_foreach_mailbox
 # ---------------------------------------------------------------------------

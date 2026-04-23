@@ -1566,6 +1566,106 @@ async def _check_mailbox_audit_actions(
                    f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(bad[:5]))
 
 
+async def _check_antiphish_impersonated_domain_protection(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_impersonated_domain_protection"
+    check_name = "Anti-phishing impersonated domain protection is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    enabled = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("EnableTargetedDomainsProtection") is True
+    ]
+    if enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Impersonated domain protection is enabled in: {', '.join(enabled[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has EnableTargetedDomainsProtection set to True. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-EnableTargetedDomainsProtection $true")
+
+
+async def _check_antiphish_impersonated_user_protection(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_impersonated_user_protection"
+    check_name = "Anti-phishing impersonated user protection is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    enabled = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("EnableTargetedUserProtection") is True
+    ]
+    if enabled:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Impersonated user protection is enabled in: {', '.join(enabled[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has EnableTargetedUserProtection set to True. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-EnableTargetedUserProtection $true")
+
+
+async def _check_antiphish_quarantine_impersonated_domain(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_quarantine_impersonated_domain"
+    check_name = "Messages from impersonated domains are quarantined"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    quarantine = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict)
+        and str(r.get("TargetedDomainProtectionAction") or "").lower() == "quarantine"
+    ]
+    if quarantine:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Impersonated-domain messages are quarantined in: {', '.join(quarantine[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has TargetedDomainProtectionAction set to Quarantine. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-TargetedDomainProtectionAction Quarantine")
+
+
+async def _check_antiphish_quarantine_impersonated_user(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_antiphish_quarantine_impersonated_user"
+    check_name = "Messages from impersonated users are quarantined"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-AntiPhishPolicy: {exc}")
+    rows = data.get("value") or []
+    quarantine = [
+        r.get("Name") or r.get("Identity") or "?"
+        for r in rows
+        if isinstance(r, dict)
+        and str(r.get("TargetedUserProtectionAction") or "").lower() == "quarantine"
+    ]
+    if quarantine:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"Impersonated-user messages are quarantined in: {', '.join(quarantine[:5])}.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "No anti-phishing policy has TargetedUserProtectionAction set to Quarantine. "
+                   "Run: Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+                   "-TargetedUserProtectionAction Quarantine")
 async def _check_mailbox_auditing_enabled_all_users(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -2745,6 +2845,78 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
+        "id": "bp_antiphish_impersonated_domain_protection",
+        "name": "Anti-phishing impersonated domain protection is enabled",
+        "description": (
+            "Enabling targeted domain protection in anti-phishing policies "
+            "allows Microsoft Defender to identify and act on messages that "
+            "spoof domains you own or that you have added to the protected "
+            "domains list."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-EnableTargetedDomainsProtection $true "
+            "-TargetedDomainsToProtect @('<yourdomain.com>')"
+        ),
+        "source": _check_antiphish_impersonated_domain_protection,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_antiphish_impersonated_user_protection",
+        "name": "Anti-phishing impersonated user protection is enabled",
+        "description": (
+            "Enabling targeted user protection in anti-phishing policies "
+            "allows Microsoft Defender to identify and act on messages that "
+            "impersonate specific high-value users such as executives."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-EnableTargetedUserProtection $true "
+            "-TargetedUsersToProtect @('<user@yourdomain.com>')"
+        ),
+        "source": _check_antiphish_impersonated_user_protection,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_antiphish_quarantine_impersonated_domain",
+        "name": "Messages from impersonated domains are quarantined",
+        "description": (
+            "When targeted domain protection is active, the detection action "
+            "should be set to Quarantine so impersonation attempts are "
+            "isolated rather than merely flagged."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-TargetedDomainProtectionAction Quarantine"
+        ),
+        "source": _check_antiphish_quarantine_impersonated_domain,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_antiphish_quarantine_impersonated_user",
+        "name": "Messages from impersonated users are quarantined",
+        "description": (
+            "When targeted user protection is active, the detection action "
+            "should be set to Quarantine so impersonation attempts are "
+            "isolated rather than merely flagged."
+        ),
+        "remediation": (
+            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "-TargetedUserProtectionAction Quarantine"
+        ),
+        "source": _check_antiphish_quarantine_impersonated_user,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": False,
         "id": "bp_quarantine_notification_enabled",
         "name": "End-user spam quarantine notifications are enabled with a daily frequency",
         "description": (
