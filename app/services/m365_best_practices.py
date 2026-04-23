@@ -3657,6 +3657,25 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_TEAMS],
     },
     {
+        "id": "bp_invited_users_auto_admitted",
+        "name": "Only invited users should be automatically admitted to Teams meetings",
+        "description": (
+            "AutoAdmittedUsers should be set to InvitedUsers so that only "
+            "people who were explicitly invited to a meeting are admitted "
+            "automatically; all other participants wait in the lobby."
+        ),
+        "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers InvitedUsers",
+        "source": _manual_review_factory(
+            "bp_invited_users_auto_admitted",
+            "Only invited users should be automatically admitted to Teams meetings",
+            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AutoAdmittedUsers",
+        ),
+        "source_type": "graph",
+        "default_enabled": True,
+        "has_remediation": False,
+        "requires_licenses": [CAP_TEAMS],
+    },
+    {
         "id": "bp_dialin_cannot_bypass_lobby",
         "name": "Users dialing in can't bypass the lobby",
         "description": (
