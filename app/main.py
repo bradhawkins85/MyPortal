@@ -11828,6 +11828,8 @@ async def m365_reset_staff_password(staff_id: int, request: Request):
     try:
         new_password = await m365_service.reset_user_password(staff_company_id, email)
     except m365_service.M365Error as exc:
+        if exc.http_status == 403:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     await audit_service.log_action(
         entity_type="staff",
