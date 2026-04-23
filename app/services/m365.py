@@ -1213,119 +1213,12 @@ async def provision_app_registration(
         )
     graph_sp_id: str = graph_sp_list[0]["id"]
 
-    # 4. Grant admin consent for each required application permission.
-    # 409 Conflict means the assignment already exists (e.g. an earlier partial
-    # provision or Microsoft Graph eventual-consistency behaviour) – treat it as
-    # success and continue so that the remaining roles are still processed.
-    for role_id in _PROVISION_APP_ROLES:
-        try:
-            await _post_app_role_assignment_with_retry(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                {
-                    "principalId": sp_object_id,
-                    "resourceId": graph_sp_id,
-                    "appRoleId": role_id,
-                },
-            )
-        except M365Error as exc:
-            if exc.http_status == 409:
-                log_info(
-                    "App role assignment already exists, skipping",
-                    role_id=role_id,
-                    sp_object_id=sp_object_id,
-                )
-            else:
-                raise
-    log_info(
-        "Granted admin consent for provisioned M365 app",
-        sp_object_id=sp_object_id,
-    )
-
-    # 4b. Grant Exchange Online Exchange.ManageAsApp role (best-effort).
-    # This enables Get-MailboxPermission via the Exchange Online PowerShell
-    # REST API.  The grant is non-fatal so provisioning still succeeds even
-    # when the Exchange Online service principal is absent from the tenant.
-    try:
-        exo_sp_response = await _graph_get(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals"
-            f"?$filter=appId eq '{_EXO_APP_ID}'&$select=id",
-        )
-        exo_sp_list = exo_sp_response.get("value", [])
-        if exo_sp_list:
-            exo_sp_id: str = exo_sp_list[0]["id"]
-            try:
-                await _post_app_role_assignment_with_retry(
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                    {
-                        "principalId": sp_object_id,
-                        "resourceId": exo_sp_id,
-                        "appRoleId": _EXO_MANAGE_AS_APP_ROLE,
-                    },
-                )
-                log_info(
-                    "Granted Exchange.ManageAsApp role",
-                    sp_object_id=sp_object_id,
-                )
-            except M365Error as exc:
-                if exc.http_status == 409:
-                    log_info(
-                        "Exchange.ManageAsApp role already assigned, skipping",
-                        sp_object_id=sp_object_id,
-                    )
-                else:
-                    log_error(
-                        "Failed to grant Exchange.ManageAsApp role; "
-                        "Get-MailboxPermission will not be available",
-                        error=str(exc),
-                    )
-        else:
-            log_info(
-                "Exchange Online service principal not found in tenant; "
-                "skipping Exchange.ManageAsApp role grant",
-            )
-    except M365Error as exc:
-        log_error(
-            "Failed to look up Exchange Online service principal; "
-            "Get-MailboxPermission will not be available",
-            error=str(exc),
-        )
-
-    # 4c. Assign Exchange Administrator directory role (best-effort).
-    # Exchange Online PowerShell cmdlets require an Exchange RBAC role in
-    # addition to the Exchange.ManageAsApp app role.
-    await _ensure_exchange_admin_role(access_token, sp_object_id)
-
-    # 5. Add the service principal as an owner of the app registration so it
-    #    can call addPassword on itself (Application.ReadWrite.OwnedBy requires ownership).
-    try:
-        await _graph_post(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
-            {
-                "@odata.id": (
-                    f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
-                )
-            },
-        )
-        log_info(
-            "Added service principal as owner of M365 app registration",
-            app_object_id=app_object_id,
-            sp_object_id=sp_object_id,
-        )
-    except M365Error as exc:
-        # Non-fatal: the app will still work but automatic secret renewal won't
-        # be available until this is resolved.
-        log_error(
-            "Failed to add SP as owner of M365 app registration; "
-            "automatic secret renewal will not be available",
-            app_object_id=app_object_id,
-            error=str(exc),
-        )
-
-    # 6. Create a client secret with a configurable lifetime (default: 730 days / 2 years)
+    # 4. Create a client secret with a configurable lifetime (default: 730 days / 2 years).
+    # This is done *before* the role-assignment step so that the HTTP callback
+    # can return credentials to the caller immediately.  Role grants are
+    # submitted as a background asyncio task to avoid blocking the HTTP request
+    # for the full Graph propagation retry window (up to ~3 minutes on slow
+    # tenants), which would cause 504 gateway timeouts.
     secret_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
     secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
     secret_data = await _graph_post(
@@ -1351,6 +1244,15 @@ async def provision_app_registration(
         expires_at=secret_expiry_str,
     )
 
+    # 5. Schedule role assignments and SP owner setup as a background task so
+    #    the HTTP callback response is not held open during Graph propagation
+    #    retries.  The grants are best-effort: if they fail the app registration
+    #    is still usable and the admin can re-provision to retry.
+    asyncio.create_task(
+        _grant_provisioned_roles(access_token, sp_object_id, graph_sp_id, app_object_id),
+        name=f"provision_roles_{client_id}",
+    )
+
     return {
         "client_id": client_id,
         "client_secret": client_secret,
@@ -1358,6 +1260,144 @@ async def provision_app_registration(
         "client_secret_key_id": client_secret_key_id,
         "client_secret_expires_at": client_secret_expires_at,
     }
+
+
+async def _grant_provisioned_roles(
+    access_token: str,
+    sp_object_id: str,
+    graph_sp_id: str,
+    app_object_id: str,
+) -> None:
+    """Background task: grant all required role assignments for a newly-provisioned app.
+
+    Runs after :func:`provision_app_registration` returns so the HTTP callback
+    response is not blocked by Microsoft Graph propagation retries (which can
+    take several minutes on slow tenants).  All failures are logged but never
+    raised – the app registration is usable even if some grants fail initially,
+    and the admin can re-provision to retry.
+
+    Grants in order:
+    1. All ``_PROVISION_APP_ROLES`` application permissions on Microsoft Graph.
+    2. ``Exchange.ManageAsApp`` on Exchange Online (best-effort).
+    3. Exchange Administrator directory role (best-effort).
+    4. Service-principal as owner of the app registration (enables secret
+       self-renewal via ``Application.ReadWrite.OwnedBy``).
+    """
+    try:
+        # 1. Grant each required Microsoft Graph application permission.
+        # 409 Conflict means the assignment already exists – treat as success.
+        # Any other error is logged and skipped so remaining roles still process.
+        for role_id in _PROVISION_APP_ROLES:
+            try:
+                await _post_app_role_assignment_with_retry(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                    {
+                        "principalId": sp_object_id,
+                        "resourceId": graph_sp_id,
+                        "appRoleId": role_id,
+                    },
+                )
+            except M365Error as exc:
+                if exc.http_status == 409:
+                    log_info(
+                        "App role assignment already exists, skipping",
+                        role_id=role_id,
+                        sp_object_id=sp_object_id,
+                    )
+                else:
+                    log_error(
+                        "Failed to grant app role assignment during provisioning",
+                        role_id=role_id,
+                        sp_object_id=sp_object_id,
+                        error=str(exc),
+                    )
+        log_info(
+            "Granted admin consent for provisioned M365 app",
+            sp_object_id=sp_object_id,
+        )
+
+        # 2. Grant Exchange Online Exchange.ManageAsApp role (best-effort).
+        try:
+            exo_sp_response = await _graph_get(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals"
+                f"?$filter=appId eq '{_EXO_APP_ID}'&$select=id",
+            )
+            exo_sp_list = exo_sp_response.get("value", [])
+            if exo_sp_list:
+                exo_sp_id: str = exo_sp_list[0]["id"]
+                try:
+                    await _post_app_role_assignment_with_retry(
+                        access_token,
+                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                        {
+                            "principalId": sp_object_id,
+                            "resourceId": exo_sp_id,
+                            "appRoleId": _EXO_MANAGE_AS_APP_ROLE,
+                        },
+                    )
+                    log_info(
+                        "Granted Exchange.ManageAsApp role",
+                        sp_object_id=sp_object_id,
+                    )
+                except M365Error as exc:
+                    if exc.http_status == 409:
+                        log_info(
+                            "Exchange.ManageAsApp role already assigned, skipping",
+                            sp_object_id=sp_object_id,
+                        )
+                    else:
+                        log_error(
+                            "Failed to grant Exchange.ManageAsApp role; "
+                            "Get-MailboxPermission will not be available",
+                            error=str(exc),
+                        )
+            else:
+                log_info(
+                    "Exchange Online service principal not found in tenant; "
+                    "skipping Exchange.ManageAsApp role grant",
+                )
+        except M365Error as exc:
+            log_error(
+                "Failed to look up Exchange Online service principal; "
+                "Get-MailboxPermission will not be available",
+                error=str(exc),
+            )
+
+        # 3. Assign Exchange Administrator directory role (best-effort).
+        await _ensure_exchange_admin_role(access_token, sp_object_id)
+
+        # 4. Add the service principal as an owner of the app registration so it
+        #    can call addPassword on itself (Application.ReadWrite.OwnedBy).
+        try:
+            await _graph_post(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
+                {
+                    "@odata.id": (
+                        f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
+                    )
+                },
+            )
+            log_info(
+                "Added service principal as owner of M365 app registration",
+                app_object_id=app_object_id,
+                sp_object_id=sp_object_id,
+            )
+        except M365Error as exc:
+            log_error(
+                "Failed to add SP as owner of M365 app registration; "
+                "automatic secret renewal will not be available",
+                app_object_id=app_object_id,
+                error=str(exc),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log_error(
+            "_grant_provisioned_roles: unexpected error in background role grant",
+            sp_object_id=sp_object_id,
+            error=str(exc),
+        )
 
 
 async def renew_client_secret(company_id: int) -> None:
