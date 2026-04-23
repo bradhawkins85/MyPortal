@@ -1,6 +1,7 @@
 """Tests for the Microsoft 365 Best Practices service."""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
@@ -1871,3 +1872,309 @@ async def test_get_last_results_filters_excluded_checks():
     result_ids = {r["check_id"] for r in results}
     assert shown_id in result_ids
     assert hidden_id not in result_ids
+
+
+# ---------------------------------------------------------------------------
+# Expanded best-practice catalog (65 additional checks)
+# ---------------------------------------------------------------------------
+
+
+# A representative sample of the new check ids that must appear in the catalog
+_EXPECTED_NEW_CHECK_IDS = {
+    # Graph identity / CA / PIM / auth-methods
+    "bp_per_user_mfa_disabled",
+    "bp_dynamic_group_for_guests",
+    "bp_managed_device_required_auth",
+    "bp_managed_device_required_secinfo_reg",
+    "bp_access_reviews_guest_users",
+    "bp_access_reviews_privileged_roles",
+    "bp_admin_accounts_cloud_only",
+    "bp_admin_accounts_reduced_license",
+    "bp_all_members_mfa_capable",
+    "bp_approval_required_ga_activation",
+    "bp_approval_required_pra_activation",
+    "bp_collab_invitations_allowed_domains",
+    "bp_custom_banned_passwords",
+    "bp_password_expiry_never_expire",
+    "bp_email_otp_disabled",
+    "bp_user_consent_apps_disallowed",
+    "bp_users_cannot_create_security_groups",
+    "bp_users_restricted_bitlocker_recovery",
+    "bp_only_managed_public_groups",
+    "bp_pim_used_to_manage_roles",
+    "bp_phishing_resistant_mfa_admins",
+    "bp_security_defaults_appropriate",
+    "bp_signin_freq_intune_enrollment",
+    "bp_signin_freq_admin_browser_no_persist",
+    "bp_system_preferred_mfa",
+    "bp_authenticator_mfa_fatigue",
+    "bp_weak_auth_methods_disabled",
+    "bp_internal_phishing_forms",
+    "bp_laps_enabled",
+    "bp_two_emergency_access_accounts",
+    # Exchange Online
+    "bp_audit_bypass_disabled_mailboxes",
+    "bp_audit_disabled_org_false",
+    "bp_audit_log_search_enabled",
+    "bp_mailbox_audit_actions",
+    "bp_modern_auth_exo",
+    "bp_smtp_auth_disabled",
+    "bp_dkim_enabled_all_domains",
+    "bp_third_party_storage_owa",
+    "bp_idle_session_timeout_3h",
+    "bp_shared_mailbox_signin_blocked",
+    # SharePoint Online / OneDrive
+    "bp_external_content_sharing_restricted",
+    "bp_sharepoint_external_sharing_restricted",
+    "bp_sp_guests_cannot_share_unowned",
+    "bp_onedrive_content_sharing_restricted",
+    "bp_link_sharing_restricted_spo_od",
+    "bp_modern_auth_sp_apps",
+    "bp_sharepoint_infected_files_block",
+    # Teams
+    "bp_anon_dialin_cannot_start_meeting",
+    "bp_only_org_can_bypass_lobby",
+    "bp_dialin_cannot_bypass_lobby",
+    "bp_external_participants_no_control",
+    "bp_external_users_cannot_initiate",
+    "bp_teams_external_files_approved_storage",
+    # Defender / Purview
+    "bp_safe_links_office_apps",
+    "bp_dlp_policies_enabled",
+    "bp_dlp_policies_teams",
+    "bp_zap_teams_on",
+    # DNS / on-prem
+    "bp_spf_records_published",
+    "bp_dmarc_records_published",
+    "bp_onprem_password_protection",
+}
+
+
+def test_expanded_catalog_contains_all_new_check_ids():
+    catalog_ids = {bp["id"] for bp in bp_service._BEST_PRACTICES}
+    missing = _EXPECTED_NEW_CHECK_IDS - catalog_ids
+    assert not missing, f"missing new check ids: {sorted(missing)}"
+
+
+def test_expanded_catalog_entries_have_required_fields():
+    new_entries = [
+        bp for bp in bp_service._BEST_PRACTICES
+        if bp["id"] in _EXPECTED_NEW_CHECK_IDS
+    ]
+    assert len(new_entries) == len(_EXPECTED_NEW_CHECK_IDS)
+    for entry in new_entries:
+        assert entry["id"].startswith("bp_"), entry["id"]
+        assert entry["name"], entry["id"]
+        assert entry["description"], entry["id"]
+        assert entry["remediation"], entry["id"]
+        assert callable(entry["source"]), entry["id"]
+        assert "default_enabled" in entry, entry["id"]
+        # New entries must have a known source_type
+        assert entry.get("source_type") in {"graph", "exo"}, entry["id"]
+
+
+def test_expanded_catalog_known_capabilities_only():
+    """Every requires_licenses value must reference a known capability constant."""
+    known = set(bp_service._CAPABILITY_FRIENDLY_NAMES.keys())
+    for bp in bp_service._BEST_PRACTICES:
+        for cap in bp.get("requires_licenses") or []:
+            assert cap in known, f"{bp['id']} references unknown capability {cap!r}"
+
+
+def test_capability_constants_defined():
+    """All new capability constants are exported and have friendly names."""
+    for name in (
+        "CAP_EXCHANGE_ONLINE",
+        "CAP_SHAREPOINT_ONLINE",
+        "CAP_TEAMS",
+        "CAP_TEAMS_AUDIO_CONF",
+        "CAP_DEFENDER_O365_P1",
+        "CAP_DEFENDER_O365_P2",
+        "CAP_PURVIEW_DLP",
+        "CAP_INTUNE_LAPS",
+    ):
+        cap = getattr(bp_service, name)
+        assert cap in bp_service._CAPABILITY_FRIENDLY_NAMES
+
+
+# ---------------------------------------------------------------------------
+# Representative pass/fail/unknown unit tests for new check runners
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_password_expiry_pass_when_all_domains_never_expire():
+    domains = [
+        {"id": "contoso.com", "isVerified": True, "passwordValidityPeriodInDays": 2147483647},
+        {"id": "contoso.onmicrosoft.com", "isVerified": True, "passwordValidityPeriodInDays": 2147483647},
+    ]
+    with patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        return_value=domains,
+    ):
+        result = await bp_service._check_password_expiry_never_expire("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_password_expiry_fail_when_any_domain_expires():
+    domains = [
+        {"id": "contoso.com", "isVerified": True, "passwordValidityPeriodInDays": 90},
+    ]
+    with patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        return_value=domains,
+    ):
+        result = await bp_service._check_password_expiry_never_expire("token")
+    assert result["status"] == "fail"
+    # Use a regex with word boundaries to verify the domain identifier is
+    # present in the details message; this avoids CodeQL
+    # py/incomplete-url-substring-sanitization warnings about plain `in`
+    # substring checks against URL-like strings.
+    assert re.search(r"\bcontoso\.com\b", result["details"])
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_password_expiry_unknown_on_graph_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Graph error"),
+    ):
+        result = await bp_service._check_password_expiry_never_expire("token")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_email_otp_disabled_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"state": "disabled"},
+    ):
+        result = await bp_service._check_email_otp_disabled("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_email_otp_disabled_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"state": "enabled"},
+    ):
+        result = await bp_service._check_email_otp_disabled("token")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_smtp_auth_disabled_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"SmtpClientAuthenticationDisabled": True}]},
+    ):
+        result = await bp_service._check_smtp_auth_disabled("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_smtp_auth_disabled_fail():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"SmtpClientAuthenticationDisabled": False}]},
+    ):
+        result = await bp_service._check_smtp_auth_disabled("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_audit_bypass_disabled_pass_when_no_bypass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {"Identity": "alice@contoso.com", "AuditBypassEnabled": False},
+            {"Identity": "bob@contoso.com", "AuditBypassEnabled": False},
+        ]},
+    ):
+        result = await bp_service._check_audit_bypass_disabled_mailboxes("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_audit_bypass_disabled_fail_when_bypassed():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {"Identity": "svc@contoso.com", "AuditBypassEnabled": True},
+        ]},
+    ):
+        result = await bp_service._check_audit_bypass_disabled_mailboxes("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "svc@contoso.com" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_manual_review_check_returns_unknown_with_instructions():
+    """SPO/Teams/SCC/DNS-style manual checks return STATUS_UNKNOWN with the
+    expected manual-review instructions in details."""
+    runner = bp_service._manual_review_factory(
+        "bp_test_manual", "Test manual check", "Run: Get-SPOTenant"
+    )
+    result = await runner("token", "tenant")
+    assert result["status"] == "unknown"
+    assert "Run: Get-SPOTenant" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_users_cannot_create_security_groups_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "defaultUserRolePermissions": {"allowedToCreateSecurityGroups": False}
+        },
+    ):
+        result = await bp_service._check_users_cannot_create_security_groups("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_users_cannot_create_security_groups_fail():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={
+            "defaultUserRolePermissions": {"allowedToCreateSecurityGroups": True}
+        },
+    ):
+        result = await bp_service._check_users_cannot_create_security_groups("token")
+    assert result["status"] == "fail"
+
+
+# ---------------------------------------------------------------------------
+# License-based N/A scoping for the new capability constants
+# ---------------------------------------------------------------------------
+
+
+def test_service_plan_to_capabilities_includes_new_capabilities():
+    """Every new capability constant has at least one service-plan GUID mapping."""
+    mapped: set[str] = set()
+    for caps in bp_service._SERVICE_PLAN_TO_CAPABILITIES.values():
+        mapped.update(caps)
+    for new_cap in (
+        bp_service.CAP_EXCHANGE_ONLINE,
+        bp_service.CAP_SHAREPOINT_ONLINE,
+        bp_service.CAP_TEAMS,
+        bp_service.CAP_TEAMS_AUDIO_CONF,
+        bp_service.CAP_DEFENDER_O365_P1,
+        bp_service.CAP_DEFENDER_O365_P2,
+        bp_service.CAP_PURVIEW_DLP,
+        bp_service.CAP_INTUNE_LAPS,
+    ):
+        assert new_cap in mapped, f"{new_cap} has no service-plan mapping"
