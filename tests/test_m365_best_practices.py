@@ -2158,6 +2158,118 @@ async def test_check_users_cannot_create_security_groups_fail():
 
 
 # ---------------------------------------------------------------------------
+# Quarantine notification check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_enabled_pass():
+    """All policies have notifications enabled and frequency=1: pass."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "EnableEndUserSpamNotifications": True,
+                    "EndUserSpamNotificationFrequency": 1,
+                }
+            ]
+        }
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "pass"
+    assert result["check_id"] == "bp_quarantine_notification_enabled"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_disabled_fails():
+    """Policy with notifications disabled: fail."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "EnableEndUserSpamNotifications": False,
+                    "EndUserSpamNotificationFrequency": 1,
+                }
+            ]
+        }
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "disabled" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_high_frequency_fails():
+    """Policy with notifications enabled but frequency > 1 day: fail."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "EnableEndUserSpamNotifications": True,
+                    "EndUserSpamNotificationFrequency": 3,
+                }
+            ]
+        }
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "frequency=3" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_quarantine_notification_unknown_on_error():
+    """EXO error returns unknown status with error message."""
+    from app.services.m365_best_practices import _check_quarantine_notification_enabled
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("EXO unavailable"),
+    ):
+        result = await _check_quarantine_notification_enabled("token", "tenant-id")
+
+    assert result["status"] == "unknown"
+    assert "EXO unavailable" in result["details"]
+
+
+def test_quarantine_notification_in_catalog():
+    """bp_quarantine_notification_enabled must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_quarantine_notification_enabled" in ids
+
+
+def test_quarantine_notification_catalog_entry():
+    """bp_quarantine_notification_enabled catalog entry must have the expected fields."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_quarantine_notification_enabled")
+    assert entry.get("has_remediation") is True
+    assert entry.get("default_enabled") is True
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
+
+
+# ---------------------------------------------------------------------------
 # License-based N/A scoping for the new capability constants
 # ---------------------------------------------------------------------------
 
