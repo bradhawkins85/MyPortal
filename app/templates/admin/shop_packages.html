@@ -124,7 +124,7 @@
                       <input type="hidden" name="archived" value="{{ '0' if package.archived else '1' }}" />
                       <button type="submit" class="header-menu__item" role="menuitem">{{ 'Unarchive' if package.archived else 'Archive' }}</button>
                     </form>
-                    <form action="/shop/admin/package/{{ package.id }}/delete" method="post" class="header-menu__form" onsubmit="return confirm('Delete this package?');">
+                    <form action="/shop/admin/package/{{ package.id }}/delete" method="post" class="header-menu__form" data-confirm="Delete this package?">
                       {% include "partials/csrf.html" %}
                       <button type="submit" class="header-menu__item header-menu__item--danger" role="menuitem">Delete</button>
                     </form>
