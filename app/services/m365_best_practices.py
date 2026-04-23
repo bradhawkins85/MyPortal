@@ -474,7 +474,21 @@ _ADMIN_ROLE_TEMPLATES = {
 }
 
 # Phishing-resistant MFA built-in authentication strength
+# Microsoft Authenticator feature settings that defeat MFA-fatigue / consent
+# spam: number matching, app-context, and location-context displays.  Keep in
+# sync with /authenticationMethodConfigurations/MicrosoftAuthenticator.
+_MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
+    "numberMatchingRequiredState",
+    "displayAppInformationRequiredState",
+    "displayLocationInformationRequiredState",
+)
+
+
 _PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
+
+# Maximum admin browser session length (in hours) for the sign-in frequency
+# best-practice; CIS recommends ≤ 4 hours for privileged role browser sessions.
+_ADMIN_SIGNIN_FREQ_MAX_HOURS = 4
 
 
 async def _safe_graph_get(token: str, url: str) -> dict[str, Any] | None:
@@ -796,18 +810,24 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
         if not data:
             continue
         skus = data.get("assignedLicenses") or []
-        # Heuristic: more than one SKU assigned to an admin is over-licensed.
+        # Heuristic: more than one SKU assigned to an admin is *potentially*
+        # over-licensed and worth manual review.  Some admins legitimately
+        # require multiple SKUs (e.g. Entra ID P2 + an O365 plan to access a
+        # mailbox); the catalog remediation text and the FAIL details below
+        # both make clear this is an indicative finding and admins should
+        # confirm before removing licenses.
         if len(skus) > 1:
             overlicensed.append(data.get("userPrincipalName") or uid)
     if not overlicensed:
         return _result(
             check_id, check_name, STATUS_PASS,
-            "Admin accounts are minimally licensed.",
+            "Admin accounts hold a single license SKU.",
         )
     return _result(
         check_id, check_name, STATUS_FAIL,
-        f"{len(overlicensed)} admin account(s) hold multiple licenses; "
-        "consider reducing to Entra ID P1/P2 only: " + ", ".join(overlicensed[:5]),
+        f"Heuristic: {len(overlicensed)} admin account(s) hold multiple license SKUs and "
+        "may be candidates for license reduction (manual verification recommended – some "
+        "accounts may legitimately require multiple SKUs): " + ", ".join(overlicensed[:5]),
     )
 
 
@@ -1183,7 +1203,7 @@ async def _check_signin_freq_admin_browser(token: str) -> dict[str, Any]:
         sif = sc.get("signInFrequency") or {}
         pb = sc.get("persistentBrowser") or {}
         sif_ok = bool(sif.get("isEnabled")) and (
-            (sif.get("type") == "hours" and (sif.get("value") or 0) <= 4)
+            (sif.get("type") == "hours" and (sif.get("value") or 0) <= _ADMIN_SIGNIN_FREQ_MAX_HOURS)
             or sif.get("frequencyInterval") == "everyTime"
         )
         pb_ok = str(pb.get("mode") or "").lower() == "never" and pb.get("isEnabled")
@@ -1216,10 +1236,8 @@ async def _check_authenticator_mfa_fatigue(token: str) -> dict[str, Any]:
     if data is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Authenticator policy.")
     fs = data.get("featureSettings") or {}
-    keys = ("numberMatchingRequiredState", "displayAppInformationRequiredState",
-            "displayLocationInformationRequiredState")
     missing = [
-        k for k in keys
+        k for k in _MFA_FATIGUE_PROTECTION_KEYS
         if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
     ]
     if not missing:
