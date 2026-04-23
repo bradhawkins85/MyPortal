@@ -3,5 +3,5 @@
   "occurred_at": "2026-04-22T06:08Z",
   "change_type": "Feature",
   "summary": "Add Enable Archive action button to M365 user mailboxes page; rename Permissions column to Actions.",
-  "content_hash": "84219101fddce95d2cd6aca7358e0e327281e51113d0c794f7d75d6fa358d51f"
+  "content_hash": "292dbf39f96bb4ec639a0b733f6cd046dd14252d89053c8907f8165a0a0fef8c"
 }
