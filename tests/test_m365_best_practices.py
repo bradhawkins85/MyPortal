@@ -3340,3 +3340,127 @@ async def test_check_spf_records_published_unknown_on_graph_error():
     ):
         result = await bp_service._check_spf_records_published("token")
     assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Block users who reached the message limit check
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_block_users_message_limit_pass():
+    """All outbound spam filter policies have ActionWhenThresholdReached=BlockUser: pass."""
+    from app.services.m365_best_practices import _check_block_users_message_limit
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "ActionWhenThresholdReached": "BlockUser",
+                }
+            ]
+        }
+        result = await _check_block_users_message_limit("token", "tenant-id")
+
+    assert result["status"] == "pass"
+    assert result["check_id"] == "bp_block_users_message_limit"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_block_users_message_limit_fail_when_alert_only():
+    """Policy with ActionWhenThresholdReached=Alert should fail."""
+    from app.services.m365_best_practices import _check_block_users_message_limit
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "ActionWhenThresholdReached": "Alert",
+                }
+            ]
+        }
+        result = await _check_block_users_message_limit("token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "BlockUser" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_block_users_message_limit_fail_when_restrict():
+    """Policy with ActionWhenThresholdReached=RestrictAccess should fail."""
+    from app.services.m365_best_practices import _check_block_users_message_limit
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {
+            "value": [
+                {
+                    "Name": "Default",
+                    "ActionWhenThresholdReached": "RestrictAccess",
+                }
+            ]
+        }
+        result = await _check_block_users_message_limit("token", "tenant-id")
+
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_block_users_message_limit_unknown_on_error():
+    """EXO error returns unknown status with error message."""
+    from app.services.m365_best_practices import _check_block_users_message_limit
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("EXO unavailable"),
+    ):
+        result = await _check_block_users_message_limit("token", "tenant-id")
+
+    assert result["status"] == "unknown"
+    assert "EXO unavailable" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_block_users_message_limit_unknown_when_no_policies():
+    """Empty policy list returns unknown status."""
+    from app.services.m365_best_practices import _check_block_users_message_limit
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+    ) as mock_cmd:
+        mock_cmd.return_value = {"value": []}
+        result = await _check_block_users_message_limit("token", "tenant-id")
+
+    assert result["status"] == "unknown"
+
+
+def test_block_users_message_limit_in_catalog():
+    """bp_block_users_message_limit must be present in the public catalog."""
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_block_users_message_limit" in ids
+
+
+def test_block_users_message_limit_catalog_entry():
+    """bp_block_users_message_limit catalog entry must have the expected fields."""
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_block_users_message_limit")
+    assert entry.get("has_remediation") is True
+    assert entry.get("default_enabled") is True
+    assert "BlockUser" in entry["remediation"]
+    # Internal implementation keys must not be exposed
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
