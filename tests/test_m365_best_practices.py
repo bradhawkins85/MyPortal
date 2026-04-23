@@ -1947,6 +1947,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_only_org_can_bypass_lobby",
     "bp_invited_users_auto_admitted",
     "bp_dialin_cannot_bypass_lobby",
+    "bp_restrict_dialin_bypass_lobby",
     "bp_external_participants_no_control",
     "bp_external_users_cannot_initiate",
     "bp_teams_external_files_approved_storage",
