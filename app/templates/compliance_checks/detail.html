@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% set check = assignment.check if assignment else {} %}
 {% set check_title = check.title if check else 'Compliance Check' %}
@@ -7,9 +8,9 @@
 {% block title %}{{ check_title }}{% endblock %}
 
 {% block header_actions %}
-  <div class="header-actions">
-    <a href="/compliance-checks" class="button button--ghost button--small">← Back</a>
-  </div>
+  {{ page_header_actions([
+    {"label": "Back to checks", "type": "link", "href": "/compliance-checks"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

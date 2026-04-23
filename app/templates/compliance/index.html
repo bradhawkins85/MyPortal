@@ -4,18 +4,6 @@
 
 {% block title %}Essential 8 Compliance{% endblock %}
 
-{% block header_actions %}
-  <div class="header-actions">
-    <input
-      type="search"
-      id="compliance-filter"
-      class="form-input"
-      placeholder="Filter controls"
-      aria-label="Filter controls"
-    />
-  </div>
-{% endblock %}
-
 {% block content %}
 <div class="management management--single compliance" data-layout>
   <section class="management__content">
@@ -54,6 +42,17 @@
     </div>
 
     <div class="card card--panel compliance-table-card">
+      <header class="card__header">
+        <div class="card__controls">
+          <input
+            type="search"
+            id="compliance-filter"
+            class="form-input"
+            placeholder="Filter controls"
+            aria-label="Filter controls"
+          />
+        </div>
+      </header>
       <div class="table-wrapper">
         <table class="table compliance-table" data-compliance-table>
           <thead>

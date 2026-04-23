@@ -1,14 +1,18 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block extra_head %}
   <link rel="stylesheet" href="{{ static_url('/static/css/suneditor.min.css') }}" />
 {% endblock %}
 
 {% block header_title %}
-  <div class="header__title-content header__title-content--spread">
-    <span class="header__title-text">{{ page_title }}</span>
-    <a class="button button--ghost button--small header__title-button" href="/admin/message-templates">Back to templates</a>
-  </div>
+  <span class="header__title-text">{{ page_title }}</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to templates", "type": "link", "href": "/admin/message-templates"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

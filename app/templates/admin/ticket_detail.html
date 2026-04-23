@@ -1,7 +1,14 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 
 {% block header_title %}Ticket detail{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "All tickets", "type": "link", "href": "/admin/tickets"}
+  ]) }}
+{% endblock %}
 {% block extra_head %}
   {{ super() }}
   <link rel="stylesheet" href="{{ static_url('/static/css/suneditor.min.css') }}" />

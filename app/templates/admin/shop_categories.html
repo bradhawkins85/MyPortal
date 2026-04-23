@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}
   <div class="header__title-content">
@@ -10,7 +11,9 @@
 {% endblock %}
 
 {% block header_actions %}
-  <a class="button button--ghost" href="/admin/shop/packages">Package admin</a>
+  {{ page_header_actions([
+    {"label": "Package admin", "type": "link", "href": "/admin/shop/packages"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

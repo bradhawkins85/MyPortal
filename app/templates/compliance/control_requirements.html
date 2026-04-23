@@ -1,27 +1,12 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block title %}{{ control.name }} - Requirements{% endblock %}
 
 {% block header_actions %}
-  <div class="header-actions">
-    <a href="/compliance" class="button button--ghost button--small">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M19 12H5M12 19l-7-7 7-7" />
-      </svg>
-      Back to controls
-    </a>
-  </div>
+  {{ page_header_actions([
+    {"label": "Back to controls", "type": "link", "href": "/compliance"}
+  ]) }}
 {% endblock %}
 
 {% block content %}
