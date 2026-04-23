@@ -328,7 +328,7 @@ async def _attention_section(ctx: _DashboardContext) -> dict[str, Any]:
 
 def _quick_actions_section(ctx: _DashboardContext) -> dict[str, Any]:
     actions: list[dict[str, Any]] = [
-        {"label": "New ticket", "href": "/tickets/new", "variant": "primary"},
+        {"label": "New ticket", "href": "/tickets", "variant": "primary"},
         {"label": "Open tickets", "href": "/tickets"},
         {"label": "Notifications", "href": "/notifications"},
     ]
@@ -336,8 +336,6 @@ def _quick_actions_section(ctx: _DashboardContext) -> dict[str, Any]:
         actions.append({"label": "Assets", "href": "/assets"})
     if ctx.has_permission("can_manage_staff"):
         actions.append({"label": "Staff", "href": "/staff"})
-    if len(ctx.available_companies) > 1:
-        actions.append({"label": "Switch company", "href": "/companies"})
     return {"actions": actions}
 
 
