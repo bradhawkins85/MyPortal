@@ -766,6 +766,28 @@
   'hasM365': has_m365
 } | tojson }}</script>
 <script type="application/json" id="active-staff-for-offboarding">{{ active_staff_for_offboarding | tojson }}</script>
+
+<div class="modal" id="m365-password-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close password modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">New O365 Password</h2>
+    <p class="form-help">Copy this password and share it securely with the user. It will not be shown again.</p>
+    <div class="form-field">
+      <label class="form-label" for="m365-new-password">New password</label>
+      <div style="display:flex;gap:0.5rem;align-items:center;">
+        <input class="form-input" id="m365-new-password" type="text" readonly style="font-family:monospace;" />
+        <button type="button" class="button button--ghost" id="m365-copy-password">Copy</button>
+      </div>
+    </div>
+    <p class="form-help form-help--success" id="m365-copy-confirm" hidden>Password copied to clipboard.</p>
+    <div class="form-actions">
+      <button type="button" class="button" data-modal-close>Close</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

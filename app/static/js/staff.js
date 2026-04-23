@@ -979,11 +979,37 @@
       window.location.reload();
     }
 
+    const m365PasswordModal = document.getElementById('m365-password-modal');
+    const m365NewPasswordInput = document.getElementById('m365-new-password');
+    const m365CopyButton = document.getElementById('m365-copy-password');
+    const m365CopyConfirm = document.getElementById('m365-copy-confirm');
+
+    bindModalDismissal(m365PasswordModal);
+
+    if (m365CopyButton && m365NewPasswordInput) {
+      m365CopyButton.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(m365NewPasswordInput.value);
+          if (m365CopyConfirm) {
+            m365CopyConfirm.hidden = false;
+            setTimeout(() => { m365CopyConfirm.hidden = true; }, 3000);
+          }
+        } catch (error) {
+          m365NewPasswordInput.select();
+        }
+      });
+    }
+
     async function resetM365Password(staffId) {
       const data = await requestJson(`/api/staff/${staffId}/m365/reset-password`, { method: 'POST' });
       const password = data && data.password ? data.password : '';
-      if (password) {
-        window.prompt('New O365 password (copy this — it will not be shown again):', password);
+      if (password && m365PasswordModal && m365NewPasswordInput) {
+        m365NewPasswordInput.value = password;
+        if (m365CopyConfirm) {
+          m365CopyConfirm.hidden = true;
+        }
+        closeModal(editModal);
+        openModal(m365PasswordModal);
       }
     }
 

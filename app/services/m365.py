@@ -2261,16 +2261,46 @@ async def get_all_users(
     return users
 
 
+def _generate_m365_password(length: int = 16) -> str:
+    """Generate a cryptographically random password that meets M365 complexity requirements.
+
+    The password contains at least one lowercase letter, one uppercase letter,
+    one digit, and one symbol from the allowed set.
+    """
+    import string as _string
+
+    lower = _string.ascii_lowercase
+    upper = _string.ascii_uppercase
+    digits = _string.digits
+    symbols = "!@#$%^&*-_=+?"
+    alphabet = lower + upper + digits + symbols
+    required: list[str] = [
+        secrets.choice(lower),
+        secrets.choice(upper),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    remaining = [secrets.choice(alphabet) for _ in range(max(0, length - len(required)))]
+    password_chars = required + remaining
+    for i in range(len(password_chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        password_chars[i], password_chars[j] = password_chars[j], password_chars[i]
+    return "".join(password_chars)
+
+
 async def _lookup_user_by_email(access_token: str, email: str) -> dict[str, Any]:
     """Return the M365 user whose ``mail`` or ``userPrincipalName`` matches *email*.
 
     Raises :exc:`M365Error` if no matching user is found.
     """
     normalized = email.strip().lower()
+    # Escape single quotes in the email to prevent OData filter injection.
+    # OData escapes a single quote within a string literal by doubling it.
+    escaped = normalized.replace("'", "''")
     # Try a direct filter first for efficiency
     filter_url = (
         "https://graph.microsoft.com/v1.0/users?"
-        f"$filter=mail eq '{normalized}' or userPrincipalName eq '{normalized}'&"
+        f"$filter=mail eq '{escaped}' or userPrincipalName eq '{escaped}'&"
         "$select=id,mail,userPrincipalName,accountEnabled"
     )
     try:
@@ -2319,8 +2349,6 @@ async def reset_user_password(company_id: int, staff_email: str) -> str:
     Raises :exc:`M365Error` if the tenant credentials are missing, the user
     cannot be located, or the Graph API call fails.
     """
-    import string as _string
-
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("No M365 credentials found for company")
@@ -2329,24 +2357,7 @@ async def reset_user_password(company_id: int, staff_email: str) -> str:
     user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
     user_id = str(user["id"]).strip()
 
-    # Generate a strong password meeting M365 complexity requirements
-    lower = _string.ascii_lowercase
-    upper = _string.ascii_uppercase
-    digits = _string.digits
-    symbols = "!@#$%^&*-_=+?"
-    alphabet = lower + upper + digits + symbols
-    required: list[str] = [
-        secrets.choice(lower),
-        secrets.choice(upper),
-        secrets.choice(digits),
-        secrets.choice(symbols),
-    ]
-    remaining = [secrets.choice(alphabet) for _ in range(16 - len(required))]
-    password_chars = required + remaining
-    for i in range(len(password_chars) - 1, 0, -1):
-        j = secrets.randbelow(i + 1)
-        password_chars[i], password_chars[j] = password_chars[j], password_chars[i]
-    new_password = "".join(password_chars)
+    new_password = _generate_m365_password()
 
     encoded_user_id = quote(user_id, safe="")
     await _graph_patch(
