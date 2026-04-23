@@ -1478,6 +1478,29 @@ async def _check_third_party_storage_owa(
                    f"OWA policies allowing third-party storage: " + ", ".join(bad))
 
 
+async def _check_outlook_addins_disabled(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_outlook_addins_disabled"
+    check_name = "Users installing Outlook add-ins is not allowed"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OwaMailboxPolicy")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OwaMailboxPolicy: {exc}")
+    rows = data.get("value") or []
+    bad = [
+        r.get("Identity") or r.get("Name") or "?"
+        for r in rows
+        if isinstance(r, dict) and r.get("WebPartsFrameworkEnabled") is True
+    ]
+    if not bad:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "User Outlook add-in installation is disabled in all OWA mailbox policies.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "OWA policies allowing user Outlook add-in installation: " + ", ".join(bad))
+
+
 async def _check_idle_session_timeout(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -2821,6 +2844,26 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_outlook_addins_disabled",
+        "name": "Users installing Outlook add-ins is not allowed",
+        "description": (
+            "Preventing users from installing Outlook add-ins reduces the risk "
+            "of malicious or data-exfiltrating add-ins being installed without "
+            "administrative oversight."
+        ),
+        "remediation": (
+            "For each OWA mailbox policy: "
+            "Set-OwaMailboxPolicy -Identity <name> -WebPartsFrameworkEnabled $false"
+        ),
+        "source": _check_outlook_addins_disabled,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-OwaMailboxPolicy",
+        "remediation_params": {"WebPartsFrameworkEnabled": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
