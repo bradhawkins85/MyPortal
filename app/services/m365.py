@@ -1049,7 +1049,7 @@ async def _graph_patch(
         graph_error_code: str | None = None
         graph_error_message: str | None = None
         try:
-            err = (response.json().get("error") or {})
+            err = response.json().get("error") or {}
             code_value = err.get("code")
             message_value = err.get("message")
             if isinstance(code_value, str):
