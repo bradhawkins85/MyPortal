@@ -1944,6 +1944,7 @@ _EXPECTED_NEW_CHECK_IDS = {
     # Teams
     "bp_anon_dialin_cannot_start_meeting",
     "bp_only_org_can_bypass_lobby",
+    "bp_invited_users_auto_admitted",
     "bp_dialin_cannot_bypass_lobby",
     "bp_external_participants_no_control",
     "bp_external_users_cannot_initiate",
