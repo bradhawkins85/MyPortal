@@ -1775,7 +1775,7 @@ async def _check_modern_auth_exo(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
     check_id = "bp_modern_auth_exo"
-    check_name = "Modern authentication for Exchange Online is enabled"
+    check_name = "Ensure modern authentication for Exchange Online is enabled"
     try:
         data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
     except M365Error as exc:
@@ -3348,10 +3348,13 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
     {
         "id": "bp_modern_auth_exo",
-        "name": "Modern authentication for Exchange Online is enabled",
+        "name": "Ensure modern authentication for Exchange Online is enabled",
         "description": (
-            "OAuth2-based modern authentication is required for MFA, "
-            "Conditional Access, and modern Outlook clients."
+            "Modern authentication (OAuth2) enables token-based authentication "
+            "and multi-factor authentication for Exchange Online clients. Without "
+            "it, Outlook clients fall back to basic authentication which cannot "
+            "be protected by Conditional Access policies or MFA, leaving "
+            "credentials vulnerable to interception and password-spray attacks."
         ),
         "remediation": "Set-OrganizationConfig -OAuth2ClientProfileEnabled $true",
         "source": _check_modern_auth_exo,
@@ -3360,6 +3363,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_cmdlet": "Set-OrganizationConfig",
         "remediation_params": {"OAuth2ClientProfileEnabled": True},
+        "is_cis_benchmark": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
