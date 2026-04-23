@@ -935,13 +935,87 @@ async def _graph_post(
             status=response.status_code,
             body=response.text,
         )
+        graph_error_code: str | None = None
+        graph_error_message: str | None = None
+        try:
+            err = (response.json().get("error") or {})
+            code_value = err.get("code")
+            message_value = err.get("message")
+            if isinstance(code_value, str):
+                graph_error_code = code_value
+            if isinstance(message_value, str):
+                graph_error_message = message_value
+        except Exception:  # noqa: BLE001
+            pass
+        suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
-            f"Microsoft Graph POST failed ({response.status_code})",
+            f"Microsoft Graph POST failed ({response.status_code}){suffix}",
             http_status=response.status_code,
+            graph_error_code=graph_error_code,
         )
     if response.status_code == 204:
         return {}
     return response.json()
+
+
+# Microsoft Graph occasionally returns a transient 400 / 404 immediately after a
+# new service principal is created because the SP's role catalogue has not yet
+# replicated across all Graph regions.  The error body looks like
+# ``{"error":{"code":"Request_BadRequest","message":"Permission being assigned
+# was not found on application"}}`` even though the requested ``appRoleId`` is a
+# valid role on the resource SP (e.g. User.Read.All on Microsoft Graph).  The
+# documented mitigation is to retry with backoff – the assignment succeeds
+# within a few seconds once propagation completes.
+_APP_ROLE_ASSIGN_TRANSIENT_MESSAGE = "permission being assigned was not found"
+
+
+def _is_app_role_assignment_propagation_error(exc: "M365Error") -> bool:
+    if exc.http_status == 404:
+        return True
+    if exc.http_status == 400:
+        message = (str(exc) or "").lower()
+        if _APP_ROLE_ASSIGN_TRANSIENT_MESSAGE in message:
+            return True
+    return False
+
+
+async def _post_app_role_assignment_with_retry(
+    access_token: str,
+    url: str,
+    payload: dict[str, Any],
+    *,
+    max_attempts: int = 6,
+    initial_delay_seconds: float = 2.0,
+) -> dict[str, Any]:
+    """POST an ``appRoleAssignments`` payload, retrying transient propagation errors.
+
+    Microsoft Graph can take several seconds after a new service principal is
+    created before ``appRoleAssignments`` accepts role grants for it.  This
+    helper retries with exponential backoff (capped at 16s per sleep) on the
+    well-known transient ``Request_BadRequest`` / 404 responses, and propagates
+    any other error unchanged.
+    """
+    delay = initial_delay_seconds
+    last_exc: M365Error | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await _graph_post(access_token, url, payload)
+        except M365Error as exc:
+            if not _is_app_role_assignment_propagation_error(exc):
+                raise
+            last_exc = exc
+            if attempt == max_attempts:
+                break
+            log_info(
+                "appRoleAssignment not yet visible, retrying after backoff",
+                attempt=attempt,
+                delay_seconds=delay,
+                status=exc.http_status,
+            )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 16.0)
+    assert last_exc is not None  # for type-checkers; loop always assigns on failure
+    raise last_exc
 
 
 async def _graph_patch(
@@ -1138,7 +1212,7 @@ async def provision_app_registration(
     # success and continue so that the remaining roles are still processed.
     for role_id in _PROVISION_APP_ROLES:
         try:
-            await _graph_post(
+            await _post_app_role_assignment_with_retry(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
                 {
@@ -1175,7 +1249,7 @@ async def provision_app_registration(
         if exo_sp_list:
             exo_sp_id: str = exo_sp_list[0]["id"]
             try:
-                await _graph_post(
+                await _post_app_role_assignment_with_retry(
                     access_token,
                     f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
                     {
