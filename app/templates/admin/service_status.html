@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}
   <div class="header__title-content header__title-content--stacked">
@@ -22,18 +23,15 @@
         <h2 class="card__title">Tracked services</h2>
         <p class="card__subtitle">Update availability details and adjust company visibility assignments.</p>
       </div>
-      <div class="service-status-admin__stats">
-        {% for definition in service_status_definitions %}
-          <div class="service-status-admin__stat">
-            <span class="service-status-admin__stat-label">{{ definition.label }}</span>
-            <span class="service-status-admin__stat-value">{{ service_status_summary.by_status.get(definition.value, 0) }}</span>
-          </div>
-        {% endfor %}
-        <div class="service-status-admin__stat service-status-admin__stat--total">
-          <span class="service-status-admin__stat-label">Total</span>
-          <span class="service-status-admin__stat-value">{{ service_status_summary.total }}</span>
-        </div>
-      </div>
+      {% set strip_items = [] %}
+      {% for definition in service_status_definitions %}
+        {% set _ = strip_items.append({
+            "label":   definition.label,
+            "value":   service_status_summary.by_status.get(definition.value, 0),
+            "variant": definition.value,
+        }) %}
+      {% endfor %}
+      {{ counter_strip(strip_items, total=service_status_summary.total, total_label="Total") }}
     </header>
     <div class="table-toolbar">
       <input
