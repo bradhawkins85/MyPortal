@@ -513,6 +513,9 @@
       workflowRetry: container.querySelector('[data-edit-action="workflow-retry"]'),
       workflowResume: container.querySelector('[data-edit-action="workflow-resume"]'),
       workflowForceComplete: container.querySelector('[data-edit-action="workflow-force-complete"]'),
+      m365ResetPassword: container.querySelector('[data-edit-action="m365-reset-password"]'),
+      m365EnableSignIn: container.querySelector('[data-edit-action="m365-enable-sign-in"]'),
+      m365DisableSignIn: container.querySelector('[data-edit-action="m365-disable-sign-in"]'),
       delete: container.querySelector('[data-edit-action="delete"]'),
     };
 
@@ -795,6 +798,10 @@
       setActionVisibility(editActionButtons.workflowRetry, { visible: workflowContext.canRetry, disabled: false });
       setActionVisibility(editActionButtons.workflowResume, { visible: workflowContext.canResume, disabled: false });
       setActionVisibility(editActionButtons.workflowForceComplete, { visible: workflowContext.canForceComplete, disabled: false });
+      const canM365Actions = Boolean(flags && flags.isSuperAdmin && flags.hasM365 && member.email);
+      setActionVisibility(editActionButtons.m365ResetPassword, { visible: canM365Actions, disabled: false });
+      setActionVisibility(editActionButtons.m365EnableSignIn, { visible: canM365Actions, disabled: false });
+      setActionVisibility(editActionButtons.m365DisableSignIn, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.delete, { visible: Boolean(flags && flags.isSuperAdmin), disabled: false });
 
       if (editActionButtons.workflowForceComplete) {
@@ -968,6 +975,22 @@
           stepName: requestedStepName,
           reason: reason.trim() || null,
         }),
+      });
+      window.location.reload();
+    }
+
+    async function resetM365Password(staffId) {
+      const data = await requestJson(`/api/staff/${staffId}/m365/reset-password`, { method: 'POST' });
+      const password = data && data.password ? data.password : '';
+      if (password) {
+        window.prompt('New O365 password (copy this — it will not be shown again):', password);
+      }
+    }
+
+    async function setM365SignIn(staffId, enabled) {
+      await requestJson(`/api/staff/${staffId}/m365/sign-in`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
       });
       window.location.reload();
     }
@@ -1335,6 +1358,45 @@
           }, getActionStep((editActionButtons.workflowForceComplete.dataset.currentStep || '').trim()), getActionNote() || '');
         } catch (error) {
           setInlineError(editActionError, `Failed to force-complete workflow step: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365ResetPassword) {
+      editActionButtons.m365ResetPassword.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await resetM365Password(currentEditStaffId);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to reset O365 password: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365EnableSignIn) {
+      editActionButtons.m365EnableSignIn.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await setM365SignIn(currentEditStaffId, true);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to enable O365 sign-in: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365DisableSignIn) {
+      editActionButtons.m365DisableSignIn.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await setM365SignIn(currentEditStaffId, false);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to disable O365 sign-in: ${error.message}`);
         }
       });
     }
