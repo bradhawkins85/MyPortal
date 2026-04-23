@@ -133,7 +133,8 @@ async def test_build_dashboard_regular_user_excludes_admin_sections(monkeypatch)
         return []
 
     async def fake_changes(*args, **kwargs):
-        return []
+        # Should NOT be called for non-admin
+        raise AssertionError("list_change_log_entries must not be called for non-admin")
 
     monkeypatch.setattr(dashboard_service.tickets_repo, "count_tickets_for_user", fake_count_for_user)
     monkeypatch.setattr(dashboard_service.tickets_repo, "count_tickets", fake_count_tickets)
@@ -149,6 +150,7 @@ async def test_build_dashboard_regular_user_excludes_admin_sections(monkeypatch)
     assert "tickets.my_open" in keys
     assert "tickets.unassigned" not in keys
     assert "webhooks.failed" not in keys
+    assert payload["recent_activity"]["changes"] == []
 
 
 @pytest.mark.asyncio
