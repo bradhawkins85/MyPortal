@@ -513,6 +513,9 @@
       workflowRetry: container.querySelector('[data-edit-action="workflow-retry"]'),
       workflowResume: container.querySelector('[data-edit-action="workflow-resume"]'),
       workflowForceComplete: container.querySelector('[data-edit-action="workflow-force-complete"]'),
+      m365ResetPassword: container.querySelector('[data-edit-action="m365-reset-password"]'),
+      m365EnableSignIn: container.querySelector('[data-edit-action="m365-enable-sign-in"]'),
+      m365DisableSignIn: container.querySelector('[data-edit-action="m365-disable-sign-in"]'),
       delete: container.querySelector('[data-edit-action="delete"]'),
     };
 
@@ -795,6 +798,10 @@
       setActionVisibility(editActionButtons.workflowRetry, { visible: workflowContext.canRetry, disabled: false });
       setActionVisibility(editActionButtons.workflowResume, { visible: workflowContext.canResume, disabled: false });
       setActionVisibility(editActionButtons.workflowForceComplete, { visible: workflowContext.canForceComplete, disabled: false });
+      const canM365Actions = Boolean(flags && flags.isSuperAdmin && flags.hasM365 && member.email);
+      setActionVisibility(editActionButtons.m365ResetPassword, { visible: canM365Actions, disabled: false });
+      setActionVisibility(editActionButtons.m365EnableSignIn, { visible: canM365Actions, disabled: false });
+      setActionVisibility(editActionButtons.m365DisableSignIn, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.delete, { visible: Boolean(flags && flags.isSuperAdmin), disabled: false });
 
       if (editActionButtons.workflowForceComplete) {
@@ -968,6 +975,48 @@
           stepName: requestedStepName,
           reason: reason.trim() || null,
         }),
+      });
+      window.location.reload();
+    }
+
+    const m365PasswordModal = document.getElementById('m365-password-modal');
+    const m365NewPasswordInput = document.getElementById('m365-new-password');
+    const m365CopyButton = document.getElementById('m365-copy-password');
+    const m365CopyConfirm = document.getElementById('m365-copy-confirm');
+
+    bindModalDismissal(m365PasswordModal);
+
+    if (m365CopyButton && m365NewPasswordInput) {
+      m365CopyButton.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(m365NewPasswordInput.value);
+          if (m365CopyConfirm) {
+            m365CopyConfirm.hidden = false;
+            setTimeout(() => { m365CopyConfirm.hidden = true; }, 3000);
+          }
+        } catch (error) {
+          m365NewPasswordInput.select();
+        }
+      });
+    }
+
+    async function resetM365Password(staffId) {
+      const data = await requestJson(`/api/staff/${staffId}/m365/reset-password`, { method: 'POST' });
+      const password = data && data.password ? data.password : '';
+      if (password && m365PasswordModal && m365NewPasswordInput) {
+        m365NewPasswordInput.value = password;
+        if (m365CopyConfirm) {
+          m365CopyConfirm.hidden = true;
+        }
+        closeModal(editModal);
+        openModal(m365PasswordModal);
+      }
+    }
+
+    async function setM365SignIn(staffId, enabled) {
+      await requestJson(`/api/staff/${staffId}/m365/sign-in`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
       });
       window.location.reload();
     }
@@ -1335,6 +1384,45 @@
           }, getActionStep((editActionButtons.workflowForceComplete.dataset.currentStep || '').trim()), getActionNote() || '');
         } catch (error) {
           setInlineError(editActionError, `Failed to force-complete workflow step: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365ResetPassword) {
+      editActionButtons.m365ResetPassword.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await resetM365Password(currentEditStaffId);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to reset O365 password: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365EnableSignIn) {
+      editActionButtons.m365EnableSignIn.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await setM365SignIn(currentEditStaffId, true);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to enable O365 sign-in: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365DisableSignIn) {
+      editActionButtons.m365DisableSignIn.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await setM365SignIn(currentEditStaffId, false);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to disable O365 sign-in: ${error.message}`);
         }
       });
     }

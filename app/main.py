@@ -9308,6 +9308,7 @@ async def staff_page(
     custom_field_definitions: list[dict[str, Any]] = []
     active_staff_for_offboarding: list[dict[str, Any]] = []
     offboarding_email_forwarding_enabled: bool = True
+    has_m365: bool = False
     if company_id is not None:
         field_config = await staff_field_config_service.load_effective_company_staff_fields(
             company_id
@@ -9321,6 +9322,8 @@ async def staff_page(
         offboarding_email_forwarding_enabled = bool(
             int((company_record or {}).get("offboarding_email_forwarding_enabled", 1) or 1)
         )
+        m365_creds = await m365_service.get_credentials(company_id)
+        has_m365 = bool(m365_creds)
         if can_approve_onboarding:
             staff_pending_requests = await staff_requests_repo.list_requests(
                 company_id, status="pending"
@@ -9520,6 +9523,7 @@ async def staff_page(
         "staff_custom_field_definitions": cast(list[dict[str, Any]], _serialise_for_json(custom_field_definitions)),
         "active_staff_for_offboarding": cast(list[dict[str, Any]], _serialise_for_json(active_staff_for_offboarding)),
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
+        "has_m365": has_m365,
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -11793,6 +11797,93 @@ async def invite_staff_member(staff_id: int, request: Request):
         invited_user_id=created_user["id"],
     )
     return JSONResponse({"success": True})
+
+
+@app.post("/api/staff/{staff_id}/m365/reset-password")
+async def m365_reset_staff_password(staff_id: int, request: Request):
+    """Reset the Office 365 password for the staff member identified by *staff_id*.
+
+    Returns the newly generated password so the admin can communicate it to the
+    user.  The password is not persisted in MyPortal.
+
+    Requires super-admin privileges.
+    """
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_super_admin=True)
+    if redirect:
+        return redirect
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    email = str(staff.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Staff member has no email address")
+    staff_company_id = int(staff.get("company_id") or 0)
+    try:
+        new_password = await m365_service.reset_user_password(staff_company_id, email)
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    await audit_service.log_action(
+        entity_type="staff",
+        entity_id=staff_id,
+        action="staff.m365.password_reset",
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        metadata={"email": email},
+    )
+    return JSONResponse({"success": True, "password": new_password})
+
+
+@app.post("/api/staff/{staff_id}/m365/sign-in")
+async def m365_set_staff_sign_in(staff_id: int, request: Request):
+    """Enable or disable Office 365 sign-in for the staff member.
+
+    Expects a JSON body: ``{"enabled": true}`` or ``{"enabled": false}``.
+
+    Requires super-admin privileges.
+    """
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_super_admin=True)
+    if redirect:
+        return redirect
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    email = str(staff.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Staff member has no email address")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+    if "enabled" not in body:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'enabled' field is required")
+    enabled = bool(body["enabled"])
+    staff_company_id = int(staff.get("company_id") or 0)
+    try:
+        await m365_service.set_user_sign_in_enabled(staff_company_id, email, enabled=enabled)
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    await audit_service.log_action(
+        entity_type="staff",
+        entity_id=staff_id,
+        action="staff.m365.sign_in_toggled",
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        metadata={"email": email, "enabled": enabled},
+    )
+    return JSONResponse({"success": True, "enabled": enabled})
+
 
 @app.head("/admin/service-status", response_class=HTMLResponse)
 @app.get("/admin/service-status", response_class=HTMLResponse)

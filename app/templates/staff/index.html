@@ -730,6 +730,9 @@
           <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-force-complete" data-edit-action="workflow-force-complete">Workflow force-complete</button>
+          <button type="button" class="button button--ghost" id="edit-action-m365-reset-password" data-edit-action="m365-reset-password" hidden>Reset O365 Password</button>
+          <button type="button" class="button button--ghost" id="edit-action-m365-enable-sign-in" data-edit-action="m365-enable-sign-in" hidden>Enable O365 Sign-in</button>
+          <button type="button" class="button button--ghost" id="edit-action-m365-disable-sign-in" data-edit-action="m365-disable-sign-in" hidden>Disable O365 Sign-in</button>
         </div>
         <div class="staff-danger-panel">
           <h3 class="staff-danger-panel__title">Danger zone</h3>
@@ -759,9 +762,32 @@
   'isSuperAdmin': is_super_admin,
   'isAdmin': is_admin,
   'canApproveOnboarding': can_approve_onboarding,
-  'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled
+  'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled,
+  'hasM365': has_m365
 } | tojson }}</script>
 <script type="application/json" id="active-staff-for-offboarding">{{ active_staff_for_offboarding | tojson }}</script>
+
+<div class="modal" id="m365-password-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close password modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">New O365 Password</h2>
+    <p class="form-help">Copy this password and share it securely with the user. It will not be shown again.</p>
+    <div class="form-field">
+      <label class="form-label" for="m365-new-password">New password</label>
+      <div class="form-field__input-row">
+        <input class="form-input form-input--monospace" id="m365-new-password" type="text" readonly />
+        <button type="button" class="button button--ghost" id="m365-copy-password">Copy</button>
+      </div>
+    </div>
+    <p class="form-help form-help--success" id="m365-copy-confirm" hidden>Password copied to clipboard.</p>
+    <div class="form-actions">
+      <button type="button" class="button" data-modal-close>Close</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

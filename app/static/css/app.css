@@ -9564,3 +9564,15 @@ a.stat-strip__stat:focus-visible {
   color: var(--color-text-muted, #94a3b8);
   font-size: 0.85rem;
 }
+
+
+/* M365 password reveal helpers */
+.form-field__input-row {
+  display: flex;
+  gap: var(--space-2, 0.5rem);
+  align-items: center;
+}
+
+.form-input--monospace {
+  font-family: var(--font-monospace, "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace);
+}
