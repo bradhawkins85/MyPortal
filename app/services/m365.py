@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shutil
+import string
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -2265,22 +2266,23 @@ def _generate_m365_password(length: int = 16) -> str:
     """Generate a cryptographically random password that meets M365 complexity requirements.
 
     The password contains at least one lowercase letter, one uppercase letter,
-    one digit, and one symbol from the allowed set.
+    one digit, and one symbol from the allowed set.  The *length* parameter must
+    be at least 4 (one character from each required category); values below 4 are
+    clamped to 4.
     """
-    import string as _string
-
-    lower = _string.ascii_lowercase
-    upper = _string.ascii_uppercase
-    digits = _string.digits
+    lower = string.ascii_lowercase
+    upper = string.ascii_uppercase
+    digits = string.digits
     symbols = "!@#$%^&*-_=+?"
     alphabet = lower + upper + digits + symbols
+    length = max(4, length)
     required: list[str] = [
         secrets.choice(lower),
         secrets.choice(upper),
         secrets.choice(digits),
         secrets.choice(symbols),
     ]
-    remaining = [secrets.choice(alphabet) for _ in range(max(0, length - len(required)))]
+    remaining = [secrets.choice(alphabet) for _ in range(length - len(required))]
     password_chars = required + remaining
     for i in range(len(password_chars) - 1, 0, -1):
         j = secrets.randbelow(i + 1)
