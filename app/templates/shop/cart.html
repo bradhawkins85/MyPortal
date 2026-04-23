@@ -6,7 +6,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "Continue shopping", "type": "link", "href": request.url_for('shop_page') | string}
+    {"label": "Continue shopping", "type": "link", "href": request.url_for('shop_page')}
   ]) }}
 {% endblock %}
 
