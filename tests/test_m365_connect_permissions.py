@@ -12,6 +12,7 @@ import pytest
 
 from app.services import m365 as m365_service
 from app.services.m365 import _PROVISION_APP_ROLES, M365Error, _EXO_MANAGE_AS_APP_ROLE
+from tests.conftest import drain_provision_background_tasks
 
 
 @pytest.fixture
@@ -291,6 +292,7 @@ async def test_provision_app_registration_skips_409_role_assignments():
             access_token="admin-token",
             display_name="Test App",
         )
+        await drain_provision_background_tasks()
 
     assert result["client_id"] == "new-client-id"
     assert result["client_secret"] == "test-secret"

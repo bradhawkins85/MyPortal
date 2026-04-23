@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services import m365 as m365_service
+from tests.conftest import drain_provision_background_tasks
 
 
 @pytest.fixture
@@ -101,6 +102,7 @@ async def test_provision_uses_configurable_lifetime():
         patch("app.services.m365.get_settings", return_value=mock_settings),
     ):
         result = await m365_service.provision_app_registration(access_token="tok")
+        await drain_provision_background_tasks()
 
     # The secret expiry passed to addPassword should be ~365 days from today
     add_password_call = next(
@@ -144,6 +146,7 @@ async def test_provision_adds_sp_as_owner():
         patch.object(m365_service, "_graph_get", side_effect=mock_get),
     ):
         await m365_service.provision_app_registration(access_token="tok")
+        await drain_provision_background_tasks()
 
     assert len(owner_calls) == 1
     owner_payload = owner_calls[0]["payload"]

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from typing import Any
 
 from app.services import m365 as m365_service
+from tests.conftest import drain_provision_background_tasks
 
 
 @pytest.fixture
@@ -120,6 +121,8 @@ async def test_provision_app_registration_success():
             access_token=access_token,
             display_name="MyPortal – Acme Corp",
         )
+        # Drain the background role-grant task while mocks are still active
+        await drain_provision_background_tasks()
 
     assert result["client_id"] == "provisioned-client-id"
     assert result["client_secret"] == "provisioned-secret"
@@ -190,6 +193,8 @@ async def test_provision_app_registration_default_display_name():
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
     ):
         await m365_service.provision_app_registration(access_token="token")
+        # Drain background role-grant task while mocks are still active
+        await drain_provision_background_tasks()
 
     app_create = next(
         p for p in captured_payloads
@@ -232,6 +237,8 @@ async def test_provision_app_registration_registers_redirect_uri():
             access_token="token",
             redirect_uri=redirect_uri,
         )
+        # Drain background role-grant task while mocks are still active
+        await drain_provision_background_tasks()
 
     app_create = next(
         p for p in captured_payloads
@@ -272,6 +279,8 @@ async def test_provision_app_registration_no_redirect_uri_when_not_provided():
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
     ):
         await m365_service.provision_app_registration(access_token="token")
+        # Drain background role-grant task while mocks are still active
+        await drain_provision_background_tasks()
 
     app_create = next(
         p for p in captured_payloads
