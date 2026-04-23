@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Best Practices{% endblock %}
 
@@ -6,15 +7,18 @@
 
 {% block header_actions %}
   {% if is_super_admin %}
-  <a href="/m365/best-practices/settings" class="button button--ghost">Manage best practices</a>
-  {% if has_credentials and catalog %}
-  <form method="post" action="/m365/best-practices/run" style="display:inline">
-    {% if csrf_token %}
-    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+    {% set bp_actions = [] %}
+    {% if has_credentials and catalog %}
+      {% set _ = bp_actions.append({
+        "label": "Evaluate now", "type": "form", "variant": "primary",
+        "action": "/m365/best-practices/run", "method": "post"
+      }) %}
     {% endif %}
-    <button type="submit" class="button">Evaluate now</button>
-  </form>
-  {% endif %}
+    {% set _ = bp_actions.append({
+      "label": "Manage best practices", "type": "link",
+      "href": "/m365/best-practices/settings"
+    }) %}
+    {{ page_header_actions(bp_actions) }}
   {% endif %}
 {% endblock %}
 

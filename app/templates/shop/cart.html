@@ -1,10 +1,13 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Cart{% endblock %}
 {% import "partials/stock_status.html" as stock_helpers %}
 
 {% block header_actions %}
-  <a class="button button--ghost" href="{{ request.url_for('shop_page') }}">Continue shopping</a>
+  {{ page_header_actions([
+    {"label": "Continue shopping", "type": "link", "href": request.url_for('shop_page')}
+  ]) }}
 {% endblock %}
 
 {% block content %}

@@ -1,6 +1,11 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}<span class="header__title-text">AI Tag Exclusions</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([]) }}
+{% endblock %}
 
 {% block content %}
   <div class="admin-grid">

@@ -1,10 +1,15 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 {% from 'macros/mobile.html' import mobile_collapsible %}
 
 {% block title %}Dashboard{% endblock %}
 
 {% block header_title %}
   <span class="header__title-text">Dashboard</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([]) }}
 {% endblock %}
 
 {% block content %}

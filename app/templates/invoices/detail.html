@@ -1,13 +1,14 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Invoice{% endblock %}
 
 {% block title %}{{ title }}{% endblock %}
 
 {% block header_actions %}
-  <div class="header-actions">
-    <a href="/invoices" class="button button--secondary button--small">← Back to invoices</a>
-  </div>
+  {{ page_header_actions([
+    {"label": "Back to invoices", "type": "link", "href": "/invoices"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

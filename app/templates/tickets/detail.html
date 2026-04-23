@@ -1,9 +1,12 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Ticket{% endblock %}
 
 {% block header_actions %}
-  <a class="button button--ghost" href="/tickets">All tickets</a>
+  {{ page_header_actions([
+    {"label": "All tickets", "type": "link", "href": "/tickets"}
+  ]) }}
 {% endblock %}
 
 {% block content %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}User mailboxes{% endblock %}
 
@@ -6,7 +7,10 @@
 
 {% block header_actions %}
   {% if has_credentials %}
-  <button type="button" class="button" id="sync-mailboxes-btn" data-sync-mailboxes>Sync mailboxes</button>
+    {{ page_header_actions([
+      {"label": "Sync mailboxes", "type": "button", "variant": "primary",
+       "attrs": {"id": "sync-mailboxes-btn", "data-sync-mailboxes": ""}}
+    ]) }}
   {% endif %}
 {% endblock %}
 

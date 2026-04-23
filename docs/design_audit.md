@@ -25,7 +25,7 @@ standards. The classifier is intentionally conservative — `PARTIAL`
 
 | Standard | PASS | PARTIAL | FAIL | FAIL? | OK | n/a |
 |---|---:|---:|---:|---:|---:|---:|
-| Header actions menu | 22 | 34 | 10 | 0 | 31 | 0 |
+| Header actions menu | 63 | 0 | 0 | 0 | 34 | 0 |
 | Statistics strip | 1 | 2 | 0 | 5 | 0 | 89 |
 | Popup modals | 9 | 0 | 36 | 0 | 0 | 52 |
 
@@ -37,7 +37,7 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `dashboard.html` | FAIL | n/a | n/a | primary button rendered in body, not in header_actions |
+| `dashboard.html` | PASS | n/a | n/a | ~1 primary button(s) inside card bodies |
 
 ### `admin/`
 
@@ -45,41 +45,41 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 |---|---|---|---|---|
 | `admin/api_keys.html` | PASS | FAIL? | PASS | page appears to render counts; consider counter_strip |
 | `admin/audit_logs.html` | OK | n/a | PASS |  |
-| `admin/automation.html` | FAIL | n/a | FAIL (2/2 non-conforming) | primary button rendered in body, not in header_actions; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden |
+| `admin/automation.html` | PASS | n/a | FAIL (2/2 non-conforming) | modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden |
 | `admin/automations.html` | PASS | n/a | n/a |  |
-| `admin/automations_create_event.html` | FAIL | n/a | n/a | primary button rendered in body, not in header_actions |
-| `admin/automations_create_scheduled.html` | FAIL | n/a | n/a | primary button rendered in body, not in header_actions |
-| `admin/business_continuity_plan_editor.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu; ~1 primary button(s) inside card bodies |
-| `admin/business_continuity_plans.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `admin/automations_create_event.html` | PASS | n/a | n/a |  |
+| `admin/automations_create_scheduled.html` | PASS | n/a | n/a |  |
+| `admin/business_continuity_plan_editor.html` | PASS | n/a | n/a | ~1 primary button(s) inside card bodies |
+| `admin/business_continuity_plans.html` | PASS | n/a | n/a |  |
 | `admin/call_recordings.html` | PASS | n/a | FAIL (3/3 non-conforming) | modal(dialog): uses <dialog> not <div>, missing aria-modal, no data-modal-close; modal(dialog): uses <dialog> not <div>, missing aria-modal, no data-modal-close; modal(dialog): uses <dialog> not <d... |
 | `admin/change_log.html` | OK | n/a | n/a |  |
 | `admin/companies.html` | PASS | n/a | PASS |  |
-| `admin/company_edit.html` | FAIL | n/a | FAIL (4/4 non-conforming) | primary button rendered in body, not in header_actions; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-... |
+| `admin/company_edit.html` | PASS | n/a | FAIL (4/4 non-conforming) | modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden; ~2 primary button(s) in... |
 | `admin/forms.html` | OK | n/a | n/a |  |
 | `admin/imap.html` | OK | n/a | n/a |  |
 | `admin/impersonation.html` | OK | n/a | n/a |  |
 | `admin/issues.html` | PASS | n/a | PASS |  |
-| `admin/knowledge_base.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `admin/knowledge_base_editor.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `admin/knowledge_base.html` | PASS | n/a | n/a |  |
+| `admin/knowledge_base_editor.html` | PASS | n/a | n/a |  |
 | `admin/m365_mail.html` | OK | n/a | n/a |  |
-| `admin/message_template_form.html` | FAIL | n/a | n/a | primary button rendered in body, not in header_actions |
+| `admin/message_template_form.html` | PASS | n/a | n/a |  |
 | `admin/message_templates.html` | PASS | n/a | n/a |  |
 | `admin/modules.html` | PASS | n/a | PASS |  |
 | `admin/profile.html` | OK | n/a | n/a |  |
 | `admin/roles.html` | OK | n/a | n/a |  |
 | `admin/scheduled_tasks.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): missing aria-labelledby, missing aria-hidden |
-| `admin/service_status.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `admin/service_status.html` | PASS | n/a | n/a |  |
 | `admin/shop.html` | PASS | FAIL? | FAIL (5/5 non-conforming) | page appears to render counts; consider counter_strip; modal(div): missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-h... |
-| `admin/shop_categories.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `admin/shop_optional_accessories.html` | FAIL | n/a | FAIL (1/1 non-conforming) | primary button rendered in body, not in header_actions; modal(div): missing aria-hidden |
-| `admin/shop_package_detail.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `admin/shop_packages.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `admin/shop_product_create.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `admin/shop_subscription_categories.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `admin/shop_categories.html` | PASS | n/a | n/a |  |
+| `admin/shop_optional_accessories.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): missing aria-hidden |
+| `admin/shop_package_detail.html` | PASS | n/a | n/a |  |
+| `admin/shop_packages.html` | PASS | n/a | n/a |  |
+| `admin/shop_product_create.html` | PASS | n/a | n/a |  |
+| `admin/shop_subscription_categories.html` | PASS | n/a | n/a |  |
 | `admin/subscriptions.html` | OK | n/a | FAIL (4/4 non-conforming) | modal(div): missing aria-modal, missing aria-labelledby, missing aria-hidden, missing hidden attr, missing modal__close, missing modal__title, no data-modal-close; modal(div): missing aria-modal, m... |
-| `admin/syncro_ticket_import.html` | FAIL | n/a | n/a | primary button rendered in body, not in header_actions |
-| `admin/tag_exclusions.html` | FAIL | n/a | n/a | primary button rendered in body, not in header_actions |
-| `admin/ticket_detail.html` | FAIL | FAIL? | FAIL (2/2 non-conforming) | primary button rendered in body, not in header_actions; page appears to render counts; consider counter_strip; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-lab... |
+| `admin/syncro_ticket_import.html` | PASS | n/a | n/a | ~1 primary button(s) inside card bodies |
+| `admin/tag_exclusions.html` | PASS | n/a | n/a | ~1 primary button(s) inside card bodies |
+| `admin/ticket_detail.html` | PASS | FAIL? | FAIL (2/2 non-conforming) | page appears to render counts; consider counter_strip; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden; ~4 primary button(s) insid... |
 | `admin/tickets.html` | PASS | n/a | PASS |  |
 | `admin/webhooks.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): missing aria-labelledby, missing aria-hidden |
 
@@ -88,7 +88,7 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
 | `assets/index.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): uses style="display:none", missing aria-modal, missing aria-labelledby, missing aria-hidden, missing hidden attr, missing modal__close, missing modal__title, no data-modal-close |
-| `assets/settings.html` | PARTIAL | n/a | FAIL (1/1 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(div): uses style="display:none", missing aria-modal, missing aria-labelledby, missing aria-hidden, missing ... |
+| `assets/settings.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): uses style="display:none", missing aria-modal, missing aria-labelledby, missing aria-hidden, missing hidden attr, missing modal__close, missing modal__title; ~1 primary button(s) inside... |
 
 ### `bcp/`
 
@@ -127,16 +127,16 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `compliance/control_requirements.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `compliance/index.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `compliance/control_requirements.html` | PASS | n/a | n/a |  |
+| `compliance/index.html` | OK | n/a | n/a |  |
 
 ### `compliance_checks/`
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `compliance_checks/detail.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `compliance_checks/index.html` | PARTIAL | n/a | FAIL (1/1 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(dialog): uses <dialog> not <div>, missing aria-modal, no data-modal-close |
-| `compliance_checks/library.html` | PARTIAL | n/a | FAIL (1/1 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(dialog): uses <dialog> not <div>, missing aria-modal, no data-modal-close |
+| `compliance_checks/detail.html` | PASS | n/a | n/a |  |
+| `compliance_checks/index.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(dialog): uses <dialog> not <div>, missing aria-modal, no data-modal-close |
+| `compliance_checks/library.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(dialog): uses <dialog> not <div>, missing aria-modal, no data-modal-close |
 
 ### `forms/`
 
@@ -148,15 +148,15 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `invoices/detail.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `invoices/index.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `invoices/detail.html` | PASS | n/a | n/a |  |
+| `invoices/index.html` | OK | n/a | n/a |  |
 
 ### `knowledge_base/`
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `knowledge_base/article.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `knowledge_base/index.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `knowledge_base/article.html` | PASS | n/a | n/a |  |
+| `knowledge_base/index.html` | PASS | n/a | n/a |  |
 
 ### `licenses/`
 
@@ -168,19 +168,19 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `m365/benchmarks.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `m365/best_practices.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `m365/best_practices_settings.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `m365/index.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `m365/shared_mailboxes.html` | PARTIAL | n/a | PASS | header_actions block present but doesn't use page_header_actions/header-title-menu |
-| `m365/user_mailboxes.html` | PARTIAL | n/a | PASS | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `m365/benchmarks.html` | PASS | n/a | n/a |  |
+| `m365/best_practices.html` | PASS | n/a | n/a |  |
+| `m365/best_practices_settings.html` | PASS | n/a | n/a |  |
+| `m365/index.html` | PASS | n/a | n/a |  |
+| `m365/shared_mailboxes.html` | PASS | n/a | PASS |  |
+| `m365/user_mailboxes.html` | PASS | n/a | PASS |  |
 
 ### `notifications/`
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
 | `notifications/index.html` | PASS | PASS | FAIL (2/2 non-conforming) | modal(div): missing aria-hidden; modal(div): missing aria-hidden |
-| `notifications/settings.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu; ~1 primary button(s) inside card bodies |
+| `notifications/settings.html` | PASS | n/a | n/a | ~1 primary button(s) inside card bodies |
 
 ### `service_status/`
 
@@ -192,11 +192,11 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `shop/cart.html` | PARTIAL | n/a | FAIL (2/2 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(div): missing aria-hidden; modal(div): missing aria-hidden; ~1 primary button(s) inside card bodies |
-| `shop/index.html` | PARTIAL | FAIL? | FAIL (2/2 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; page appears to render counts; consider counter_strip; modal(div): missing aria-labelledby, missing aria-hidden, ... |
-| `shop/orders.html` | PARTIAL | n/a | FAIL (1/1 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(div): missing aria-labelledby, missing aria-hidden |
-| `shop/packages.html` | PARTIAL | n/a | FAIL (1/1 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(div): missing aria-hidden |
-| `shop/quotes.html` | PARTIAL | n/a | FAIL (2/2 non-conforming) | header_actions block present but doesn't use page_header_actions/header-title-menu; modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden |
+| `shop/cart.html` | PASS | n/a | FAIL (2/2 non-conforming) | modal(div): missing aria-hidden; modal(div): missing aria-hidden; ~1 primary button(s) inside card bodies |
+| `shop/index.html` | PASS | FAIL? | FAIL (2/2 non-conforming) | page appears to render counts; consider counter_strip; modal(div): missing aria-labelledby, missing aria-hidden, missing modal__title; modal(div): missing aria-labelledby, missing aria-hidden, miss... |
+| `shop/orders.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): missing aria-labelledby, missing aria-hidden |
+| `shop/packages.html` | PASS | n/a | FAIL (1/1 non-conforming) | modal(div): missing aria-hidden |
+| `shop/quotes.html` | PASS | n/a | FAIL (2/2 non-conforming) | modal(div): missing aria-labelledby, missing aria-hidden; modal(div): missing aria-labelledby, missing aria-hidden |
 
 ### `staff/`
 
@@ -211,13 +211,13 @@ Grouped by directory. `Notes` is a short auto-generated description of the most 
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `subscriptions/index.html` | PARTIAL | n/a | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu |
+| `subscriptions/index.html` | OK | n/a | n/a |  |
 
 ### `tickets/`
 
 | Template | Actions | Stats | Modals | Notes |
 |---|---|---|---|---|
-| `tickets/detail.html` | PARTIAL | FAIL? | n/a | header_actions block present but doesn't use page_header_actions/header-title-menu; page appears to render counts; consider counter_strip; ~1 primary button(s) inside card bodies |
+| `tickets/detail.html` | PASS | FAIL? | n/a | page appears to render counts; consider counter_strip; ~1 primary button(s) inside card bodies |
 | `tickets/index.html` | PASS | PARTIAL | PASS | stat-strip used but missing total tile or variant |
 
 ## Remediation priority
@@ -269,56 +269,12 @@ structure documented in `docs/design.md` §3.
 - [ ] `shop/quotes.html` — FAIL (2/2 non-conforming)
 - [ ] `staff/index.html` — FAIL (8/8 non-conforming)
 
-### Header actions to align (44 templates)
+### Header actions to align (0 templates)
 
 Adopt the `page_header_actions` macro (or the legacy `header-title-menu`
 markup) so each page has at most one `button--primary` and a single
 overflow `Actions ▾` menu. Move stray buttons out of card bodies.
 
-- [ ] `admin/automation.html` — FAIL
-- [ ] `admin/automations_create_event.html` — FAIL
-- [ ] `admin/automations_create_scheduled.html` — FAIL
-- [ ] `admin/business_continuity_plan_editor.html` — PARTIAL
-- [ ] `admin/business_continuity_plans.html` — PARTIAL
-- [ ] `admin/company_edit.html` — FAIL
-- [ ] `admin/knowledge_base.html` — PARTIAL
-- [ ] `admin/knowledge_base_editor.html` — PARTIAL
-- [ ] `admin/message_template_form.html` — FAIL
-- [ ] `admin/service_status.html` — PARTIAL
-- [ ] `admin/shop_categories.html` — PARTIAL
-- [ ] `admin/shop_optional_accessories.html` — FAIL
-- [ ] `admin/shop_package_detail.html` — PARTIAL
-- [ ] `admin/shop_packages.html` — PARTIAL
-- [ ] `admin/shop_product_create.html` — PARTIAL
-- [ ] `admin/shop_subscription_categories.html` — PARTIAL
-- [ ] `admin/syncro_ticket_import.html` — FAIL
-- [ ] `admin/tag_exclusions.html` — FAIL
-- [ ] `admin/ticket_detail.html` — FAIL
-- [ ] `assets/settings.html` — PARTIAL
-- [ ] `compliance/control_requirements.html` — PARTIAL
-- [ ] `compliance/index.html` — PARTIAL
-- [ ] `compliance_checks/detail.html` — PARTIAL
-- [ ] `compliance_checks/index.html` — PARTIAL
-- [ ] `compliance_checks/library.html` — PARTIAL
-- [ ] `dashboard.html` — FAIL
-- [ ] `invoices/detail.html` — PARTIAL
-- [ ] `invoices/index.html` — PARTIAL
-- [ ] `knowledge_base/article.html` — PARTIAL
-- [ ] `knowledge_base/index.html` — PARTIAL
-- [ ] `m365/benchmarks.html` — PARTIAL
-- [ ] `m365/best_practices.html` — PARTIAL
-- [ ] `m365/best_practices_settings.html` — PARTIAL
-- [ ] `m365/index.html` — PARTIAL
-- [ ] `m365/shared_mailboxes.html` — PARTIAL
-- [ ] `m365/user_mailboxes.html` — PARTIAL
-- [ ] `notifications/settings.html` — PARTIAL
-- [ ] `shop/cart.html` — PARTIAL
-- [ ] `shop/index.html` — PARTIAL
-- [ ] `shop/orders.html` — PARTIAL
-- [ ] `shop/packages.html` — PARTIAL
-- [ ] `shop/quotes.html` — PARTIAL
-- [ ] `subscriptions/index.html` — PARTIAL
-- [ ] `tickets/detail.html` — PARTIAL
 
 ### Stat strip candidates (7 templates)
 
