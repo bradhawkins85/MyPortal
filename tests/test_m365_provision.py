@@ -355,6 +355,47 @@ async def test_post_app_role_assignment_does_not_retry_on_409(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_post_app_role_assignment_default_budget_recovers_after_seven_failures(monkeypatch):
+    """Default retry budget tolerates slow Graph SP propagation (>6 attempts).
+
+    Regression test for the case where a tenant takes longer than the previous
+    6-attempt / ~46 second budget to replicate a newly-created service
+    principal, surfacing as repeated ``Permission being assigned was not found
+    on application`` errors before the assignment finally succeeds.
+    """
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+
+    attempts = {"n": 0}
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        attempts["n"] += 1
+        if attempts["n"] < 8:
+            raise m365_service.M365Error(
+                "Microsoft Graph POST failed (400): Permission being assigned was not found on application",
+                http_status=400,
+                graph_error_code="Request_BadRequest",
+            )
+        return {"id": "assignment-id"}
+
+    with patch.object(m365_service, "_graph_post", side_effect=mock_graph_post):
+        result = await m365_service._post_app_role_assignment_with_retry(
+            "token",
+            "https://graph.microsoft.com/v1.0/servicePrincipals/sp-id/appRoleAssignments",
+            {"principalId": "sp-id", "resourceId": "graph-sp-id", "appRoleId": "role-id"},
+            initial_delay_seconds=0.0,
+        )
+
+    assert result == {"id": "assignment-id"}
+    assert attempts["n"] == 8
+    assert len(sleeps) == 7
+
+
+@pytest.mark.anyio("asyncio")
 async def test_post_app_role_assignment_gives_up_after_max_attempts(monkeypatch):
     async def fake_sleep(seconds: float) -> None:
         return None
