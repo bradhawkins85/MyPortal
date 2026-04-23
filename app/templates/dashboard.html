@@ -26,19 +26,10 @@
       <h2 class="dashboard-summary__title">
         {{ greeting.get('greeting') or 'Hello' }}, {{ greeting.get('name') or 'there' }}.
       </h2>
-      <p class="dashboard-summary__meta">
-        {% if greeting.get('company_name') %}
-          {{ greeting.role or 'Member' }} · {{ greeting.company_name }}
-        {% else %}
-          {{ greeting.role or 'Member' }}
-        {% endif %}
-      </p>
+      {% if greeting.get('company_name') %}
+        <p class="dashboard-summary__meta">{{ greeting.company_name }}</p>
+      {% endif %}
     </div>
-    {% if greeting.get('can_switch_company') %}
-      <a class="button button--ghost button--small" href="{{ greeting.switch_url or '/companies' }}">
-        Switch company
-      </a>
-    {% endif %}
   </article>
 
   <article class="card card--panel dashboard-summary__attention" aria-labelledby="dashboard-attention-heading">

@@ -328,7 +328,7 @@ async def _attention_section(ctx: _DashboardContext) -> dict[str, Any]:
 
 def _quick_actions_section(ctx: _DashboardContext) -> dict[str, Any]:
     actions: list[dict[str, Any]] = [
-        {"label": "New ticket", "href": "/tickets/new", "variant": "primary"},
+        {"label": "New ticket", "href": "/tickets", "variant": "primary"},
         {"label": "Open tickets", "href": "/tickets"},
         {"label": "Notifications", "href": "/notifications"},
     ]
@@ -336,8 +336,6 @@ def _quick_actions_section(ctx: _DashboardContext) -> dict[str, Any]:
         actions.append({"label": "Assets", "href": "/assets"})
     if ctx.has_permission("can_manage_staff"):
         actions.append({"label": "Staff", "href": "/staff"})
-    if len(ctx.available_companies) > 1:
-        actions.append({"label": "Switch company", "href": "/companies"})
     return {"actions": actions}
 
 
@@ -362,21 +360,22 @@ async def _recent_activity_section(ctx: _DashboardContext) -> dict[str, Any]:
             )
 
     changes: list[dict[str, Any]] = []
-    try:
-        change_rows = await change_log_repo.list_change_log_entries(limit=_RECENT_ACTIVITY_LIMIT)
-    except Exception as exc:
-        log_error("Dashboard: change log lookup failed", error=str(exc))
-        change_rows = []
-    for row in change_rows or []:
-        summary = row.get("summary") or "(no summary)"
-        change_type = row.get("change_type") or ""
-        changes.append(
-            {
-                "title": str(summary),
-                "subtitle": str(change_type) if change_type else "",
-                "occurred_at": row.get("occurred_at_utc"),
-            }
-        )
+    if ctx.is_super_admin:
+        try:
+            change_rows = await change_log_repo.list_change_log_entries(limit=_RECENT_ACTIVITY_LIMIT)
+        except Exception as exc:
+            log_error("Dashboard: change log lookup failed", error=str(exc))
+            change_rows = []
+        for row in change_rows or []:
+            summary = row.get("summary") or "(no summary)"
+            change_type = row.get("change_type") or ""
+            changes.append(
+                {
+                    "title": str(summary),
+                    "subtitle": str(change_type) if change_type else "",
+                    "occurred_at": row.get("occurred_at_utc"),
+                }
+            )
 
     return {
         "notifications": notifications,
