@@ -2959,7 +2959,7 @@ async def test_check_spf_records_published_fail_when_missing():
     ):
         result = await bp_service._check_spf_records_published("token")
     assert result["status"] == "fail"
-    assert "contoso.com" in result["details"]
+    assert re.search(r"\bcontoso\.com\b", result["details"])
 
 
 @pytest.mark.anyio("asyncio")
@@ -3012,7 +3012,7 @@ async def test_check_dmarc_records_published_fail_when_missing():
     ):
         result = await bp_service._check_dmarc_records_published("token")
     assert result["status"] == "fail"
-    assert "contoso.com" in result["details"]
+    assert re.search(r"\bcontoso\.com\b", result["details"])
 
 
 @pytest.mark.anyio("asyncio")
