@@ -229,22 +229,36 @@
               <td data-label="Category" data-column="category">{{ product.category_name or '—' }}</td>
               <td data-label="Stock" data-column="stock" data-value="{{ product.stock }}">{{ product.stock }}</td>
               <td class="table__actions">
-                <div class="table__action-buttons">
-                  <button type="button" class="button button--ghost" data-product-edit="{{ product.id }}">Edit</button>
-                  <form action="/shop/admin/product/{{ product.id }}/{{ 'unarchive' if product.archived else 'archive' }}" method="post" class="inline-form">
-                    {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                    {% endif %}
-                    <button type="submit" class="button button--ghost">{{ 'Unarchive' if product.archived else 'Archive' }}</button>
-                  </form>
-                  <form action="/shop/admin/product/{{ product.id }}/delete" method="post" class="inline-form" data-confirm="Delete this product?">
-                    {% if csrf_token %}
-                    <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                    {% endif %}
-                    <button type="submit" class="button button--danger">Delete</button>
-                  </form>
-                  <button type="button" class="button button--ghost" data-product-visibility="{{ product.id }}">Visibility</button>
-                  <button type="button" class="button button--ghost" data-product-price-history="{{ product.id }}" data-product-sku="{{ product.vendor_sku or product.sku }}">Price History</button>
+                {%- set row_menu_id = 'product-actions-menu-' ~ product.id -%}
+                <div class="header-menu" data-header-menu>
+                  <button type="button"
+                          class="button button--ghost button--small header-menu__button"
+                          data-header-menu-toggle
+                          aria-haspopup="menu"
+                          aria-expanded="false"
+                          aria-controls="{{ row_menu_id }}">
+                    <span>Actions</span>
+                    <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                      <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                    </svg>
+                  </button>
+                  <div id="{{ row_menu_id }}"
+                       class="header-menu__panel"
+                       role="menu"
+                       data-header-menu-panel
+                       hidden>
+                    <button type="button" class="header-menu__item" role="menuitem" data-product-edit="{{ product.id }}">Edit</button>
+                    <button type="button" class="header-menu__item" role="menuitem" data-product-visibility="{{ product.id }}">Visibility</button>
+                    <button type="button" class="header-menu__item" role="menuitem" data-product-price-history="{{ product.id }}" data-product-sku="{{ product.vendor_sku or product.sku }}">Price History</button>
+                    <form action="/shop/admin/product/{{ product.id }}/{{ 'unarchive' if product.archived else 'archive' }}" method="post" class="header-menu__form">
+                      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                      <button type="submit" class="header-menu__item" role="menuitem">{{ 'Unarchive' if product.archived else 'Archive' }}</button>
+                    </form>
+                    <form action="/shop/admin/product/{{ product.id }}/delete" method="post" class="header-menu__form" data-confirm="Delete this product?" onsubmit="return confirm('Delete this product?');">
+                      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                      <button type="submit" class="header-menu__item header-menu__item--danger" role="menuitem">Delete</button>
+                    </form>
+                  </div>
                 </div>
               </td>
             </tr>
