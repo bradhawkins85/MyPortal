@@ -5075,16 +5075,38 @@ async def run_m365_best_practices(request: Request):
     )
     if redirect:
         return redirect
-    try:
-        await m365_best_practices_service.run_best_practices(company_id)
-        log_info("M365 best practices run", company_id=company_id, user_id=user.get("id"))
-    except m365_service.M365Error as exc:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
+
+    user_id = user.get("id")
+
+    def _on_complete(_results: list[dict]) -> None:
+        log_info(
+            "M365 best practices run completed",
+            company_id=company_id,
+            user_id=user_id,
+            check_count=len(_results),
         )
+
+    def _on_error(exc: Exception) -> None:
+        log_error(
+            "M365 best practices run failed",
+            company_id=company_id,
+            user_id=user_id,
+            error=str(exc),
+        )
+
+    background_tasks.queue_background_task(
+        lambda: m365_best_practices_service.run_best_practices(company_id),
+        description="m365-best-practices-run",
+        on_complete=_on_complete,
+        on_error=_on_error,
+    )
+    log_info(
+        "M365 best practices run queued",
+        company_id=company_id,
+        user_id=user_id,
+    )
     return RedirectResponse(
-        url="/m365/best-practices?success=Best+practices+evaluated",
+        url="/m365/best-practices?success=Best+practice+evaluation+started+in+the+background",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
