@@ -342,11 +342,11 @@
               <h3>{{ field.display_name }}
                 <span class="section-meta">({{ field.field_type }})</span>
               </h3>
-              {% if field.values %}
+              {% if field['values'] %}
                 <table class="report-table">
                   <thead><tr><th>Value</th><th class="right">Assets</th></tr></thead>
                   <tbody>
-                    {% for entry in field.values %}
+                    {% for entry in field['values'] %}
                       <tr>
                         <td>{{ entry.value }}</td>
                         <td class="right">{{ entry.count }}</td>
