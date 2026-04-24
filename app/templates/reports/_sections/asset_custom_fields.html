@@ -14,10 +14,11 @@
           </h3>
           {% if field['values'] %}
             {% if field.field_type == 'checkbox' %}
-              {{ counter_strip(items=[
-                {'label': entry.value, 'value': entry.count, 'variant': 'neutral'}
-                for entry in field['values']
-              ]) }}
+              {% set counter_items = [] %}
+              {% for entry in field['values'] %}
+                {% set _ = counter_items.append({'label': entry.value, 'value': entry.count, 'variant': 'neutral'}) %}
+              {% endfor %}
+              {{ counter_strip(items=counter_items) }}
             {% else %}
               <table class="report-table">
                 <thead>
