@@ -24,14 +24,14 @@
                 <thead>
                   <tr>
                     <th>Value</th>
-                    <th style="text-align: right;">Assets</th>
+                    <th>Assets</th>
                   </tr>
                 </thead>
                 <tbody>
                   {% for entry in field['values'] %}
                     <tr>
                       <td>{{ entry.value }}</td>
-                      <td style="text-align: right;">{{ entry.count }}</td>
+                      <td>{{ entry.count }}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
