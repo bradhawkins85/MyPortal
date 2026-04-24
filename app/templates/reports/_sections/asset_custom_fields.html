@@ -1,3 +1,4 @@
+{% from "macros/counters.html" import counter_strip %}
 <section class="card card--panel" data-report-section="asset_custom_fields">
   <header class="card__header report-section__header">
     <h2>Asset custom field values</h2>
@@ -12,22 +13,29 @@
             <span class="report-section__meta">({{ field.field_type }})</span>
           </h3>
           {% if field['values'] %}
-            <table class="report-table">
-              <thead>
-                <tr>
-                  <th>Value</th>
-                  <th style="text-align: right;">Assets</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for entry in field['values'] %}
+            {% if field.field_type == 'checkbox' %}
+              {{ counter_strip(items=[
+                {'label': entry.value, 'value': entry.count, 'variant': 'neutral'}
+                for entry in field['values']
+              ]) }}
+            {% else %}
+              <table class="report-table">
+                <thead>
                   <tr>
-                    <td>{{ entry.value }}</td>
-                    <td style="text-align: right;">{{ entry.count }}</td>
+                    <th>Value</th>
+                    <th style="text-align: right;">Assets</th>
                   </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {% for entry in field['values'] %}
+                    <tr>
+                      <td>{{ entry.value }}</td>
+                      <td style="text-align: right;">{{ entry.count }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
           {% else %}
             <p class="report-empty">No recorded values for this field.</p>
           {% endif %}

@@ -163,6 +163,7 @@
             {'label': 'Pass', 'value': section.data.counts.pass, 'variant': 'success'},
             {'label': 'Warn', 'value': section.data.counts.warn, 'variant': 'warning'},
             {'label': 'Fail', 'value': section.data.counts.fail, 'variant': 'danger'},
+            {'label': 'N/A', 'value': section.data.counts.not_applicable, 'variant': 'neutral'},
             {'label': 'Pass rate', 'value': section.data.pass_percentage ~ '%', 'variant': 'info'},
           ]) }}
           {% if section.data.last_run_at %}
@@ -175,26 +176,48 @@
 
     {% elif section.key == 'top_mailboxes' %}
       <section class="report-section">
-        <h2>Top 5 mailboxes by size</h2>
-        {% set mbs = section.data.mailboxes or [] %}
-        {% if mbs %}
-          <table class="report-table">
-            <thead><tr>
-              <th>Display name</th><th>UPN</th><th>Type</th>
-              <th class="right">Total size</th><th class="right">Archive size</th>
-            </tr></thead>
-            <tbody>
-              {% for mb in mbs %}
-                <tr>
-                  <td>{{ mb.display_name }}</td>
-                  <td>{{ mb.user_principal_name }}</td>
-                  <td>{{ mb.mailbox_type }}</td>
-                  <td class="right">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
-                  <td class="right">{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <h2>Mailbox sizes</h2>
+        {% set user_mbs = section.data.user_mailboxes or [] %}
+        {% set shared_mbs = section.data.shared_mailboxes or [] %}
+        {% if user_mbs or shared_mbs %}
+          {% if user_mbs %}
+            <h3>User mailboxes</h3>
+            <table class="report-table">
+              <thead><tr>
+                <th>Display name</th><th>UPN</th>
+                <th class="right">Total size</th><th class="right">Archive size</th>
+              </tr></thead>
+              <tbody>
+                {% for mb in user_mbs %}
+                  <tr>
+                    <td>{{ mb.display_name }}</td>
+                    <td>{{ mb.user_principal_name }}</td>
+                    <td class="right">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                    <td class="right">{% if mb.archive_bytes is none %}None{% else %}{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% endif %}
+          {% if shared_mbs %}
+            <h3>Shared mailboxes</h3>
+            <table class="report-table">
+              <thead><tr>
+                <th>Display name</th><th>UPN</th>
+                <th class="right">Total size</th><th class="right">Archive size</th>
+              </tr></thead>
+              <tbody>
+                {% for mb in shared_mbs %}
+                  <tr>
+                    <td>{{ mb.display_name }}</td>
+                    <td>{{ mb.user_principal_name }}</td>
+                    <td class="right">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                    <td class="right">{% if mb.archive_bytes is none %}None{% else %}{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% endif %}
         {% else %}
           <p class="empty">No mailbox data is available for this company.</p>
         {% endif %}
@@ -234,15 +257,15 @@
         {% if licenses %}
           <table class="report-table">
             <thead><tr>
-              <th>Name</th><th class="right">Total</th><th class="right">Allocated</th>
+              <th>Name</th><th>Total</th><th>Allocated</th>
               <th>Expiry</th><th>Contract term</th>
             </tr></thead>
             <tbody>
               {% for lic in licenses %}
                 <tr>
                   <td>{{ lic.name }}</td>
-                  <td class="right">{{ lic.total }}</td>
-                  <td class="right">{{ lic.allocated }}</td>
+                  <td>{{ lic.total }}</td>
+                  <td>{{ lic.allocated }}</td>
                   <td>{{ lic.expiry_date or '—' }}</td>
                   <td>{{ lic.contract_term or '—' }}</td>
                 </tr>
@@ -343,17 +366,24 @@
                 <span class="section-meta">({{ field.field_type }})</span>
               </h3>
               {% if field['values'] %}
-                <table class="report-table">
-                  <thead><tr><th>Value</th><th class="right">Assets</th></tr></thead>
-                  <tbody>
-                    {% for entry in field['values'] %}
-                      <tr>
-                        <td>{{ entry.value }}</td>
-                        <td class="right">{{ entry.count }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
+                {% if field.field_type == 'checkbox' %}
+                  {{ stats([
+                    {'label': entry.value, 'value': entry.count, 'variant': 'neutral'}
+                    for entry in field['values']
+                  ]) }}
+                {% else %}
+                  <table class="report-table">
+                    <thead><tr><th>Value</th><th class="right">Assets</th></tr></thead>
+                    <tbody>
+                      {% for entry in field['values'] %}
+                        <tr>
+                          <td>{{ entry.value }}</td>
+                          <td class="right">{{ entry.count }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                {% endif %}
               {% else %}
                 <p class="empty">No recorded values for this field.</p>
               {% endif %}
