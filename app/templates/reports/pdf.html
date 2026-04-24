@@ -367,10 +367,14 @@
               </h3>
               {% if field['values'] %}
                 {% if field.field_type == 'checkbox' %}
-                  {{ stats([
-                    {'label': entry.value, 'value': entry.count, 'variant': 'neutral'}
-                    for entry in field['values']
-                  ]) }}
+                  <div class="stats">
+                    {% for entry in field['values'] %}
+                      <div class="stats__item stats__item--neutral">
+                        <span class="stats__label">{{ entry.value }}</span>
+                        <span class="stats__value">{{ entry.count }}</span>
+                      </div>
+                    {% endfor %}
+                  </div>
                 {% else %}
                   <table class="report-table">
                     <thead><tr><th>Value</th><th class="right">Assets</th></tr></thead>
