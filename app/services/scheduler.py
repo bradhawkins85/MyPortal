@@ -41,7 +41,14 @@ _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
 COMMANDS_BY_MODULE: dict[str, set[str]] = {
-    "m365": {"sync_m365_data", "sync_o365", "sync_m365_email_domains"},
+    "m365": {
+        "sync_m365_data",
+        "sync_o365",
+        "sync_m365_email_domains",
+        "sync_m365_licenses",
+        "sync_m365_contacts",
+        "sync_m365_mailboxes",
+    },
     "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
     "call-recordings": {"sync_recordings", "queue_transcriptions", "process_transcription"},
     "unifi-talk": {"sync_unifi_talk_recordings"},
@@ -416,6 +423,72 @@ class SchedulerService:
                             },
                             default=str,
                         )
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
+                elif command == "sync_m365_licenses":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        company_id_int = int(company_id)
+                        try:
+                            await m365_service.sync_company_licenses(company_id_int)
+                            details = json.dumps(
+                                {"company_id": company_id_int, "licenses_synced": True},
+                                default=str,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            status = "failed"
+                            details = json.dumps(
+                                {"company_id": company_id_int, "licenses_synced": False, "error": str(exc)},
+                                default=str,
+                            )
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
+                elif command == "sync_m365_contacts":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        company_id_int = int(company_id)
+                        try:
+                            staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
+                            details = json.dumps(
+                                {
+                                    "company_id": company_id_int,
+                                    "staff": {
+                                        "created": staff_summary.created,
+                                        "updated": staff_summary.updated,
+                                        "skipped": staff_summary.skipped,
+                                        "removed": staff_summary.removed,
+                                        "total": staff_summary.total,
+                                    } if staff_summary is not None else None,
+                                },
+                                default=str,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            status = "failed"
+                            details = json.dumps(
+                                {"company_id": company_id_int, "staff_sync_error": str(exc)},
+                                default=str,
+                            )
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
+                elif command == "sync_m365_mailboxes":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        company_id_int = int(company_id)
+                        try:
+                            mailboxes_synced = await m365_service.sync_mailboxes(company_id_int)
+                            details = json.dumps(
+                                {"company_id": company_id_int, "mailboxes_synced": mailboxes_synced},
+                                default=str,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            status = "failed"
+                            details = json.dumps(
+                                {"company_id": company_id_int, "mailboxes_synced": 0, "error": str(exc)},
+                                default=str,
+                            )
                     else:
                         status = "skipped"
                         details = "Company context required"

@@ -77,8 +77,8 @@ async def test_get_commands_for_company_empty(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio
-async def test_m365_provision_creates_both_tasks(monkeypatch):
-    """Both sync_m365_data and sync_staff tasks are created when none exist."""
+async def test_m365_provision_creates_all_tasks(monkeypatch):
+    """sync_m365_licenses, sync_m365_contacts, sync_m365_mailboxes and sync_staff tasks are created when none exist."""
     created: list[dict] = []
 
     monkeypatch.setattr(
@@ -97,14 +97,19 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
     # Simulate the logic that runs after a successful provision
     company_id = 5
     company_name = "Acme Corp"
-    m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
     sync_staff_task_name = f"{company_name} - Sync staff directory" if company_name else "Sync staff directory"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
-    for command, label in (
-        ("sync_m365_data", m365_task_name),
-        ("sync_staff", sync_staff_task_name),
-    ):
-        if command not in existing_commands:
+    has_m365_sync_task = bool(
+        {"sync_m365_data", "sync_o365", "sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
+        & existing_commands
+    )
+    if not has_m365_sync_task:
+        for command, label_suffix in (
+            ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
+            ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
+            ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
+        ):
+            label = f"{company_name} - {label_suffix}" if company_name else label_suffix
             await scheduled_tasks_repo.create_task(
                 name=label,
                 command=command,
@@ -112,15 +117,23 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
                 company_id=company_id,
                 active=True,
             )
+    if "sync_staff" not in existing_commands:
+        await scheduled_tasks_repo.create_task(
+            name=sync_staff_task_name,
+            command="sync_staff",
+            cron=main_module._random_daily_cron(),
+            company_id=company_id,
+            active=True,
+        )
     await main_module.scheduler_service.refresh()
 
-    assert len(created) == 2
+    assert len(created) == 4
     commands_created = {t["command"] for t in created}
-    assert commands_created == {"sync_m365_data", "sync_staff"}
-    m365_task = next(t for t in created if t["command"] == "sync_m365_data")
-    assert m365_task["name"] == "Acme Corp - Sync Microsoft 365 data"
-    staff_task = next(t for t in created if t["command"] == "sync_staff")
-    assert staff_task["name"] == "Acme Corp - Sync staff directory"
+    assert commands_created == {"sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes", "sync_staff"}
+    assert next(t for t in created if t["command"] == "sync_m365_licenses")["name"] == "Acme Corp - Sync Microsoft 365 licenses"
+    assert next(t for t in created if t["command"] == "sync_m365_contacts")["name"] == "Acme Corp - Sync Microsoft 365 contacts"
+    assert next(t for t in created if t["command"] == "sync_m365_mailboxes")["name"] == "Acme Corp - Sync Microsoft 365 mailboxes"
+    assert next(t for t in created if t["command"] == "sync_staff")["name"] == "Acme Corp - Sync staff directory"
     for task in created:
         assert task["company_id"] == company_id
         cron = task["cron"]
@@ -132,13 +145,13 @@ async def test_m365_provision_creates_both_tasks(monkeypatch):
 
 @pytest.mark.anyio
 async def test_m365_provision_skips_existing_tasks(monkeypatch):
-    """No duplicate tasks are created when sync_m365_data and sync_staff already exist."""
+    """No duplicate tasks are created when split M365 tasks and sync_staff already exist."""
     created: list[dict] = []
 
     monkeypatch.setattr(
         scheduled_tasks_repo,
         "get_commands_for_company",
-        AsyncMock(return_value={"sync_m365_data", "sync_staff"}),
+        AsyncMock(return_value={"sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes", "sync_staff"}),
     )
 
     async def fake_create_task(**kwargs):
@@ -150,14 +163,19 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
 
     company_id = 5
     company_name = "Acme Corp"
-    m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
     sync_staff_task_name = f"{company_name} - Sync staff directory" if company_name else "Sync staff directory"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
-    for command, label in (
-        ("sync_m365_data", m365_task_name),
-        ("sync_staff", sync_staff_task_name),
-    ):
-        if command not in existing_commands:
+    has_m365_sync_task = bool(
+        {"sync_m365_data", "sync_o365", "sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
+        & existing_commands
+    )
+    if not has_m365_sync_task:
+        for command, label_suffix in (
+            ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
+            ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
+            ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
+        ):
+            label = f"{company_name} - {label_suffix}" if company_name else label_suffix
             await scheduled_tasks_repo.create_task(
                 name=label,
                 command=command,
@@ -165,6 +183,14 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
                 company_id=company_id,
                 active=True,
             )
+    if "sync_staff" not in existing_commands:
+        await scheduled_tasks_repo.create_task(
+            name=sync_staff_task_name,
+            command="sync_staff",
+            cron=main_module._random_daily_cron(),
+            company_id=company_id,
+            active=True,
+        )
     await main_module.scheduler_service.refresh()
 
     assert created == [], "No tasks should be created when they already exist"
@@ -172,8 +198,8 @@ async def test_m365_provision_skips_existing_tasks(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_m365_provision_creates_only_missing_task(monkeypatch):
-    """Only the missing task is created when one already exists."""
+async def test_m365_provision_skips_when_legacy_task_exists(monkeypatch):
+    """No new split M365 tasks are created when a legacy sync_m365_data task already exists."""
     created: list[dict] = []
 
     monkeypatch.setattr(
@@ -191,14 +217,19 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
 
     company_id = 5
     company_name = "Acme Corp"
-    m365_task_name = f"{company_name} - Sync Microsoft 365 data" if company_name else "Sync Microsoft 365 data"
     sync_staff_task_name = f"{company_name} - Sync staff directory" if company_name else "Sync staff directory"
     existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
-    for command, label in (
-        ("sync_m365_data", m365_task_name),
-        ("sync_staff", sync_staff_task_name),
-    ):
-        if command not in existing_commands:
+    has_m365_sync_task = bool(
+        {"sync_m365_data", "sync_o365", "sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
+        & existing_commands
+    )
+    if not has_m365_sync_task:
+        for command, label_suffix in (
+            ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
+            ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
+            ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
+        ):
+            label = f"{company_name} - {label_suffix}" if company_name else label_suffix
             await scheduled_tasks_repo.create_task(
                 name=label,
                 command=command,
@@ -206,8 +237,17 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
                 company_id=company_id,
                 active=True,
             )
+    if "sync_staff" not in existing_commands:
+        await scheduled_tasks_repo.create_task(
+            name=sync_staff_task_name,
+            command="sync_staff",
+            cron=main_module._random_daily_cron(),
+            company_id=company_id,
+            active=True,
+        )
     await main_module.scheduler_service.refresh()
 
+    # Only sync_staff should be created since legacy sync_m365_data already exists
     assert len(created) == 1
     assert created[0]["command"] == "sync_staff"
 
@@ -217,25 +257,19 @@ async def test_m365_provision_creates_only_missing_task(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_m365_task_name_includes_company_name():
-    """sync_m365_data task name is prefixed with the company name."""
+    """split M365 task names are prefixed with the company name."""
     company_name = "Widgets Inc"
-    task_name = (
-        f"{company_name} - Sync Microsoft 365 data"
-        if company_name
-        else "Sync Microsoft 365 data"
-    )
-    assert task_name == "Widgets Inc - Sync Microsoft 365 data"
+    for label_suffix in ("Sync Microsoft 365 licenses", "Sync Microsoft 365 contacts", "Sync Microsoft 365 mailboxes"):
+        task_name = f"{company_name} - {label_suffix}" if company_name else label_suffix
+        assert task_name == f"Widgets Inc - {label_suffix}"
 
 
 def test_m365_task_name_fallback_when_no_company_name():
-    """sync_m365_data task name falls back to default when company name is empty."""
+    """split M365 task names fall back to default when company name is empty."""
     company_name = ""
-    task_name = (
-        f"{company_name} - Sync Microsoft 365 data"
-        if company_name
-        else "Sync Microsoft 365 data"
-    )
-    assert task_name == "Sync Microsoft 365 data"
+    for label_suffix in ("Sync Microsoft 365 licenses", "Sync Microsoft 365 contacts", "Sync Microsoft 365 mailboxes"):
+        task_name = f"{company_name} - {label_suffix}" if company_name else label_suffix
+        assert task_name == label_suffix
 
 
 def test_sync_staff_task_name_includes_company_name():
