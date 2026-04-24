@@ -71,7 +71,7 @@
 {% block styles %}
 <style>
   .report-page { display: flex; flex-direction: column; gap: var(--space-4); }
-  .report-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+  .report-stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--space-4); }
   .report-stat-row > .card { margin: 0; }
   .report-cover__body { padding: var(--space-5); text-align: center; }
   .report-cover__eyebrow {

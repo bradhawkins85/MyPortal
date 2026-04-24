@@ -56,22 +56,68 @@
           </tr>
         </thead>
         <tbody id="sections-tbody">
+          {% set stat_keys = ['assets', 'staff', 'orders_current_month'] %}
+          {% set stat_row_rendered = namespace(value=false) %}
+          {% set stat_sections = namespace(value=[]) %}
           {% for section in sections %}
-            <tr draggable="true" data-key="{{ section.key }}" class="sortable-row">
-              <td class="drag-handle">
-                <button type="button" class="drag-handle__btn" aria-label="Drag to reorder {{ section.label }}" tabindex="-1" aria-hidden="true">⠿</button>
-              </td>
-              <td><strong>{{ section.label }}</strong></td>
-              <td class="report-section__meta">{{ section.description }}</td>
-              <td style="text-align: center;">
-                <input
-                  type="checkbox"
-                  name="sections"
-                  value="{{ section.key }}"
-                  {% if visibility.get(section.key, True) %}checked{% endif %}
-                >
-              </td>
-            </tr>
+            {% if section.key in stat_keys %}
+              {% set stat_sections.value = stat_sections.value + [section] %}
+            {% endif %}
+          {% endfor %}
+          {% for section in sections %}
+            {% if section.key in stat_keys %}
+              {% if not stat_row_rendered.value %}
+                {# Render all three stat sections as a single grouped draggable row #}
+                <tr draggable="true" data-key="assets|staff|orders_current_month" class="sortable-row">
+                  <td class="drag-handle">
+                    <button type="button" class="drag-handle__btn" aria-label="Drag to reorder stat sections" tabindex="-1" aria-hidden="true">⠿</button>
+                  </td>
+                  <td>
+                    {% for stat in stat_sections.value %}
+                      <div style="padding: var(--space-1) 0;{% if not loop.last %} border-bottom: 1px solid var(--color-border);{% endif %}">
+                        <strong>{{ stat.label }}</strong>
+                      </div>
+                    {% endfor %}
+                  </td>
+                  <td class="report-section__meta">
+                    {% for stat in stat_sections.value %}
+                      <div style="padding: var(--space-1) 0;{% if not loop.last %} border-bottom: 1px solid var(--color-border);{% endif %}">
+                        {{ stat.description }}
+                      </div>
+                    {% endfor %}
+                  </td>
+                  <td style="text-align: center; vertical-align: top;">
+                    {% for stat in stat_sections.value %}
+                      <div style="padding: var(--space-1) 0;{% if not loop.last %} border-bottom: 1px solid var(--color-border);{% endif %}">
+                        <input
+                          type="checkbox"
+                          name="sections"
+                          value="{{ stat.key }}"
+                          {% if visibility.get(stat.key, True) %}checked{% endif %}
+                        >
+                      </div>
+                    {% endfor %}
+                  </td>
+                </tr>
+                {% set stat_row_rendered.value = true %}
+              {% endif %}
+            {% else %}
+              <tr draggable="true" data-key="{{ section.key }}" class="sortable-row">
+                <td class="drag-handle">
+                  <button type="button" class="drag-handle__btn" aria-label="Drag to reorder {{ section.label }}" tabindex="-1" aria-hidden="true">⠿</button>
+                </td>
+                <td><strong>{{ section.label }}</strong></td>
+                <td class="report-section__meta">{{ section.description }}</td>
+                <td style="text-align: center;">
+                  <input
+                    type="checkbox"
+                    name="sections"
+                    value="{{ section.key }}"
+                    {% if visibility.get(section.key, True) %}checked{% endif %}
+                  >
+                </td>
+              </tr>
+            {% endif %}
           {% endfor %}
         </tbody>
       </table>
@@ -126,7 +172,15 @@
   const autoHideInput = document.getElementById('auto-hide-input');
 
   function updateOrderInput() {
-    const keys = Array.from(tbody.querySelectorAll('tr[data-key]')).map(r => r.dataset.key);
+    const keys = [];
+    tbody.querySelectorAll('tr[data-key]').forEach(function (r) {
+      const key = r.dataset.key;
+      if (key && key.includes('|')) {
+        key.split('|').forEach(function (k) { if (k) keys.push(k); });
+      } else if (key) {
+        keys.push(key);
+      }
+    });
     orderInput.value = keys.join(',');
   }
 
