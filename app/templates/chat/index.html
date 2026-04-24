@@ -14,30 +14,24 @@
 <section class="card card--panel">
   <header class="card__header">
     <div class="card__controls">
-      <form method="get" autocomplete="off" class="toolbar__form">
-        <div class="toolbar__field">
+      <form method="get" autocomplete="off" class="tickets-toolbar__form" id="chat-filter-form">
+        <div class="tickets-toolbar__field">
           <label class="form-label" for="chat-status-filter">Status</label>
-          <select id="chat-status-filter" name="status" class="form-input">
+          <select id="chat-status-filter" name="status" class="form-input" data-auto-filter>
             <option value="">All</option>
             <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open</option>
             <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>Closed</option>
           </select>
         </div>
         {% if is_staff %}
-        <div class="toolbar__field">
+        <div class="tickets-toolbar__field">
           <label class="form-label" for="chat-unattended-filter">Show</label>
-          <select id="chat-unattended-filter" name="unattended" class="form-input">
+          <select id="chat-unattended-filter" name="unattended" class="form-input" data-auto-filter>
             <option value="">All sessions</option>
             <option value="1" {% if unattended_filter == '1' %}selected{% endif %}>Unattended only</option>
           </select>
         </div>
         {% endif %}
-        <div class="toolbar__actions">
-          <button type="submit" class="button">Filter</button>
-          {% if status_filter or unattended_filter %}
-            <a href="{{ request.url.path }}" class="button button--ghost">Clear</a>
-          {% endif %}
-        </div>
       </form>
     </div>
   </header>
@@ -168,6 +162,11 @@
       alert('Network error: ' + err.message);
       submit.disabled = false;
     }
+  });
+
+  // Auto-submit filter form on select change
+  document.querySelectorAll('[data-auto-filter]').forEach(el => {
+    el.addEventListener('change', () => document.getElementById('chat-filter-form').submit());
   });
 
   // Assign & Join buttons
