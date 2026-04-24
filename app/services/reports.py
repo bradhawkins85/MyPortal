@@ -314,17 +314,20 @@ async def _build_essential8(company_id: int) -> dict[str, Any]:
                 in_progress += 1
         not_started = total - compliant - in_progress
         percentage = round((compliant / total * 100.0), 1) if total else 0.0
-        level_rows.append(
-            {
-                "level": level_key,
-                "label": level_label,
-                "total": total,
-                "compliant": compliant,
-                "in_progress": in_progress,
-                "not_started": not_started,
-                "percentage": percentage,
-            }
-        )
+        # ML2 and ML3 are only included when at least one control has progress.
+        has_progress = compliant > 0 or in_progress > 0
+        if level_key == "ml1" or has_progress:
+            level_rows.append(
+                {
+                    "level": level_key,
+                    "label": level_label,
+                    "total": total,
+                    "compliant": compliant,
+                    "in_progress": in_progress,
+                    "not_started": not_started,
+                    "percentage": percentage,
+                }
+            )
     return {"levels": level_rows}
 
 

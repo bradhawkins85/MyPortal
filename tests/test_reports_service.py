@@ -132,9 +132,13 @@ async def test_build_company_report_assembles_all_sections():
 
     e8 = report.section("essential8")
     assert e8 is not None
+    level_keys = [lvl["level"] for lvl in e8.data["levels"]]
     ml1 = next(level for level in e8.data["levels"] if level["level"] == "ml1")
     assert ml1["compliant"] == 2
     assert ml1["total"] == 2
+    # ML2 has in_progress=1 so it should be included; ML3 has no progress so it must be omitted.
+    assert "ml2" in level_keys
+    assert "ml3" not in level_keys
 
     tickets = report.section("tickets_last_month")
     assert tickets is not None and tickets.data["total"] == 0
