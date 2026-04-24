@@ -1,6 +1,7 @@
 """Repository for per-company report section visibility preferences."""
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable, Mapping
 
 from app.core.database import db
@@ -62,8 +63,56 @@ async def delete_for_company(company_id: int) -> None:
     )
 
 
+async def get_company_report_settings(company_id: int) -> dict[str, Any]:
+    """Return report-level settings for a company.
+
+    Defaults: ``auto_hide_empty=True``, ``section_order=None`` (canonical order).
+    """
+    row = await db.fetch_one(
+        "SELECT auto_hide_empty, section_order FROM company_report_settings WHERE company_id = %s",
+        (company_id,),
+    )
+    if row is None:
+        return {"auto_hide_empty": True, "section_order": None}
+    raw_auto_hide = row.get("auto_hide_empty") if isinstance(row, Mapping) else row["auto_hide_empty"]
+    raw_order = row.get("section_order") if isinstance(row, Mapping) else row["section_order"]
+    try:
+        auto_hide = bool(int(raw_auto_hide))
+    except (TypeError, ValueError):
+        auto_hide = bool(raw_auto_hide)
+    section_order: list[str] | None = None
+    if raw_order:
+        try:
+            section_order = json.loads(raw_order)
+        except (json.JSONDecodeError, TypeError):
+            section_order = None
+    return {"auto_hide_empty": auto_hide, "section_order": section_order}
+
+
+async def save_company_report_settings(
+    company_id: int,
+    auto_hide_empty: bool,
+    section_order: list[str] | None,
+) -> None:
+    """Persist report-level settings for a company (upsert)."""
+    auto_hide_val = 1 if auto_hide_empty else 0
+    order_json = json.dumps(section_order) if section_order is not None else None
+    # Emulate UPSERT for MySQL/SQLite compatibility.
+    await db.execute(
+        "DELETE FROM company_report_settings WHERE company_id = %s",
+        (company_id,),
+    )
+    await db.execute(
+        "INSERT INTO company_report_settings (company_id, auto_hide_empty, section_order)"
+        " VALUES (%s, %s, %s)",
+        (company_id, auto_hide_val, order_json),
+    )
+
+
 __all__ = [
     "get_section_preferences",
     "set_section_preferences",
     "delete_for_company",
+    "get_company_report_settings",
+    "save_company_report_settings",
 ]

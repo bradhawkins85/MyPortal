@@ -19,6 +19,9 @@ async def test_build_company_report_assembles_all_sections():
         reports.report_sections_repo, "get_section_preferences",
         new=AsyncMock(return_value={}),  # all sections default to enabled
     ), patch.object(
+        reports.report_sections_repo, "get_company_report_settings",
+        new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
+    ), patch.object(
         reports.assets_repo, "count_active_assets",
         new=AsyncMock(return_value=7),
     ), patch.object(
@@ -160,6 +163,9 @@ async def test_build_company_report_respects_disabled_sections():
     ), patch.object(
         reports.report_sections_repo, "get_section_preferences",
         new=AsyncMock(return_value=preferences),
+    ), patch.object(
+        reports.report_sections_repo, "get_company_report_settings",
+        new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
     ):
         report = await reports.build_company_report(1)
 
@@ -205,3 +211,181 @@ async def test_build_company_report_raises_for_missing_company():
     ):
         with pytest.raises(ValueError):
             await reports.build_company_report(999)
+
+
+@pytest.mark.asyncio
+async def test_auto_hide_empty_hides_sections_with_no_data():
+    """Sections with empty data are disabled when auto_hide_empty is True."""
+    from app.services import reports
+
+    company = {"id": 10, "name": "EmptyCo"}
+    # All sections enabled but all builders return empty/zero data.
+    preferences = {key: True for key in reports.SECTION_KEYS}
+
+    with patch.object(
+        reports.company_repo, "get_company_by_id",
+        new=AsyncMock(return_value=company),
+    ), patch.object(
+        reports.report_sections_repo, "get_section_preferences",
+        new=AsyncMock(return_value=preferences),
+    ), patch.object(
+        reports.report_sections_repo, "get_company_report_settings",
+        new=AsyncMock(return_value={"auto_hide_empty": True, "section_order": None}),
+    ), patch.object(
+        reports.assets_repo, "count_active_assets", new=AsyncMock(return_value=0),
+    ), patch.object(
+        reports.assets_repo, "count_active_assets_by_type", new=AsyncMock(return_value=0),
+    ), patch.object(
+        reports.staff_repo, "count_staff", new=AsyncMock(return_value=0),
+    ), patch.object(
+        reports.m365_bp_repo, "list_results", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.shop_repo, "list_order_summaries", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.licenses_repo, "list_company_licenses", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.subscriptions_repo, "list_subscriptions", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.essential8_repo, "list_essential8_controls", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.essential8_repo, "get_per_maturity_statuses_for_company",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
+        reports.compliance_checks_repo, "get_assignment_summary",
+        new=AsyncMock(return_value={"total": 0, "compliance_percentage": 0.0,
+                                    "in_progress": 0, "not_started": 0,
+                                    "overdue_count": 0, "due_soon_count": 0}),
+    ), patch.object(
+        reports.asset_custom_fields_repo, "list_field_definitions",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.issues_repo, "list_issues_with_assignments",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.db, "fetch_all", new=AsyncMock(return_value=[]),
+    ):
+        report = await reports.build_company_report(10)
+
+    assert report.auto_hide_empty is True
+    # Every section should be marked empty and therefore disabled.
+    for section in report.sections:
+        assert section.is_empty is True, f"{section.key} should be empty"
+        assert section.enabled is False, f"{section.key} should be auto-hidden"
+
+
+@pytest.mark.asyncio
+async def test_auto_hide_disabled_leaves_empty_sections_visible():
+    """When auto_hide_empty is False, empty sections remain enabled."""
+    from app.services import reports
+
+    company = {"id": 11, "name": "ShowAll"}
+    preferences = {key: True for key in reports.SECTION_KEYS}
+
+    with patch.object(
+        reports.company_repo, "get_company_by_id",
+        new=AsyncMock(return_value=company),
+    ), patch.object(
+        reports.report_sections_repo, "get_section_preferences",
+        new=AsyncMock(return_value=preferences),
+    ), patch.object(
+        reports.report_sections_repo, "get_company_report_settings",
+        new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
+    ), patch.object(
+        reports.assets_repo, "count_active_assets", new=AsyncMock(return_value=0),
+    ), patch.object(
+        reports.assets_repo, "count_active_assets_by_type", new=AsyncMock(return_value=0),
+    ), patch.object(
+        reports.staff_repo, "count_staff", new=AsyncMock(return_value=0),
+    ), patch.object(
+        reports.m365_bp_repo, "list_results", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.shop_repo, "list_order_summaries", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.licenses_repo, "list_company_licenses", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.subscriptions_repo, "list_subscriptions", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.essential8_repo, "list_essential8_controls", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.essential8_repo, "get_per_maturity_statuses_for_company",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
+        reports.compliance_checks_repo, "get_assignment_summary",
+        new=AsyncMock(return_value={"total": 0, "compliance_percentage": 0.0,
+                                    "in_progress": 0, "not_started": 0,
+                                    "overdue_count": 0, "due_soon_count": 0}),
+    ), patch.object(
+        reports.asset_custom_fields_repo, "list_field_definitions",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.issues_repo, "list_issues_with_assignments",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.db, "fetch_all", new=AsyncMock(return_value=[]),
+    ):
+        report = await reports.build_company_report(11)
+
+    assert report.auto_hide_empty is False
+    # All sections are enabled even though their data is empty.
+    assert all(s.enabled is True for s in report.sections)
+
+
+@pytest.mark.asyncio
+async def test_build_company_report_respects_section_order():
+    """Custom section_order is reflected in the report sections list."""
+    from app.services import reports
+
+    company = {"id": 12, "name": "Ordered"}
+    preferences = {key: True for key in reports.SECTION_KEYS}
+    # Request staff first, then assets.
+    custom_order = ["staff", "assets"] + [
+        s.key for s in reports.REPORT_SECTIONS if s.key not in ("staff", "assets")
+    ]
+
+    with patch.object(
+        reports.company_repo, "get_company_by_id",
+        new=AsyncMock(return_value=company),
+    ), patch.object(
+        reports.report_sections_repo, "get_section_preferences",
+        new=AsyncMock(return_value=preferences),
+    ), patch.object(
+        reports.report_sections_repo, "get_company_report_settings",
+        new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": custom_order}),
+    ), patch.object(
+        reports.assets_repo, "count_active_assets", new=AsyncMock(return_value=5),
+    ), patch.object(
+        reports.assets_repo, "count_active_assets_by_type", new=AsyncMock(return_value=2),
+    ), patch.object(
+        reports.staff_repo, "count_staff", new=AsyncMock(return_value=3),
+    ), patch.object(
+        reports.m365_bp_repo, "list_results", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.shop_repo, "list_order_summaries", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.licenses_repo, "list_company_licenses", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.subscriptions_repo, "list_subscriptions", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.essential8_repo, "list_essential8_controls", new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.essential8_repo, "get_per_maturity_statuses_for_company",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
+        reports.compliance_checks_repo, "get_assignment_summary",
+        new=AsyncMock(return_value={"total": 0, "compliance_percentage": 0.0,
+                                    "in_progress": 0, "not_started": 0,
+                                    "overdue_count": 0, "due_soon_count": 0}),
+    ), patch.object(
+        reports.asset_custom_fields_repo, "list_field_definitions",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.issues_repo, "list_issues_with_assignments",
+        new=AsyncMock(return_value=[]),
+    ), patch.object(
+        reports.db, "fetch_all", new=AsyncMock(return_value=[]),
+    ):
+        report = await reports.build_company_report(12)
+
+    assert report.sections[0].key == "staff"
+    assert report.sections[1].key == "assets"
+    assert len(report.sections) == len(reports.REPORT_SECTIONS)
