@@ -79,20 +79,16 @@ async def sync_call_recordings(
     __: dict = Depends(require_super_admin),
 ):
     """Sync call recordings from filesystem (super admin only)."""
-    # Get the recordings path from query param or module settings
-    phone_system_type: str | None = None
+    # Look up the call-recordings module once so we can fall back to the
+    # configured path and read the phone system type without repeating work.
+    from app.repositories import integration_modules as modules_repo
+
+    module = await modules_repo.get_module("call-recordings")
+    module_settings = (module or {}).get("settings") or {}
+    phone_system_type = module_settings.get("phone_system_type")
     if not recordings_path:
-        from app.repositories import integration_modules as modules_repo
-        module = await modules_repo.get_module("call-recordings")
-        if module and module.get("settings"):
-            recordings_path = module["settings"].get("recordings_path")
-            phone_system_type = module["settings"].get("phone_system_type")
-    else:
-        from app.repositories import integration_modules as modules_repo
-        module = await modules_repo.get_module("call-recordings")
-        if module and module.get("settings"):
-            phone_system_type = module["settings"].get("phone_system_type")
-    
+        recordings_path = module_settings.get("recordings_path")
+
     if not recordings_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -129,15 +125,14 @@ async def force_sync_call_recordings(
     __: dict = Depends(require_super_admin),
 ):
     """Force sync call recordings from filesystem, reloading all details while preserving ticket linkages and transcriptions (super admin only)."""
-    # Get the recordings path from query param or module settings
     from app.repositories import integration_modules as modules_repo
+
     module = await modules_repo.get_module("call-recordings")
-    phone_system_type: str | None = None
-    if module and module.get("settings"):
-        phone_system_type = module["settings"].get("phone_system_type")
-        if not recordings_path:
-            recordings_path = module["settings"].get("recordings_path")
-    
+    module_settings = (module or {}).get("settings") or {}
+    phone_system_type = module_settings.get("phone_system_type")
+    if not recordings_path:
+        recordings_path = module_settings.get("recordings_path")
+
     if not recordings_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
