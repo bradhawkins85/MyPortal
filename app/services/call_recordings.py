@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import httpx
 from loguru import logger
@@ -15,6 +16,21 @@ from app.services import webhook_monitor
 
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+
+# Phone system types whose recording layout differs from the generic
+# audio-file/title based discovery. Keep in sync with
+# ``app.services.modules.CALL_RECORDINGS_PHONE_SYSTEM_TYPES``.
+PHONE_SYSTEM_GENERIC = "generic"
+PHONE_SYSTEM_GRANDSTREAM_UCM = "grandstream-ucm"
+PHONE_SYSTEM_3CX = "3cx"
+
+# Grandstream UCM emits a hidden CSV index per month named e.g.
+# ``.rd_files_netdisk_2026-04.csv`` which lives next to a folder called
+# ``2026-04`` containing the actual recordings for that month.
+_GRANDSTREAM_CSV_PATTERN = re.compile(
+    r"^\.rd_files_netdisk_(?P<period>\d{4}-\d{2})\.csv$"
+)
+_GRANDSTREAM_CSV_GLOB = ".rd_files_netdisk_*.csv"
 
 
 def _extract_phone_from_title(title: str | None) -> str | None:
@@ -208,7 +224,289 @@ def _first_non_empty(mapping: Mapping[str, Any], *keys: str) -> Any:
     return None
 
 
-async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any]:
+def _normalize_phone_system_type(phone_system_type: str | None) -> str:
+    """Coerce a phone system type into one of the supported values."""
+    candidate = (phone_system_type or "").strip().lower()
+    if candidate in {
+        PHONE_SYSTEM_GENERIC,
+        PHONE_SYSTEM_GRANDSTREAM_UCM,
+        PHONE_SYSTEM_3CX,
+    }:
+        return candidate
+    return PHONE_SYSTEM_GENERIC
+
+
+def _coerce_grandstream_phone(value: Any) -> str | None:
+    """Pick a usable phone number from a Grandstream CSV row value."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Some rows use sentinel values such as ``s`` or ``unknown``; skip those.
+    if text.lower() in {"s", "unknown", "anonymous", "n/a"}:
+        return None
+    return text
+
+
+def _grandstream_pick_phone(row: Mapping[str, Any]) -> str | None:
+    """Determine the most useful phone number from a Grandstream CSV row.
+
+    The CSV has both ``caller_num`` and ``callee_num``. Prefer the externally
+    visible number (``new_caller_num`` if present), then the caller number,
+    then the callee number, then the ``other_num`` field.
+    """
+    for key in ("new_caller_num", "caller_num", "callee_num", "other_num"):
+        candidate = _coerce_grandstream_phone(row.get(key))
+        if candidate:
+            return candidate
+    return None
+
+
+def _grandstream_parse_create_time(value: Any) -> datetime | None:
+    """Parse the ``create_time`` column from a Grandstream CSV row."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # ``create_time`` is typically a unix timestamp (seconds). Fall back to the
+    # generic datetime coercion if it is not numeric.
+    if text.isdigit():
+        try:
+            return datetime.fromtimestamp(int(text), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    try:
+        return datetime.fromtimestamp(float(text), tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        pass
+    return _coerce_datetime_value(text)
+
+
+def _grandstream_parse_duration(value: Any) -> int | None:
+    """Parse the ``duration`` column from a Grandstream CSV row."""
+    return _coerce_duration(value)
+
+
+def _find_grandstream_csv_files(base_path: Path) -> list[Path]:
+    """Return Grandstream UCM CSV index files under ``base_path``.
+
+    The index files are hidden (their names start with a dot) so a normal
+    ``rglob('*.csv')`` would still return them, but we filter explicitly to
+    avoid picking up unrelated CSV files in the same tree.
+    """
+    matches: list[Path] = []
+    for path in base_path.rglob(_GRANDSTREAM_CSV_GLOB):
+        if not path.is_file():
+            continue
+        if not _GRANDSTREAM_CSV_PATTERN.match(path.name):
+            continue
+        matches.append(path)
+    return sorted(matches)
+
+
+def _resolve_grandstream_audio_path(
+    csv_path: Path,
+    period: str,
+    file_name: str,
+    *,
+    base_path: Path,
+) -> Path | None:
+    """Resolve an audio file referenced by a Grandstream CSV row.
+
+    The CSV name encodes a ``YYYY-MM`` period that matches the name of a
+    folder containing the recordings for that month. We try, in order:
+
+    1. ``<csv_dir>/<period>/<file_name>`` (the documented layout)
+    2. ``<csv_dir>/<file_name>`` (CSV stored alongside the audio files)
+    3. A recursive search beneath ``base_path`` for a file with the same name.
+    """
+    candidate_name = Path(file_name).name  # guard against path traversal in CSV
+    candidates = [
+        csv_path.parent / period / candidate_name,
+        csv_path.parent / candidate_name,
+    ]
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except (OSError, ValueError):
+            continue
+        if resolved.is_file() and _is_within(resolved, base_path):
+            return resolved
+
+    # Fall back to a recursive search for the file name inside base_path.
+    for path in base_path.rglob(candidate_name):
+        if path.is_file():
+            return path
+    return None
+
+
+def _is_within(path: Path, base: Path) -> bool:
+    """Return ``True`` when ``path`` is the same as or below ``base``."""
+    try:
+        path.relative_to(base)
+    except ValueError:
+        return False
+    return True
+
+
+def _iter_grandstream_csv_rows(csv_path: Path) -> Iterable[dict[str, Any]]:
+    """Yield decoded rows from a Grandstream UCM index CSV.
+
+    The reader uses ``utf-8-sig`` to transparently strip the BOM that
+    Grandstream firmware sometimes emits.
+    """
+    try:
+        handle = csv_path.open("r", encoding="utf-8-sig", newline="")
+    except OSError as exc:  # pragma: no cover - filesystem dependent
+        logger.warning(f"Unable to open Grandstream CSV {csv_path}: {exc}")
+        return
+    with handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if not row:
+                continue
+            yield {
+                (key or "").strip(): value
+                for key, value in row.items()
+                if key is not None
+            }
+
+
+async def _sync_grandstream_ucm(
+    base_path: Path,
+    *,
+    force: bool,
+) -> dict[str, Any]:
+    """Synchronise recordings using Grandstream UCM CSV index files."""
+    created = 0
+    updated = 0
+    skipped = 0
+    errors: list[str] = []
+
+    csv_files = _find_grandstream_csv_files(base_path)
+    if not csv_files:
+        return {
+            "status": "ok",
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "errors": [
+                "No Grandstream UCM CSV index files (.rd_files_netdisk_YYYY-MM.csv) "
+                "were found beneath the configured recordings path."
+            ],
+        }
+
+    for csv_path in csv_files:
+        match = _GRANDSTREAM_CSV_PATTERN.match(csv_path.name)
+        if not match:  # pragma: no cover - filtered above
+            continue
+        period = match.group("period")
+
+        try:
+            rows = list(_iter_grandstream_csv_rows(csv_path))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception(
+                "Failed to read Grandstream CSV index", csv_path=str(csv_path)
+            )
+            errors.append(f"Failed to read Grandstream CSV {csv_path.name}.")
+            continue
+
+        for row in rows:
+            file_name = str(row.get("file_name") or "").strip()
+            if not file_name:
+                continue
+
+            audio_file = _resolve_grandstream_audio_path(
+                csv_path, period, file_name, base_path=base_path
+            )
+            if audio_file is None:
+                skipped += 1
+                continue
+
+            phone_number = _grandstream_pick_phone(row)
+            call_date = _grandstream_parse_create_time(row.get("create_time"))
+            if call_date is None:
+                # Fall back to file_date (YYYY-MM-DD), then file mtime.
+                call_date = _coerce_datetime_value(row.get("file_date"))
+            if call_date is None:
+                try:
+                    call_date = datetime.fromtimestamp(
+                        audio_file.stat().st_mtime, tz=timezone.utc
+                    )
+                except OSError:
+                    call_date = datetime.now(tz=timezone.utc)
+
+            duration = _grandstream_parse_duration(row.get("duration"))
+
+            existing = await call_recordings_repo.get_call_recording_by_file_path(
+                str(audio_file)
+            )
+            if existing:
+                updates: dict[str, Any] = {}
+                if force:
+                    if audio_file.name != existing.get("file_name"):
+                        updates["file_name"] = audio_file.name
+                    if phone_number and phone_number != existing.get("phone_number"):
+                        updates["phone_number"] = phone_number
+                    if call_date and call_date != existing.get("call_date"):
+                        updates["call_date"] = call_date
+                    if (
+                        duration is not None
+                        and duration != existing.get("duration_seconds")
+                    ):
+                        updates["duration_seconds"] = duration
+                    if phone_number:
+                        staff_id = await call_recordings_repo.lookup_staff_by_phone(
+                            phone_number
+                        )
+                        if staff_id and staff_id != existing.get("caller_staff_id"):
+                            updates["caller_staff_id"] = staff_id
+                    if updates:
+                        await call_recordings_repo.force_update_call_recording(
+                            existing["id"], **updates
+                        )
+                        updated += 1
+                    else:
+                        skipped += 1
+                else:
+                    skipped += 1
+                continue
+
+            try:
+                await call_recordings_repo.create_call_recording(
+                    file_path=str(audio_file),
+                    file_name=audio_file.name,
+                    phone_number=phone_number,
+                    call_date=call_date,
+                    duration_seconds=duration,
+                    transcription=None,
+                    transcription_status="pending",
+                )
+                created += 1
+            except Exception as exc:  # pragma: no cover - database dependent
+                logger.error(
+                    f"Failed to persist Grandstream call recording {audio_file}: {exc}"
+                )
+                errors.append(
+                    f"Failed to persist call recording {audio_file.name}."
+                )
+
+    return {
+        "status": "ok",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+async def sync_recordings_from_filesystem(
+    recordings_path: str,
+    *,
+    phone_system_type: str | None = None,
+) -> dict[str, Any]:
     """Discover recordings on disk and persist them to the database."""
     # Validate and resolve the path
     try:
@@ -218,6 +516,11 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
     
     if not base_path.exists() or not base_path.is_dir():
         raise FileNotFoundError(f"Recordings path does not exist: {recordings_path}")
+
+    resolved_phone_system = _normalize_phone_system_type(phone_system_type)
+    if resolved_phone_system == PHONE_SYSTEM_GRANDSTREAM_UCM:
+        return await _sync_grandstream_ucm(base_path, force=False)
+    # ``3cx`` currently shares the generic discovery flow.
 
     created = 0
     updated = 0
@@ -330,7 +633,11 @@ async def sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any
     }
 
 
-async def force_sync_recordings_from_filesystem(recordings_path: str) -> dict[str, Any]:
+async def force_sync_recordings_from_filesystem(
+    recordings_path: str,
+    *,
+    phone_system_type: str | None = None,
+) -> dict[str, Any]:
     """
     Force sync recordings from filesystem, reloading all details while preserving ticket linkages and transcriptions.
     
@@ -348,6 +655,11 @@ async def force_sync_recordings_from_filesystem(recordings_path: str) -> dict[st
     
     if not base_path.exists() or not base_path.is_dir():
         raise FileNotFoundError(f"Recordings path does not exist: {recordings_path}")
+
+    resolved_phone_system = _normalize_phone_system_type(phone_system_type)
+    if resolved_phone_system == PHONE_SYSTEM_GRANDSTREAM_UCM:
+        return await _sync_grandstream_ucm(base_path, force=True)
+    # ``3cx`` currently shares the generic discovery flow.
 
     created = 0
     updated = 0
