@@ -364,6 +364,14 @@
               </a>
             </li>
           {% endif %}
+          <li class="menu__item">
+            <a href="/reports/company-overview" {% if current_path.startswith('/reports') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3h9l5 5v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm8 1v4h4l-4-4zM7 12h10v2H7zm0 4h10v2H7zm0-8h5v2H7z"/></svg>
+              </span>
+              <span class="menu__label">Reports</span>
+            </a>
+          </li>
           {% if can_view_compliance_checks %}
             <li class="menu__item menu__item--expandable {% if current_path.startswith('/compliance-checks') %}menu__item--expanded{% endif %}" data-menu-key="/compliance-checks">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if current_path.startswith('/compliance-checks') %}true{% else %}false{% endif %}">
