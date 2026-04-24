@@ -1070,7 +1070,7 @@ async def _check_restrict_anon_users_start_meeting(
         return _result(check_id, check_name, STATUS_PASS,
                        "AllowAnonymousUsersToStartMeeting=False; anonymous users cannot start Teams meetings.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"AllowAnonymousUsersToStartMeeting={allow_start}; anonymous users can start Teams meetings without an authenticated organiser. "
+                   f"AllowAnonymousUsersToStartMeeting={allow_start}; anonymous users can start Teams meetings without an authenticated organizer. "
                    "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowAnonymousUsersToStartMeeting $false")
 
 
@@ -4268,7 +4268,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "description": (
             "AllowAnonymousUsersToStartMeeting should be set to $false so that "
             "unauthenticated participants cannot start Teams meetings without an "
-            "authenticated organiser being present, reducing the risk of "
+            "authenticated organizer being present, reducing the risk of "
             "unsupervised meetings and data exposure."
         ),
         "remediation": (
