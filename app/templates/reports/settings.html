@@ -74,21 +74,21 @@
                   </td>
                   <td>
                     {% for stat in stat_sections.value %}
-                      <div style="padding: var(--space-1) 0;{% if not loop.last %} border-bottom: 1px solid var(--color-border);{% endif %}">
+                      <div class="stat-section-row{% if loop.last %} stat-section-row--last{% endif %}">
                         <strong>{{ stat.label }}</strong>
                       </div>
                     {% endfor %}
                   </td>
                   <td class="report-section__meta">
                     {% for stat in stat_sections.value %}
-                      <div style="padding: var(--space-1) 0;{% if not loop.last %} border-bottom: 1px solid var(--color-border);{% endif %}">
+                      <div class="stat-section-row{% if loop.last %} stat-section-row--last{% endif %}">
                         {{ stat.description }}
                       </div>
                     {% endfor %}
                   </td>
                   <td style="text-align: center; vertical-align: top;">
                     {% for stat in stat_sections.value %}
-                      <div style="padding: var(--space-1) 0;{% if not loop.last %} border-bottom: 1px solid var(--color-border);{% endif %}">
+                      <div class="stat-section-row{% if loop.last %} stat-section-row--last{% endif %}">
                         <input
                           type="checkbox"
                           name="sections"
@@ -160,6 +160,8 @@
   .drag-handle:active, .drag-handle__btn:active { cursor: grabbing; }
   .sortable-row.drag-over { background: var(--color-surface-alt); outline: 2px dashed var(--color-primary, #0e4f8a); }
   .sortable-row.dragging { opacity: 0.4; }
+  .stat-section-row { padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
+  .stat-section-row--last { border-bottom: none; }
 </style>
 {% endblock %}
 
@@ -172,11 +174,12 @@
   const autoHideInput = document.getElementById('auto-hide-input');
 
   function updateOrderInput() {
+    const COMPOSITE_KEY_DELIMITER = '|';
     const keys = [];
     tbody.querySelectorAll('tr[data-key]').forEach(function (r) {
       const key = r.dataset.key;
-      if (key && key.includes('|')) {
-        key.split('|').forEach(function (k) { if (k) keys.push(k); });
+      if (key && key.includes(COMPOSITE_KEY_DELIMITER)) {
+        key.split(COMPOSITE_KEY_DELIMITER).forEach(function (k) { if (k) keys.push(k); });
       } else if (key) {
         keys.push(key);
       }
