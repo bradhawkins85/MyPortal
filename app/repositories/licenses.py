@@ -18,6 +18,8 @@ def _normalise_license(row: dict[str, Any]) -> dict[str, Any]:
         value = normalised.get(key)
         if isinstance(value, datetime):
             normalised[key] = value.replace(tzinfo=None)
+    if "auto_renew" in normalised and normalised["auto_renew"] is not None:
+        normalised["auto_renew"] = bool(normalised["auto_renew"])
     return normalised
 
 
@@ -113,11 +115,12 @@ async def create_license(
     count: int,
     expiry_date: datetime | None,
     contract_term: str | None,
+    auto_renew: bool | None = None,
 ) -> dict[str, Any]:
     license_id = await db.execute_returning_lastrowid(
         """
-        INSERT INTO licenses (company_id, name, platform, count, expiry_date, contract_term)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO licenses (company_id, name, platform, count, expiry_date, contract_term, auto_renew)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -126,6 +129,7 @@ async def create_license(
             count,
             expiry_date,
             contract_term,
+            int(auto_renew) if auto_renew is not None else None,
         ),
     )
     if not license_id:
@@ -145,11 +149,13 @@ async def update_license(
     count: int,
     expiry_date: datetime | None,
     contract_term: str | None,
+    auto_renew: bool | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
         UPDATE licenses
-        SET company_id = %s, name = %s, platform = %s, count = %s, expiry_date = %s, contract_term = %s
+        SET company_id = %s, name = %s, platform = %s, count = %s, expiry_date = %s,
+            contract_term = %s, auto_renew = %s
         WHERE id = %s
         """,
         (
@@ -159,6 +165,7 @@ async def update_license(
             count,
             expiry_date,
             contract_term,
+            int(auto_renew) if auto_renew is not None else None,
             license_id,
         ),
     )
