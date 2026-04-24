@@ -1,0 +1,52 @@
+<section class="card card--panel" data-report-section="licenses_detail">
+  <header class="card__header report-section__header">
+    <h2>Licenses — Full breakdown</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} license SKUs</span>
+  </header>
+  <div class="card__body">
+    {% set licenses = section.detail_data.licenses or [] %}
+    {% if licenses %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Total</th>
+            <th>Allocated</th>
+            <th>Available</th>
+            <th>Usage %</th>
+            <th>Expiry</th>
+            <th>Contract term</th>
+            <th>Auto-renew</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lic in licenses %}
+            <tr>
+              <td>{{ lic.name }}</td>
+              <td>{{ lic.total }}</td>
+              <td>{{ lic.allocated }}</td>
+              <td>{{ lic.available }}</td>
+              <td>
+                {% set pct = lic.usage_percentage | default(0) %}
+                {% if pct >= 90 %}
+                  <span class="status status--danger">{{ pct }}%</span>
+                {% elif pct >= 75 %}
+                  <span class="status status--warning">{{ pct }}%</span>
+                {% else %}
+                  {{ pct }}%
+                {% endif %}
+              </td>
+              <td>{{ lic.expiry_date or '—' }}</td>
+              <td>{{ lic.contract_term or '—' }}</td>
+              <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
+              <td>{{ lic.notes or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No licenses are recorded for this company.</p>
+    {% endif %}
+  </div>
+</section>

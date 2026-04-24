@@ -1,0 +1,65 @@
+<section class="card card--panel" data-report-section="top_mailboxes_detail">
+  <header class="card__header report-section__header">
+    <h2>Mailboxes — All mailboxes</h2>
+    <span class="report-section__meta">
+      {{ section.detail_data.total_user or 0 }} user &amp; {{ section.detail_data.total_shared or 0 }} shared
+    </span>
+  </header>
+  <div class="card__body">
+    {% macro archive_size(bytes) %}
+      {%- if bytes is none %}None{% else %}{{ (bytes / (1024*1024)) | round(1) }} MB{% endif -%}
+    {% endmacro %}
+    {% set user_mailboxes = section.detail_data.user_mailboxes or [] %}
+    {% set shared_mailboxes = section.detail_data.shared_mailboxes or [] %}
+    {% if user_mailboxes or shared_mailboxes %}
+      {% if user_mailboxes %}
+        <h3 style="margin: 0 0 var(--space-2); font-size: 1rem;">User mailboxes</h3>
+        <table class="report-table" style="margin-bottom: var(--space-4);">
+          <thead>
+            <tr>
+              <th>Display name</th>
+              <th>User principal name</th>
+              <th>Total size</th>
+              <th>Archive size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for mb in user_mailboxes %}
+              <tr>
+                <td>{{ mb.display_name }}</td>
+                <td>{{ mb.user_principal_name }}</td>
+                <td>{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                <td>{{ archive_size(mb.archive_bytes) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+      {% if shared_mailboxes %}
+        <h3 style="margin: 0 0 var(--space-2); font-size: 1rem;">Shared mailboxes</h3>
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Display name</th>
+              <th>User principal name</th>
+              <th>Total size</th>
+              <th>Archive size</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for mb in shared_mailboxes %}
+              <tr>
+                <td>{{ mb.display_name }}</td>
+                <td>{{ mb.user_principal_name }}</td>
+                <td>{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                <td>{{ archive_size(mb.archive_bytes) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% else %}
+      <p class="report-empty">No mailbox data is available for this company.</p>
+    {% endif %}
+  </div>
+</section>

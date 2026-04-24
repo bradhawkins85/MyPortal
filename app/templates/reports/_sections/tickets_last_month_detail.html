@@ -1,0 +1,61 @@
+<section class="card card--panel" data-report-section="tickets_last_month_detail">
+  <header class="card__header report-section__header">
+    <h2>Tickets — Full list (past 30 days)</h2>
+    <span class="report-section__meta">
+      {{ section.detail_data.total or 0 }} tickets since
+      {% if section.detail_data.since %}
+        <span data-utc="{{ section.detail_data.since }}">{{ section.detail_data.since }}</span>
+      {% endif %}
+    </span>
+  </header>
+  <div class="card__body">
+    {% set tickets = section.detail_data.tickets or [] %}
+    {% if tickets %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Subject</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Category</th>
+            <th>Created</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ticket in tickets %}
+            {% set status_map = {'open': 'warning', 'pending': 'warning', 'in_progress': 'info', 'resolved': 'success', 'closed': 'neutral'} %}
+            <tr>
+              <td>{{ ticket.id }}</td>
+              <td>{{ ticket.subject or '—' }}</td>
+              <td>
+                <span class="status status--{{ status_map.get(ticket.status, 'neutral') }}">
+                  {{ ticket.status | replace('_', ' ') | title }}
+                </span>
+              </td>
+              <td>{{ ticket.priority or '—' }}</td>
+              <td>{{ ticket.category or '—' }}</td>
+              <td>
+                {% if ticket.created_at %}
+                  <span data-utc="{{ ticket.created_at }}">{{ ticket.created_at }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>
+                {% if ticket.updated_at %}
+                  <span data-utc="{{ ticket.updated_at }}">{{ ticket.updated_at }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No tickets in the past 30 days.</p>
+    {% endif %}
+  </div>
+</section>
