@@ -16,8 +16,8 @@
             <tr>
               <th>Display name</th>
               <th>User principal name</th>
-              <th style="text-align: right;">Total size</th>
-              <th style="text-align: right;">Archive size</th>
+              <th>Total size</th>
+              <th>Archive size</th>
             </tr>
           </thead>
           <tbody>
@@ -25,8 +25,8 @@
               <tr>
                 <td>{{ mb.display_name }}</td>
                 <td>{{ mb.user_principal_name }}</td>
-                <td style="text-align: right;">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
-                <td style="text-align: right;">{{ archive_size(mb.archive_bytes) }}</td>
+                <td>{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                <td>{{ archive_size(mb.archive_bytes) }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -39,8 +39,8 @@
             <tr>
               <th>Display name</th>
               <th>User principal name</th>
-              <th style="text-align: right;">Total size</th>
-              <th style="text-align: right;">Archive size</th>
+              <th>Total size</th>
+              <th>Archive size</th>
             </tr>
           </thead>
           <tbody>
@@ -48,8 +48,8 @@
               <tr>
                 <td>{{ mb.display_name }}</td>
                 <td>{{ mb.user_principal_name }}</td>
-                <td style="text-align: right;">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
-                <td style="text-align: right;">{{ archive_size(mb.archive_bytes) }}</td>
+                <td>{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                <td>{{ archive_size(mb.archive_bytes) }}</td>
               </tr>
             {% endfor %}
           </tbody>
