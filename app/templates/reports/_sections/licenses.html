@@ -14,6 +14,7 @@
             <th>Allocated</th>
             <th>Expiry</th>
             <th>Contract term</th>
+            <th>Auto-renew</th>
           </tr>
         </thead>
         <tbody>
@@ -24,6 +25,7 @@
               <td>{{ lic.allocated }}</td>
               <td>{{ lic.expiry_date or '—' }}</td>
               <td>{{ lic.contract_term or '—' }}</td>
+              <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>

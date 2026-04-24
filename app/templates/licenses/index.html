@@ -46,6 +46,7 @@
             <th scope="col" data-column-key="allocated" data-sort-key="allocated">Allocated</th>
             <th scope="col" data-column-key="expiry" data-sort-key="expiry_display">Expiry</th>
             <th scope="col" data-column-key="contract_term" data-sort-key="contract_term">Contract term</th>
+            <th scope="col" data-column-key="auto_renew" data-sort-key="auto_renew">Auto-renew</th>
             {% if can_order_licenses %}<th scope="col">Actions</th>{% endif %}
           </tr>
         </thead>
@@ -62,6 +63,12 @@
             </td>
             <td data-column="expiry_display" data-value="{{ license.expiry_display or '' }}">{{ license.expiry_display or '—' }}</td>
             <td data-column="contract_term" data-value="{{ license.contract_term or '' }}">{{ license.contract_term or '—' }}</td>
+            <td data-column="auto_renew" data-value="{{ 'yes' if license.auto_renew else ('no' if license.auto_renew is not none else '') }}">
+              {%- if license.auto_renew is none -%}—
+              {%- elif license.auto_renew -%}<span class="status status--success">Yes</span>
+              {%- else -%}<span class="status status--neutral">No</span>
+              {%- endif -%}
+            </td>
             {% if can_order_licenses %}
             <td>
               {% set row_menu_id = 'license-actions-menu-' ~ license.id %}
@@ -91,7 +98,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="{% if can_order_licenses %}7{% else %}6{% endif %}" class="text-center">No licenses recorded for this company yet.</td>
+            <td colspan="{% if can_order_licenses %}8{% else %}7{% endif %}" class="text-center">No licenses recorded for this company yet.</td>
           </tr>
           {% endfor %}
         </tbody>
