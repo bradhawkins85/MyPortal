@@ -63,6 +63,27 @@ async def get_task_for_company_by_command(company_id: int, command: str) -> dict
     return _normalise_task(row) if row else None
 
 
+async def get_first_task_for_company_by_commands(
+    company_id: int, commands: list[str]
+) -> dict[str, Any] | None:
+    """Return the first active task for *company_id* whose command is in *commands*, ordered
+    by the priority of *commands* (first match wins).  Returns None if none found.
+    """
+    if not commands:
+        return None
+    placeholders = ",".join(["%s"] * len(commands))
+    rows = await db.fetch_all(
+        f"SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN ({placeholders})",
+        (company_id, *commands),
+    )
+    # Return the first match according to the priority order of commands
+    by_command = {row["command"]: row for row in rows}
+    for command in commands:
+        if command in by_command:
+            return _normalise_task(by_command[command])
+    return None
+
+
 
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"

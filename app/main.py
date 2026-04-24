@@ -5593,11 +5593,9 @@ async def sync_m365_mailboxes(request: Request):
         return JSONResponse({"error": "Authentication required"}, status_code=401)
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
-    task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_mailboxes")
-    if task is None:
-        task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_data")
-    if task is None:
-        task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_o365")
+    task = await scheduled_tasks_repo.get_first_task_for_company_by_commands(
+        company_id, ["sync_m365_mailboxes", "sync_m365_data", "sync_o365"]
+    )
     if task is not None:
         asyncio.create_task(scheduler_service.run_now(task["id"]))
     else:

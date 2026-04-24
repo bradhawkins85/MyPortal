@@ -1,7 +1,8 @@
 """Tests for the async /m365/mailboxes/sync endpoint.
 
 Covers:
-- Endpoint returns 202 and queues the scheduled task when sync_m365_data task exists.
+- Endpoint returns 202 and queues the scheduled task when sync_m365_mailboxes task exists.
+- Endpoint falls back to sync_m365_data task when sync_m365_mailboxes not found.
 - Endpoint falls back to queuing sync_mailboxes directly when no task exists.
 - Non-super-admin receives 403 Forbidden.
 """
@@ -62,16 +63,16 @@ def _non_admin_context():
 
 
 # ---------------------------------------------------------------------------
-# sync endpoint – happy path: scheduled task found
+# sync endpoint – happy path: sync_m365_mailboxes task found
 # ---------------------------------------------------------------------------
 
 
 def test_sync_endpoint_queues_scheduled_task_and_returns_202(monkeypatch):
-    """When a sync_m365_data task exists the endpoint returns 202 immediately."""
-    fake_task = {"id": 7, "command": "sync_m365_data", "company_id": 42}
+    """When a sync_m365_mailboxes task exists the endpoint returns 202 immediately."""
+    fake_task = {"id": 7, "command": "sync_m365_mailboxes", "company_id": 42}
 
-    async def fake_get_task(company_id, command):
-        if command == "sync_m365_data":
+    async def fake_get_first_task(company_id, commands):
+        if "sync_m365_mailboxes" in commands:
             return fake_task
         return None
 
@@ -84,7 +85,11 @@ def test_sync_endpoint_queues_scheduled_task_and_returns_202(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr(main_module, "_load_license_context", _super_admin_context())
-    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task_for_company_by_command", fake_get_task)
+    monkeypatch.setattr(
+        main_module.scheduled_tasks_repo,
+        "get_first_task_for_company_by_commands",
+        fake_get_first_task,
+    )
     monkeypatch.setattr(main_module.asyncio, "create_task", fake_create_task)
 
     with TestClient(app) as client:
@@ -101,9 +106,9 @@ def test_sync_endpoint_queues_scheduled_task_and_returns_202(monkeypatch):
 
 
 def test_sync_endpoint_falls_back_to_direct_sync_when_no_task(monkeypatch):
-    """When no sync_m365_data / sync_o365 task exists it falls back to sync_mailboxes."""
+    """When no sync_m365_mailboxes / sync_m365_data / sync_o365 task exists it falls back to sync_mailboxes."""
 
-    async def fake_get_task(company_id, command):
+    async def fake_get_first_task(company_id, commands):
         return None
 
     queued_coros = []
@@ -114,7 +119,11 @@ def test_sync_endpoint_falls_back_to_direct_sync_when_no_task(monkeypatch):
         return MagicMock()
 
     monkeypatch.setattr(main_module, "_load_license_context", _super_admin_context())
-    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task_for_company_by_command", fake_get_task)
+    monkeypatch.setattr(
+        main_module.scheduled_tasks_repo,
+        "get_first_task_for_company_by_commands",
+        fake_get_first_task,
+    )
     monkeypatch.setattr(main_module.asyncio, "create_task", fake_create_task)
 
     with TestClient(app) as client:
