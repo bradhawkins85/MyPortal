@@ -22,6 +22,11 @@ async def test_build_company_report_assembles_all_sections():
         reports.assets_repo, "count_active_assets",
         new=AsyncMock(return_value=7),
     ), patch.object(
+        reports.assets_repo, "count_active_assets_by_type",
+        new=AsyncMock(side_effect=lambda *, company_id, since, device_type: (
+            2 if device_type == "server" else 5
+        )),
+    ), patch.object(
         reports.staff_repo, "count_staff",
         new=AsyncMock(return_value=3),
     ), patch.object(
@@ -103,7 +108,10 @@ async def test_build_company_report_assembles_all_sections():
     assert all(s.enabled for s in report.sections)
 
     assets = report.section("assets")
-    assert assets is not None and assets.data["total_active"] == 7
+    assert assets is not None and assets.data["total_synced"] == 7
+    assert assets.data["servers"] == 2
+    assert assets.data["workstations"] == 5
+    assert "since" in assets.data
 
     staff = report.section("staff")
     assert staff is not None and staff.data["total_active"] == 3

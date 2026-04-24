@@ -45,8 +45,8 @@ class ReportSection:
 REPORT_SECTIONS: tuple[ReportSection, ...] = (
     ReportSection(
         key="assets",
-        label="Active assets",
-        description="Count of active assets currently tracked for the company.",
+        label="Assets synced (last 30 days)",
+        description="Count of assets that have synced in the last 30 days, split by Servers and Workstations.",
     ),
     ReportSection(
         key="staff",
@@ -141,8 +141,20 @@ class ReportData:
 
 
 async def _build_assets(company_id: int) -> dict[str, Any]:
-    total = await assets_repo.count_active_assets(company_id=company_id)
-    return {"total_active": int(total)}
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    total = await assets_repo.count_active_assets(company_id=company_id, since=since)
+    servers = await assets_repo.count_active_assets_by_type(
+        company_id=company_id, since=since, device_type="server"
+    )
+    workstations = await assets_repo.count_active_assets_by_type(
+        company_id=company_id, since=since, device_type="workstation"
+    )
+    return {
+        "total_synced": int(total),
+        "servers": int(servers),
+        "workstations": int(workstations),
+        "since": since.isoformat(),
+    }
 
 
 async def _build_staff(company_id: int) -> dict[str, Any]:
