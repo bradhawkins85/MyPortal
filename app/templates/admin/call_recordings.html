@@ -43,24 +43,6 @@
 {% block content %}
   <div class="management management--single" data-layout>
     <section class="management__content">
-      <header class="management__header">
-        <div>
-          <h1 class="management__title">Call Recordings & Transcriptions</h1>
-          <p class="management__subtitle">Review call recordings, view transcriptions, and create tickets from customer conversations.</p>
-        </div>
-        <div class="management__header-actions">
-          <div class="search-box">
-            <input
-              type="search"
-              id="recording-search"
-              class="form-input search-box__input"
-              placeholder="Search recordings..."
-              aria-label="Search recordings"
-            />
-          </div>
-        </div>
-      </header>
-
       <div class="management__body">
         <!-- Transcription Status Summary -->
         <div class="status-summary" id="status-summary" aria-live="polite">
@@ -108,6 +90,16 @@
               <option value="">All Recordings</option>
               <option value="0">Unlinked Only</option>
             </select>
+          </label>
+          <label class="form-label">
+            Search
+            <input
+              type="search"
+              id="recording-search"
+              class="form-input search-box__input"
+              placeholder="Search recordings..."
+              aria-label="Search recordings"
+            />
           </label>
         </div>
 
@@ -223,6 +215,23 @@
   </dialog>
 
   <script>
+    // Show a notification using the global toast element from the base layout
+    function showGlobalToast(message, variant = 'info', autoHideMs = 5000) {
+      const root = document.querySelector('[data-global-toast]');
+      if (!root) return;
+      const messageEl = root.querySelector('[data-notification-toast-message]');
+      if (!messageEl) return;
+      const VARIANTS = { success: 'alert--success', warning: 'alert--warning', error: 'alert--error', info: 'alert--info' };
+      ['alert--info', 'alert--success', 'alert--warning', 'alert--error'].forEach(cls => root.classList.remove(cls));
+      root.classList.add(VARIANTS[variant] || 'alert--info');
+      messageEl.textContent = message;
+      root.hidden = false;
+      root.setAttribute('aria-hidden', 'false');
+      if (autoHideMs) {
+        setTimeout(() => { root.hidden = true; root.setAttribute('aria-hidden', 'true'); }, autoHideMs);
+      }
+    }
+
     // State
     let currentPage = 1;
     const pageSize = 50;
@@ -529,7 +538,10 @@
     async function syncRecordings(force = false) {
       const actionText = force ? 'Force syncing' : 'Syncing';
       const endpoint = force ? '/api/call-recordings/force-sync' : '/api/call-recordings/sync';
-      
+
+      // Show a "started" notification immediately so the user knows the action was triggered
+      showGlobalToast(`${actionText} recordings… this may take a moment.`, 'info', 8000);
+
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
