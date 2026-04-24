@@ -80,7 +80,7 @@ async def import_contacts_for_company(
 async def _import_from_syncro(company_id: int, syncro_id: str) -> ImportSummary:
     log_info("Starting Syncro contact import", company_id=company_id, syncro_id=syncro_id)
     contacts = await syncro.get_contacts(syncro_id)
-    existing_staff = await staff_repo.list_staff(company_id)
+    existing_staff = await staff_repo.list_all_staff_for_import(company_id)
 
     created = 0
     updated = 0
@@ -192,7 +192,7 @@ async def _import_from_syncro(company_id: int, syncro_id: str) -> ImportSummary:
 async def _import_from_m365(company_id: int) -> ImportSummary:
     log_info("Starting M365 directory staff import", company_id=company_id)
     users = await m365_service.get_all_users(company_id)
-    existing_staff = await staff_repo.list_staff(company_id)
+    existing_staff = await staff_repo.list_all_staff_for_import(company_id)
 
     created = 0
     updated = 0
