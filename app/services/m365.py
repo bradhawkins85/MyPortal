@@ -2087,18 +2087,26 @@ async def sync_company_licenses(company_id: int) -> None:
                 http_status=403,
             ) from exc
 
-    # Fetch subscription details (renewal date, auto-renew, contract term) keyed by skuId.
+    # Fetch subscription details (renewal date, auto-renew, contract term).
+    # Indexed primarily by skuId (lowercase) with skuPartNumber as a fallback key so
+    # that matches succeed even when one endpoint omits or uses a different skuId.
+    # _graph_get_all is used to follow @odata.nextLink pagination and avoid missing
+    # subscriptions on tenants with a large number of SKUs.
     # This endpoint may not be available on all tenants/permission sets so failures are
     # logged but do not abort the rest of the sync.
     subscription_by_sku_id: dict[str, dict[str, Any]] = {}
+    subscription_by_sku_part: dict[str, dict[str, Any]] = {}
     try:
-        sub_payload = await _graph_get(
+        subs = await _graph_get_all(
             access_token, "https://graph.microsoft.com/v1.0/directory/subscriptions"
         )
-        for sub in sub_payload.get("value", []):
+        for sub in subs:
             sku_id = sub.get("skuId")
+            sku_part = sub.get("skuPartNumber")
             if sku_id:
-                subscription_by_sku_id[str(sku_id)] = sub
+                subscription_by_sku_id[str(sku_id).lower()] = sub
+            if sku_part:
+                subscription_by_sku_part[str(sku_part).upper()] = sub
     except Exception:  # noqa: BLE001
         log_info(
             "M365 could not retrieve subscription details; expiry/term/auto-renew will not be updated",
@@ -2122,7 +2130,10 @@ async def sync_company_licenses(company_id: int) -> None:
         name = friendly_name or (app.get("name") if app else None) or part_number or "Unknown SKU"
 
         # Resolve subscription-level fields from /directory/subscriptions.
-        sub_info = subscription_by_sku_id.get(str(sku_id)) if sku_id else None
+        # Try skuId first (case-insensitive), then fall back to skuPartNumber.
+        sub_info = subscription_by_sku_id.get(str(sku_id).lower()) if sku_id else None
+        if sub_info is None and part_number:
+            sub_info = subscription_by_sku_part.get(str(part_number).upper())
         api_expiry_date: date | None = None
         api_auto_renew: bool | None = None
         api_contract_term: str | None = None
