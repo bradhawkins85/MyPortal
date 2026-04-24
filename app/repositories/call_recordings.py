@@ -114,7 +114,7 @@ async def list_call_recordings(
         LEFT JOIN tickets t ON cr.linked_ticket_id = t.id
         LEFT JOIN ticket_labour_types lt ON cr.labour_type_id = lt.id
         WHERE {where_clause}
-        ORDER BY cr.created_at DESC
+        ORDER BY cr.call_date DESC
         LIMIT %s OFFSET %s
     """
     
