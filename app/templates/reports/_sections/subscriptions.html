@@ -11,7 +11,7 @@
           <tr>
             <th>Product</th>
             <th>Category</th>
-            <th style="text-align: right;">Quantity</th>
+            <th>Quantity</th>
             <th>Status</th>
             <th>Start</th>
             <th>End</th>
@@ -23,7 +23,7 @@
             <tr>
               <td>{{ sub.product_name or '—' }}</td>
               <td>{{ sub.category_name or '—' }}</td>
-              <td style="text-align: right;">{{ sub.quantity if sub.quantity is not none else '—' }}</td>
+              <td>{{ sub.quantity if sub.quantity is not none else '—' }}</td>
               <td><span class="status status--info">{{ sub.status }}</span></td>
               <td>{{ sub.start_date or '—' }}</td>
               <td>{{ sub.end_date or '—' }}</td>
