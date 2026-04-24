@@ -1,0 +1,35 @@
+<section class="card card--panel" data-report-section="licenses">
+  <header class="card__header report-section__header">
+    <h2>Licenses</h2>
+    <span class="report-section__meta">{{ section.data.total or 0 }} license SKUs</span>
+  </header>
+  <div class="card__body">
+    {% set licenses = section.data.licenses or [] %}
+    {% if licenses %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th style="text-align: right;">Total</th>
+            <th style="text-align: right;">Allocated</th>
+            <th>Expiry</th>
+            <th>Contract term</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for lic in licenses %}
+            <tr>
+              <td>{{ lic.name }}</td>
+              <td style="text-align: right;">{{ lic.total }}</td>
+              <td style="text-align: right;">{{ lic.allocated }}</td>
+              <td>{{ lic.expiry_date or '—' }}</td>
+              <td>{{ lic.contract_term or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No licenses are recorded for this company.</p>
+    {% endif %}
+  </div>
+</section>

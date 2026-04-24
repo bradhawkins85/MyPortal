@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
+
+{% block header_title %}Company overview report{% endblock %}
+{% block title %}Company overview report{% endblock %}
+
+{% block header_actions %}
+<div class="header-actions header-actions--right">
+  <a class="button button--primary" href="/reports/company-overview.pdf">Download PDF</a>
+  {% if can_configure_report %}
+    <a class="button button--ghost" href="/reports/company-overview/settings">Configure sections</a>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="report-page">
+
+  {# Cover block #}
+  <div class="card card--panel report-cover">
+    <div class="report-cover__body">
+      <p class="report-cover__eyebrow">Company overview report</p>
+      <h1 class="report-cover__title">{{ report.company.name }}</h1>
+      {% if report.company.address %}
+        <p class="report-cover__meta">{{ report.company.address }}</p>
+      {% endif %}
+      <p class="report-cover__meta">
+        Generated <span data-utc="{{ report.generated_at.isoformat() }}">{{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+      </p>
+    </div>
+  </div>
+
+  {% for section in report.sections %}
+    {% if section.enabled %}
+      {% include "reports/_sections/" + section.key + ".html" ignore missing %}
+    {% endif %}
+  {% endfor %}
+
+  {% set any_enabled = namespace(value=false) %}
+  {% for section in report.sections %}
+    {% if section.enabled %}{% set any_enabled.value = true %}{% endif %}
+  {% endfor %}
+  {% if not any_enabled.value %}
+    <div class="card card--panel">
+      <div class="card__body">
+        <p>No report sections are currently enabled for this company.</p>
+        {% if can_configure_report %}
+          <p><a class="button button--primary" href="/reports/company-overview/settings">Configure sections</a></p>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block styles %}
+<style>
+  .report-page { display: flex; flex-direction: column; gap: var(--space-4); }
+  .report-cover__body { padding: var(--space-5); text-align: center; }
+  .report-cover__eyebrow {
+    margin: 0 0 var(--space-2);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+  }
+  .report-cover__title { margin: 0 0 var(--space-2); font-size: 2.2rem; }
+  .report-cover__meta { margin: 0; color: var(--color-text-muted); }
+  .report-section__header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+  .report-section__header h2 { margin: 0; font-size: 1.25rem; }
+  .report-section__meta { color: var(--color-text-muted); font-size: 0.9rem; }
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table th, .report-table td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+  }
+  .report-table thead th { background: var(--color-surface-alt); font-weight: 600; }
+  .report-empty { color: var(--color-text-muted); padding: var(--space-3); }
+</style>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="staff">
+  <header class="card__header report-section__header">
+    <h2>Active staff</h2>
+  </header>
+  <div class="card__body">
+    {{ counter_strip(items=[
+      {'label': 'Active staff', 'value': section.data.total_active or 0, 'variant': 'info'}
+    ]) }}
+  </div>
+</section>

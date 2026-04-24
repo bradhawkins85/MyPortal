@@ -1,0 +1,34 @@
+<section class="card card--panel" data-report-section="top_mailboxes">
+  <header class="card__header report-section__header">
+    <h2>Top 5 mailboxes by size</h2>
+  </header>
+  <div class="card__body">
+    {% set mailboxes = section.data.mailboxes or [] %}
+    {% if mailboxes %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Display name</th>
+            <th>User principal name</th>
+            <th>Type</th>
+            <th style="text-align: right;">Total size</th>
+            <th style="text-align: right;">Archive size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mb in mailboxes %}
+            <tr>
+              <td>{{ mb.display_name }}</td>
+              <td>{{ mb.user_principal_name }}</td>
+              <td>{{ mb.mailbox_type }}</td>
+              <td style="text-align: right;">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+              <td style="text-align: right;">{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No mailbox data is available for this company.</p>
+    {% endif %}
+  </div>
+</section>

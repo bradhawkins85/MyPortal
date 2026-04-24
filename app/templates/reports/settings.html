@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block header_title %}Report sections{% endblock %}
+{% block title %}Configure report sections — {{ company.name }}{% endblock %}
+
+{% block header_actions %}
+<div class="header-actions header-actions--right">
+  <a class="button button--ghost" href="/reports/company-overview">Back to report</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card card--panel">
+  <div class="card__body">
+    <p>
+      Choose which sections to include in the company overview report for
+      <strong>{{ company.name }}</strong>. Disabled sections are skipped in both
+      the online report and the PDF export. New sections added in future
+      releases are enabled by default.
+    </p>
+    <form method="post" action="/reports/company-overview/settings">
+      {% if csrf_token is defined and csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      {% endif %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="width: 28%;">Section</th>
+            <th>Description</th>
+            <th style="width: 10%; text-align: center;">Enabled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for section in sections %}
+            <tr>
+              <td><strong>{{ section.label }}</strong></td>
+              <td class="report-section__meta">{{ section.description }}</td>
+              <td style="text-align: center;">
+                <input
+                  type="checkbox"
+                  name="sections"
+                  value="{{ section.key }}"
+                  {% if visibility.get(section.key, True) %}checked{% endif %}
+                >
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top: var(--space-4); display: flex; gap: var(--space-2);">
+        <button type="submit" class="button button--primary">Save preferences</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block styles %}
+<style>
+  .report-table { width: 100%; border-collapse: collapse; }
+  .report-table th, .report-table td {
+    text-align: left;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+  }
+  .report-table thead th { background: var(--color-surface-alt); font-weight: 600; }
+  .report-section__meta { color: var(--color-text-muted); font-size: 0.9rem; }
+</style>
+{% endblock %}

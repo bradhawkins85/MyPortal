@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Company overview report — {{ report.company.name }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 15mm 18mm 15mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+    }
+    @page :first { margin: 0; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #222;
+      font-size: 10pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1, h2, h3 { color: #1f2937; margin: 0 0 0.4em; }
+    h1 { font-size: 20pt; }
+    h2 { font-size: 14pt; margin-top: 0; border-bottom: 1px solid #ddd; padding-bottom: 4pt; }
+    h3 { font-size: 11pt; }
+    p { margin: 0 0 0.5em; }
+    .cover {
+      page: cover;
+      padding: 55mm 20mm 20mm;
+      min-height: 257mm;
+      text-align: center;
+      background: linear-gradient(180deg, #0e4f8a 0%, #0e4f8a 55%, #ffffff 55%);
+      color: #ffffff;
+    }
+    .cover__eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      font-size: 10pt;
+      margin-bottom: 12pt;
+      opacity: 0.85;
+    }
+    .cover__title { font-size: 28pt; margin: 0 0 12pt; color: #ffffff; }
+    .cover__meta {
+      font-size: 11pt;
+      opacity: 0.9;
+      margin: 0 0 6pt;
+    }
+    .cover__footer {
+      margin-top: 80mm;
+      color: #1f2937;
+      font-size: 9pt;
+    }
+    .report-section {
+      page-break-inside: avoid;
+      margin-bottom: 14pt;
+    }
+    .report-section + .report-section { margin-top: 14pt; }
+    .section-meta { color: #666; font-size: 9pt; }
+    table.report-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6pt;
+    }
+    table.report-table th, table.report-table td {
+      border: 1px solid #d1d5db;
+      padding: 4pt 6pt;
+      text-align: left;
+      vertical-align: top;
+    }
+    table.report-table thead th {
+      background: #f3f4f6;
+      font-weight: 600;
+    }
+    .right { text-align: right; }
+    .stats { display: table; width: 100%; border-collapse: separate; border-spacing: 4pt 0; margin-top: 6pt; }
+    .stats__item {
+      display: table-cell;
+      width: 1%;
+      padding: 6pt 8pt;
+      background: #f3f4f6;
+      border-left: 3pt solid #0e4f8a;
+      border-radius: 3pt;
+    }
+    .stats__item--success { border-left-color: #16a34a; }
+    .stats__item--warning { border-left-color: #d97706; }
+    .stats__item--danger { border-left-color: #b91c1c; }
+    .stats__item--info { border-left-color: #0e4f8a; }
+    .stats__item--neutral { border-left-color: #6b7280; }
+    .stats__label {
+      display: block;
+      font-size: 8pt;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .stats__value {
+      display: block;
+      font-size: 14pt;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    .level-block { page-break-inside: avoid; margin-bottom: 10pt; }
+    .empty { color: #666; font-style: italic; }
+    .field-block { page-break-inside: avoid; margin-bottom: 10pt; }
+  </style>
+</head>
+<body>
+
+  {# ------------------------------------------------------------------ #}
+  {#  Cover page                                                         #}
+  {# ------------------------------------------------------------------ #}
+  <div class="cover">
+    <p class="cover__eyebrow">Company overview report</p>
+    <h1 class="cover__title">{{ report.company.name }}</h1>
+    {% if report.company.address %}
+      <p class="cover__meta">{{ report.company.address }}</p>
+    {% endif %}
+    <p class="cover__meta">Generated {{ report.generated_at.strftime('%d %B %Y, %H:%M UTC') }}</p>
+    <div class="cover__footer">Prepared by {{ site_name|default('MyPortal') }}</div>
+  </div>
+
+  {# ------------------------------------------------------------------ #}
+  {#  Macros for consistent output                                       #}
+  {# ------------------------------------------------------------------ #}
+  {% macro stats(items) %}
+    <div class="stats">
+      {% for item in items %}
+        <div class="stats__item stats__item--{{ item.variant or 'neutral' }}">
+          <span class="stats__label">{{ item.label }}</span>
+          <span class="stats__value">{{ item.value }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endmacro %}
+
+  {# ------------------------------------------------------------------ #}
+  {#  Sections                                                           #}
+  {# ------------------------------------------------------------------ #}
+  {% for section in report.sections if section.enabled %}
+
+    {% if section.key == 'assets' %}
+      <section class="report-section">
+        <h2>Active assets</h2>
+        {{ stats([{'label': 'Active assets', 'value': section.data.total_active or 0, 'variant': 'info'}]) }}
+      </section>
+
+    {% elif section.key == 'staff' %}
+      <section class="report-section">
+        <h2>Active staff</h2>
+        {{ stats([{'label': 'Active staff', 'value': section.data.total_active or 0, 'variant': 'info'}]) }}
+      </section>
+
+    {% elif section.key == 'm365_best_practices' %}
+      <section class="report-section">
+        <h2>M365 best practice summary</h2>
+        {% if section.data.total %}
+          {{ stats([
+            {'label': 'Checks run', 'value': section.data.total, 'variant': 'info'},
+            {'label': 'Pass', 'value': section.data.counts.pass, 'variant': 'success'},
+            {'label': 'Warn', 'value': section.data.counts.warn, 'variant': 'warning'},
+            {'label': 'Fail', 'value': section.data.counts.fail, 'variant': 'danger'},
+            {'label': 'Pass rate', 'value': section.data.pass_percentage ~ '%', 'variant': 'info'},
+          ]) }}
+          {% if section.data.last_run_at %}
+            <p class="section-meta">Last run: {{ section.data.last_run_at }}</p>
+          {% endif %}
+        {% else %}
+          <p class="empty">No M365 best practice results have been recorded yet.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'top_mailboxes' %}
+      <section class="report-section">
+        <h2>Top 5 mailboxes by size</h2>
+        {% set mbs = section.data.mailboxes or [] %}
+        {% if mbs %}
+          <table class="report-table">
+            <thead><tr>
+              <th>Display name</th><th>UPN</th><th>Type</th>
+              <th class="right">Total size</th><th class="right">Archive size</th>
+            </tr></thead>
+            <tbody>
+              {% for mb in mbs %}
+                <tr>
+                  <td>{{ mb.display_name }}</td>
+                  <td>{{ mb.user_principal_name }}</td>
+                  <td>{{ mb.mailbox_type }}</td>
+                  <td class="right">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                  <td class="right">{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No mailbox data is available for this company.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'orders_current_month' %}
+      <section class="report-section">
+        <h2>Orders this month</h2>
+        {{ stats([{'label': 'Orders this month', 'value': section.data.total or 0, 'variant': 'info'}]) }}
+        {% set orders = section.data.orders or [] %}
+        {% if orders %}
+          <table class="report-table">
+            <thead><tr>
+              <th>Order #</th><th>Date</th><th>Status</th><th>Shipping</th><th>PO #</th>
+            </tr></thead>
+            <tbody>
+              {% for order in orders %}
+                <tr>
+                  <td>{{ order.order_number }}</td>
+                  <td>{{ order.order_date }}</td>
+                  <td>{{ order.status }}</td>
+                  <td>{{ order.shipping_status or '—' }}</td>
+                  <td>{{ order.po_number or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No orders have been placed so far this month.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'licenses' %}
+      <section class="report-section">
+        <h2>Licenses</h2>
+        {% set licenses = section.data.licenses or [] %}
+        {% if licenses %}
+          <table class="report-table">
+            <thead><tr>
+              <th>Name</th><th class="right">Total</th><th class="right">Allocated</th>
+              <th>Expiry</th><th>Contract term</th>
+            </tr></thead>
+            <tbody>
+              {% for lic in licenses %}
+                <tr>
+                  <td>{{ lic.name }}</td>
+                  <td class="right">{{ lic.total }}</td>
+                  <td class="right">{{ lic.allocated }}</td>
+                  <td>{{ lic.expiry_date or '—' }}</td>
+                  <td>{{ lic.contract_term or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No licenses are recorded for this company.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'subscriptions' %}
+      <section class="report-section">
+        <h2>Subscriptions</h2>
+        {% set subs = section.data.subscriptions or [] %}
+        {% if subs %}
+          <table class="report-table">
+            <thead><tr>
+              <th>Product</th><th>Category</th><th class="right">Qty</th>
+              <th>Status</th><th>Start</th><th>End</th><th>Commitment</th>
+            </tr></thead>
+            <tbody>
+              {% for sub in subs %}
+                <tr>
+                  <td>{{ sub.product_name or '—' }}</td>
+                  <td>{{ sub.category_name or '—' }}</td>
+                  <td class="right">{{ sub.quantity if sub.quantity is not none else '—' }}</td>
+                  <td>{{ sub.status }}</td>
+                  <td>{{ sub.start_date or '—' }}</td>
+                  <td>{{ sub.end_date or '—' }}</td>
+                  <td>{{ sub.commitment_term or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No subscriptions are recorded for this company.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'essential8' %}
+      <section class="report-section">
+        <h2>Essential 8 compliance progress</h2>
+        {% set levels = section.data.levels or [] %}
+        {% if levels %}
+          {% for level in levels %}
+            <div class="level-block">
+              <h3>{{ level.label }}
+                <span class="section-meta">— {{ level.percentage }}% compliant ({{ level.compliant }} of {{ level.total }})</span>
+              </h3>
+              {{ stats([
+                {'label': 'Compliant', 'value': level.compliant, 'variant': 'success'},
+                {'label': 'In progress', 'value': level.in_progress, 'variant': 'warning'},
+                {'label': 'Not started', 'value': level.not_started, 'variant': 'neutral'},
+              ]) }}
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="empty">No Essential 8 data is available for this company.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'compliance_checks' %}
+      <section class="report-section">
+        <h2>Customer compliance checks</h2>
+        {{ stats([
+          {'label': 'Total', 'value': section.data.total or 0, 'variant': 'info'},
+          {'label': 'Compliance rate', 'value': (section.data.compliance_percentage or 0) ~ '%', 'variant': 'info'},
+          {'label': 'In progress', 'value': section.data.in_progress or 0, 'variant': 'warning'},
+          {'label': 'Not started', 'value': section.data.not_started or 0, 'variant': 'neutral'},
+          {'label': 'Overdue', 'value': section.data.overdue_count or 0, 'variant': 'danger'},
+          {'label': 'Due soon', 'value': section.data.due_soon_count or 0, 'variant': 'warning'},
+        ]) }}
+      </section>
+
+    {% elif section.key == 'tickets_last_month' %}
+      <section class="report-section">
+        <h2>Tickets (past month)</h2>
+        {% set counts = section.data.counts or {} %}
+        {{ stats([
+          {'label': 'Total', 'value': section.data.total or 0, 'variant': 'info'},
+          {'label': 'Open', 'value': counts.open or 0, 'variant': 'warning'},
+          {'label': 'Pending', 'value': counts.pending or 0, 'variant': 'warning'},
+          {'label': 'In progress', 'value': counts.in_progress or 0, 'variant': 'info'},
+          {'label': 'Resolved', 'value': counts.resolved or 0, 'variant': 'success'},
+          {'label': 'Closed', 'value': counts.closed or 0, 'variant': 'neutral'},
+        ]) }}
+      </section>
+
+    {% elif section.key == 'asset_custom_fields' %}
+      <section class="report-section">
+        <h2>Asset custom field values</h2>
+        {% set fields = section.data.fields or [] %}
+        {% if fields %}
+          {% for field in fields %}
+            <div class="field-block">
+              <h3>{{ field.display_name }}
+                <span class="section-meta">({{ field.field_type }})</span>
+              </h3>
+              {% if field.values %}
+                <table class="report-table">
+                  <thead><tr><th>Value</th><th class="right">Assets</th></tr></thead>
+                  <tbody>
+                    {% for entry in field.values %}
+                      <tr>
+                        <td>{{ entry.value }}</td>
+                        <td class="right">{{ entry.count }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <p class="empty">No recorded values for this field.</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="empty">No asset custom fields have been defined.</p>
+        {% endif %}
+      </section>
+
+    {% elif section.key == 'issues' %}
+      <section class="report-section">
+        <h2>Issue tracker issues</h2>
+        {% set issues = section.data.issues or [] %}
+        {% if issues %}
+          <table class="report-table">
+            <thead><tr>
+              <th>Issue</th><th>Status</th><th>Notes</th><th>Updated</th>
+            </tr></thead>
+            <tbody>
+              {% for issue in issues %}
+                <tr>
+                  <td>
+                    <strong>{{ issue.name }}</strong>
+                    {% if issue.description %}
+                      <div class="section-meta">{{ issue.description }}</div>
+                    {% endif %}
+                  </td>
+                  <td>{{ issue.status }}</td>
+                  <td>{{ issue.notes or '—' }}</td>
+                  <td>{{ issue.updated_at or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No issues are currently assigned to this company.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+  {% endfor %}
+
+</body>
+</html>
