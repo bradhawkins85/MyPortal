@@ -513,7 +513,6 @@ async def _build_issues(company_id: int) -> dict[str, Any]:
     return {"issues": rows, "total": len(rows)}
 
 
-
 # Maps section keys to their builder coroutine.
 _SECTION_BUILDERS = {
     "assets": _build_assets,
@@ -981,7 +980,7 @@ async def build_company_report(company_id: int) -> ReportData:
                 try:
                     detail_data = await detail_builder(company_id)
                 except Exception as exc:  # pragma: no cover - defensive
-                    detail_data = {"error": str(exc)}
+                    detail_data = {"error": f"Failed to load detail data for {section_def.key}: {exc}"}
         sections.append(
             SectionResult(
                 key=section_def.key,
