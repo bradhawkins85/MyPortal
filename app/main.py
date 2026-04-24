@@ -4573,11 +4573,21 @@ async def company_overview_report_settings_page(request: Request):
             url="/reports/company-overview", status_code=status.HTTP_303_SEE_OTHER
         )
     visibility = await reports_service.get_section_visibility(company_id)
+    report_settings = await reports_service.get_company_report_settings(company_id)
+    # Apply saved order to the section list for display.
+    section_order: list[str] | None = report_settings.get("section_order")
+    all_sections = list(reports_service.REPORT_SECTIONS)
+    if section_order:
+        key_to_section = {s.key: s for s in all_sections}
+        ordered = [key_to_section[k] for k in section_order if k in key_to_section]
+        remaining = [s for s in all_sections if s.key not in set(section_order)]
+        all_sections = ordered + remaining
     extra = {
         "title": "Report sections",
         "company": company,
-        "sections": list(reports_service.REPORT_SECTIONS),
+        "sections": all_sections,
         "visibility": visibility,
+        "auto_hide_empty": report_settings.get("auto_hide_empty", True),
     }
     return await _render_template("reports/settings.html", request, user, extra=extra)
 
@@ -4601,12 +4611,21 @@ async def company_overview_report_settings_save(request: Request):
         for section in reports_service.REPORT_SECTIONS
     }
     await reports_service.save_section_visibility(company_id, preferences)
+    # Persist auto-hide and section order settings.
+    auto_hide_empty = form.get("auto_hide_empty") == "1"
+    raw_order = form.get("section_order", "")
+    section_order_list: list[str] | None = (
+        [k for k in raw_order.split(",") if k] if raw_order else None
+    )
+    await reports_service.save_company_report_settings(
+        company_id, auto_hide_empty, section_order_list
+    )
     await audit_service.log_action(
         action="report.company_overview.configure",
         user_id=user.get("id"),
         entity_type="company",
         entity_id=company_id,
-        metadata={"enabled_sections": sorted(enabled_keys)},
+        metadata={"enabled_sections": sorted(enabled_keys), "auto_hide_empty": auto_hide_empty},
         request=request,
     )
     return RedirectResponse(
