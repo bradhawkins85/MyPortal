@@ -76,9 +76,8 @@ async def set_detail_preferences(
         if row is not None:
             enabled_val: int
             try:
-                enabled_val = 1 if bool(int(
-                    row.get("enabled") if isinstance(row, Mapping) else row["enabled"]
-                )) else 0
+                enabled_raw = row.get("enabled") if isinstance(row, Mapping) else row["enabled"]
+                enabled_val = 1 if bool(int(enabled_raw)) else 0
             except (TypeError, ValueError):
                 enabled_val = 1
         else:

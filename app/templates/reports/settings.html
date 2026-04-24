@@ -19,9 +19,9 @@
       releases are enabled by default.
     </p>
     <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: var(--space-1);">
-      Enable <strong>Detailed</strong> on a section to append a full-detail page after the
-      summary view (both online and PDF). Detailed is automatically unchecked when Enabled
-      is unchecked.
+      Enable <strong>Detailed</strong> for a section to include an additional detail page after
+      the summary (applies to both web and PDF reports). Note: The Detailed option is
+      automatically disabled when the section is disabled.
     </p>
     <form method="post" action="/reports/company-overview/settings" id="report-settings-form">
       {% if csrf_token is defined and csrf_token %}
