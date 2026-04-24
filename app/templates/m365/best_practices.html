@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Best Practices{% endblock %}
+{% block header_title %}Microsoft 365 Best Practices{% endblock %}
 
-{% block title %}Best Practices – Office 365{% endblock %}
+{% block title %}Microsoft 365 Best Practices{% endblock %}
 
 {% block header_actions %}
   {% if is_super_admin %}
@@ -22,6 +22,21 @@
   {% endif %}
 {% endblock %}
 
+{% block styles %}
+<style>
+  .bp-filter-btn {
+    cursor: pointer;
+    border: none;
+    text-align: left;
+  }
+  .bp-filter-btn[aria-pressed="true"] {
+    outline: 2px solid var(--color-accent, #38bdf8);
+    outline-offset: 2px;
+    transform: translateY(-2px);
+  }
+</style>
+{% endblock %}
+
 {% block content %}
   {% if error %}
   <div class="alert alert--error" role="alert">{{ error }}</div>
@@ -31,11 +46,51 @@
   {% endif %}
 
   {# ------------------------------------------------------------------ #}
+  {# Helper macro: stat-strip filter boxes                               #}
+  {# ------------------------------------------------------------------ #}
+  {% macro filter_strip(results, table_id) %}
+  {% set pass_count = results | selectattr("status", "equalto", "pass") | list | length %}
+  {% set fail_count = results | selectattr("status", "equalto", "fail") | list | length %}
+  {% set unknown_count = results | selectattr("status", "equalto", "unknown") | list | length %}
+  {% set na_count = results | selectattr("status", "equalto", "not_applicable") | list | length %}
+  <div class="stat-strip bp-filter-strip" data-bp-table="{{ table_id }}">
+    {% if pass_count %}
+    <button type="button" class="stat-strip__stat stat-strip__stat--success bp-filter-btn"
+            data-bp-status="pass" aria-pressed="false" title="Click to filter: Passed checks">
+      <span class="stat-strip__stat-label">Passed</span>
+      <span class="stat-strip__stat-value">{{ pass_count }}</span>
+    </button>
+    {% endif %}
+    {% if fail_count %}
+    <button type="button" class="stat-strip__stat stat-strip__stat--danger bp-filter-btn"
+            data-bp-status="fail" aria-pressed="false" title="Click to filter: Failed checks">
+      <span class="stat-strip__stat-label">Failed</span>
+      <span class="stat-strip__stat-value">{{ fail_count }}</span>
+    </button>
+    {% endif %}
+    {% if unknown_count %}
+    <button type="button" class="stat-strip__stat stat-strip__stat--warning bp-filter-btn"
+            data-bp-status="unknown" aria-pressed="false" title="Click to filter: Unknown checks">
+      <span class="stat-strip__stat-label">Unknown</span>
+      <span class="stat-strip__stat-value">{{ unknown_count }}</span>
+    </button>
+    {% endif %}
+    {% if na_count %}
+    <button type="button" class="stat-strip__stat stat-strip__stat--neutral bp-filter-btn"
+            data-bp-status="not_applicable" aria-pressed="false" title="Click to filter: Not Applicable checks">
+      <span class="stat-strip__stat-label">Not Applicable</span>
+      <span class="stat-strip__stat-value">{{ na_count }}</span>
+    </button>
+    {% endif %}
+  </div>
+  {% endmacro %}
+
+  {# ------------------------------------------------------------------ #}
   {# Helper macro: render a results table                                #}
   {# ------------------------------------------------------------------ #}
-  {% macro result_table(checks, show_actions) %}
+  {% macro result_table(checks, show_actions, table_id='') %}
   <div class="panel__body" style="padding:0">
-    <table class="table">
+    <table class="table"{% if table_id %} id="{{ table_id }}"{% endif %}>
       <thead>
         <tr>
           <th style="width:3rem"></th>
@@ -47,7 +102,7 @@
       </thead>
       <tbody>
         {% for check in checks %}
-        <tr>
+        <tr data-bp-status="{{ check.status }}">
           <td style="text-align:center">
             {% if check.status == "pass" %}
               <span title="Pass" style="color:var(--color-success,#16a34a);font-size:1.25rem">✓</span>
@@ -131,46 +186,27 @@
   {% set intune_macos_results = results | selectattr("cis_group", "equalto", "intune_macos") | list %}
 
   <section class="panel">
-    <header class="panel__header">
-      <div>
-        <h2 class="panel__title">Microsoft 365 Best Practices</h2>
-        <p class="panel__subtitle">
-          Microsoft 365 Best Practice checks are enabled globally by your provider and
-          evaluated individually against this company's tenant configuration.
-          Checks marked <span class="badge badge--info badge--cis">CIS</span> are also part of the CIS Microsoft 365 Foundations Benchmark.
-        </p>
-      </div>
-      {% if m365_results %}
-      {% set pass_count = m365_results | selectattr("status", "equalto", "pass") | list | length %}
-      {% set fail_count = m365_results | selectattr("status", "equalto", "fail") | list | length %}
-      {% set unknown_count = m365_results | selectattr("status", "equalto", "unknown") | list | length %}
-      {% set na_count = m365_results | selectattr("status", "equalto", "not_applicable") | list | length %}
-      <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
-        {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
-        {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
-        {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
-        {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
-      </div>
-      {% endif %}
-    </header>
-    <div class="panel__body">
-      {% if not catalog %}
-        <p class="text-muted">No best practices are currently enabled.
-          {% if is_super_admin %}
-            Visit <a href="/m365/best-practices/settings">Manage best practices</a> to enable checks.
-          {% else %}
-            Please contact your administrator to enable Microsoft 365 best practice checks.
-          {% endif %}
-        </p>
-      {% elif not has_credentials %}
-        <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before running best-practice checks.</p>
-      {% elif not results %}
-        <p class="text-muted">No best-practice results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to perform the first scan.{% endif %}</p>
-      {% endif %}
-    </div>
-
     {% if m365_results %}
-    {{ result_table(m365_results, is_super_admin) }}
+      <div class="panel__body" style="padding-bottom:0">
+        {{ filter_strip(m365_results, 'bp-table-m365') }}
+      </div>
+      {{ result_table(m365_results, is_super_admin, 'bp-table-m365') }}
+    {% else %}
+      <div class="panel__body">
+        {% if not catalog %}
+          <p class="text-muted">No best practices are currently enabled.
+            {% if is_super_admin %}
+              Visit <a href="/m365/best-practices/settings">Manage best practices</a> to enable checks.
+            {% else %}
+              Please contact your administrator to enable Microsoft 365 best practice checks.
+            {% endif %}
+          </p>
+        {% elif not has_credentials %}
+          <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before running best-practice checks.</p>
+        {% elif not results %}
+          <p class="text-muted">No best-practice results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to perform the first scan.{% endif %}</p>
+        {% endif %}
+      </div>
     {% endif %}
   </section>
 
@@ -180,29 +216,17 @@
   {% if intune_windows_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_windows") | list) %}
   <section class="panel">
     <header class="panel__header">
-      <div>
-        <h3 class="panel__title">CIS Intune Benchmark – Windows</h3>
-        <p class="panel__subtitle">CIS Microsoft Intune for Windows Benchmark – device compliance and configuration checks.</p>
-      </div>
-      {% if intune_windows_results %}
-      {% set pass_count = intune_windows_results | selectattr("status", "equalto", "pass") | list | length %}
-      {% set fail_count = intune_windows_results | selectattr("status", "equalto", "fail") | list | length %}
-      {% set unknown_count = intune_windows_results | selectattr("status", "equalto", "unknown") | list | length %}
-      {% set na_count = intune_windows_results | selectattr("status", "equalto", "not_applicable") | list | length %}
-      <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
-        {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
-        {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
-        {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
-        {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
-      </div>
-      {% endif %}
+      <h3 class="panel__title">CIS Intune Benchmark – Windows</h3>
     </header>
     {% if intune_windows_results %}
-    {{ result_table(intune_windows_results, is_super_admin) }}
+      <div class="panel__body" style="padding-bottom:0">
+        {{ filter_strip(intune_windows_results, 'bp-table-intune-windows') }}
+      </div>
+      {{ result_table(intune_windows_results, is_super_admin, 'bp-table-intune-windows') }}
     {% else %}
-    <div class="panel__body">
-      <p class="text-muted">No Intune Windows results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
-    </div>
+      <div class="panel__body">
+        <p class="text-muted">No Intune Windows results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
+      </div>
     {% endif %}
   </section>
   {% endif %}
@@ -213,29 +237,17 @@
   {% if intune_ios_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_ios") | list) %}
   <section class="panel">
     <header class="panel__header">
-      <div>
-        <h3 class="panel__title">CIS Intune Benchmark – iOS / iPadOS</h3>
-        <p class="panel__subtitle">CIS Microsoft Intune for iOS/iPadOS Benchmark – mobile device compliance checks.</p>
-      </div>
-      {% if intune_ios_results %}
-      {% set pass_count = intune_ios_results | selectattr("status", "equalto", "pass") | list | length %}
-      {% set fail_count = intune_ios_results | selectattr("status", "equalto", "fail") | list | length %}
-      {% set unknown_count = intune_ios_results | selectattr("status", "equalto", "unknown") | list | length %}
-      {% set na_count = intune_ios_results | selectattr("status", "equalto", "not_applicable") | list | length %}
-      <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
-        {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
-        {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
-        {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
-        {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
-      </div>
-      {% endif %}
+      <h3 class="panel__title">CIS Intune Benchmark – iOS / iPadOS</h3>
     </header>
     {% if intune_ios_results %}
-    {{ result_table(intune_ios_results, is_super_admin) }}
+      <div class="panel__body" style="padding-bottom:0">
+        {{ filter_strip(intune_ios_results, 'bp-table-intune-ios') }}
+      </div>
+      {{ result_table(intune_ios_results, is_super_admin, 'bp-table-intune-ios') }}
     {% else %}
-    <div class="panel__body">
-      <p class="text-muted">No Intune iOS/iPadOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
-    </div>
+      <div class="panel__body">
+        <p class="text-muted">No Intune iOS/iPadOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
+      </div>
     {% endif %}
   </section>
   {% endif %}
@@ -246,29 +258,17 @@
   {% if intune_macos_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_macos") | list) %}
   <section class="panel">
     <header class="panel__header">
-      <div>
-        <h3 class="panel__title">CIS Intune Benchmark – macOS</h3>
-        <p class="panel__subtitle">CIS Microsoft Intune for macOS Benchmark – macOS device compliance checks.</p>
-      </div>
-      {% if intune_macos_results %}
-      {% set pass_count = intune_macos_results | selectattr("status", "equalto", "pass") | list | length %}
-      {% set fail_count = intune_macos_results | selectattr("status", "equalto", "fail") | list | length %}
-      {% set unknown_count = intune_macos_results | selectattr("status", "equalto", "unknown") | list | length %}
-      {% set na_count = intune_macos_results | selectattr("status", "equalto", "not_applicable") | list | length %}
-      <div style="display:flex;gap:0.75rem;align-items:center;flex-shrink:0">
-        {% if pass_count %}<span class="badge badge--success">{{ pass_count }} passed</span>{% endif %}
-        {% if fail_count %}<span class="badge badge--error">{{ fail_count }} failed</span>{% endif %}
-        {% if unknown_count %}<span class="badge badge--warning">{{ unknown_count }} unknown</span>{% endif %}
-        {% if na_count %}<span class="badge">{{ na_count }} N/A</span>{% endif %}
-      </div>
-      {% endif %}
+      <h3 class="panel__title">CIS Intune Benchmark – macOS</h3>
     </header>
     {% if intune_macos_results %}
-    {{ result_table(intune_macos_results, is_super_admin) }}
+      <div class="panel__body" style="padding-bottom:0">
+        {{ filter_strip(intune_macos_results, 'bp-table-intune-macos') }}
+      </div>
+      {{ result_table(intune_macos_results, is_super_admin, 'bp-table-intune-macos') }}
     {% else %}
-    <div class="panel__body">
-      <p class="text-muted">No Intune macOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
-    </div>
+      <div class="panel__body">
+        <p class="text-muted">No Intune macOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
+      </div>
     {% endif %}
   </section>
   {% endif %}
@@ -308,4 +308,30 @@
     </div>
   </section>
   {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+
+  document.querySelectorAll('.bp-filter-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var strip = btn.closest('.bp-filter-strip');
+      var tableId = strip ? strip.dataset.bpTable : null;
+      var pressed = btn.getAttribute('aria-pressed') === 'true';
+      btn.setAttribute('aria-pressed', pressed ? 'false' : 'true');
+      if (!tableId) return;
+      var table = document.getElementById(tableId);
+      if (!table) return;
+      var activeFilters = Array.from(
+        strip.querySelectorAll('.bp-filter-btn[aria-pressed="true"]')
+      ).map(function (b) { return b.dataset.bpStatus; });
+      table.querySelectorAll('tbody tr').forEach(function (row) {
+        row.hidden = activeFilters.length > 0 && !activeFilters.includes(row.dataset.bpStatus);
+      });
+    });
+  });
+}());
+</script>
 {% endblock %}
