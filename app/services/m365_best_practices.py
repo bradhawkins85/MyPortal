@@ -824,6 +824,257 @@ async def _check_zap_teams_on(
 
 
 # ---------------------------------------------------------------------------
+# Microsoft Teams checks (EXO InvokeCommand – Teams PowerShell cmdlets)
+# ---------------------------------------------------------------------------
+#
+# These checks call Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy,
+# Get-CsTenantFederationConfiguration, Get-CsTeamsClientConfiguration) via
+# the Exchange Online InvokeCommand REST endpoint.  The endpoint supports
+# Teams PowerShell cmdlets alongside EXO cmdlets when the app registration
+# holds the appropriate Teams admin permissions (Teams.ManageAsApp or the
+# Teams Service Administrator RBAC role on the service principal).
+
+
+async def _check_anon_dialin_cannot_start_meeting(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that anonymous users and dial-in callers cannot start a Teams meeting."""
+    check_id = "bp_anon_dialin_cannot_start_meeting"
+    check_name = "Anonymous users and dial-in callers can't start a meeting"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams meeting policy returned.")
+    anon_start = cfg.get("AllowAnonymousUsersToStartMeeting")
+    pstn_bypass = cfg.get("AllowPSTNUsersToBypassLobby")
+    if anon_start is False and pstn_bypass is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AllowAnonymousUsersToStartMeeting=False and "
+                       "AllowPSTNUsersToBypassLobby=False on the Global policy.")
+    issues: list[str] = []
+    if anon_start is not False:
+        issues.append(f"AllowAnonymousUsersToStartMeeting={anon_start}")
+    if pstn_bypass is not False:
+        issues.append(f"AllowPSTNUsersToBypassLobby={pstn_bypass}")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Global Teams meeting policy allows anonymous/dial-in users to start meetings: "
+                   + "; ".join(issues) + ". "
+                   "Run: Set-CsTeamsMeetingPolicy -Identity Global "
+                   "-AllowAnonymousUsersToStartMeeting $false -AllowPSTNUsersToBypassLobby $false")
+
+
+async def _check_only_org_bypass_lobby(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that only org members can bypass the Teams lobby (AutoAdmittedUsers)."""
+    check_id = "bp_only_org_can_bypass_lobby"
+    check_name = "Only people in my org can bypass the lobby"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams meeting policy returned.")
+    admitted = str(cfg.get("AutoAdmittedUsers") or "").lower()
+    passing_values = {"everyoneincompany", "everyoneincompanyexcludingguests"}
+    if admitted in passing_values:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"AutoAdmittedUsers='{cfg.get('AutoAdmittedUsers')}'; only org members bypass the lobby.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"AutoAdmittedUsers='{cfg.get('AutoAdmittedUsers')}'; external participants can bypass the lobby. "
+                   "Run: Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers EveryoneInCompany")
+
+
+async def _check_invited_users_auto_admitted(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that only invited users are automatically admitted to Teams meetings."""
+    check_id = "bp_invited_users_auto_admitted"
+    check_name = "Only invited users should be automatically admitted to Teams meetings"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams meeting policy returned.")
+    admitted = str(cfg.get("AutoAdmittedUsers") or "").lower()
+    if admitted == "invitedusers":
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AutoAdmittedUsers='InvitedUsers'; only explicitly invited participants are admitted automatically.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"AutoAdmittedUsers='{cfg.get('AutoAdmittedUsers')}'; non-invited participants may be admitted automatically. "
+                   "Run: Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers InvitedUsers")
+
+
+async def _check_external_participants_no_control(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that external participants cannot give or request control in Teams meetings."""
+    check_id = "bp_external_participants_no_control"
+    check_name = "External participants can't give or request control"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams meeting policy returned.")
+    allow_ctrl = cfg.get("AllowExternalParticipantGiveRequestControl")
+    if allow_ctrl is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AllowExternalParticipantGiveRequestControl=False; external participants cannot give or request screen control.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"AllowExternalParticipantGiveRequestControl={allow_ctrl}; external participants can control shared screens. "
+                   "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowExternalParticipantGiveRequestControl $false")
+
+
+async def _check_external_users_cannot_initiate(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that external Teams users cannot initiate unsolicited conversations."""
+    check_id = "bp_external_users_cannot_initiate"
+    check_name = "External Teams users cannot initiate conversations"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTenantFederationConfiguration"
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTenantFederationConfiguration: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Teams federation configuration returned.")
+    allow_fed = cfg.get("AllowFederatedUsers")
+    if allow_fed is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AllowFederatedUsers=False; external Teams users cannot initiate conversations.")
+    # AllowFederatedUsers=True is acceptable ONLY when AllowedDomains is a
+    # restricted list (not AllowAllKnownDomains).
+    allowed_domains = cfg.get("AllowedDomains") or {}
+    domain_type = str(
+        allowed_domains.get("AllowedParent") or
+        allowed_domains.get("Element") or
+        allowed_domains.get("@odata.type") or ""
+    ).lower()
+    if "allowallknowndomains" not in domain_type and allow_fed is True:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AllowFederatedUsers=True but federation is restricted to a managed domain allow-list.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"AllowFederatedUsers={allow_fed} with unrestricted domain list; any external Teams tenant can contact internal users. "
+                   "Run: Set-CsTenantFederationConfiguration -AllowFederatedUsers $false")
+
+
+async def _check_teams_external_files_approved_storage(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that Teams only allows approved cloud storage services for file sharing."""
+    check_id = "bp_teams_external_files_approved_storage"
+    check_name = "External file sharing in Teams is enabled for only approved cloud storage services"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsClientConfiguration", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsClientConfiguration: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams client configuration returned.")
+    third_party_props = {
+        "AllowDropBox": cfg.get("AllowDropBox"),
+        "AllowGoogleDrive": cfg.get("AllowGoogleDrive"),
+        "AllowBox": cfg.get("AllowBox"),
+        "AllowShareFile": cfg.get("AllowShareFile"),
+        "AllowEgnyte": cfg.get("AllowEgnyte"),
+    }
+    enabled_providers = [k for k, v in third_party_props.items() if v is True]
+    if not enabled_providers:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "All third-party cloud storage providers (DropBox, GoogleDrive, Box, ShareFile, Egnyte) are disabled.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "The following third-party cloud storage providers are enabled in Teams: "
+                   + ", ".join(enabled_providers) + ". "
+                   "Run: Set-CsTeamsClientConfiguration -Identity Global "
+                   "-AllowDropBox $false -AllowGoogleDrive $false -AllowBox $false "
+                   "-AllowShareFile $false -AllowEgnyte $false")
+
+
+async def _check_restrict_anon_users_join_meeting(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that anonymous users are restricted from joining Teams meetings."""
+    check_id = "bp_restrict_anon_users_join_meeting"
+    check_name = "Restrict anonymous users from joining meetings"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams meeting policy returned.")
+    allow_anon = cfg.get("AllowAnonymousUsersToJoinMeeting")
+    if allow_anon is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AllowAnonymousUsersToJoinMeeting=False; unauthenticated participants cannot join Teams meetings.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"AllowAnonymousUsersToJoinMeeting={allow_anon}; anonymous users can join Teams meetings. "
+                   "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowAnonymousUsersToJoinMeeting $false")
+
+
+async def _check_restrict_anon_users_start_meeting(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    """Check that anonymous users cannot start Teams meetings."""
+    check_id = "bp_restrict_anon_users_start_meeting"
+    check_name = "Restrict anonymous users from starting Teams meetings"
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
+        )
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+    cfg = _exo_first_value(data)
+    if not cfg:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No Global Teams meeting policy returned.")
+    allow_start = cfg.get("AllowAnonymousUsersToStartMeeting")
+    if allow_start is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "AllowAnonymousUsersToStartMeeting=False; anonymous users cannot start Teams meetings.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"AllowAnonymousUsersToStartMeeting={allow_start}; anonymous users can start Teams meetings without an authenticated organizer. "
+                   "Run: Set-CsTeamsMeetingPolicy -Identity Global -AllowAnonymousUsersToStartMeeting $false")
+
+
+# ---------------------------------------------------------------------------
 # DNS checks (SPF / DMARC via DNS-over-HTTPS)
 # ---------------------------------------------------------------------------
 
@@ -3867,13 +4118,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowAnonymousUsersToStartMeeting $false "
             "-AllowPSTNUsersToBypassLobby $false"
         ),
-        "source": _manual_review_factory(
-            "bp_anon_dialin_cannot_start_meeting",
-            "Anonymous users and dial-in callers can't start a meeting",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
-            "Select AllowAnonymousUsersToStartMeeting,AllowPSTNUsersToBypassLobby",
-        ),
-        "source_type": "graph",
+        "source": _check_anon_dialin_cannot_start_meeting,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -3886,12 +4132,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "external participants always wait in the lobby."
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers EveryoneInCompany",
-        "source": _manual_review_factory(
-            "bp_only_org_can_bypass_lobby",
-            "Only people in my org can bypass the lobby",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AutoAdmittedUsers",
-        ),
-        "source_type": "graph",
+        "source": _check_only_org_bypass_lobby,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -3905,12 +4147,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "automatically; all other participants wait in the lobby."
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers InvitedUsers",
-        "source": _manual_review_factory(
-            "bp_invited_users_auto_admitted",
-            "Only invited users should be automatically admitted to Teams meetings",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AutoAdmittedUsers",
-        ),
-        "source_type": "graph",
+        "source": _check_invited_users_auto_admitted,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -3965,12 +4203,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "screens stops a primary social-engineering vector."
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowExternalParticipantGiveRequestControl $false",
-        "source": _manual_review_factory(
-            "bp_external_participants_no_control",
-            "External participants can't give or request control",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | Select AllowExternalParticipantGiveRequestControl",
-        ),
-        "source_type": "graph",
+        "source": _check_external_participants_no_control,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -3986,13 +4220,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Set-CsTenantFederationConfiguration -AllowFederatedUsers $false "
             "(or restrict via -AllowedDomains to a managed list)"
         ),
-        "source": _manual_review_factory(
-            "bp_external_users_cannot_initiate",
-            "External Teams users cannot initiate conversations",
-            "Manual verification required. Run: Get-CsTenantFederationConfiguration | "
-            "Select AllowFederatedUsers,AllowedDomains",
-        ),
-        "source_type": "graph",
+        "source": _check_external_users_cannot_initiate,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -4009,13 +4238,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowDropBox $false -AllowGoogleDrive $false -AllowBox $false "
             "-AllowShareFile $false -AllowEgnyte $false"
         ),
-        "source": _manual_review_factory(
-            "bp_teams_external_files_approved_storage",
-            "External file sharing in Teams is enabled for only approved cloud storage services",
-            "Manual verification required. Run: Get-CsTeamsClientConfiguration -Identity Global | "
-            "Select AllowDropBox,AllowGoogleDrive,AllowBox,AllowShareFile,AllowEgnyte",
-        ),
-        "source_type": "graph",
+        "source": _check_teams_external_files_approved_storage,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -4032,13 +4256,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Set-CsTeamsMeetingPolicy -Identity Global "
             "-AllowAnonymousUsersToJoinMeeting $false"
         ),
-        "source": _manual_review_factory(
-            "bp_restrict_anon_users_join_meeting",
-            "Restrict anonymous users from joining meetings",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
-            "Select AllowAnonymousUsersToJoinMeeting",
-        ),
-        "source_type": "graph",
+        "source": _check_restrict_anon_users_join_meeting,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
@@ -4049,20 +4268,15 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "description": (
             "AllowAnonymousUsersToStartMeeting should be set to $false so that "
             "unauthenticated participants cannot start Teams meetings without an "
-            "authenticated organiser being present, reducing the risk of "
+            "authenticated organizer being present, reducing the risk of "
             "unsupervised meetings and data exposure."
         ),
         "remediation": (
             "Set-CsTeamsMeetingPolicy -Identity Global "
             "-AllowAnonymousUsersToStartMeeting $false"
         ),
-        "source": _manual_review_factory(
-            "bp_restrict_anon_users_start_meeting",
-            "Restrict anonymous users from starting Teams meetings",
-            "Manual verification required. Run: Get-CsTeamsMeetingPolicy -Identity Global | "
-            "Select AllowAnonymousUsersToStartMeeting",
-        ),
-        "source_type": "graph",
+        "source": _check_restrict_anon_users_start_meeting,
+        "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
