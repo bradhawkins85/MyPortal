@@ -205,6 +205,7 @@ from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 from app.services import issues as issues_service
+from app.services import reports as reports_service
 from app.services import service_status as service_status_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
@@ -4449,6 +4450,168 @@ async def compliance_checks_library_page(request: Request):
         "is_super_admin": True,
     }
     return await _render_template("compliance_checks/library.html", request, user, extra=extra)
+
+
+# ---------------------------------------------------------------------------
+# Company overview report
+# ---------------------------------------------------------------------------
+
+
+async def _load_report_context(request: Request):
+    """Authenticate the user and resolve their active company for the report."""
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return user, None, None, None, redirect
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid company identifier",
+        ) from exc
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    company = await company_repo.get_company_by_id(company_id)
+    return user, membership, company, company_id, None
+
+
+def _can_configure_report(user: Mapping[str, Any], membership: Mapping[str, Any] | None) -> bool:
+    if user.get("is_super_admin"):
+        return True
+    return bool(membership and membership.get("is_admin"))
+
+
+@app.get("/reports/company-overview", response_class=HTMLResponse)
+async def company_overview_report_page(request: Request):
+    user, membership, company, company_id, redirect = await _load_report_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    report = await reports_service.build_company_report(company_id)
+    extra = {
+        "title": "Company overview report",
+        "report": report,
+        "company": company,
+        "can_configure_report": _can_configure_report(user, membership),
+    }
+    return await _render_template("reports/index.html", request, user, extra=extra)
+
+
+@app.get("/reports/company-overview.pdf")
+async def company_overview_report_pdf(request: Request):
+    from fastapi.responses import StreamingResponse
+
+    user, _membership, company, company_id, redirect = await _load_report_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    try:
+        from weasyprint import HTML  # type: ignore
+    except (ImportError, OSError) as exc:  # pragma: no cover - depends on system packages
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "PDF export requires WeasyPrint and its native dependencies. "
+                "See https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation"
+            ),
+        ) from exc
+
+    report = await reports_service.build_company_report(company_id)
+    base_context = await _build_base_context(
+        request,
+        user,
+        extra={"report": report, "company": company, "title": "Company overview report"},
+    )
+    template = templates.get_template("reports/pdf.html")
+    rendered_html = template.render(base_context)
+
+    await audit_service.log_action(
+        action="report.company_overview.export_pdf",
+        user_id=user.get("id"),
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"company_id": company_id},
+        request=request,
+    )
+
+    pdf_bytes = HTML(
+        string=rendered_html,
+        base_url=str(request.base_url),
+    ).write_pdf()
+
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in (" ", "-", "_") else "_"
+        for ch in (company.get("name") or f"company_{company_id}")
+    ).strip().replace(" ", "_") or f"company_{company_id}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"company_overview_{safe_name}_{timestamp}.pdf"
+
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/reports/company-overview/settings", response_class=HTMLResponse)
+async def company_overview_report_settings_page(request: Request):
+    user, membership, company, company_id, redirect = await _load_report_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if not _can_configure_report(user, membership):
+        return RedirectResponse(
+            url="/reports/company-overview", status_code=status.HTTP_303_SEE_OTHER
+        )
+    visibility = await reports_service.get_section_visibility(company_id)
+    extra = {
+        "title": "Report sections",
+        "company": company,
+        "sections": list(reports_service.REPORT_SECTIONS),
+        "visibility": visibility,
+    }
+    return await _render_template("reports/settings.html", request, user, extra=extra)
+
+
+@app.post("/reports/company-overview/settings")
+async def company_overview_report_settings_save(request: Request):
+    user, membership, company, company_id, redirect = await _load_report_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if not _can_configure_report(user, membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to configure reports.",
+        )
+    form = await request.form()
+    enabled_keys = set(form.getlist("sections"))
+    preferences = {
+        section.key: (section.key in enabled_keys)
+        for section in reports_service.REPORT_SECTIONS
+    }
+    await reports_service.save_section_visibility(company_id, preferences)
+    await audit_service.log_action(
+        action="report.company_overview.configure",
+        user_id=user.get("id"),
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"enabled_sections": sorted(enabled_keys)},
+        request=request,
+    )
+    return RedirectResponse(
+        url="/reports/company-overview", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @app.head("/invoices", response_class=HTMLResponse)

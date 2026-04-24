@@ -1,0 +1,44 @@
+<section class="card card--panel" data-report-section="issues">
+  <header class="card__header report-section__header">
+    <h2>Issue tracker issues</h2>
+    <span class="report-section__meta">{{ section.data.total or 0 }} issues</span>
+  </header>
+  <div class="card__body">
+    {% set issues = section.data.issues or [] %}
+    {% if issues %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Issue</th>
+            <th>Status</th>
+            <th>Notes</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for issue in issues %}
+            <tr>
+              <td>
+                <strong>{{ issue.name }}</strong>
+                {% if issue.description %}
+                  <div class="report-section__meta">{{ issue.description }}</div>
+                {% endif %}
+              </td>
+              <td><span class="status status--info">{{ issue.status }}</span></td>
+              <td>{{ issue.notes or '—' }}</td>
+              <td>
+                {% if issue.updated_at %}
+                  <span data-utc="{{ issue.updated_at }}">{{ issue.updated_at }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No issues are currently assigned to this company.</p>
+    {% endif %}
+  </div>
+</section>

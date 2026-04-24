@@ -1,0 +1,19 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="compliance_checks">
+  <header class="card__header report-section__header">
+    <h2>Customer compliance checks</h2>
+  </header>
+  <div class="card__body">
+    {{ counter_strip(
+      total=section.data.total,
+      total_label='Total checks',
+      items=[
+        {'label': 'Compliance rate', 'value': (section.data.compliance_percentage | default(0)) ~ '%', 'variant': 'info'},
+        {'label': 'In progress', 'value': section.data.in_progress | default(0), 'variant': 'warning'},
+        {'label': 'Not started', 'value': section.data.not_started | default(0), 'variant': 'neutral'},
+        {'label': 'Overdue', 'value': section.data.overdue_count | default(0), 'variant': 'danger'},
+        {'label': 'Due soon', 'value': section.data.due_soon_count | default(0), 'variant': 'warning'},
+      ]
+    ) }}
+  </div>
+</section>

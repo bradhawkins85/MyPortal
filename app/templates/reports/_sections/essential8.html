@@ -1,0 +1,26 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="essential8">
+  <header class="card__header report-section__header">
+    <h2>Essential 8 compliance progress</h2>
+  </header>
+  <div class="card__body">
+    {% set levels = section.data.levels or [] %}
+    {% if levels %}
+      {% for level in levels %}
+        <div style="margin-bottom: var(--space-3);">
+          <div class="report-section__header" style="margin-bottom: var(--space-2);">
+            <h3 style="margin: 0; font-size: 1rem;">{{ level.label }}</h3>
+            <span class="report-section__meta">{{ level.percentage }}% compliant ({{ level.compliant }} of {{ level.total }})</span>
+          </div>
+          {{ counter_strip(items=[
+            {'label': 'Compliant', 'value': level.compliant, 'variant': 'success'},
+            {'label': 'In progress', 'value': level.in_progress, 'variant': 'warning'},
+            {'label': 'Not started', 'value': level.not_started, 'variant': 'neutral'},
+          ]) }}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="report-empty">No Essential 8 data is available for this company.</p>
+    {% endif %}
+  </div>
+</section>

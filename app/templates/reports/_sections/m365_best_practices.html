@@ -1,0 +1,28 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="m365_best_practices">
+  <header class="card__header report-section__header">
+    <h2>M365 best practice summary</h2>
+    {% if section.data.last_run_at %}
+      <span class="report-section__meta">
+        Last run <span data-utc="{{ section.data.last_run_at }}">{{ section.data.last_run_at }}</span>
+      </span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {% if section.data.total %}
+      {{ counter_strip(
+        total=section.data.total,
+        total_label='Checks run',
+        items=[
+          {'label': 'Pass', 'value': section.data.counts.pass, 'variant': 'success'},
+          {'label': 'Warn', 'value': section.data.counts.warn, 'variant': 'warning'},
+          {'label': 'Fail', 'value': section.data.counts.fail, 'variant': 'danger'},
+          {'label': 'Error', 'value': section.data.counts.error, 'variant': 'danger'},
+          {'label': 'Pass rate', 'value': section.data.pass_percentage ~ '%', 'variant': 'info'},
+        ]
+      ) }}
+    {% else %}
+      <p class="report-empty">No M365 best practice results have been recorded yet.</p>
+    {% endif %}
+  </div>
+</section>
