@@ -164,6 +164,9 @@ async def test_build_company_report_respects_disabled_sections():
         reports.report_sections_repo, "get_section_preferences",
         new=AsyncMock(return_value=preferences),
     ), patch.object(
+        reports.report_sections_repo, "get_detail_preferences",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
         reports.report_sections_repo, "get_company_report_settings",
         new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
     ):
@@ -389,3 +392,160 @@ async def test_build_company_report_respects_section_order():
     assert report.sections[0].key == "staff"
     assert report.sections[1].key == "assets"
     assert len(report.sections) == len(reports.REPORT_SECTIONS)
+
+
+# ---------------------------------------------------------------------------
+# Detailed report tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_section_detail_visibility_defaults_to_false():
+    """get_section_detail_visibility returns False for every section when no prefs are stored."""
+    from app.services import reports
+
+    with patch.object(
+        reports.report_sections_repo, "get_detail_preferences",
+        new=AsyncMock(return_value={}),
+    ):
+        result = await reports.get_section_detail_visibility(99)
+
+    assert set(result.keys()) == set(reports.SECTION_KEYS)
+    assert all(v is False for v in result.values())
+
+
+@pytest.mark.asyncio
+async def test_save_section_detail_visibility_persists():
+    """save_section_detail_visibility calls set_detail_preferences with cleaned values."""
+    from app.services import reports
+
+    captured: dict = {}
+
+    async def fake_set(company_id, cleaned, *, valid_keys=None):
+        captured["company_id"] = company_id
+        captured["cleaned"] = dict(cleaned)
+        captured["valid_keys"] = set(valid_keys) if valid_keys is not None else None
+
+    with patch.object(
+        reports.report_sections_repo, "set_detail_preferences",
+        new=fake_set,
+    ):
+        result = await reports.save_section_detail_visibility(
+            7,
+            {"assets": True, "staff": False, "not_a_real_section": True},
+        )
+
+    assert set(result.keys()) == set(reports.SECTION_KEYS)
+    assert result["assets"] is True
+    assert result["staff"] is False
+    assert "not_a_real_section" not in result
+    assert captured["company_id"] == 7
+    assert captured["cleaned"]["assets"] is True
+    assert captured["cleaned"]["staff"] is False
+    assert "not_a_real_section" not in captured["cleaned"]
+
+
+def _make_full_patches(reports_module):
+    """Return a list of (target, mock) tuples for all section builders."""
+    return [
+        (reports_module.assets_repo, "count_active_assets", AsyncMock(return_value=5)),
+        (reports_module.assets_repo, "count_active_assets_by_type", AsyncMock(return_value=2)),
+        (reports_module.staff_repo, "count_staff", AsyncMock(return_value=2)),
+        (reports_module.m365_bp_repo, "list_results", AsyncMock(return_value=[])),
+        (reports_module.shop_repo, "list_order_summaries", AsyncMock(return_value=[])),
+        (reports_module.licenses_repo, "list_company_licenses", AsyncMock(return_value=[])),
+        (reports_module.subscriptions_repo, "list_subscriptions", AsyncMock(return_value=[])),
+        (reports_module.essential8_repo, "list_essential8_controls", AsyncMock(return_value=[])),
+        (reports_module.essential8_repo, "get_per_maturity_statuses_for_company", AsyncMock(return_value={})),
+        (reports_module.compliance_checks_repo, "get_assignment_summary", AsyncMock(return_value={
+            "total": 0, "compliance_percentage": 0.0, "in_progress": 0,
+            "not_started": 0, "overdue_count": 0, "due_soon_count": 0,
+        })),
+        (reports_module.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[])),
+        (reports_module.issues_repo, "list_issues_with_assignments", AsyncMock(return_value=[])),
+        (reports_module.db, "fetch_all", AsyncMock(return_value=[])),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_company_report_populates_detail_data():
+    """When detailed=True for a section, detail_data and detailed flag are set on SectionResult."""
+    from app.services import reports
+    from unittest.mock import AsyncMock, patch
+    from contextlib import ExitStack
+
+    company = {"id": 20, "name": "DetailCo"}
+    preferences = {key: True for key in reports.SECTION_KEYS}
+    # Only assets section is detailed.
+    detail_prefs = {key: (key == "assets") for key in reports.SECTION_KEYS}
+
+    patches = [
+        patch.object(reports.company_repo, "get_company_by_id", new=AsyncMock(return_value=company)),
+        patch.object(reports.report_sections_repo, "get_section_preferences", new=AsyncMock(return_value=preferences)),
+        patch.object(reports.report_sections_repo, "get_detail_preferences", new=AsyncMock(return_value=detail_prefs)),
+        patch.object(reports.report_sections_repo, "get_company_report_settings",
+                     new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None})),
+        # Detail builder for assets.
+        patch.object(reports.assets_repo, "list_company_assets",
+                     new=AsyncMock(return_value=[
+                         {"id": 1, "name": "Server01", "type": "server", "os_name": "Windows Server 2022",
+                          "status": "active", "serial_number": "SN123", "last_sync": None,
+                          "last_user": None, "form_factor": None, "warranty_status": None,
+                          "warranty_end_date": None},
+                     ])),
+    ]
+    # Add all summary builder mocks.
+    for (obj, attr, mock) in _make_full_patches(reports):
+        patches.append(patch.object(obj, attr, new=mock))
+
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        report = await reports.build_company_report(20)
+
+    assets_section = report.section("assets")
+    assert assets_section is not None
+    assert assets_section.detailed is True
+    assert assets_section.detail_data.get("total") == 1
+    detail_assets = assets_section.detail_data.get("assets") or []
+    assert len(detail_assets) == 1
+    assert detail_assets[0]["name"] == "Server01"
+
+    # Other sections should not be detailed.
+    for section in report.sections:
+        if section.key != "assets":
+            assert section.detailed is False
+            assert section.detail_data == {}
+
+
+@pytest.mark.asyncio
+async def test_build_company_report_disabled_section_not_detailed():
+    """A disabled section must never have detailed=True even if detail prefs say so."""
+    from app.services import reports
+    from unittest.mock import AsyncMock, patch
+    from contextlib import ExitStack
+
+    company = {"id": 21, "name": "DisabledCo"}
+    # All sections disabled.
+    preferences = {key: False for key in reports.SECTION_KEYS}
+    # All sections marked as detailed.
+    detail_prefs = {key: True for key in reports.SECTION_KEYS}
+
+    patches = [
+        patch.object(reports.company_repo, "get_company_by_id", new=AsyncMock(return_value=company)),
+        patch.object(reports.report_sections_repo, "get_section_preferences", new=AsyncMock(return_value=preferences)),
+        patch.object(reports.report_sections_repo, "get_detail_preferences", new=AsyncMock(return_value=detail_prefs)),
+        patch.object(reports.report_sections_repo, "get_company_report_settings",
+                     new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None})),
+    ]
+
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        report = await reports.build_company_report(21)
+
+    for section in report.sections:
+        assert section.enabled is False
+        assert section.detailed is False
+        assert section.detail_data == {}
+

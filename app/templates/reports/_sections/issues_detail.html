@@ -1,0 +1,32 @@
+<section class="card card--panel" data-report-section="issues_detail">
+  <header class="card__header report-section__header">
+    <h2>Issues — Full detail</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} issues</span>
+  </header>
+  <div class="card__body">
+    {% set issues = section.detail_data.issues or [] %}
+    {% if issues %}
+      {% for issue in issues %}
+        <div style="margin-bottom: var(--space-4); padding: var(--space-3); border: 1px solid var(--color-border); border-radius: 6px;">
+          <div class="report-section__header" style="margin-bottom: var(--space-2);">
+            <strong>{{ issue.name }}</strong>
+            <span class="status status--info">{{ issue.status }}</span>
+          </div>
+          {% if issue.description %}
+            <p style="margin: 0 0 var(--space-2); color: var(--color-text-muted); font-size: 0.9rem;">{{ issue.description }}</p>
+          {% endif %}
+          {% if issue.notes %}
+            <p style="margin: 0 0 var(--space-2);"><strong>Notes:</strong> {{ issue.notes }}</p>
+          {% endif %}
+          {% if issue.updated_at %}
+            <p style="margin: 0; color: var(--color-text-muted); font-size: 0.85rem;">
+              Updated <span data-utc="{{ issue.updated_at }}">{{ issue.updated_at }}</span>
+            </p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="report-empty">No issues are currently assigned to this company.</p>
+    {% endif %}
+  </div>
+</section>

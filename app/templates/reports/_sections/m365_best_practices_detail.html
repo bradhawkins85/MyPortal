@@ -1,0 +1,44 @@
+<section class="card card--panel" data-report-section="m365_best_practices_detail">
+  <header class="card__header report-section__header">
+    <h2>M365 best practices — Per-check breakdown</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} checks</span>
+  </header>
+  <div class="card__body">
+    {% set checks = section.detail_data.checks or [] %}
+    {% if checks %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Check</th>
+            <th>Status</th>
+            <th>Details</th>
+            <th>Remediation</th>
+            <th>Last run</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for check in checks %}
+            {% set status_map = {'pass': 'success', 'warn': 'warning', 'fail': 'danger', 'error': 'danger', 'not_applicable': 'neutral'} %}
+            <tr>
+              <td><strong>{{ check.check_name or check.check_id or '—' }}</strong></td>
+              <td>
+                <span class="status status--{{ status_map.get(check.status, 'neutral') }}">{{ check.status or '—' }}</span>
+              </td>
+              <td>{{ check.details or '—' }}</td>
+              <td>{{ check.remediation_status or '—' }}</td>
+              <td>
+                {% if check.run_at %}
+                  <span data-utc="{{ check.run_at }}">{{ check.run_at }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No M365 best practice results have been recorded yet.</p>
+    {% endif %}
+  </div>
+</section>

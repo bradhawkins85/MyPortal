@@ -121,6 +121,8 @@ class SectionResult:
     enabled: bool
     data: dict[str, Any] = field(default_factory=dict)
     is_empty: bool = False
+    detailed: bool = False
+    detail_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -511,6 +513,7 @@ async def _build_issues(company_id: int) -> dict[str, Any]:
     return {"issues": rows, "total": len(rows)}
 
 
+
 # Maps section keys to their builder coroutine.
 _SECTION_BUILDERS = {
     "assets": _build_assets,
@@ -525,6 +528,334 @@ _SECTION_BUILDERS = {
     "tickets_last_month": _build_tickets_last_month,
     "asset_custom_fields": _build_asset_custom_fields,
     "issues": _build_issues,
+}
+
+
+# ---------------------------------------------------------------------------
+# Detail builders  (per-section expanded data for the "Detailed" pages)
+# ---------------------------------------------------------------------------
+
+
+async def _build_assets_detail(company_id: int) -> dict[str, Any]:
+    """Full list of company assets for the detail page."""
+    rows = await assets_repo.list_company_assets(company_id)
+    assets: list[dict[str, Any]] = []
+    for row in rows:
+        last_sync_raw = row.get("last_sync")
+        last_sync: str | None = None
+        if isinstance(last_sync_raw, datetime):
+            last_sync = last_sync_raw.isoformat()
+        elif isinstance(last_sync_raw, str):
+            last_sync = last_sync_raw
+        assets.append(
+            {
+                "name": row.get("name"),
+                "type": row.get("type"),
+                "os_name": row.get("os_name"),
+                "status": row.get("status"),
+                "serial_number": row.get("serial_number"),
+                "last_sync": last_sync,
+                "last_user": row.get("last_user"),
+                "form_factor": row.get("form_factor"),
+                "warranty_status": row.get("warranty_status"),
+                "warranty_end_date": _date_to_iso(row.get("warranty_end_date")),
+            }
+        )
+    return {"assets": assets, "total": len(assets)}
+
+
+async def _build_staff_detail(company_id: int) -> dict[str, Any]:
+    """Full list of enabled staff for the detail page."""
+    rows = await staff_repo.list_staff(company_id, enabled=True, page_size=500)
+    staff: list[dict[str, Any]] = []
+    for row in rows:
+        staff.append(
+            {
+                "name": row.get("name") or (
+                    f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
+                ),
+                "email": row.get("email"),
+                "mobile_phone": row.get("mobile_phone"),
+                "department": row.get("department"),
+                "position": row.get("position") or row.get("job_title"),
+                "onboarding_status": row.get("onboarding_status"),
+            }
+        )
+    return {"staff": staff, "total": len(staff)}
+
+
+async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
+    """Per-check breakdown for the detail page."""
+    results = await m365_bp_repo.list_results(company_id)
+    checks: list[dict[str, Any]] = []
+    for row in results:
+        checks.append(
+            {
+                "check_id": row.get("check_id"),
+                "check_name": row.get("check_name"),
+                "status": str(row.get("status") or "").lower(),
+                "details": row.get("details"),
+                "remediation_status": row.get("remediation_status"),
+                "run_at": _datetime_to_iso(row.get("run_at")),
+            }
+        )
+    # Sort: fails first, then warns, then pass, then others.
+    _order = {"fail": 0, "warn": 1, "error": 2, "pass": 3, "not_applicable": 4}
+    checks.sort(key=lambda c: (_order.get(c.get("status") or "", 5), c.get("check_name") or ""))
+    return {"checks": checks, "total": len(checks)}
+
+
+async def _build_top_mailboxes_detail(company_id: int) -> dict[str, Any]:
+    """All mailboxes (not just top 5) for the detail page."""
+
+    def _to_mailbox_row(row: Any) -> dict[str, Any]:
+        primary = int(row.get("storage_used_bytes") or 0)
+        raw_archive = row.get("archive_storage_used_bytes")
+        archive: int | None = int(raw_archive) if raw_archive is not None else None
+        total = primary + (archive or 0)
+        return {
+            "user_principal_name": row.get("user_principal_name"),
+            "display_name": row.get("display_name") or row.get("user_principal_name"),
+            "mailbox_type": row.get("mailbox_type") or "UserMailbox",
+            "total_bytes": total,
+            "primary_bytes": primary,
+            "archive_bytes": archive,
+        }
+
+    _query = """
+        SELECT user_principal_name, display_name, mailbox_type,
+               storage_used_bytes, archive_storage_used_bytes
+        FROM m365_mailboxes
+        WHERE company_id = %s AND mailbox_type = %s
+        ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
+    """
+    try:
+        user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
+    except Exception:  # pragma: no cover
+        user_rows = []
+    try:
+        shared_rows = await db.fetch_all(_query, (company_id, "SharedMailbox"))
+    except Exception:  # pragma: no cover
+        shared_rows = []
+
+    return {
+        "user_mailboxes": [_to_mailbox_row(r) for r in user_rows or []],
+        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_rows or []],
+        "total_user": len(user_rows or []),
+        "total_shared": len(shared_rows or []),
+    }
+
+
+async def _build_orders_detail(company_id: int) -> dict[str, Any]:
+    """All orders from the past 3 months for the detail page."""
+    orders = await shop_repo.list_order_summaries(company_id)
+    today = datetime.now(timezone.utc).date()
+    cutoff = today - timedelta(days=90)
+    filtered: list[dict[str, Any]] = []
+    for order in orders or []:
+        order_date = _coerce_date(order.get("order_date"))
+        if order_date is None or order_date < cutoff:
+            continue
+        filtered.append(
+            {
+                "order_number": order.get("order_number"),
+                "order_date": order_date.isoformat(),
+                "status": order.get("status") or "unknown",
+                "shipping_status": order.get("shipping_status"),
+                "po_number": order.get("po_number"),
+            }
+        )
+    filtered.sort(key=lambda o: o.get("order_date") or "", reverse=True)
+    return {
+        "orders": filtered,
+        "total": len(filtered),
+        "since": cutoff.isoformat(),
+    }
+
+
+async def _build_licenses_detail(company_id: int) -> dict[str, Any]:
+    """License list with computed usage percentage for the detail page."""
+    records = await licenses_repo.list_company_licenses(company_id)
+    licenses: list[dict[str, Any]] = []
+    for record in records:
+        expiry = _coerce_date(record.get("expiry_date"))
+        total = int(record.get("count") or 0)
+        allocated = int(record.get("allocated") or 0)
+        usage_pct = round((allocated / total * 100.0), 1) if total else 0.0
+        licenses.append(
+            {
+                "name": record.get("display_name") or record.get("name"),
+                "total": total,
+                "allocated": allocated,
+                "available": max(0, total - allocated),
+                "usage_percentage": usage_pct,
+                "expiry_date": expiry.isoformat() if expiry else None,
+                "contract_term": record.get("contract_term"),
+                "auto_renew": record.get("auto_renew"),
+                "notes": record.get("notes"),
+            }
+        )
+    return {"licenses": licenses, "total": len(licenses)}
+
+
+async def _build_subscriptions_detail(company_id: int) -> dict[str, Any]:
+    """Full subscription data (same as summary, all available fields) for the detail page."""
+    records = await subscriptions_repo.list_subscriptions(customer_id=company_id)
+    subscriptions: list[dict[str, Any]] = []
+    for record in records:
+        subscriptions.append(
+            {
+                "subscription_id": record.get("id") or record.get("subscription_id"),
+                "product_name": record.get("product_name"),
+                "category_name": record.get("category_name"),
+                "quantity": record.get("quantity"),
+                "status": record.get("status") or "unknown",
+                "start_date": _date_to_iso(record.get("start_date")),
+                "end_date": _date_to_iso(record.get("end_date")),
+                "commitment_term": record.get("commitment_term"),
+                "billing_cycle": record.get("billing_cycle"),
+                "unit_price": record.get("unit_price"),
+                "currency": record.get("currency"),
+            }
+        )
+    return {"subscriptions": subscriptions, "total": len(subscriptions)}
+
+
+async def _build_essential8_detail(company_id: int) -> dict[str, Any]:
+    """Per-control breakdown with maturity-level statuses for the detail page."""
+    controls = await essential8_repo.list_essential8_controls()
+    per_control = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    rows: list[dict[str, Any]] = []
+    for control in controls:
+        control_id = control.get("id")
+        statuses = per_control.get(control_id, {}) if control_id is not None else {}
+        rows.append(
+            {
+                "id": control_id,
+                "name": control.get("name"),
+                "description": control.get("description"),
+                "ml1": statuses.get("ml1", "not_started"),
+                "ml2": statuses.get("ml2", "not_started"),
+                "ml3": statuses.get("ml3", "not_started"),
+            }
+        )
+    return {"controls": rows, "total": len(rows)}
+
+
+async def _build_compliance_checks_detail(company_id: int) -> dict[str, Any]:
+    """Full list of compliance check assignments for the detail page."""
+    assignments = await compliance_checks_repo.list_assignments(company_id)
+    rows: list[dict[str, Any]] = []
+    for a in assignments:
+        rows.append(
+            {
+                "check_title": a.get("check_title"),
+                "category_name": a.get("category_name"),
+                "status": a.get("status") or "unknown",
+                "next_review_at": _datetime_to_iso(a.get("next_review_at")),
+                "last_checked_at": _datetime_to_iso(a.get("last_checked_at")),
+                "notes": a.get("notes"),
+                "evidence_summary": a.get("evidence_summary"),
+            }
+        )
+    rows.sort(key=lambda r: (r.get("category_name") or "", r.get("check_title") or ""))
+    return {"assignments": rows, "total": len(rows)}
+
+
+async def _build_tickets_detail(company_id: int) -> dict[str, Any]:
+    """Full ticket list (individual tickets) from the past 30 days for the detail page."""
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    try:
+        rows = await db.fetch_all(
+            """
+            SELECT id, subject, status, priority, category, created_at, updated_at
+            FROM tickets
+            WHERE company_id = %s AND created_at >= %s
+            ORDER BY created_at DESC
+            """,
+            (company_id, since.replace(tzinfo=None)),
+        )
+    except Exception:  # pragma: no cover
+        rows = []
+    tickets: list[dict[str, Any]] = []
+    for row in rows or []:
+        created = row.get("created_at")
+        updated = row.get("updated_at")
+        tickets.append(
+            {
+                "id": row.get("id"),
+                "subject": row.get("subject"),
+                "status": str(row.get("status") or "").lower(),
+                "priority": row.get("priority"),
+                "category": row.get("category"),
+                "created_at": created.isoformat() if isinstance(created, datetime) else str(created or ""),
+                "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated or ""),
+            }
+        )
+    return {"tickets": tickets, "total": len(tickets), "since": since.isoformat()}
+
+
+async def _build_asset_custom_fields_detail(company_id: int) -> dict[str, Any]:
+    """Asset custom fields with unlimited value rows for the detail page."""
+    definitions = await asset_custom_fields_repo.list_field_definitions()
+    fields_out: list[dict[str, Any]] = []
+    for definition in definitions:
+        field_type = str(definition.get("field_type") or "").lower()
+        definition_id = definition.get("id")
+        if definition_id is None:
+            continue
+        if field_type in {"text", "url"}:
+            # Unlimited rows (summary caps at 20).
+            rows = await db.fetch_all(
+                """
+                SELECT v.value_text AS value, COUNT(DISTINCT v.asset_id) AS total
+                FROM asset_custom_field_values v
+                JOIN assets a ON v.asset_id = a.id
+                WHERE v.field_definition_id = %s
+                  AND a.company_id = %s
+                  AND v.value_text IS NOT NULL AND v.value_text <> ''
+                GROUP BY v.value_text
+                ORDER BY total DESC
+                """,
+                (definition_id, company_id),
+            )
+            counts = [
+                {"value": row.get("value") or "", "count": int(row.get("total") or 0)}
+                for row in rows or []
+            ]
+        else:
+            counts = await _count_custom_field_values(company_id, definition, field_type)
+        fields_out.append(
+            {
+                "name": definition.get("name"),
+                "display_name": definition.get("display_name") or definition.get("name"),
+                "field_type": field_type,
+                "values": counts,
+                "total": sum(entry["count"] for entry in counts),
+            }
+        )
+    return {"fields": fields_out}
+
+
+async def _build_issues_detail(company_id: int) -> dict[str, Any]:
+    """Full issue list with description body for the detail page (same dataset as summary)."""
+    return await _build_issues(company_id)
+
+
+# Maps section keys to their detail builder coroutine.
+_DETAIL_BUILDERS: dict[str, Any] = {
+    "assets": _build_assets_detail,
+    "staff": _build_staff_detail,
+    "m365_best_practices": _build_m365_best_practices_detail,
+    "top_mailboxes": _build_top_mailboxes_detail,
+    "orders_current_month": _build_orders_detail,
+    "licenses": _build_licenses_detail,
+    "subscriptions": _build_subscriptions_detail,
+    "essential8": _build_essential8_detail,
+    "compliance_checks": _build_compliance_checks_detail,
+    "tickets_last_month": _build_tickets_detail,
+    "asset_custom_fields": _build_asset_custom_fields_detail,
+    "issues": _build_issues_detail,
 }
 
 
@@ -553,6 +884,30 @@ async def save_section_visibility(
         raw = preferences.get(section.key)
         cleaned[section.key] = _coerce_bool(raw, default=True)
     await report_sections_repo.set_section_preferences(
+        company_id, cleaned, valid_keys=SECTION_KEYS
+    )
+    return cleaned
+
+
+async def get_section_detail_visibility(company_id: int) -> dict[str, bool]:
+    """Return a ``{section_key: detailed}`` map for every section.
+
+    Unset sections default to ``False`` (no detail page).
+    """
+    stored = await report_sections_repo.get_detail_preferences(company_id)
+    return {section.key: stored.get(section.key, False) for section in REPORT_SECTIONS}
+
+
+async def save_section_detail_visibility(
+    company_id: int,
+    preferences: Mapping[str, Any],
+) -> dict[str, bool]:
+    """Persist detail-page preferences, returning the canonical map afterwards."""
+    cleaned: dict[str, bool] = {}
+    for section in REPORT_SECTIONS:
+        raw = preferences.get(section.key)
+        cleaned[section.key] = _coerce_bool(raw, default=False)
+    await report_sections_repo.set_detail_preferences(
         company_id, cleaned, valid_keys=SECTION_KEYS
     )
     return cleaned
@@ -590,6 +945,7 @@ async def build_company_report(company_id: int) -> ReportData:
         raise ValueError(f"Company {company_id} not found")
 
     visibility = await get_section_visibility(company_id)
+    detail_visibility = await get_section_detail_visibility(company_id)
     report_settings = await get_company_report_settings(company_id)
     auto_hide_empty: bool = report_settings.get("auto_hide_empty", True)
     section_order: list[str] | None = report_settings.get("section_order")
@@ -616,6 +972,16 @@ async def build_company_report(company_id: int) -> ReportData:
         # When auto-hide is active, treat empty-but-enabled sections as hidden.
         if enabled and auto_hide_empty and is_empty:
             enabled = False
+        # Detail page: only populated when the section is enabled and detailed flag is set.
+        detailed = enabled and detail_visibility.get(section_def.key, False)
+        detail_data: dict[str, Any] = {}
+        if detailed:
+            detail_builder = _DETAIL_BUILDERS.get(section_def.key)
+            if detail_builder is not None:
+                try:
+                    detail_data = await detail_builder(company_id)
+                except Exception as exc:  # pragma: no cover - defensive
+                    detail_data = {"error": str(exc)}
         sections.append(
             SectionResult(
                 key=section_def.key,
@@ -623,6 +989,8 @@ async def build_company_report(company_id: int) -> ReportData:
                 enabled=enabled,
                 data=data,
                 is_empty=is_empty,
+                detailed=detailed,
+                detail_data=detail_data,
             )
         )
     return ReportData(
