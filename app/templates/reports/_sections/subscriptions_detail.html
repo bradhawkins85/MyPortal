@@ -1,0 +1,49 @@
+<section class="card card--panel" data-report-section="subscriptions_detail">
+  <header class="card__header report-section__header">
+    <h2>Subscriptions — Full breakdown</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} subscriptions</span>
+  </header>
+  <div class="card__body">
+    {% set subs = section.detail_data.subscriptions or [] %}
+    {% if subs %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Category</th>
+            <th>Qty</th>
+            <th>Status</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Commitment</th>
+            <th>Billing cycle</th>
+            <th>Unit price</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sub in subs %}
+            <tr>
+              <td>{{ sub.product_name or '—' }}</td>
+              <td>{{ sub.category_name or '—' }}</td>
+              <td>{{ sub.quantity if sub.quantity is not none else '—' }}</td>
+              <td><span class="status status--info">{{ sub.status }}</span></td>
+              <td>{{ sub.start_date or '—' }}</td>
+              <td>{{ sub.end_date or '—' }}</td>
+              <td>{{ sub.commitment_term or '—' }}</td>
+              <td>{{ sub.billing_cycle or '—' }}</td>
+              <td>
+                {% if sub.unit_price is not none %}
+                  {{ sub.unit_price }}{% if sub.currency %} {{ sub.currency }}{% endif %}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No subscriptions are recorded for this company.</p>
+    {% endif %}
+  </div>
+</section>

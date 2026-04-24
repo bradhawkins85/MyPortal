@@ -1,0 +1,37 @@
+<section class="card card--panel" data-report-section="staff_detail">
+  <header class="card__header report-section__header">
+    <h2>Staff — Full list</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} active staff</span>
+  </header>
+  <div class="card__body">
+    {% set staff = section.detail_data.staff or [] %}
+    {% if staff %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Mobile</th>
+            <th>Department</th>
+            <th>Position</th>
+            <th>Onboarding status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for member in staff %}
+            <tr>
+              <td>{{ member.name or '—' }}</td>
+              <td>{{ member.email or '—' }}</td>
+              <td>{{ member.mobile_phone or '—' }}</td>
+              <td>{{ member.department or '—' }}</td>
+              <td>{{ member.position or '—' }}</td>
+              <td>{{ member.onboarding_status or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No active staff are recorded for this company.</p>
+    {% endif %}
+  </div>
+</section>

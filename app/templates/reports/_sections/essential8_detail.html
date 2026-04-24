@@ -1,0 +1,51 @@
+<section class="card card--panel" data-report-section="essential8_detail">
+  <header class="card__header report-section__header">
+    <h2>Essential 8 — Per-control breakdown</h2>
+    <span class="report-section__meta">{{ section.detail_data.total or 0 }} controls</span>
+  </header>
+  <div class="card__body">
+    {% set controls = section.detail_data.controls or [] %}
+    {% if controls %}
+      {% set status_variant = {'compliant': 'success', 'in_progress': 'warning', 'not_started': 'neutral'} %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Control</th>
+            <th>ML1</th>
+            <th>ML2</th>
+            <th>ML3</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for control in controls %}
+            <tr>
+              <td>
+                <strong>{{ control.name or '—' }}</strong>
+                {% if control.description %}
+                  <div class="report-section__meta">{{ control.description }}</div>
+                {% endif %}
+              </td>
+              <td>
+                <span class="status status--{{ status_variant.get(control.ml1, 'neutral') }}">
+                  {{ control.ml1 | replace('_', ' ') | title }}
+                </span>
+              </td>
+              <td>
+                <span class="status status--{{ status_variant.get(control.ml2, 'neutral') }}">
+                  {{ control.ml2 | replace('_', ' ') | title }}
+                </span>
+              </td>
+              <td>
+                <span class="status status--{{ status_variant.get(control.ml3, 'neutral') }}">
+                  {{ control.ml3 | replace('_', ' ') | title }}
+                </span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No Essential 8 control data is available for this company.</p>
+    {% endif %}
+  </div>
+</section>

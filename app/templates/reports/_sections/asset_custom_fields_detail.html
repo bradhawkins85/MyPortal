@@ -1,0 +1,49 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="asset_custom_fields_detail">
+  <header class="card__header report-section__header">
+    <h2>Asset custom fields — Full value distribution</h2>
+  </header>
+  <div class="card__body">
+    {% set fields = section.detail_data.fields or [] %}
+    {% if fields %}
+      {% for field in fields %}
+        <div style="margin-bottom: var(--space-4);">
+          <h3 style="margin: 0 0 var(--space-2); font-size: 1rem;">
+            {{ field.display_name }}
+            <span class="report-section__meta">({{ field.field_type }})</span>
+          </h3>
+          {% if field['values'] %}
+            {% if field.field_type == 'checkbox' %}
+              {% set counter_items = [] %}
+              {% for entry in field['values'] %}
+                {% set _ = counter_items.append({'label': entry.value, 'value': entry.count, 'variant': 'neutral'}) %}
+              {% endfor %}
+              {{ counter_strip(items=counter_items) }}
+            {% else %}
+              <table class="report-table">
+                <thead>
+                  <tr>
+                    <th>Value</th>
+                    <th>Assets</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for entry in field['values'] %}
+                    <tr>
+                      <td>{{ entry.value }}</td>
+                      <td>{{ entry.count }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+          {% else %}
+            <p class="report-empty">No recorded values for this field.</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="report-empty">No asset custom fields have been defined.</p>
+    {% endif %}
+  </div>
+</section>

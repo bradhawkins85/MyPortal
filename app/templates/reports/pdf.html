@@ -433,5 +433,376 @@
 
   {% endfor %}
 
+  {# ------------------------------------------------------------------ #}
+  {#  Detailed section pages                                             #}
+  {# ------------------------------------------------------------------ #}
+  {% set any_detailed = namespace(value=false) %}
+  {% for section in report.sections if section.enabled and section.detailed %}
+    {% set any_detailed.value = true %}
+  {% endfor %}
+
+  {% if any_detailed.value %}
+    <div style="page-break-before: always; margin-bottom: 20pt;">
+      <h1 style="font-size: 18pt; border-bottom: 2px solid #0e4f8a; padding-bottom: 6pt; margin-bottom: 4pt;">Detailed Report</h1>
+      <p class="section-meta">The following sections contain expanded detail for each summary section marked as detailed.</p>
+    </div>
+
+    {% for section in report.sections if section.enabled and section.detailed %}
+      {% set dd = section.detail_data %}
+
+      {% if section.key == 'assets' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Assets — Full list</h2>
+          {% set assets = dd.assets or [] %}
+          {% if assets %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Name</th><th>Type</th><th>OS</th><th>Status</th>
+                <th>Serial</th><th>Last user</th><th>Warranty end</th>
+              </tr></thead>
+              <tbody>
+                {% for asset in assets %}
+                  <tr>
+                    <td>{{ asset.name or '—' }}</td>
+                    <td>{{ asset.type or '—' }}</td>
+                    <td>{{ asset.os_name or '—' }}</td>
+                    <td>{{ asset.status or '—' }}</td>
+                    <td>{{ asset.serial_number or '—' }}</td>
+                    <td>{{ asset.last_user or '—' }}</td>
+                    <td>{{ asset.warranty_end_date or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No assets recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'staff' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Staff — Full list</h2>
+          {% set staff = dd.staff or [] %}
+          {% if staff %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Name</th><th>Email</th><th>Mobile</th><th>Department</th><th>Position</th>
+              </tr></thead>
+              <tbody>
+                {% for member in staff %}
+                  <tr>
+                    <td>{{ member.name or '—' }}</td>
+                    <td>{{ member.email or '—' }}</td>
+                    <td>{{ member.mobile_phone or '—' }}</td>
+                    <td>{{ member.department or '—' }}</td>
+                    <td>{{ member.position or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No active staff recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'm365_best_practices' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>M365 best practices — Per-check breakdown</h2>
+          {% set checks = dd.checks or [] %}
+          {% if checks %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Check</th><th>Status</th><th>Details</th><th>Remediation</th>
+              </tr></thead>
+              <tbody>
+                {% for check in checks %}
+                  <tr>
+                    <td><strong>{{ check.check_name or check.check_id or '—' }}</strong></td>
+                    <td>{{ check.status or '—' }}</td>
+                    <td>{{ check.details or '—' }}</td>
+                    <td>{{ check.remediation_status or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No M365 best practice results recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'top_mailboxes' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Mailboxes — All mailboxes</h2>
+          {% set user_mbs = dd.user_mailboxes or [] %}
+          {% set shared_mbs = dd.shared_mailboxes or [] %}
+          {% if user_mbs %}
+            <h3>User mailboxes ({{ dd.total_user or 0 }})</h3>
+            <table class="report-table">
+              <thead><tr>
+                <th>Display name</th><th>UPN</th>
+                <th class="right">Total size</th><th class="right">Archive</th>
+              </tr></thead>
+              <tbody>
+                {% for mb in user_mbs %}
+                  <tr>
+                    <td>{{ mb.display_name }}</td>
+                    <td>{{ mb.user_principal_name }}</td>
+                    <td class="right">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                    <td class="right">{% if mb.archive_bytes is none %}None{% else %}{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% endif %}
+          {% if shared_mbs %}
+            <h3 style="margin-top: 10pt;">Shared mailboxes ({{ dd.total_shared or 0 }})</h3>
+            <table class="report-table">
+              <thead><tr>
+                <th>Display name</th><th>UPN</th>
+                <th class="right">Total size</th><th class="right">Archive</th>
+              </tr></thead>
+              <tbody>
+                {% for mb in shared_mbs %}
+                  <tr>
+                    <td>{{ mb.display_name }}</td>
+                    <td>{{ mb.user_principal_name }}</td>
+                    <td class="right">{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                    <td class="right">{% if mb.archive_bytes is none %}None{% else %}{{ (mb.archive_bytes / (1024*1024)) | round(1) }} MB{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% endif %}
+          {% if not user_mbs and not shared_mbs %}
+            <p class="empty">No mailbox data available.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'orders_current_month' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Orders — Last 90 days</h2>
+          <p class="section-meta">{{ dd.total or 0 }} orders since {{ dd.since or '' }}</p>
+          {% set orders = dd.orders or [] %}
+          {% if orders %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Order #</th><th>Date</th><th>Status</th><th>Shipping</th><th>PO #</th>
+              </tr></thead>
+              <tbody>
+                {% for order in orders %}
+                  <tr>
+                    <td>{{ order.order_number }}</td>
+                    <td>{{ order.order_date }}</td>
+                    <td>{{ order.status }}</td>
+                    <td>{{ order.shipping_status or '—' }}</td>
+                    <td>{{ order.po_number or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No orders in the past 90 days.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'licenses' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Licenses — Full breakdown</h2>
+          {% set licenses = dd.licenses or [] %}
+          {% if licenses %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Name</th><th>Total</th><th>Allocated</th><th>Available</th>
+                <th>Usage %</th><th>Expiry</th><th>Contract term</th><th>Auto-renew</th>
+              </tr></thead>
+              <tbody>
+                {% for lic in licenses %}
+                  <tr>
+                    <td>{{ lic.name }}</td>
+                    <td>{{ lic.total }}</td>
+                    <td>{{ lic.allocated }}</td>
+                    <td>{{ lic.available }}</td>
+                    <td>{{ lic.usage_percentage }}%</td>
+                    <td>{{ lic.expiry_date or '—' }}</td>
+                    <td>{{ lic.contract_term or '—' }}</td>
+                    <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No licenses recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'subscriptions' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Subscriptions — Full breakdown</h2>
+          {% set subs = dd.subscriptions or [] %}
+          {% if subs %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Product</th><th>Category</th><th class="right">Qty</th>
+                <th>Status</th><th>Start</th><th>End</th><th>Commitment</th><th>Billing</th>
+              </tr></thead>
+              <tbody>
+                {% for sub in subs %}
+                  <tr>
+                    <td>{{ sub.product_name or '—' }}</td>
+                    <td>{{ sub.category_name or '—' }}</td>
+                    <td class="right">{{ sub.quantity if sub.quantity is not none else '—' }}</td>
+                    <td>{{ sub.status }}</td>
+                    <td>{{ sub.start_date or '—' }}</td>
+                    <td>{{ sub.end_date or '—' }}</td>
+                    <td>{{ sub.commitment_term or '—' }}</td>
+                    <td>{{ sub.billing_cycle or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No subscriptions recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'essential8' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Essential 8 — Per-control breakdown</h2>
+          {% set controls = dd.controls or [] %}
+          {% if controls %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Control</th><th>ML1</th><th>ML2</th><th>ML3</th>
+              </tr></thead>
+              <tbody>
+                {% for control in controls %}
+                  <tr>
+                    <td><strong>{{ control.name or '—' }}</strong></td>
+                    <td>{{ control.ml1 | replace('_', ' ') | title }}</td>
+                    <td>{{ control.ml2 | replace('_', ' ') | title }}</td>
+                    <td>{{ control.ml3 | replace('_', ' ') | title }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No Essential 8 control data available.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'compliance_checks' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Compliance checks — Full assignment list</h2>
+          {% set assignments = dd.assignments or [] %}
+          {% if assignments %}
+            <table class="report-table">
+              <thead><tr>
+                <th>Check</th><th>Category</th><th>Status</th>
+                <th>Next review</th><th>Notes</th>
+              </tr></thead>
+              <tbody>
+                {% for a in assignments %}
+                  <tr>
+                    <td><strong>{{ a.check_title or '—' }}</strong></td>
+                    <td>{{ a.category_name or '—' }}</td>
+                    <td>{{ a.status | replace('_', ' ') | title }}</td>
+                    <td>{{ a.next_review_at or '—' }}</td>
+                    <td>{{ a.notes or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No compliance check assignments recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'tickets_last_month' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Tickets — Full list (past 30 days)</h2>
+          <p class="section-meta">{{ dd.total or 0 }} tickets since {{ dd.since or '' }}</p>
+          {% set tickets = dd.tickets or [] %}
+          {% if tickets %}
+            <table class="report-table">
+              <thead><tr>
+                <th>#</th><th>Subject</th><th>Status</th><th>Priority</th><th>Created</th>
+              </tr></thead>
+              <tbody>
+                {% for ticket in tickets %}
+                  <tr>
+                    <td>{{ ticket.id }}</td>
+                    <td>{{ ticket.subject or '—' }}</td>
+                    <td>{{ ticket.status | replace('_', ' ') | title }}</td>
+                    <td>{{ ticket.priority or '—' }}</td>
+                    <td>{{ ticket.created_at or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No tickets in the past 30 days.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'asset_custom_fields' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Asset custom fields — Full value distribution</h2>
+          {% set fields = dd.fields or [] %}
+          {% if fields %}
+            {% for field in fields %}
+              <div class="field-block">
+                <h3>{{ field.display_name }}
+                  <span class="section-meta">({{ field.field_type }})</span>
+                </h3>
+                {% if field['values'] %}
+                  <table class="report-table">
+                    <thead><tr><th>Value</th><th class="right">Assets</th></tr></thead>
+                    <tbody>
+                      {% for entry in field['values'] %}
+                        <tr>
+                          <td>{{ entry.value }}</td>
+                          <td class="right">{{ entry.count }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                {% else %}
+                  <p class="empty">No recorded values for this field.</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="empty">No asset custom fields defined.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'issues' %}
+        <section class="report-section" style="page-break-before: always;">
+          <h2>Issues — Full detail</h2>
+          {% set issues = dd.issues or [] %}
+          {% if issues %}
+            {% for issue in issues %}
+              <div style="margin-bottom: 10pt; padding: 6pt; border: 1pt solid #d1d5db; border-radius: 3pt;">
+                <div style="display: flex; justify-content: space-between;">
+                  <strong>{{ issue.name }}</strong>
+                  <span>{{ issue.status }}</span>
+                </div>
+                {% if issue.description %}
+                  <p class="section-meta">{{ issue.description }}</p>
+                {% endif %}
+                {% if issue.notes %}
+                  <p><strong>Notes:</strong> {{ issue.notes }}</p>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="empty">No issues currently assigned.</p>
+          {% endif %}
+        </section>
+      {% endif %}
+
+    {% endfor %}
+  {% endif %}
+
 </body>
 </html>
