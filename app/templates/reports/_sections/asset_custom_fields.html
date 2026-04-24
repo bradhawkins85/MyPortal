@@ -15,7 +15,7 @@
           {% if field['values'] %}
             {% if field.field_type == 'checkbox' %}
               {{ counter_strip(items=[
-                {'label': entry.value, 'value': entry.count, 'variant': 'info'}
+                {'label': entry.value, 'value': entry.count, 'variant': 'neutral'}
                 for entry in field['values']
               ]) }}
             {% else %}
