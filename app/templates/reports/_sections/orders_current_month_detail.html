@@ -1,0 +1,37 @@
+<section class="card card--panel" data-report-section="orders_current_month_detail">
+  <header class="card__header report-section__header">
+    <h2>Orders — Last 90 days</h2>
+    <span class="report-section__meta">
+      {{ section.detail_data.total or 0 }} orders since {{ section.detail_data.since or '' }}
+    </span>
+  </header>
+  <div class="card__body">
+    {% set orders = section.detail_data.orders or [] %}
+    {% if orders %}
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Order #</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Shipping</th>
+            <th>PO #</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <td>{{ order.order_number }}</td>
+              <td>{{ order.order_date }}</td>
+              <td><span class="status status--info">{{ order.status }}</span></td>
+              <td>{{ order.shipping_status or '—' }}</td>
+              <td>{{ order.po_number or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No orders in the past 90 days.</p>
+    {% endif %}
+  </div>
+</section>

@@ -30,6 +30,7 @@
     </div>
   </div>
 
+  {# ── Summary sections ── #}
   {% set stat_row_rendered = namespace(value=false) %}
   {% for section in report.sections %}
     {% if section.enabled %}
@@ -65,6 +66,28 @@
       </div>
     </div>
   {% endif %}
+
+  {# ── Detailed section pages (only rendered when at least one section has detailed=True) ── #}
+  {% set any_detailed = namespace(value=false) %}
+  {% for section in report.sections %}
+    {% if section.enabled and section.detailed %}{% set any_detailed.value = true %}{% endif %}
+  {% endfor %}
+
+  {% if any_detailed.value %}
+    <div class="card card--panel report-detail-divider">
+      <div class="card__body">
+        <h2 style="margin: 0; font-size: 1.1rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Detailed report</h2>
+        <p style="margin: var(--space-1) 0 0; color: var(--color-text-muted); font-size: 0.9rem;">The following pages contain expanded detail for each section marked as detailed.</p>
+      </div>
+    </div>
+
+    {% for section in report.sections %}
+      {% if section.enabled and section.detailed %}
+        {% include "reports/_sections/" + section.key + "_detail.html" ignore missing %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+
 </div>
 {% endblock %}
 
@@ -95,5 +118,6 @@
   }
   .report-table thead th { background: var(--color-surface-alt); font-weight: 600; text-align: left; }
   .report-empty { color: var(--color-text-muted); padding: var(--space-3); }
+  .report-detail-divider { border-top: 3px solid var(--color-primary, #0e4f8a); }
 </style>
 {% endblock %}

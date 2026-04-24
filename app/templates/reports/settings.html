@@ -18,6 +18,11 @@
       the online report and the PDF export. New sections added in future
       releases are enabled by default.
     </p>
+    <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: var(--space-1);">
+      Enable <strong>Detailed</strong> on a section to append a full-detail page after the
+      summary view (both online and PDF). Detailed is automatically unchecked when Enabled
+      is unchecked.
+    </p>
     <form method="post" action="/reports/company-overview/settings" id="report-settings-form">
       {% if csrf_token is defined and csrf_token %}
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
@@ -53,6 +58,7 @@
             <th style="width: 28%;">Section</th>
             <th>Description</th>
             <th style="width: 10%; text-align: center;">Enabled</th>
+            <th style="width: 10%; text-align: center;">Detailed</th>
           </tr>
         </thead>
         <tbody id="sections-tbody">
@@ -93,7 +99,24 @@
                           type="checkbox"
                           name="sections"
                           value="{{ stat.key }}"
+                          class="enabled-checkbox"
+                          data-key="{{ stat.key }}"
                           {% if visibility.get(stat.key, True) %}checked{% endif %}
+                        >
+                      </div>
+                    {% endfor %}
+                  </td>
+                  <td style="text-align: center; vertical-align: top;">
+                    {% for stat in stat_sections.value %}
+                      <div class="stat-section-row{% if loop.last %} stat-section-row--last{% endif %}">
+                        <input
+                          type="checkbox"
+                          name="detailed_sections"
+                          value="{{ stat.key }}"
+                          class="detailed-checkbox"
+                          data-key="{{ stat.key }}"
+                          {% if detail_visibility.get(stat.key, False) %}checked{% endif %}
+                          {% if not visibility.get(stat.key, True) %}disabled{% endif %}
                         >
                       </div>
                     {% endfor %}
@@ -113,7 +136,20 @@
                     type="checkbox"
                     name="sections"
                     value="{{ section.key }}"
+                    class="enabled-checkbox"
+                    data-key="{{ section.key }}"
                     {% if visibility.get(section.key, True) %}checked{% endif %}
+                  >
+                </td>
+                <td style="text-align: center;">
+                  <input
+                    type="checkbox"
+                    name="detailed_sections"
+                    value="{{ section.key }}"
+                    class="detailed-checkbox"
+                    data-key="{{ section.key }}"
+                    {% if detail_visibility.get(section.key, False) %}checked{% endif %}
+                    {% if not visibility.get(section.key, True) %}disabled{% endif %}
                   >
                 </td>
               </tr>
@@ -162,6 +198,7 @@
   .sortable-row.dragging { opacity: 0.4; }
   .stat-section-row { padding: var(--space-1) 0; border-bottom: 1px solid var(--color-border); }
   .stat-section-row--last { border-bottom: none; }
+  input[type="checkbox"].detailed-checkbox:disabled { opacity: 0.35; cursor: not-allowed; }
 </style>
 {% endblock %}
 
@@ -193,6 +230,21 @@
   // Sync auto-hide checkbox → hidden input.
   autoHideCheckbox.addEventListener('change', function () {
     autoHideInput.value = this.checked ? '1' : '0';
+  });
+
+  // When Enabled is unchecked, also uncheck and disable Detailed.
+  tbody.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('enabled-checkbox')) return;
+    const key = e.target.dataset.key;
+    if (!key) return;
+    const detailedBox = tbody.querySelector('.detailed-checkbox[data-key="' + key + '"]');
+    if (!detailedBox) return;
+    if (!e.target.checked) {
+      detailedBox.checked = false;
+      detailedBox.disabled = true;
+    } else {
+      detailedBox.disabled = false;
+    }
   });
 
   // HTML5 drag-and-drop reordering.
