@@ -2020,6 +2020,25 @@ async def _sync_staff_assignments(
     await license_repo.bulk_unlink_staff(license_id, to_unlink)
 
 
+_TERM_DURATION_LABELS: dict[str, str] = {
+    "P1M": "Monthly",
+    "P1Y": "Annual",
+    "P2Y": "2-Year",
+    "P3Y": "3-Year",
+}
+
+
+def _parse_subscription_date(value: str | None) -> date | None:
+    """Parse an ISO 8601 datetime string returned by the Graph API into a date."""
+    if not value:
+        return None
+    try:
+        # Graph API returns strings like "2025-01-01T00:00:00Z"
+        return datetime.fromisoformat(value.rstrip("Z")).date()
+    except (ValueError, AttributeError):
+        return None
+
+
 async def sync_company_licenses(company_id: int) -> None:
     log_info("M365 starting license synchronisation", company_id=company_id)
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
@@ -2067,6 +2086,25 @@ async def sync_company_licenses(company_id: int) -> None:
                 "access' will apply and confirm the required permissions.",
                 http_status=403,
             ) from exc
+
+    # Fetch subscription details (renewal date, auto-renew, contract term) keyed by skuId.
+    # This endpoint may not be available on all tenants/permission sets so failures are
+    # logged but do not abort the rest of the sync.
+    subscription_by_sku_id: dict[str, dict[str, Any]] = {}
+    try:
+        sub_payload = await _graph_get(
+            access_token, "https://graph.microsoft.com/v1.0/directory/subscriptions"
+        )
+        for sub in sub_payload.get("value", []):
+            sku_id = sub.get("skuId")
+            if sku_id:
+                subscription_by_sku_id[str(sku_id)] = sub
+    except Exception:  # noqa: BLE001
+        log_info(
+            "M365 could not retrieve subscription details; expiry/term/auto-renew will not be updated",
+            company_id=company_id,
+        )
+
     synced_skus: set[str] = set()
     for sku in payload.get("value", []):
         part_number = str(sku.get("skuPartNumber") or "").strip()
@@ -2082,18 +2120,41 @@ async def sync_company_licenses(company_id: int) -> None:
             else None
         )
         name = friendly_name or (app.get("name") if app else None) or part_number or "Unknown SKU"
+
+        # Resolve subscription-level fields from /directory/subscriptions.
+        sub_info = subscription_by_sku_id.get(str(sku_id)) if sku_id else None
+        api_expiry_date: date | None = None
+        api_auto_renew: bool | None = None
+        api_contract_term: str | None = None
+        if sub_info:
+            api_expiry_date = _parse_subscription_date(sub_info.get("nextLifecycleDateTime"))
+            raw_auto_renew = sub_info.get("autoRenew")
+            if raw_auto_renew is not None:
+                api_auto_renew = bool(raw_auto_renew)
+            term_info = sub_info.get("subscriptionTermInfo") or {}
+            term_duration = term_info.get("termDuration") if isinstance(term_info, dict) else None
+            if term_duration:
+                api_contract_term = _TERM_DURATION_LABELS.get(
+                    str(term_duration).upper(), str(term_duration)
+                )
+
         existing = await license_repo.get_license_by_company_and_sku(
             company_id, part_number
         )
         if existing:
+            # Use API expiry if retrieved, otherwise keep the manually-set value.
+            final_expiry = api_expiry_date if api_expiry_date is not None else existing.get("expiry_date")
+            # Use API contract term if retrieved, otherwise preserve the existing value.
+            final_contract_term = api_contract_term if api_contract_term is not None else existing.get("contract_term")
             await license_repo.update_license(
                 existing["id"],
                 company_id=company_id,
                 name=name,
                 platform=part_number,
                 count=count,
-                expiry_date=existing.get("expiry_date"),
-                contract_term=existing.get("contract_term"),
+                expiry_date=final_expiry,
+                contract_term=final_contract_term,
+                auto_renew=api_auto_renew if api_auto_renew is not None else existing.get("auto_renew"),
             )
             license_id = existing["id"]
         else:
@@ -2102,8 +2163,9 @@ async def sync_company_licenses(company_id: int) -> None:
                 name=name,
                 platform=part_number,
                 count=count,
-                expiry_date=None,
-                contract_term="",
+                expiry_date=api_expiry_date,
+                contract_term=api_contract_term or "",
+                auto_renew=api_auto_renew,
             )
             license_id = created["id"]
         if part_number:

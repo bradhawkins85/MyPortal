@@ -11,6 +11,7 @@ class LicenseBase(BaseModel):
     count: int = Field(..., ge=0)
     expiry_date: Optional[datetime] = None
     contract_term: Optional[str] = None
+    auto_renew: Optional[bool] = None
 
 
 class LicenseCreate(LicenseBase):
@@ -23,6 +24,7 @@ class LicenseUpdate(BaseModel):
     count: Optional[int] = Field(default=None, ge=0)
     expiry_date: Optional[datetime] = None
     contract_term: Optional[str] = None
+    auto_renew: Optional[bool] = None
 
 
 class LicenseResponse(LicenseBase):
