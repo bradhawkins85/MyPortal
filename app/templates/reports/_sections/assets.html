@@ -1,11 +1,16 @@
 {% from "macros/counters.html" import counter_strip %}
 <section class="card card--panel" data-report-section="assets">
   <header class="card__header report-section__header">
-    <h2>Active assets</h2>
+    <h2>Assets synced (last 30 days)</h2>
   </header>
   <div class="card__body">
-    {{ counter_strip(items=[
-      {'label': 'Active assets', 'value': section.data.total_active or 0, 'variant': 'info'}
-    ]) }}
+    {{ counter_strip(
+      total=section.data.total_synced or 0,
+      total_label='Total synced',
+      items=[
+        {'label': 'Servers', 'value': section.data.servers or 0, 'variant': 'info'},
+        {'label': 'Workstations', 'value': section.data.workstations or 0, 'variant': 'info'}
+      ]
+    ) }}
   </div>
 </section>
