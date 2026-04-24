@@ -204,9 +204,11 @@ async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
     """
     try:
         user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
-        shared_rows = await db.fetch_all(_query, (company_id, "SharedMailbox"))
     except Exception:  # pragma: no cover - defensive when table missing
         user_rows = []
+    try:
+        shared_rows = await db.fetch_all(_query, (company_id, "SharedMailbox"))
+    except Exception:  # pragma: no cover - defensive when table missing
         shared_rows = []
 
     return {
