@@ -18,21 +18,49 @@
       the online report and the PDF export. New sections added in future
       releases are enabled by default.
     </p>
-    <form method="post" action="/reports/company-overview/settings">
+    <form method="post" action="/reports/company-overview/settings" id="report-settings-form">
       {% if csrf_token is defined and csrf_token %}
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       {% endif %}
-      <table class="report-table">
+      <input type="hidden" name="auto_hide_empty" id="auto-hide-input" value="{{ '1' if auto_hide_empty else '0' }}">
+      <input type="hidden" name="section_order" id="section-order-input" value="">
+
+      <div class="settings-option" style="margin-bottom: var(--space-4); padding: var(--space-3); background: var(--color-surface-alt); border-radius: 6px; border: 1px solid var(--color-border);">
+        <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer; font-weight: 600;">
+          <input
+            type="checkbox"
+            id="auto-hide-checkbox"
+            {% if auto_hide_empty %}checked{% endif %}
+            style="width: 16px; height: 16px;"
+          >
+          Auto-hide empty sections
+        </label>
+        <p style="margin: var(--space-1) 0 0 calc(16px + var(--space-2)); color: var(--color-text-muted); font-size: 0.9rem;">
+          When enabled, sections that have no content to display are automatically hidden in both
+          the report webpage and the PDF export. Sections are still shown here so you can enable or
+          disable them independently.
+        </p>
+      </div>
+
+      <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: var(--space-2);">
+        Drag rows to reorder sections. Changes are saved when you click <strong>Save preferences</strong>.
+      </p>
+
+      <table class="report-table" id="sections-table">
         <thead>
           <tr>
+            <th style="width: 36px;" aria-label="Drag handle"></th>
             <th style="width: 28%;">Section</th>
             <th>Description</th>
             <th style="width: 10%; text-align: center;">Enabled</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="sections-tbody">
           {% for section in sections %}
-            <tr>
+            <tr draggable="true" data-key="{{ section.key }}" class="sortable-row">
+              <td class="drag-handle">
+                <button type="button" class="drag-handle__btn" aria-label="Drag to reorder {{ section.label }}" tabindex="-1" aria-hidden="true">⠿</button>
+              </td>
               <td><strong>{{ section.label }}</strong></td>
               <td class="report-section__meta">{{ section.description }}</td>
               <td style="text-align: center;">
@@ -66,5 +94,101 @@
   }
   .report-table thead th { background: var(--color-surface-alt); font-weight: 600; }
   .report-section__meta { color: var(--color-text-muted); font-size: 0.9rem; }
+  .drag-handle {
+    cursor: grab;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    padding: var(--space-2) var(--space-2);
+    user-select: none;
+    text-align: center;
+  }
+  .drag-handle__btn {
+    background: none;
+    border: none;
+    cursor: grab;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    padding: 0;
+    line-height: 1;
+  }
+  .drag-handle:active, .drag-handle__btn:active { cursor: grabbing; }
+  .sortable-row.drag-over { background: var(--color-surface-alt); outline: 2px dashed var(--color-primary, #0e4f8a); }
+  .sortable-row.dragging { opacity: 0.4; }
 </style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const tbody = document.getElementById('sections-tbody');
+  const orderInput = document.getElementById('section-order-input');
+  const autoHideCheckbox = document.getElementById('auto-hide-checkbox');
+  const autoHideInput = document.getElementById('auto-hide-input');
+
+  function updateOrderInput() {
+    const keys = Array.from(tbody.querySelectorAll('tr[data-key]')).map(r => r.dataset.key);
+    orderInput.value = keys.join(',');
+  }
+
+  // Initialise the hidden order input from current DOM order.
+  updateOrderInput();
+
+  // Sync auto-hide checkbox → hidden input.
+  autoHideCheckbox.addEventListener('change', function () {
+    autoHideInput.value = this.checked ? '1' : '0';
+  });
+
+  // HTML5 drag-and-drop reordering.
+  let dragSrc = null;
+
+  tbody.addEventListener('dragstart', function (e) {
+    dragSrc = e.target.closest('tr');
+    if (!dragSrc) return;
+    dragSrc.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  tbody.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const target = e.target.closest('tr');
+    if (!target || target === dragSrc) return;
+    tbody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+    target.classList.add('drag-over');
+  });
+
+  tbody.addEventListener('dragleave', function (e) {
+    const target = e.target.closest('tr');
+    if (target) target.classList.remove('drag-over');
+  });
+
+  tbody.addEventListener('drop', function (e) {
+    e.preventDefault();
+    const target = e.target.closest('tr');
+    if (!target || !dragSrc || target === dragSrc) return;
+    target.classList.remove('drag-over');
+
+    // Determine whether to insert before or after the target.
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      tbody.insertBefore(dragSrc, target);
+    } else {
+      tbody.insertBefore(dragSrc, target.nextSibling);
+    }
+    updateOrderInput();
+  });
+
+  tbody.addEventListener('dragend', function () {
+    if (dragSrc) dragSrc.classList.remove('dragging');
+    tbody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+    dragSrc = null;
+  });
+
+  // Also update order on form submit (safety net).
+  document.getElementById('report-settings-form').addEventListener('submit', function () {
+    updateOrderInput();
+  });
+}());
+</script>
 {% endblock %}

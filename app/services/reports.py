@@ -120,6 +120,7 @@ class SectionResult:
     label: str
     enabled: bool
     data: dict[str, Any] = field(default_factory=dict)
+    is_empty: bool = False
 
 
 @dataclass
@@ -127,6 +128,7 @@ class ReportData:
     company: dict[str, Any]
     generated_at: datetime
     sections: list[SectionResult] = field(default_factory=list)
+    auto_hide_empty: bool = True
 
     def section(self, key: str) -> SectionResult | None:
         for section in self.sections:
@@ -555,6 +557,31 @@ async def save_section_visibility(
     return cleaned
 
 
+async def get_company_report_settings(company_id: int) -> dict[str, Any]:
+    """Return report-level settings (auto_hide_empty, section_order) for a company."""
+    return await report_sections_repo.get_company_report_settings(company_id)
+
+
+async def save_company_report_settings(
+    company_id: int,
+    auto_hide_empty: bool,
+    section_order: list[str] | None,
+) -> None:
+    """Persist report-level settings for a company."""
+    # Normalise section_order: only keep valid section keys, discard unknown ones.
+    if section_order is not None:
+        valid_order = [k for k in section_order if k in SECTION_KEYS]
+        # Append any canonical keys that were missing from the supplied order.
+        supplied = set(valid_order)
+        for s in REPORT_SECTIONS:
+            if s.key not in supplied:
+                valid_order.append(s.key)
+        section_order = valid_order
+    await report_sections_repo.save_company_report_settings(
+        company_id, auto_hide_empty, section_order
+    )
+
+
 async def build_company_report(company_id: int) -> ReportData:
     """Build the full report for a single company."""
     company = await company_repo.get_company_by_id(company_id)
@@ -562,8 +589,19 @@ async def build_company_report(company_id: int) -> ReportData:
         raise ValueError(f"Company {company_id} not found")
 
     visibility = await get_section_visibility(company_id)
+    report_settings = await get_company_report_settings(company_id)
+    auto_hide_empty: bool = report_settings.get("auto_hide_empty", True)
+    section_order: list[str] | None = report_settings.get("section_order")
+
+    # Build ordered list of section definitions.
+    if section_order:
+        key_to_def = {s.key: s for s in REPORT_SECTIONS}
+        ordered_defs = [key_to_def[k] for k in section_order if k in key_to_def]
+    else:
+        ordered_defs = list(REPORT_SECTIONS)
+
     sections: list[SectionResult] = []
-    for section_def in REPORT_SECTIONS:
+    for section_def in ordered_defs:
         enabled = visibility.get(section_def.key, True)
         data: dict[str, Any] = {}
         if enabled:
@@ -573,24 +611,64 @@ async def build_company_report(company_id: int) -> ReportData:
                     data = await builder(company_id)
                 except Exception as exc:  # pragma: no cover - defensive
                     data = {"error": str(exc)}
+        is_empty = _section_is_empty(section_def.key, data)
+        # When auto-hide is active, treat empty-but-enabled sections as hidden.
+        if enabled and auto_hide_empty and is_empty:
+            enabled = False
         sections.append(
             SectionResult(
                 key=section_def.key,
                 label=section_def.label,
                 enabled=enabled,
                 data=data,
+                is_empty=is_empty,
             )
         )
     return ReportData(
         company=company,
         generated_at=datetime.now(timezone.utc),
         sections=sections,
+        auto_hide_empty=auto_hide_empty,
     )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
+    """Return True when a section has no meaningful content to display."""
+    if not data or "error" in data:
+        return True
+    if key == "assets":
+        return int(data.get("total_synced") or 0) == 0
+    if key == "staff":
+        return int(data.get("total_active") or 0) == 0
+    if key == "m365_best_practices":
+        return int(data.get("total") or 0) == 0
+    if key == "top_mailboxes":
+        return not (data.get("user_mailboxes") or data.get("shared_mailboxes"))
+    if key == "orders_current_month":
+        return int(data.get("total") or 0) == 0
+    if key == "licenses":
+        return int(data.get("total") or 0) == 0
+    if key == "subscriptions":
+        return int(data.get("total") or 0) == 0
+    if key == "essential8":
+        levels = data.get("levels") or []
+        return len(levels) == 0 or all(int(lvl.get("total") or 0) == 0 for lvl in levels)
+    if key == "compliance_checks":
+        return int(data.get("total") or 0) == 0
+    if key == "tickets_last_month":
+        return int(data.get("total") or 0) == 0
+    if key == "asset_custom_fields":
+        fields = data.get("fields") or []
+        return len(fields) == 0
+    if key == "issues":
+        return int(data.get("total") or 0) == 0
+    return False
+
 
 
 def _coerce_bool(value: Any, *, default: bool = False) -> bool:
@@ -666,6 +744,8 @@ __all__ = [
     "ReportSection",
     "SectionResult",
     "build_company_report",
+    "get_company_report_settings",
     "get_section_visibility",
+    "save_company_report_settings",
     "save_section_visibility",
 ]
