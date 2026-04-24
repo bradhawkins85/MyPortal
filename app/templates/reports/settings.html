@@ -43,13 +43,13 @@
       </div>
 
       <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: var(--space-2);">
-        Drag the <span aria-hidden="true">⠿</span> handle to reorder sections. Changes are saved when you click <strong>Save preferences</strong>.
+        Drag rows to reorder sections. Changes are saved when you click <strong>Save preferences</strong>.
       </p>
 
       <table class="report-table" id="sections-table">
         <thead>
           <tr>
-            <th style="width: 36px;"></th>
+            <th style="width: 36px;" aria-label="Drag handle"></th>
             <th style="width: 28%;">Section</th>
             <th>Description</th>
             <th style="width: 10%; text-align: center;">Enabled</th>
@@ -58,7 +58,9 @@
         <tbody id="sections-tbody">
           {% for section in sections %}
             <tr draggable="true" data-key="{{ section.key }}" class="sortable-row">
-              <td class="drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⠿</td>
+              <td class="drag-handle">
+                <button type="button" class="drag-handle__btn" aria-label="Drag to reorder {{ section.label }}" tabindex="-1" aria-hidden="true">⠿</button>
+              </td>
               <td><strong>{{ section.label }}</strong></td>
               <td class="report-section__meta">{{ section.description }}</td>
               <td style="text-align: center;">
@@ -100,7 +102,16 @@
     user-select: none;
     text-align: center;
   }
-  .drag-handle:active { cursor: grabbing; }
+  .drag-handle__btn {
+    background: none;
+    border: none;
+    cursor: grab;
+    color: var(--color-text-muted);
+    font-size: 1.1rem;
+    padding: 0;
+    line-height: 1;
+  }
+  .drag-handle:active, .drag-handle__btn:active { cursor: grabbing; }
   .sortable-row.drag-over { background: var(--color-surface-alt); outline: 2px dashed var(--color-primary, #0e4f8a); }
   .sortable-row.dragging { opacity: 0.4; }
 </style>
