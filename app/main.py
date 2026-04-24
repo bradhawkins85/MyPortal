@@ -3516,7 +3516,10 @@ async def _render_company_edit_page(
 
         automation_command_options = [
             {"value": "sync_staff", "label": "Sync staff directory"},
-            {"value": "sync_m365_data", "label": "Sync Microsoft 365 data"},
+            {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
+            {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
+            {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
+            {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
             {"value": "sync_to_xero", "label": "Sync to Xero"},
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
             {"value": "generate_invoice", "label": "Generate Invoice"},
@@ -3699,11 +3702,74 @@ async def on_startup() -> None:
 
         await bootstrap_default_template()
 
+    async def _migrate_sync_m365_data_tasks() -> None:
+        """For companies that only have legacy sync_m365_data tasks, create the three
+        split tasks (sync_m365_licenses, sync_m365_contacts, sync_m365_mailboxes) at
+        staggered times and deactivate the old task to avoid gateway timeouts."""
+        legacy_commands = {"sync_m365_data", "sync_o365"}
+        new_commands = {"sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
+        all_tasks = await scheduled_tasks_repo.list_tasks(include_inactive=False)
+        # Group tasks by company_id
+        from collections import defaultdict
+        by_company: dict[int, list[dict]] = defaultdict(list)
+        for t in all_tasks:
+            cid = t.get("company_id")
+            if cid is not None:
+                by_company[int(cid)].append(t)
+        migrated = 0
+        for company_id, company_tasks in by_company.items():
+            commands_for_company = {t["command"] for t in company_tasks}
+            has_legacy = bool(legacy_commands & commands_for_company)
+            has_new = bool(new_commands & commands_for_company)
+            if not has_legacy or has_new:
+                continue
+            # Find an existing company name from the legacy task name if possible
+            legacy_task = next(
+                (t for t in company_tasks if t.get("command") in legacy_commands), None
+            )
+            task_name_prefix = ""
+            if legacy_task:
+                raw_name: str = legacy_task.get("name") or ""
+                for suffix in (" - Sync Microsoft 365 data", " - Sync O365", " - Sync M365"):
+                    if raw_name.endswith(suffix):
+                        task_name_prefix = raw_name[: -len(suffix)]
+                        break
+            for command, label_suffix in (
+                ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
+                ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
+                ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
+            ):
+                if command not in commands_for_company:
+                    label = (
+                        f"{task_name_prefix} - {label_suffix}"
+                        if task_name_prefix
+                        else label_suffix
+                    )
+                    await scheduled_tasks_repo.create_task(
+                        name=label,
+                        command=command,
+                        cron=_random_daily_cron(),
+                        company_id=company_id,
+                        active=True,
+                    )
+            # Deactivate the legacy task so data is no longer synced twice
+            for t in company_tasks:
+                if t.get("command") in legacy_commands:
+                    await scheduled_tasks_repo.set_task_active(t["id"], False)
+            migrated += 1
+            log_info(
+                "Migrated legacy sync_m365_data task to split tasks",
+                company_id=company_id,
+            )
+        if migrated:
+            log_info("sync_m365_data migration complete", companies_migrated=migrated)
+
     startup_tasks = [
         ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
         ("ensure_default_modules", modules_service.ensure_default_modules()),
         ("refresh_all_schedules", automations_service.refresh_all_schedules()),
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
+        ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
     ]
 
     results = await asyncio.gather(
@@ -5527,7 +5593,9 @@ async def sync_m365_mailboxes(request: Request):
         return JSONResponse({"error": "Authentication required"}, status_code=401)
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
-    task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_data")
+    task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_mailboxes")
+    if task is None:
+        task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_m365_data")
     if task is None:
         task = await scheduled_tasks_repo.get_task_for_company_by_command(company_id, "sync_o365")
     if task is not None:
@@ -6720,24 +6788,23 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         # Auto-create default sync tasks for the company if not already present.
         existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
-        has_m365_sync_task = bool({"sync_m365_data", "sync_o365"} & existing_commands)
-        m365_task_name = (
-            f"{company_name} - Sync Microsoft 365 data"
-            if company_name
-            else "Sync Microsoft 365 data"
+        has_m365_sync_task = bool(
+            {"sync_m365_data", "sync_o365", "sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
+            & existing_commands
         )
         sync_staff_task_name = (
             f"{company_name} - Sync staff directory"
             if company_name
             else "Sync staff directory"
         )
-        for command, label in (
-            ("sync_m365_data", m365_task_name),
-            ("sync_staff", sync_staff_task_name),
-        ):
-            if command == "sync_m365_data" and has_m365_sync_task:
-                continue
-            if command not in existing_commands:
+        # Create the three split M365 sync tasks if no M365 sync tasks exist yet
+        if not has_m365_sync_task:
+            for command, label_suffix in (
+                ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
+                ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
+                ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
+            ):
+                label = f"{company_name} - {label_suffix}" if company_name else label_suffix
                 await scheduled_tasks_repo.create_task(
                     name=label,
                     command=command,
@@ -6750,6 +6817,19 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                     command=command,
                     company_id=company_id,
                 )
+        if "sync_staff" not in existing_commands:
+            await scheduled_tasks_repo.create_task(
+                name=sync_staff_task_name,
+                command="sync_staff",
+                cron=_random_daily_cron(),
+                company_id=company_id,
+                active=True,
+            )
+            log_info(
+                "Auto-created scheduled task after M365 provisioning",
+                command="sync_staff",
+                company_id=company_id,
+            )
         await scheduler_service.refresh()
 
         asyncio.create_task(
@@ -14241,7 +14321,10 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
 
     command_options = [
         {"value": "sync_staff", "label": "Sync staff directory"},
-        {"value": "sync_m365_data", "label": "Sync Microsoft 365 data"},
+        {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
+        {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
+        {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
+        {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
         {"value": "sync_to_xero", "label": "Sync to Xero"},
         {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
         {"value": "generate_invoice", "label": "Generate Invoice"},
