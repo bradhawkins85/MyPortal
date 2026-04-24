@@ -45,6 +45,21 @@ XERO_MODULE_SLUG = "xero"
 # Truncation limits for webhook payload logging
 WEBHOOK_PAYLOAD_DESCRIPTION_MAX_LENGTH = 200
 
+CALL_RECORDINGS_PHONE_SYSTEM_TYPES: tuple[str, ...] = (
+    "generic",
+    "grandstream-ucm",
+    "3cx",
+)
+"""Supported phone system types for call recording processing.
+
+The dropdown shown in the call-recordings module configuration uses these
+values. ``generic`` is the default and uses the existing audio-file/title
+based discovery. ``grandstream-ucm`` parses the
+``.rd_files_netdisk_YYYY-MM.csv`` index files produced by Grandstream UCM
+appliances. ``3cx`` is reserved for 3CX-specific processing and currently
+falls back to the generic discovery flow.
+"""
+
 DEFAULT_CHATGPT_TOOLS = [
     "listTickets",
     "getTicket",
@@ -658,10 +673,11 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "call-recordings",
         "name": "Call Recordings",
-        "description": "Configure the storage location for call recording files. Set the base directory path where recording files should be stored or retrieved.",
+        "description": "Configure the storage location for call recording files. Set the base directory path where recording files should be stored or retrieved, and pick the phone system that produced the recordings so the files can be processed correctly.",
         "icon": "📞",
         "settings": {
             "recordings_path": "/var/lib/myportal/call_recordings",
+            "phone_system_type": "generic",
         },
     },
     {
@@ -1108,6 +1124,17 @@ def _coerce_settings(
                 "app_object_id": _preserve_field("app_object_id"),
                 "client_secret_key_id": _preserve_field("client_secret_key_id"),
                 "client_secret_expires_at": _preserve_field("client_secret_expires_at"),
+            }
+        )
+    elif slug == "call-recordings":
+        phone_system_type = str(merged.get("phone_system_type") or "").strip().lower()
+        if phone_system_type not in CALL_RECORDINGS_PHONE_SYSTEM_TYPES:
+            phone_system_type = "generic"
+        merged.update(
+            {
+                "recordings_path": str(merged.get("recordings_path", "")).strip()
+                or "/var/lib/myportal/call_recordings",
+                "phone_system_type": phone_system_type,
             }
         )
     elif slug == "unifi-talk":
@@ -3199,20 +3226,33 @@ async def _validate_call_recordings(
     override_path = str(payload.get("path") or payload.get("recordings_path") or "").strip()
     recordings_path = override_path or configured_path
 
+    phone_system_type = str(
+        payload.get("phone_system_type")
+        or settings.get("phone_system_type")
+        or "generic"
+    ).strip().lower()
+    if phone_system_type not in CALL_RECORDINGS_PHONE_SYSTEM_TYPES:
+        phone_system_type = "generic"
+
     if not recordings_path:
         return {
             "status": "skipped",
             "recordings_path": "/var/lib/myportal/call_recordings",
             "has_recordings_path": False,
+            "phone_system_type": phone_system_type,
             "message": "No recordings path configured",
         }
 
     try:
-        sync_result = await call_recordings_service.sync_recordings_from_filesystem(recordings_path)
+        sync_result = await call_recordings_service.sync_recordings_from_filesystem(
+            recordings_path,
+            phone_system_type=phone_system_type,
+        )
         return {
             **sync_result,
             "recordings_path": recordings_path,
             "has_recordings_path": True,
+            "phone_system_type": phone_system_type,
         }
     except FileNotFoundError as exc:
         logger.error("Recordings path does not exist", path=recordings_path)
@@ -3220,6 +3260,7 @@ async def _validate_call_recordings(
             "status": "error",
             "recordings_path": recordings_path,
             "has_recordings_path": False,
+            "phone_system_type": phone_system_type,
             "error": str(exc),
         }
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -3228,6 +3269,7 @@ async def _validate_call_recordings(
             "status": "error",
             "recordings_path": recordings_path,
             "has_recordings_path": True,
+            "phone_system_type": phone_system_type,
             "error": str(exc),
         }
 

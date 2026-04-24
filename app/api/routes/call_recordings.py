@@ -80,11 +80,18 @@ async def sync_call_recordings(
 ):
     """Sync call recordings from filesystem (super admin only)."""
     # Get the recordings path from query param or module settings
+    phone_system_type: str | None = None
     if not recordings_path:
         from app.repositories import integration_modules as modules_repo
         module = await modules_repo.get_module("call-recordings")
         if module and module.get("settings"):
             recordings_path = module["settings"].get("recordings_path")
+            phone_system_type = module["settings"].get("phone_system_type")
+    else:
+        from app.repositories import integration_modules as modules_repo
+        module = await modules_repo.get_module("call-recordings")
+        if module and module.get("settings"):
+            phone_system_type = module["settings"].get("phone_system_type")
     
     if not recordings_path:
         raise HTTPException(
@@ -93,7 +100,10 @@ async def sync_call_recordings(
         )
     
     try:
-        result = await call_recordings_service.sync_recordings_from_filesystem(recordings_path)
+        result = await call_recordings_service.sync_recordings_from_filesystem(
+            recordings_path,
+            phone_system_type=phone_system_type,
+        )
         return result
     except FileNotFoundError:
         raise HTTPException(
@@ -120,10 +130,12 @@ async def force_sync_call_recordings(
 ):
     """Force sync call recordings from filesystem, reloading all details while preserving ticket linkages and transcriptions (super admin only)."""
     # Get the recordings path from query param or module settings
-    if not recordings_path:
-        from app.repositories import integration_modules as modules_repo
-        module = await modules_repo.get_module("call-recordings")
-        if module and module.get("settings"):
+    from app.repositories import integration_modules as modules_repo
+    module = await modules_repo.get_module("call-recordings")
+    phone_system_type: str | None = None
+    if module and module.get("settings"):
+        phone_system_type = module["settings"].get("phone_system_type")
+        if not recordings_path:
             recordings_path = module["settings"].get("recordings_path")
     
     if not recordings_path:
@@ -133,7 +145,10 @@ async def force_sync_call_recordings(
         )
     
     try:
-        result = await call_recordings_service.force_sync_recordings_from_filesystem(recordings_path)
+        result = await call_recordings_service.force_sync_recordings_from_filesystem(
+            recordings_path,
+            phone_system_type=phone_system_type,
+        )
         return result
     except FileNotFoundError:
         raise HTTPException(

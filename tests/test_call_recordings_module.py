@@ -39,7 +39,10 @@ async def test_trigger_call_recordings_module():
         assert result.get("status") == "ok"
         assert result.get("created") == 2
         assert result.get("recordings_path") == "/test/path/recordings"
-        mock_sync.assert_awaited_once_with("/test/path/recordings")
+        assert result.get("phone_system_type") == "generic"
+        mock_sync.assert_awaited_once_with(
+            "/test/path/recordings", phone_system_type="generic"
+        )
 
 
 @pytest.mark.asyncio
