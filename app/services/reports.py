@@ -268,6 +268,7 @@ async def _build_licenses(company_id: int) -> dict[str, Any]:
                 "allocated": int(record.get("allocated") or 0),
                 "expiry_date": expiry.isoformat() if expiry else None,
                 "contract_term": record.get("contract_term"),
+                "auto_renew": record.get("auto_renew"),
             }
         )
     return {"licenses": licenses, "total": len(licenses)}

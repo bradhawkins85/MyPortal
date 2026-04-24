@@ -114,7 +114,10 @@ async def test_sync_company_licenses_403_with_delegated_token_retry_succeeds():
         await m365_service.sync_company_licenses(1)
 
     mock_grant.assert_awaited_once_with(1, access_token="delegated-token")
-    assert call_count == 2, "Graph should have been called twice (first 403, then retry)"
+    assert call_count == 3, (
+        "Graph should have been called three times (first 403 for subscribedSkus, "
+        "retry for subscribedSkus, then directory/subscriptions)"
+    )
 
 
 @pytest.mark.anyio("asyncio")
