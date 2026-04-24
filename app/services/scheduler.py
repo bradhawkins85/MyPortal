@@ -604,8 +604,12 @@ class SchedulerService:
                     module = await modules_repo.get_module("call-recordings")
                     if module and module.get("settings"):
                         recordings_path = module["settings"].get("recordings_path")
+                        phone_system_type = module["settings"].get("phone_system_type")
                         if recordings_path:
-                            result = await call_recordings_service.sync_recordings_from_filesystem(recordings_path)
+                            result = await call_recordings_service.sync_recordings_from_filesystem(
+                                recordings_path,
+                                phone_system_type=phone_system_type,
+                            )
                             details = json.dumps(result, default=str)
                             log_info("Call recordings synced", **result)
                         else:
