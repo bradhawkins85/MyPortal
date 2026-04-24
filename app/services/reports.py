@@ -152,7 +152,14 @@ async def _build_staff(company_id: int) -> dict[str, Any]:
 
 async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
     results = await m365_bp_repo.list_results(company_id)
-    counts: dict[str, int] = {"pass": 0, "fail": 0, "warn": 0, "error": 0, "other": 0}
+    counts: dict[str, int] = {
+        "pass": 0,
+        "fail": 0,
+        "warn": 0,
+        "error": 0,
+        "not_applicable": 0,
+        "other": 0,
+    }
     for row in results:
         status = str(row.get("status") or "").lower()
         if status in counts:
@@ -171,36 +178,41 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
 
 
 async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
-    """Top five mailboxes (user + shared) by archived + storage size."""
-    try:
-        rows = await db.fetch_all(
-            """
-            SELECT user_principal_name, display_name, mailbox_type,
-                   storage_used_bytes, archive_storage_used_bytes
-            FROM m365_mailboxes
-            WHERE company_id = %s
-            ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
-            LIMIT 5
-            """,
-            (company_id,),
-        )
-    except Exception:  # pragma: no cover - defensive when table missing
-        rows = []
-    mailboxes: list[dict[str, Any]] = []
-    for row in rows or []:
+    """Top five user mailboxes and top five shared mailboxes by size."""
+
+    def _to_mailbox_row(row: Any) -> dict[str, Any]:
         primary = int(row.get("storage_used_bytes") or 0)
-        archive = int(row.get("archive_storage_used_bytes") or 0)
-        mailboxes.append(
-            {
-                "user_principal_name": row.get("user_principal_name"),
-                "display_name": row.get("display_name") or row.get("user_principal_name"),
-                "mailbox_type": row.get("mailbox_type") or "UserMailbox",
-                "total_bytes": primary + archive,
-                "primary_bytes": primary,
-                "archive_bytes": archive,
-            }
-        )
-    return {"mailboxes": mailboxes}
+        raw_archive = row.get("archive_storage_used_bytes")
+        archive: int | None = int(raw_archive) if raw_archive is not None else None
+        total = primary + (archive or 0)
+        return {
+            "user_principal_name": row.get("user_principal_name"),
+            "display_name": row.get("display_name") or row.get("user_principal_name"),
+            "mailbox_type": row.get("mailbox_type") or "UserMailbox",
+            "total_bytes": total,
+            "primary_bytes": primary,
+            "archive_bytes": archive,
+        }
+
+    _query = """
+        SELECT user_principal_name, display_name, mailbox_type,
+               storage_used_bytes, archive_storage_used_bytes
+        FROM m365_mailboxes
+        WHERE company_id = %s AND mailbox_type = %s
+        ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
+        LIMIT 5
+    """
+    try:
+        user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
+        shared_rows = await db.fetch_all(_query, (company_id, "SharedMailbox"))
+    except Exception:  # pragma: no cover - defensive when table missing
+        user_rows = []
+        shared_rows = []
+
+    return {
+        "user_mailboxes": [_to_mailbox_row(r) for r in user_rows or []],
+        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_rows or []],
+    }
 
 
 async def _build_orders_current_month(company_id: int) -> dict[str, Any]:
