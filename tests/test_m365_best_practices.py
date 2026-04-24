@@ -3775,3 +3775,354 @@ def test_customer_lockbox_catalog_entry():
     assert "source" not in entry
     assert "remediation_cmdlet" not in entry
     assert "remediation_params" not in entry
+
+
+# ---------------------------------------------------------------------------
+# Microsoft Teams checks (EXO InvokeCommand)
+# ---------------------------------------------------------------------------
+
+_TEAMS_MEETING_POLICY_PASS = {
+    "AllowAnonymousUsersToStartMeeting": False,
+    "AllowPSTNUsersToBypassLobby": False,
+    "AutoAdmittedUsers": "InvitedUsers",
+    "AllowExternalParticipantGiveRequestControl": False,
+    "AllowAnonymousUsersToJoinMeeting": False,
+}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_anon_dialin_cannot_start_meeting_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [_TEAMS_MEETING_POLICY_PASS]},
+    ):
+        result = await bp_service._check_anon_dialin_cannot_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_anon_dialin_cannot_start_meeting_fail_anon():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AllowAnonymousUsersToStartMeeting": True}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_anon_dialin_cannot_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "AllowAnonymousUsersToStartMeeting" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_anon_dialin_cannot_start_meeting_fail_pstn():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AllowPSTNUsersToBypassLobby": True}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_anon_dialin_cannot_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "AllowPSTNUsersToBypassLobby" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_anon_dialin_cannot_start_meeting_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Teams unavailable"),
+    ):
+        result = await bp_service._check_anon_dialin_cannot_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_only_org_bypass_lobby_pass_everyoneincompany():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "EveryoneInCompany"}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_only_org_bypass_lobby("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_only_org_bypass_lobby_pass_excluding_guests():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "EveryoneInCompanyExcludingGuests"}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_only_org_bypass_lobby("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_only_org_bypass_lobby_fail_everyone():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "Everyone"}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_only_org_bypass_lobby("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_only_org_bypass_lobby_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("not found"),
+    ):
+        result = await bp_service._check_only_org_bypass_lobby("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_invited_users_auto_admitted_pass():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "InvitedUsers"}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_invited_users_auto_admitted("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_invited_users_auto_admitted_fail_everyoneincompany():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "EveryoneInCompany"}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_invited_users_auto_admitted("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_invited_users_auto_admitted_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("error"),
+    ):
+        result = await bp_service._check_invited_users_auto_admitted("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_participants_no_control_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [_TEAMS_MEETING_POLICY_PASS]},
+    ):
+        result = await bp_service._check_external_participants_no_control("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_participants_no_control_fail():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AllowExternalParticipantGiveRequestControl": True}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_external_participants_no_control("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "AllowExternalParticipantGiveRequestControl" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_participants_no_control_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("timeout"),
+    ):
+        result = await bp_service._check_external_participants_no_control("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_users_cannot_initiate_pass_fed_disabled():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"AllowFederatedUsers": False}]},
+    ):
+        result = await bp_service._check_external_users_cannot_initiate("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_users_cannot_initiate_fail_unrestricted():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{
+            "AllowFederatedUsers": True,
+            "AllowedDomains": {"AllowedParent": "AllowAllKnownDomains"},
+        }]},
+    ):
+        result = await bp_service._check_external_users_cannot_initiate("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_external_users_cannot_initiate_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("error"),
+    ):
+        result = await bp_service._check_external_users_cannot_initiate("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_teams_external_files_approved_storage_pass():
+    cfg = {
+        "AllowDropBox": False,
+        "AllowGoogleDrive": False,
+        "AllowBox": False,
+        "AllowShareFile": False,
+        "AllowEgnyte": False,
+    }
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [cfg]},
+    ):
+        result = await bp_service._check_teams_external_files_approved_storage("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_teams_external_files_approved_storage_fail():
+    cfg = {
+        "AllowDropBox": True,
+        "AllowGoogleDrive": False,
+        "AllowBox": False,
+        "AllowShareFile": False,
+        "AllowEgnyte": False,
+    }
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [cfg]},
+    ):
+        result = await bp_service._check_teams_external_files_approved_storage("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+    assert "AllowDropBox" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_teams_external_files_approved_storage_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("error"),
+    ):
+        result = await bp_service._check_teams_external_files_approved_storage("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_restrict_anon_users_join_meeting_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [_TEAMS_MEETING_POLICY_PASS]},
+    ):
+        result = await bp_service._check_restrict_anon_users_join_meeting("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_restrict_anon_users_join_meeting_fail():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AllowAnonymousUsersToJoinMeeting": True}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_restrict_anon_users_join_meeting("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_restrict_anon_users_join_meeting_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("error"),
+    ):
+        result = await bp_service._check_restrict_anon_users_join_meeting("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_restrict_anon_users_start_meeting_pass():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [_TEAMS_MEETING_POLICY_PASS]},
+    ):
+        result = await bp_service._check_restrict_anon_users_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_restrict_anon_users_start_meeting_fail():
+    policy = {**_TEAMS_MEETING_POLICY_PASS, "AllowAnonymousUsersToStartMeeting": True}
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [policy]},
+    ):
+        result = await bp_service._check_restrict_anon_users_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_restrict_anon_users_start_meeting_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("error"),
+    ):
+        result = await bp_service._check_restrict_anon_users_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+
+
+def test_teams_checks_use_exo_source_type():
+    """All Teams meeting policy checks must use source_type 'exo'."""
+    exo_teams_ids = {
+        "bp_anon_dialin_cannot_start_meeting",
+        "bp_only_org_can_bypass_lobby",
+        "bp_invited_users_auto_admitted",
+        "bp_external_participants_no_control",
+        "bp_external_users_cannot_initiate",
+        "bp_teams_external_files_approved_storage",
+        "bp_restrict_anon_users_join_meeting",
+        "bp_restrict_anon_users_start_meeting",
+    }
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    for check_id in exo_teams_ids:
+        entry = catalog.get(check_id)
+        assert entry is not None, f"{check_id} not found in catalog"
+        assert entry.get("source_type") == "exo", (
+            f"{check_id} must have source_type='exo', got {entry.get('source_type')!r}"
+        )
