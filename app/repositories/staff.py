@@ -347,6 +347,25 @@ async def list_all_staff(
     return mapped_rows
 
 
+async def list_all_staff_for_import(company_id: int) -> list[dict[str, Any]]:
+    """Return all staff rows for a company without pagination.
+
+    Intended only for internal import/sync operations where every existing
+    record must be considered to avoid creating duplicates.
+    """
+    rows = await db.fetch_all(
+        """
+        SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
+        FROM staff AS s
+        LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        WHERE s.company_id = %s
+        ORDER BY s.id ASC
+        """,
+        (company_id,),
+    )
+    return [_map_staff_row(row) for row in rows]
+
+
 async def list_staff_by_email(email: str) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """

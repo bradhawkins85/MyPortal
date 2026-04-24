@@ -88,7 +88,7 @@ async def test_import_contacts_uses_syncro_when_configured(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
     created_calls: list[dict] = []
@@ -140,7 +140,7 @@ async def test_import_contacts_falls_back_to_m365_when_no_syncro(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
     created_calls: list[dict] = []
@@ -188,7 +188,7 @@ async def test_import_m365_skips_users_without_name(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
     created_calls: list[dict] = []
@@ -227,7 +227,7 @@ async def test_import_m365_updates_existing_staff(monkeypatch):
     )
     existing = [{"id": 99, "first_name": "Dave", "last_name": "Brown", "email": "dave@example.com"}]
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return(existing),
     )
     updated_calls: list[dict] = []
@@ -263,7 +263,7 @@ async def test_import_m365_contacts_bypasses_syncro_when_syncro_id_set(monkeypat
 
     monkeypatch.setattr("app.services.m365.get_all_users", fake_get_all_users)
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
 
@@ -325,7 +325,7 @@ async def test_import_m365_removes_m365_staff_not_in_m365(monkeypatch):
         {"id": 2, "first_name": "Bob", "last_name": "Gone", "email": "bob@example.com", "source": "m365"},
     ]
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return(existing),
     )
     updated_calls: list = []
@@ -378,7 +378,7 @@ async def test_import_m365_does_not_remove_manually_added_staff(monkeypatch):
         {"id": 2, "first_name": "Charlie", "last_name": "Manual", "email": "charlie@example.com", "source": "manual"},
     ]
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return(existing),
     )
 
@@ -424,7 +424,7 @@ async def test_import_m365_new_staff_has_source_m365(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
 
@@ -460,7 +460,7 @@ async def test_import_syncro_new_staff_has_source_syncro(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
 
@@ -503,7 +503,7 @@ async def test_import_m365_disabled_account_marks_ex_staff(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
     created_calls: list[dict] = []
@@ -552,7 +552,7 @@ async def test_import_m365_enabled_account_not_ex_staff(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return([]),
     )
     created_calls: list[dict] = []
@@ -602,7 +602,7 @@ async def test_import_m365_defaults_missing_account_action_for_existing_staff(mo
             "account_action": None,
         }
     ]
-    monkeypatch.setattr("app.repositories.staff.list_staff", lambda *_, **__: _async_return(existing))
+    monkeypatch.setattr("app.repositories.staff.list_all_staff_for_import", lambda *_, **__: _async_return(existing))
     updated_calls: list[dict] = []
 
     async def fake_update_staff(staff_id, **kwargs):
@@ -656,7 +656,7 @@ async def test_import_m365_updates_existing_to_ex_staff_when_disabled(monkeypatc
         }
     ]
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return(existing),
     )
     updated_calls: list[dict] = []
@@ -714,7 +714,7 @@ async def test_import_m365_clears_ex_staff_when_account_re_enabled(monkeypatch):
         }
     ]
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return(existing),
     )
     updated_calls: list[dict] = []
@@ -773,7 +773,7 @@ async def test_import_m365_disabled_account_kept_in_seen_emails(monkeypatch):
         }
     ]
     monkeypatch.setattr(
-        "app.repositories.staff.list_staff",
+        "app.repositories.staff.list_all_staff_for_import",
         lambda *_, **__: _async_return(existing),
     )
 
@@ -797,6 +797,72 @@ async def test_import_m365_disabled_account_kept_in_seen_emails(monkeypatch):
 
     assert len(seen_emails_captured) == 1
     assert "jack@example.com" in seen_emails_captured[0]
+
+
+
+@pytest.mark.anyio
+async def test_import_m365_no_duplicates_when_staff_exceeds_list_staff_page_size(monkeypatch):
+    """When a company has more than 200 staff (the default list_staff page limit) every
+    existing staff member must still be recognised and updated rather than re-created."""
+    monkeypatch.setattr(
+        "app.services.m365.get_credentials",
+        lambda *_, **__: _async_return({"client_id": "abc", "tenant_id": "xyz"}),
+    )
+
+    # Build 250 M365 users — deliberately more than the list_staff default page of 200.
+    m365_users = [
+        {
+            "givenName": f"User{i}",
+            "surname": "Test",
+            "mail": f"user{i}@example.com",
+            "accountEnabled": True,
+        }
+        for i in range(250)
+    ]
+    monkeypatch.setattr(
+        "app.services.m365.get_all_users",
+        lambda *_, **__: _async_return(m365_users),
+    )
+    monkeypatch.setattr(
+        "app.services.m365.parse_graph_datetime",
+        lambda *_: None,
+    )
+
+    # Simulate all 250 staff already existing in the database.
+    existing = [
+        {"id": i + 1, "first_name": f"User{i}", "last_name": "Test", "email": f"user{i}@example.com"}
+        for i in range(250)
+    ]
+    monkeypatch.setattr(
+        "app.repositories.staff.list_all_staff_for_import",
+        lambda *_, **__: _async_return(existing),
+    )
+
+    updated_ids: list[int] = []
+
+    async def fake_update_staff(staff_id, **kwargs):
+        updated_ids.append(staff_id)
+        return {"id": staff_id, **kwargs}
+
+    monkeypatch.setattr("app.repositories.staff.update_staff", fake_update_staff)
+
+    created_calls: list[dict] = []
+
+    async def fake_create_staff(**kwargs):
+        created_calls.append(kwargs)
+        return {**kwargs, "id": 9999}
+
+    monkeypatch.setattr("app.repositories.staff.create_staff", fake_create_staff)
+    monkeypatch.setattr(
+        "app.repositories.staff.delete_m365_staff_not_in",
+        lambda *_, **__: _async_return(0),
+    )
+
+    summary = await staff_importer.import_m365_contacts_for_company(99)
+
+    assert summary.created == 0, "no new staff should be created when all already exist"
+    assert summary.updated == 250
+    assert len(created_calls) == 0
 
 
 # ---------------------------------------------------------------------------
