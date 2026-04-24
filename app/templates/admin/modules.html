@@ -460,6 +460,16 @@
                 <input id="call-recordings-path" name="settings.recordings_path" class="form-input" value="{{ settings.recordings_path or '/var/lib/myportal/call_recordings' }}" placeholder="/var/lib/myportal/call_recordings" />
                 <p class="form-help">The base directory path where call recording files are stored.</p>
               </div>
+              {% set phone_system = settings.phone_system_type or 'generic' %}
+              <div class="form-field">
+                <label class="form-label" for="call-recordings-phone-system">Phone system</label>
+                <select id="call-recordings-phone-system" name="settings.phone_system_type" class="form-input">
+                  <option value="generic" {% if phone_system == 'generic' %}selected{% endif %}>Generic (auto-detect)</option>
+                  <option value="grandstream-ucm" {% if phone_system == 'grandstream-ucm' %}selected{% endif %}>Grandstream UCM</option>
+                  <option value="3cx" {% if phone_system == '3cx' %}selected{% endif %}>3CX</option>
+                </select>
+                <p class="form-help">Pick the phone system that produced the recordings so MyPortal can parse the call metadata correctly. Grandstream UCM uses the <code>.rd_files_netdisk_YYYY-MM.csv</code> index files alongside each monthly recordings folder.</p>
+              </div>
             {% elif module.slug == 'unifi-talk' %}
               <div class="form-field">
                 <label class="form-label" for="unifi-talk-host">Remote host</label>
