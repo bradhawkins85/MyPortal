@@ -5,8 +5,6 @@
   </header>
   <div class="card__body">
     {{ counter_strip(
-      total=section.data.total_synced or 0,
-      total_label='Total synced',
       items=[
         {'label': 'Servers', 'value': section.data.servers or 0, 'variant': 'info'},
         {'label': 'Workstations', 'value': section.data.workstations or 0, 'variant': 'info'}
