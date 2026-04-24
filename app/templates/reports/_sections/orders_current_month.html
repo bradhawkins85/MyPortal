@@ -1,0 +1,39 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="orders_current_month">
+  <header class="card__header report-section__header">
+    <h2>Orders this month</h2>
+    <span class="report-section__meta">Since {{ section.data.month_start }}</span>
+  </header>
+  <div class="card__body">
+    {{ counter_strip(items=[
+      {'label': 'Orders this month', 'value': section.data.total or 0, 'variant': 'info'}
+    ]) }}
+    {% set orders = section.data.orders or [] %}
+    {% if orders %}
+      <table class="report-table" style="margin-top: var(--space-3);">
+        <thead>
+          <tr>
+            <th>Order #</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Shipping</th>
+            <th>PO #</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in orders %}
+            <tr>
+              <td>{{ order.order_number }}</td>
+              <td>{{ order.order_date }}</td>
+              <td><span class="status status--info">{{ order.status }}</span></td>
+              <td>{{ order.shipping_status or '—' }}</td>
+              <td>{{ order.po_number or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="report-empty">No orders have been placed so far this month.</p>
+    {% endif %}
+  </div>
+</section>

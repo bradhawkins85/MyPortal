@@ -1,0 +1,40 @@
+<section class="card card--panel" data-report-section="asset_custom_fields">
+  <header class="card__header report-section__header">
+    <h2>Asset custom field values</h2>
+  </header>
+  <div class="card__body">
+    {% set fields = section.data.fields or [] %}
+    {% if fields %}
+      {% for field in fields %}
+        <div style="margin-bottom: var(--space-4);">
+          <h3 style="margin: 0 0 var(--space-2); font-size: 1rem;">
+            {{ field.display_name }}
+            <span class="report-section__meta">({{ field.field_type }})</span>
+          </h3>
+          {% if field.values %}
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th>Value</th>
+                  <th style="text-align: right;">Assets</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in field.values %}
+                  <tr>
+                    <td>{{ entry.value }}</td>
+                    <td style="text-align: right;">{{ entry.count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="report-empty">No recorded values for this field.</p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="report-empty">No asset custom fields have been defined.</p>
+    {% endif %}
+  </div>
+</section>

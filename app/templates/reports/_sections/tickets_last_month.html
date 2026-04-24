@@ -1,0 +1,26 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="tickets_last_month">
+  <header class="card__header report-section__header">
+    <h2>Tickets (past month)</h2>
+    {% if section.data.since %}
+      <span class="report-section__meta">Since
+        <span data-utc="{{ section.data.since }}">{{ section.data.since }}</span>
+      </span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {% set counts = section.data.counts or {} %}
+    {{ counter_strip(
+      total=section.data.total,
+      total_label='Total',
+      items=[
+        {'label': 'Open', 'value': counts.open | default(0), 'variant': 'warning'},
+        {'label': 'Pending', 'value': counts.pending | default(0), 'variant': 'warning'},
+        {'label': 'In progress', 'value': counts.in_progress | default(0), 'variant': 'info'},
+        {'label': 'Resolved', 'value': counts.resolved | default(0), 'variant': 'success'},
+        {'label': 'Closed', 'value': counts.closed | default(0), 'variant': 'neutral'},
+        {'label': 'Other', 'value': counts.other | default(0), 'variant': 'neutral'},
+      ]
+    ) }}
+  </div>
+</section>
