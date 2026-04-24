@@ -30,9 +30,24 @@
     </div>
   </div>
 
+  {% set stat_row_rendered = namespace(value=false) %}
   {% for section in report.sections %}
     {% if section.enabled %}
-      {% include "reports/_sections/" + section.key + ".html" ignore missing %}
+      {% if section.key in ['assets', 'staff', 'orders_current_month'] %}
+        {# Render all three stat sections together in one row on first encounter #}
+        {% if not stat_row_rendered.value %}
+          <div class="report-stat-row">
+            {% for inner in report.sections %}
+              {% if inner.key in ['assets', 'staff', 'orders_current_month'] and inner.enabled %}
+                {% include "reports/_sections/" + inner.key + ".html" ignore missing %}
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% set stat_row_rendered.value = true %}
+        {% endif %}
+      {% else %}
+        {% include "reports/_sections/" + section.key + ".html" ignore missing %}
+      {% endif %}
     {% endif %}
   {% endfor %}
 
@@ -56,6 +71,8 @@
 {% block styles %}
 <style>
   .report-page { display: flex; flex-direction: column; gap: var(--space-4); }
+  .report-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+  .report-stat-row > .card { margin: 0; }
   .report-cover__body { padding: var(--space-5); text-align: center; }
   .report-cover__eyebrow {
     margin: 0 0 var(--space-2);

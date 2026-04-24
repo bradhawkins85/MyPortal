@@ -112,6 +112,7 @@ async def test_build_company_report_assembles_all_sections():
     assert m365 is not None
     assert m365.data["counts"]["pass"] == 1
     assert m365.data["counts"]["fail"] == 1
+    assert m365.data["counts"]["not_applicable"] == 0
     assert m365.data["total"] == 2
     assert m365.data["pass_percentage"] == 50.0
 
