@@ -454,6 +454,13 @@
                 <label class="form-label" for="whisperx-language">Default Language</label>
                 <input id="whisperx-language" name="settings.language" class="form-input" value="{{ settings.language or 'en' }}" placeholder="en" />
               </div>
+              <div class="form-field">
+                <label class="form-label form-label--checkbox" for="whisperx-stereo-split">
+                  <input id="whisperx-stereo-split" name="settings.stereo_split" type="checkbox" value="true" {% if settings.stereo_split %}checked{% endif %} />
+                  Identify Caller / Callee (stereo split)
+                </label>
+                <p class="form-help">When enabled, stereo WAV recordings are split into two mono channels before transcription. The right channel is treated as the <strong>Caller</strong> and the left channel as the <strong>Callee</strong> (Grandstream UCM convention). Non-stereo or non-WAV files are transcribed as normal.</p>
+              </div>
             {% elif module.slug == 'call-recordings' %}
               <div class="form-field">
                 <label class="form-label" for="call-recordings-path">Recordings Path</label>

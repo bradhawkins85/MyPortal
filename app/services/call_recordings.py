@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import array
 import csv
 import json
 import re
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -797,6 +799,115 @@ async def force_sync_recordings_from_filesystem(
     }
 
 
+# ---------------------------------------------------------------------------
+# Stereo channel helpers
+# ---------------------------------------------------------------------------
+
+# Sample-width → array type-code for little-endian PCM WAV.
+_WAV_TYPECODES: dict[int, str] = {1: "b", 2: "h", 4: "l"}
+
+
+def _split_stereo_wav(file_path: Path) -> tuple[Path, Path] | None:
+    """Split a stereo WAV file into two temporary mono channel files.
+
+    For Grandstream UCM recordings the **right** channel carries the **caller**
+    and the **left** channel carries the **callee**.
+
+    Returns ``(callee_path, caller_path)`` on success, or ``None`` when the
+    file is not a 2-channel PCM WAV (e.g. mono, non-WAV, or unsupported
+    sample width).  The caller is responsible for deleting both files.
+    """
+    try:
+        with wave.open(str(file_path), "rb") as wav:
+            if wav.getnchannels() != 2:
+                return None
+            sample_width = wav.getsampwidth()
+            frame_rate = wav.getframerate()
+            n_frames = wav.getnframes()
+            raw_data = wav.readframes(n_frames)
+    except (wave.Error, EOFError, OSError):
+        return None
+
+    typecode = _WAV_TYPECODES.get(sample_width)
+    if typecode is None:
+        return None
+
+    samples: array.array = array.array(typecode, raw_data)
+    # Stereo samples are interleaved: [L0, R0, L1, R1, …]
+    callee_samples = samples[0::2]   # left  channel = callee
+    caller_samples = samples[1::2]   # right channel = caller
+
+    stem = file_path.stem
+    callee_path = file_path.parent / f"{stem}_callee_ch.wav"
+    caller_path = file_path.parent / f"{stem}_caller_ch.wav"
+
+    try:
+        for path, channel in ((callee_path, callee_samples), (caller_path, caller_samples)):
+            with wave.open(str(path), "wb") as out:
+                out.setnchannels(1)
+                out.setsampwidth(sample_width)
+                out.setframerate(frame_rate)
+                out.writeframes(channel.tobytes())
+    except (wave.Error, OSError):
+        callee_path.unlink(missing_ok=True)
+        caller_path.unlink(missing_ok=True)
+        return None
+
+    return callee_path, caller_path
+
+
+def _fmt_time(seconds: float) -> str:
+    """Format a timestamp in seconds as ``MM:SS``."""
+    secs = max(0, int(seconds))
+    return f"{secs // 60:02d}:{secs % 60:02d}"
+
+
+def _parse_whisperx_response(response: httpx.Response) -> tuple[str, list[dict[str, Any]]]:
+    """Parse a WhisperX ``/asr`` response.
+
+    Returns ``(text, segments)`` where *segments* is a (possibly empty) list
+    of dicts with at least ``start`` and ``text`` keys.
+    """
+    try:
+        result = response.json()
+        text = (result.get("text") or "").strip()
+        segments = result.get("segments") or []
+        return text, [s for s in segments if isinstance(s, dict)]
+    except ValueError:
+        return response.text.strip(), []
+
+
+def _build_stereo_transcription(
+    caller_text: str,
+    caller_segments: list[dict[str, Any]],
+    callee_text: str,
+    callee_segments: list[dict[str, Any]],
+) -> str:
+    """Combine caller and callee channel results into a labelled transcription.
+
+    When both channels supply timing segments the output is a single
+    chronologically-ordered conversation.  Otherwise two labelled sections
+    are returned.
+    """
+    if caller_segments or callee_segments:
+        tagged: list[dict[str, Any]] = []
+        for seg in caller_segments:
+            tagged.append({"start": seg.get("start", 0.0), "label": "Caller", "text": (seg.get("text") or "").strip()})
+        for seg in callee_segments:
+            tagged.append({"start": seg.get("start", 0.0), "label": "Callee", "text": (seg.get("text") or "").strip()})
+        tagged = [s for s in tagged if s["text"]]
+        tagged.sort(key=lambda s: s["start"])
+        lines = [f"[{_fmt_time(s['start'])}] **{s['label']}:** {s['text']}" for s in tagged]
+        return "\n".join(lines)
+
+    parts: list[str] = []
+    if caller_text:
+        parts.append(f"**Caller:**\n{caller_text}")
+    if callee_text:
+        parts.append(f"**Callee:**\n{callee_text}")
+    return "\n\n".join(parts)
+
+
 async def queue_pending_transcriptions() -> dict[str, Any]:
     """
     Queue all pending recordings for transcription.
@@ -989,89 +1100,150 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             settings.get("language"),
         )
 
+        # Attempt stereo channel split (Grandstream UCM: right=caller, left=callee)
+        stereo_split = settings.get("stereo_split", False)
+        stereo_channel_paths: tuple[Path, Path] | None = None
+        if stereo_split:
+            stereo_channel_paths = _split_stereo_wav(Path(file_path))
+            if stereo_channel_paths is None:
+                logger.info(
+                    "Stereo split requested but recording {} is not a 2-channel WAV; "
+                    "transcribing as a single channel",
+                    recording_id,
+                )
+
         async with httpx.AsyncClient(timeout=300.0) as client:
-            # Open and read the file
             try:
-                with open(file_path, "rb") as audio_file:
-                    files = {"audio_file": (recording["file_name"], audio_file, "audio/wav")}
+                data: dict[str, str] = {}
+                if settings.get("language"):
+                    data["language"] = settings["language"]
 
-                    # Prepare form data if language is specified
-                    data = {}
-                    if settings.get("language"):
-                        data["language"] = settings.get("language")
-
-                    logger.debug(f"Sending audio file to WhisperX: size={Path(file_path).stat().st_size} bytes")
-                    
-                    response = await client.post(
-                        target_url,
-                        files=files,
-                        data=data if data else None,
-                        headers=headers,
-                    )
-                    
-                    # Log response details
-                    logger.info(
-                        "WhisperX API response: status={}, content_length={}",
-                        response.status_code,
-                        len(response.content),
-                    )
-                    
-                    response.raise_for_status()
-                    
-                    # Try to parse as JSON first
-                    transcription = None
-                    result = None
+                if stereo_channel_paths:
+                    # --- stereo: transcribe each channel separately then merge ---
+                    callee_path, caller_path = stereo_channel_paths
                     try:
-                        result = response.json()
-                        logger.debug(f"WhisperX response body (JSON): {result}")
-                        transcription = result.get("text", "")
-                    except ValueError as exc:
-                        # Not JSON - check if it's plain text
-                        content_type = response.headers.get("content-type", "").lower()
-                        if "text/plain" in content_type or not content_type.startswith("application/json"):
-                            # Accept plain text response
-                            transcription = response.text.strip()
-                            logger.info(
-                                "WhisperX returned plain text response for recording {}: length={}",
-                                recording_id,
-                                len(transcription),
+                        logger.debug(
+                            "Sending caller channel to WhisperX for recording {}: size={} bytes",
+                            recording_id,
+                            caller_path.stat().st_size,
+                        )
+                        with open(caller_path, "rb") as cf:
+                            resp_caller = await client.post(
+                                target_url,
+                                files={"audio_file": (recording["file_name"], cf, "audio/wav")},
+                                data=data or None,
+                                headers=headers,
                             )
-                        else:
-                            # Unexpected content type
-                            error_message = f"Invalid response format (content-type: {content_type}): {response.text[:500]}"
-                            logger.error(
-                                "Invalid response format while transcribing recording {}: {}",
-                                recording_id,
-                                response.text[:500],
+                        resp_caller.raise_for_status()
+                        caller_text, caller_segs = _parse_whisperx_response(resp_caller)
+
+                        logger.debug(
+                            "Sending callee channel to WhisperX for recording {}: size={} bytes",
+                            recording_id,
+                            callee_path.stat().st_size,
+                        )
+                        with open(callee_path, "rb") as cf:
+                            resp_callee = await client.post(
+                                target_url,
+                                files={"audio_file": (recording["file_name"], cf, "audio/wav")},
+                                data=data or None,
+                                headers=headers,
                             )
-                            
-                            # Record webhook failure
-                            if webhook_event_id:
-                                try:
-                                    await webhook_monitor.record_manual_failure(
-                                        webhook_event_id,
-                                        attempt_number=1,
-                                        status="failed",
-                                        error_message=error_message,
-                                        response_status=response.status_code,
-                                        response_body=response.text[:4000],
-                                        request_headers=safe_headers,
-                                        request_body={"file_name": recording["file_name"]},
-                                        response_headers=dict(response.headers),
-                                    )
-                                except Exception as webhook_exc:
-                                    logger.warning(f"Failed to record webhook failure: {webhook_exc}")
-                            
-                            await call_recordings_repo.update_call_recording(
-                                recording_id,
-                                transcription_status="failed",
-                            )
-                            raise ValueError("Invalid response from transcription service") from exc
-                        
+                        resp_callee.raise_for_status()
+                        callee_text, callee_segs = _parse_whisperx_response(resp_callee)
+                    finally:
+                        callee_path.unlink(missing_ok=True)
+                        caller_path.unlink(missing_ok=True)
+
+                    transcription: str | None = _build_stereo_transcription(
+                        caller_text, caller_segs, callee_text, callee_segs
+                    )
+                    result: dict | None = {"text": transcription}
+                    response = resp_callee  # use last response for webhook logging
+
+                    logger.info(
+                        "WhisperX stereo transcription completed for recording {}: length={}",
+                        recording_id,
+                        len(transcription),
+                    )
+
+                else:
+                    # --- mono: single channel (original behaviour) ---
+                    with open(file_path, "rb") as audio_file:
+                        files = {"audio_file": (recording["file_name"], audio_file, "audio/wav")}
+
+                        logger.debug(f"Sending audio file to WhisperX: size={Path(file_path).stat().st_size} bytes")
+
+                        response = await client.post(
+                            target_url,
+                            files=files,
+                            data=data if data else None,
+                            headers=headers,
+                        )
+
+                        # Log response details
+                        logger.info(
+                            "WhisperX API response: status={}, content_length={}",
+                            response.status_code,
+                            len(response.content),
+                        )
+
+                        response.raise_for_status()
+
+                        # Try to parse as JSON first
+                        transcription = None
+                        result = None
+                        try:
+                            result = response.json()
+                            logger.debug(f"WhisperX response body (JSON): {result}")
+                            transcription = result.get("text", "")
+                        except ValueError as exc:
+                            # Not JSON - check if it's plain text
+                            content_type = response.headers.get("content-type", "").lower()
+                            if "text/plain" in content_type or not content_type.startswith("application/json"):
+                                # Accept plain text response
+                                transcription = response.text.strip()
+                                logger.info(
+                                    "WhisperX returned plain text response for recording {}: length={}",
+                                    recording_id,
+                                    len(transcription),
+                                )
+                            else:
+                                # Unexpected content type
+                                error_message = f"Invalid response format (content-type: {content_type}): {response.text[:500]}"
+                                logger.error(
+                                    "Invalid response format while transcribing recording {}: {}",
+                                    recording_id,
+                                    response.text[:500],
+                                )
+
+                                # Record webhook failure
+                                if webhook_event_id:
+                                    try:
+                                        await webhook_monitor.record_manual_failure(
+                                            webhook_event_id,
+                                            attempt_number=1,
+                                            status="failed",
+                                            error_message=error_message,
+                                            response_status=response.status_code,
+                                            response_body=response.text[:4000],
+                                            request_headers=safe_headers,
+                                            request_body={"file_name": recording["file_name"]},
+                                            response_headers=dict(response.headers),
+                                        )
+                                    except Exception as webhook_exc:
+                                        logger.warning(f"Failed to record webhook failure: {webhook_exc}")
+
+                                await call_recordings_repo.update_call_recording(
+                                    recording_id,
+                                    transcription_status="failed",
+                                )
+                                raise ValueError("Invalid response from transcription service") from exc
+
             except FileNotFoundError:
                 error_message = f"Audio file not found: {file_path}"
                 logger.error(error_message)
-                
+
                 # Record webhook failure
                 if webhook_event_id:
                     try:
@@ -1087,7 +1259,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                         )
                     except Exception as webhook_exc:
                         logger.warning(f"Failed to record webhook failure: {webhook_exc}")
-                
+
                 await call_recordings_repo.update_call_recording(
                     recording_id,
                     transcription_status="failed",
@@ -1103,7 +1275,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                     transcription_status="failed",
                 )
                 raise ValueError(error_message)
-            
+
             logger.info(
                 "Transcription completed for recording {}: length={}",
                 recording_id,
