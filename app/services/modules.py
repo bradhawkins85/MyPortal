@@ -4551,6 +4551,11 @@ def _split_stereo_wav(file_path: Path) -> tuple[Path, Path] | None:
 
     typecode = _WAV_TYPECODES.get(sample_width)
     if typecode is None:
+        logger.debug(
+            "Unsupported WAV sample width {} for stereo split of {}; skipping",
+            sample_width,
+            file_path.name,
+        )
         return None
 
     samples: array.array = array.array(typecode, raw_data)
