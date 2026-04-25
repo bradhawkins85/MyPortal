@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import array
+import json
 import struct
 import wave
 from pathlib import Path
@@ -48,11 +49,10 @@ class _FakeResponse:
     """Minimal httpx.Response stand-in for _parse_whisperx_response tests."""
 
     def __init__(self, body, content_type: str = "application/json"):
-        import json as _json
         self._body = body
         self.content_type = content_type
         if isinstance(body, dict):
-            self._text = _json.dumps(body)
+            self._text = json.dumps(body)
         else:
             self._text = str(body)
         self.headers = {"content-type": content_type}
@@ -62,10 +62,9 @@ class _FakeResponse:
         return self._text
 
     def json(self):
-        import json as _json
         if isinstance(self._body, dict):
             return self._body
-        return _json.loads(self._text)
+        return json.loads(self._text)
 
 
 # ---------------------------------------------------------------------------

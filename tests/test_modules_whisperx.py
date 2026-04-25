@@ -1,6 +1,8 @@
 """Tests for the WhisperX automation module handler."""
+import array
 import asyncio
 import json
+import wave
 from pathlib import Path
 
 import httpx
@@ -421,10 +423,7 @@ def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
 
 def _make_stereo_wav(path, n_frames=50, sample_rate=8000):
     """Write a minimal 2-channel 16-bit PCM WAV file to *path*."""
-    import array
-    import wave as _wave
-
-    with _wave.open(str(path), "wb") as w:
+    with wave.open(str(path), "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(sample_rate)
@@ -535,12 +534,11 @@ def test_invoke_whisperx_stereo_split_mono_falls_back(monkeypatch, tmp_path):
     upload_dir.mkdir(parents=True, exist_ok=True)
     mono_file = upload_dir / "mono_call.wav"
 
-    import wave as _wave, array as _array
-    with _wave.open(str(mono_file), "wb") as w:
+    with wave.open(str(mono_file), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(8000)
-        w.writeframes(_array.array("h", [0] * 50).tobytes())
+        w.writeframes(array.array("h", [0] * 50).tobytes())
 
     async def fake_list_attachments(tid, *, access_levels=None):
         return [
