@@ -258,3 +258,49 @@ async def bulk_unlink_staff(license_id: int, staff_ids: Iterable[int]) -> None:
         f"DELETE FROM staff_licenses WHERE license_id = %s AND staff_id IN ({placeholders})",
         tuple([license_id, *ids]),
     )
+
+
+async def record_usage_if_changed(license_id: int, count: int, allocated: int) -> bool:
+    """Record a usage entry for *license_id* only when count or allocated has changed.
+
+    The initial snapshot for a newly-seen license is always recorded.  Subsequent
+    calls only insert a new row when *count* or *allocated* differs from the most
+    recently recorded values.
+
+    Returns ``True`` if a new row was written, ``False`` otherwise.
+    """
+    last_row = await db.fetch_one(
+        "SELECT count, allocated FROM license_usage_history"
+        " WHERE license_id = %s ORDER BY recorded_at DESC, id DESC LIMIT 1",
+        (license_id,),
+    )
+
+    if last_row is not None:
+        if int(last_row["count"]) == count and int(last_row["allocated"]) == allocated:
+            return False
+
+    await db.execute(
+        "INSERT INTO license_usage_history (license_id, count, allocated) VALUES (%s, %s, %s)",
+        (license_id, count, allocated),
+    )
+    return True
+
+
+async def get_usage_history(license_id: int) -> list[dict[str, Any]]:
+    """Return all recorded usage entries for *license_id* in ascending order."""
+    rows = await db.fetch_all(
+        "SELECT id, license_id, count, allocated, recorded_at"
+        " FROM license_usage_history"
+        " WHERE license_id = %s ORDER BY recorded_at ASC, id ASC",
+        (license_id,),
+    )
+    return [
+        {
+            "id": row["id"],
+            "license_id": row["license_id"],
+            "count": int(row["count"]),
+            "allocated": int(row["allocated"]),
+            "recorded_at": row["recorded_at"],
+        }
+        for row in rows
+    ]
