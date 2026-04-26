@@ -187,6 +187,26 @@ async def delete_task(task_id: int) -> None:
     await db.execute("DELETE FROM scheduled_tasks WHERE id = %s", (task_id,))
 
 
+async def delete_tasks(task_ids: list[int]) -> int:
+    """Delete multiple scheduled tasks by ID. Returns the number of rows deleted."""
+    if not task_ids:
+        return 0
+    placeholders = ",".join(["%s"] * len(task_ids))
+    result = await db.execute(
+        f"DELETE FROM scheduled_tasks WHERE id IN ({placeholders})",
+        tuple(task_ids),
+    )
+    return int(result or 0)
+
+
+async def rename_task(task_id: int, name: str) -> None:
+    """Update only the name of a scheduled task."""
+    await db.execute(
+        "UPDATE scheduled_tasks SET name = %s WHERE id = %s",
+        (name, task_id),
+    )
+
+
 async def set_task_active(task_id: int, active: bool) -> dict[str, Any] | None:
     await db.execute(
         "UPDATE scheduled_tasks SET active = %s WHERE id = %s",

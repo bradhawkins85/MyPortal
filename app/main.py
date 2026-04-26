@@ -484,6 +484,24 @@ tags_metadata = [
         "description": "User administration, profile management, and self-service endpoints.",
     },
 ]
+
+# Human-readable labels for scheduled task commands used when auto-generating task names.
+TASK_COMMAND_LABELS: dict[str, str] = {
+    "sync_staff": "Sync staff directory",
+    "sync_m365_data": "Sync Microsoft 365 data (legacy)",
+    "sync_m365_licenses": "Sync Microsoft 365 licenses",
+    "sync_m365_contacts": "Sync Microsoft 365 contacts",
+    "sync_m365_mailboxes": "Sync Microsoft 365 mailboxes",
+    "sync_to_xero": "Sync to Xero",
+    "sync_to_xero_auto_send": "Sync to Xero (Auto Send)",
+    "generate_invoice": "Generate Invoice",
+    "create_scheduled_ticket": "Create scheduled ticket",
+    "sync_recordings": "Sync call recordings",
+    "sync_unifi_talk_recordings": "Sync Unifi Talk recordings",
+    "queue_transcriptions": "Queue transcriptions",
+    "process_transcription": "Process transcription",
+}
+
 app = FastAPI(
     title=settings.app_name,
     description=(
@@ -14373,7 +14391,12 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
 
 
 @app.get("/admin/scheduled-tasks", response_class=HTMLResponse)
-async def admin_scheduled_tasks(request: Request, show_inactive: bool = Query(default=False)):
+async def admin_scheduled_tasks(
+    request: Request,
+    show_inactive: bool = Query(default=False),
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
@@ -14414,8 +14437,157 @@ async def admin_scheduled_tasks(request: Request, show_inactive: bool = Query(de
         "title": "Scheduled Tasks",
         "tasks": prepared_tasks,
         "show_inactive": show_inactive,
+        "success_message": success,
+        "error_message": error,
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
+
+
+@app.post("/admin/scheduled-tasks/bulk-delete", response_class=HTMLResponse)
+async def admin_bulk_delete_scheduled_tasks(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_ids = form.getlist("taskIds")
+    task_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            identifier = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        task_ids.append(identifier)
+
+    if not task_ids:
+        return RedirectResponse(
+            url="/admin/scheduled-tasks?error=Select+at+least+one+task+to+delete.",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    try:
+        deleted_count = await scheduled_tasks_repo.delete_tasks(task_ids)
+        await scheduler_service.refresh()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to bulk delete scheduled tasks",
+            task_ids=task_ids,
+            error=str(exc),
+        )
+        return RedirectResponse(
+            url="/admin/scheduled-tasks?error=Unable+to+delete+the+selected+tasks.+Please+try+again.",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    log_info(
+        "Scheduled tasks bulk deleted",
+        deleted_count=deleted_count,
+        deleted_by=current_user.get("id") if current_user else None,
+        task_ids=task_ids,
+    )
+
+    message_suffix = "task" if deleted_count == 1 else "tasks"
+    redirect_message = f"Deleted {deleted_count} {message_suffix}."
+    if deleted_count < len(task_ids):
+        redirect_message = f"Deleted {deleted_count} {message_suffix}. Some selected tasks were not found."
+
+    show_inactive_raw = form.get("show_inactive")
+    show_inactive_param = "1" if show_inactive_raw else ""
+    base_url = "/admin/scheduled-tasks"
+    params: list[str] = [f"success={quote(redirect_message)}"]
+    if show_inactive_param:
+        params.append(f"show_inactive={show_inactive_param}")
+    return RedirectResponse(
+        url=f"{base_url}?{'&'.join(params)}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/scheduled-tasks/bulk-rename", response_class=HTMLResponse)
+async def admin_bulk_rename_scheduled_tasks(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_ids = form.getlist("taskIds")
+    task_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            identifier = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        task_ids.append(identifier)
+
+    if not task_ids:
+        return RedirectResponse(
+            url="/admin/scheduled-tasks?error=Select+at+least+one+task+to+rename.",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    companies = await company_repo.list_companies()
+    company_lookup: dict[int, str] = {}
+    for company in companies:
+        try:
+            cid = int(company.get("id")) if company.get("id") is not None else None
+        except (TypeError, ValueError):
+            cid = None
+        if cid is None:
+            continue
+        company_lookup[cid] = str(company.get("name") or f"Company #{cid}")
+
+    renamed_count = 0
+    for task_id in task_ids:
+        task = await scheduled_tasks_repo.get_task(task_id)
+        if not task:
+            continue
+        raw_company_id = task.get("company_id")
+        company_key: int | None = None
+        if raw_company_id is not None:
+            try:
+                company_key = int(raw_company_id)
+            except (TypeError, ValueError):
+                company_key = None
+        if company_key is None:
+            company_label = "All companies"
+        else:
+            company_label = company_lookup.get(company_key, f"Company #{company_key}")
+
+        command = str(task.get("command") or "")
+        command_label = TASK_COMMAND_LABELS.get(command, command)
+
+        new_name = f"{company_label} \u2014 {command_label}"
+        await scheduled_tasks_repo.rename_task(task_id, new_name)
+        renamed_count += 1
+
+    log_info(
+        "Scheduled tasks bulk renamed",
+        renamed_count=renamed_count,
+        renamed_by=current_user.get("id") if current_user else None,
+        task_ids=task_ids,
+    )
+
+    message_suffix = "task" if renamed_count == 1 else "tasks"
+    redirect_message = f"Renamed {renamed_count} {message_suffix}."
+
+    show_inactive_raw = form.get("show_inactive")
+    show_inactive_param = "1" if show_inactive_raw else ""
+    base_url = "/admin/scheduled-tasks"
+    params: list[str] = [f"success={quote(redirect_message)}"]
+    if show_inactive_param:
+        params.append(f"show_inactive={show_inactive_param}")
+    return RedirectResponse(
+        url=f"{base_url}?{'&'.join(params)}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/admin/webhooks", response_class=HTMLResponse)
