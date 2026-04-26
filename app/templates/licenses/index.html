@@ -541,6 +541,12 @@
     const usageChartWrapper = document.getElementById('usage-tracking-chart-wrapper');
     const usageCanvas = document.getElementById('usage-tracking-canvas');
 
+    // Cache CSS custom-property values once to avoid repeated getComputedStyle calls.
+    const _rootStyle = getComputedStyle(document.documentElement);
+    const _chartGridColor = (_rootStyle.getPropertyValue('--color-border') || '#e2e8f0').trim();
+    const _chartPrimaryColor = (_rootStyle.getPropertyValue('--color-primary') || '#2563eb').trim();
+    const _chartSuccessColor = (_rootStyle.getPropertyValue('--color-success') || '#16a34a').trim();
+
     function drawUsageChart(history) {
       if (!usageCanvas || !(usageCanvas instanceof HTMLCanvasElement)) return;
       const ctx = usageCanvas.getContext('2d');
@@ -559,15 +565,18 @@
       const maxVal = Math.max(...counts, ...allocateds, 1);
       const dates = history.map((d) => new Date(d.recorded_at));
       const minTime = dates[0].getTime();
-      const maxTime = dates[dates.length - 1].getTime() || (minTime + 1);
-      const timeRange = maxTime - minTime || 1;
+      // When there is only one data point spread it across the full chart width.
+      const maxTime = dates.length > 1 ? dates[dates.length - 1].getTime() : minTime;
+      const timeRange = maxTime - minTime || chartW;
 
-      const xOf = (i) => PAD.left + ((dates[i].getTime() - minTime) / timeRange) * chartW;
+      const xOf = (i) => {
+        if (dates.length === 1) return PAD.left + chartW / 2;
+        return PAD.left + ((dates[i].getTime() - minTime) / timeRange) * chartW;
+      };
       const yOf = (val) => PAD.top + chartH - (val / maxVal) * chartH;
 
       // Grid lines
-      const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border') || '#e2e8f0';
-      ctx.strokeStyle = gridColor.trim();
+      ctx.strokeStyle = _chartGridColor;
       ctx.lineWidth = 1;
       const gridSteps = 4;
       for (let i = 0; i <= gridSteps; i++) {
@@ -604,25 +613,25 @@
         });
       }
 
-      const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--color-primary') || '#2563eb';
-      const successColor = getComputedStyle(document.documentElement).getPropertyValue('--color-success') || '#16a34a';
-      drawLine(counts, primaryColor.trim() || '#2563eb');
-      drawLine(allocateds, successColor.trim() || '#16a34a');
+      drawLine(counts, _chartPrimaryColor);
+      drawLine(allocateds, _chartSuccessColor);
 
       // X-axis date labels
       ctx.fillStyle = '#64748b';
       ctx.font = '11px system-ui,sans-serif';
       ctx.textAlign = 'center';
-      const labelCount = Math.min(history.length, 6);
-      const step = Math.max(1, Math.floor(history.length / labelCount));
-      for (let i = 0; i < history.length; i += step) {
-        const x = xOf(i);
-        const label = dates[i].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        ctx.fillText(label, x, PAD.top + chartH + 18);
-      }
-      // Always label the last point
-      if (history.length > 1) {
-        const last = history.length - 1;
+      if (dates.length === 1) {
+        const label = dates[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        ctx.fillText(label, xOf(0), PAD.top + chartH + 18);
+      } else {
+        const labelCount = Math.min(dates.length, 6);
+        const step = Math.max(1, Math.floor(dates.length / labelCount));
+        for (let i = 0; i < dates.length; i += step) {
+          const label = dates[i].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          ctx.fillText(label, xOf(i), PAD.top + chartH + 18);
+        }
+        // Always label the last point if not already covered.
+        const last = dates.length - 1;
         if (last % step !== 0) {
           const label = dates[last].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
           ctx.fillText(label, xOf(last), PAD.top + chartH + 18);
