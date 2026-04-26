@@ -5,5 +5,7 @@ CREATE TABLE IF NOT EXISTS license_usage_history (
     allocated INT NOT NULL,
     recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_license_usage_history_license_id (license_id),
-    INDEX idx_license_usage_history_license_recorded (license_id, recorded_at)
+    INDEX idx_license_usage_history_license_recorded (license_id, recorded_at),
+    CONSTRAINT fk_license_usage_history_license
+        FOREIGN KEY (license_id) REFERENCES licenses (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
