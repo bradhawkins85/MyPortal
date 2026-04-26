@@ -2157,7 +2157,7 @@ async def sync_company_licenses(company_id: int) -> None:
             final_expiry = api_expiry_date if api_expiry_date is not None else existing.get("expiry_date")
             # Use API contract term if retrieved, otherwise preserve the existing value.
             final_contract_term = api_contract_term if api_contract_term is not None else existing.get("contract_term")
-            await license_repo.update_license(
+            updated = await license_repo.update_license(
                 existing["id"],
                 company_id=company_id,
                 name=name,
@@ -2168,6 +2168,11 @@ async def sync_company_licenses(company_id: int) -> None:
                 auto_renew=api_auto_renew if api_auto_renew is not None else existing.get("auto_renew"),
             )
             license_id = existing["id"]
+            await license_repo.record_usage_if_changed(
+                license_id=int(license_id),
+                count=int(updated["count"]),
+                allocated=int(updated.get("allocated") or 0),
+            )
         else:
             created = await license_repo.create_license(
                 company_id=company_id,
@@ -2179,6 +2184,11 @@ async def sync_company_licenses(company_id: int) -> None:
                 auto_renew=api_auto_renew,
             )
             license_id = created["id"]
+            await license_repo.record_usage_if_changed(
+                license_id=int(license_id),
+                count=int(created["count"]),
+                allocated=int(created.get("allocated") or 0),
+            )
         if part_number:
             synced_skus.add(part_number)
         if sku_id:
