@@ -1,6 +1,8 @@
 """Tests for the WhisperX automation module handler."""
+import array
 import asyncio
 import json
+import wave
 from pathlib import Path
 
 import httpx
@@ -413,3 +415,187 @@ def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
     finally:
         if delayed_file.exists():
             delayed_file.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Stereo split integration tests
+# ---------------------------------------------------------------------------
+
+def _make_stereo_wav(path, n_frames=50, sample_rate=8000):
+    """Write a minimal 2-channel 16-bit PCM WAV file to *path*."""
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        samples = array.array("h")
+        for _ in range(n_frames):
+            samples.append(100)   # left  / callee
+            samples.append(200)   # right / caller
+        w.writeframes(samples.tobytes())
+
+
+def test_invoke_whisperx_stereo_split(monkeypatch, tmp_path):
+    """With stereo_split=True, two requests are sent (caller + callee channels)."""
+    fake_event_state = _webhook_helpers(monkeypatch)
+
+    async def fake_get_ticket(tid):
+        return {"id": tid, "subject": "Call"}
+
+    upload_dir = Path(modules.__file__).parent.parent / "static" / "uploads" / "tickets"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    stereo_file = upload_dir / "stereo_call.wav"
+    _make_stereo_wav(stereo_file)
+
+    async def fake_list_attachments(tid, *, access_levels=None):
+        return [
+            {
+                "id": 10,
+                "ticket_id": tid,
+                "filename": "stereo_call.wav",
+                "original_filename": "call.wav",
+                "mime_type": "audio/wav",
+                "file_size": stereo_file.stat().st_size,
+            }
+        ]
+
+    created_reply = {}
+
+    async def fake_create_reply(*, ticket_id, author_id, body, is_internal, **kw):
+        created_reply.update(ticket_id=ticket_id, body=body, is_internal=is_internal)
+        return {"id": 55}
+
+    async def fake_emit_event(tid, *, actor_type, trigger_automations):
+        pass
+
+    import app.repositories.tickets as tickets_repo_mod
+    import app.repositories.ticket_attachments as attach_repo_mod
+
+    monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
+    monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
+    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", fake_emit_event)
+
+    caller_resp = _FakeResponse({"text": "Caller says hello."})
+    callee_resp = _FakeResponse({"text": "Callee says hi."})
+    _responses = iter([caller_resp, callee_resp])
+
+    class _MultiResponseClient:
+        def __init__(self):
+            self.calls = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, *, files=None, data=None, headers=None):
+            self.calls.append({"url": url})
+            return next(_responses)
+
+    client_factory = _MultiResponseClient()
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    try:
+        settings = {
+            "base_url": "http://whisperx.local",
+            "api_key": "",
+            "language": "",
+            "stereo_split": True,
+        }
+        payload = {"ticket_id": 20}
+
+        result = asyncio.run(modules._invoke_whisperx(settings, payload))
+
+        assert result["status"] == "succeeded", f"result={result}"
+        assert result["ticket_id"] == 20
+        assert result["transcription_count"] == 1
+        # Two HTTP calls should have been made (one per channel)
+        assert len(client_factory.calls) == 2
+        # The combined transcription should contain both speaker labels
+        assert "**Caller:**" in created_reply["body"]
+        assert "**Callee:**" in created_reply["body"]
+        assert "Caller says hello." in created_reply["body"]
+        assert "Callee says hi." in created_reply["body"]
+    finally:
+        stereo_file.unlink(missing_ok=True)
+        for f in upload_dir.glob("stereo_call*_ch.wav"):
+            f.unlink(missing_ok=True)
+
+
+def test_invoke_whisperx_stereo_split_mono_falls_back(monkeypatch, tmp_path):
+    """With stereo_split=True but a mono file, only one request is made."""
+    _webhook_helpers(monkeypatch)
+
+    async def fake_get_ticket(tid):
+        return {"id": tid}
+
+    upload_dir = Path(modules.__file__).parent.parent / "static" / "uploads" / "tickets"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    mono_file = upload_dir / "mono_call.wav"
+
+    with wave.open(str(mono_file), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(array.array("h", [0] * 50).tobytes())
+
+    async def fake_list_attachments(tid, *, access_levels=None):
+        return [
+            {
+                "id": 11,
+                "ticket_id": tid,
+                "filename": "mono_call.wav",
+                "original_filename": "call.wav",
+                "mime_type": "audio/wav",
+                "file_size": mono_file.stat().st_size,
+            }
+        ]
+
+    async def fake_create_reply(**kw):
+        return {"id": 77}
+
+    async def fake_emit_event(tid, *, actor_type, trigger_automations):
+        pass
+
+    import app.repositories.tickets as tickets_repo_mod
+    import app.repositories.ticket_attachments as attach_repo_mod
+
+    monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
+    monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
+    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", fake_emit_event)
+
+    class _CountingClient:
+        def __init__(self):
+            self.call_count = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kw):
+            self.call_count += 1
+            return _FakeResponse({"text": "Mono transcription."})
+
+    client = _CountingClient()
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client)
+
+    try:
+        settings = {
+            "base_url": "http://whisperx.local",
+            "api_key": "",
+            "language": "",
+            "stereo_split": True,
+        }
+        payload = {"ticket_id": 30}
+
+        result = asyncio.run(modules._invoke_whisperx(settings, payload))
+
+        assert result["status"] == "succeeded", f"result={result}"
+        # Only one HTTP call because file is mono → fell back to single channel
+        assert client.call_count == 1
+    finally:
+        mono_file.unlink(missing_ok=True)
