@@ -676,25 +676,27 @@ async def _build_orders_detail(company_id: int) -> dict[str, Any]:
 
 
 async def _build_licenses_detail(company_id: int) -> dict[str, Any]:
-    """License list with computed usage percentage for the detail page."""
+    """License list with per-license staff assignments for the detail page."""
     records = await licenses_repo.list_company_licenses(company_id)
+    staff_by_license = await licenses_repo.list_staff_by_license_for_company(company_id)
     licenses: list[dict[str, Any]] = []
     for record in records:
-        expiry = _coerce_date(record.get("expiry_date"))
         total = int(record.get("count") or 0)
         allocated = int(record.get("allocated") or 0)
-        usage_pct = round((allocated / total * 100.0), 1) if total else 0.0
+        license_id = record.get("id")
+        staff = staff_by_license.get(license_id, [])
         licenses.append(
             {
                 "name": record.get("display_name") or record.get("name"),
                 "total": total,
                 "allocated": allocated,
-                "available": max(0, total - allocated),
-                "usage_percentage": usage_pct,
-                "expiry_date": expiry.isoformat() if expiry else None,
-                "contract_term": record.get("contract_term"),
-                "auto_renew": record.get("auto_renew"),
-                "notes": record.get("notes"),
+                "staff": [
+                    {
+                        "name": f"{s.get('first_name', '')} {s.get('last_name', '')}".strip(),
+                        "email": s.get("email"),
+                    }
+                    for s in staff
+                ],
             }
         )
     return {"licenses": licenses, "total": len(licenses)}
