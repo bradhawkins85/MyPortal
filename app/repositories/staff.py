@@ -149,6 +149,8 @@ async def list_staff(
         params.append(1 if enabled else 0)
     if exclude_ex_staff:
         conditions.append("s.is_ex_staff = 0")
+    if exclude_package_staff:
+        conditions.append("NOT (LOWER(SUBSTR(s.email, 1, 8)) = 'package_')")
     if onboarding_complete is not None:
         conditions.append("s.onboarding_complete = %s")
         params.append(1 if onboarding_complete else 0)
@@ -224,11 +226,6 @@ async def list_staff(
         tuple([*params, safe_page_size]),
     )
     mapped_rows = [_map_staff_row(row) for row in rows]
-    if exclude_package_staff:
-        mapped_rows = [
-            r for r in mapped_rows
-            if not _PACKAGE_STAFF_RE.match(r.get("email") or "")
-        ]
     if not mapped_rows:
         return mapped_rows
     values_by_staff = await staff_custom_fields_repo.get_all_staff_field_values(
