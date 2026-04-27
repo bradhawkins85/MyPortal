@@ -467,7 +467,7 @@
   {% endfor %}
 
   {% if any_detailed.value %}
-    <div style="page-break-before: always; margin-bottom: 20pt;">
+    <div style="page-break-before: always; page-break-after: avoid; margin-bottom: 20pt;">
       <h1 style="font-size: 18pt; border-bottom: 2px solid #0e4f8a; padding-bottom: 6pt; margin-bottom: 4pt;">Detailed Report</h1>
       <p class="section-meta">The following sections contain expanded detail for each summary section marked as detailed.</p>
     </div>
@@ -637,8 +637,7 @@
           {% if licenses %}
             <table class="report-table">
               <thead><tr>
-                <th>Name</th><th>Total</th><th>Allocated</th><th>Available</th>
-                <th>Usage %</th><th>Expiry</th><th>Contract term</th><th>Auto-renew</th>
+                <th>Name</th><th>Total</th><th>Allocated</th><th>Assigned Staff</th>
               </tr></thead>
               <tbody>
                 {% for lic in licenses %}
@@ -646,11 +645,13 @@
                     <td>{{ lic.name }}</td>
                     <td>{{ lic.total }}</td>
                     <td>{{ lic.allocated }}</td>
-                    <td>{{ lic.available }}</td>
-                    <td>{{ lic.usage_percentage }}%</td>
-                    <td>{{ lic.expiry_date or '—' }}</td>
-                    <td>{{ lic.contract_term or '—' }}</td>
-                    <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
+                    <td>
+                      {% if lic.staff %}
+                        {% for member in lic.staff %}{{ member.name }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
                   </tr>
                 {% endfor %}
               </tbody>
