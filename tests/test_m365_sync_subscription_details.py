@@ -3,8 +3,7 @@
 Covers:
 - expiry_date is populated from nextLifecycleDateTime in directory/subscriptions
 - auto_renew is populated from autoRenew in directory/subscriptions
-- contract_term is populated from subscriptionTermInfo.termDuration
-- known termDuration values are mapped to human-readable labels
+- auto_renew falls back to the status field ("Enabled" = True)
 - fields are preserved when directory/subscriptions call fails
 - _parse_subscription_date handles valid and invalid input
 """
@@ -19,9 +18,7 @@ import pytest
 from app.services import m365 as m365_service
 from app.services.m365 import (
     _coerce_optional_bool,
-    _normalise_contract_term,
     _parse_subscription_date,
-    _TERM_DURATION_LABELS,
 )
 
 
@@ -63,24 +60,6 @@ def test_coerce_optional_bool_handles_strings() -> None:
     assert _coerce_optional_bool("unknown") is None
 
 
-def test_normalise_contract_term_handles_aliases() -> None:
-    assert _normalise_contract_term("P1Y") == "Annual"
-    assert _normalise_contract_term("monthly") == "Monthly"
-    assert _normalise_contract_term(None) is None
-
-
-# ---------------------------------------------------------------------------
-# _TERM_DURATION_LABELS mappings
-# ---------------------------------------------------------------------------
-
-
-def test_term_duration_labels_known_values() -> None:
-    assert _TERM_DURATION_LABELS["P1M"] == "Monthly"
-    assert _TERM_DURATION_LABELS["P1Y"] == "Annual"
-    assert _TERM_DURATION_LABELS["P2Y"] == "2-Year"
-    assert _TERM_DURATION_LABELS["P3Y"] == "3-Year"
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -114,7 +93,6 @@ def _make_license(
     license_id: int,
     platform: str,
     expiry_date: date | None = None,
-    contract_term: str | None = "",
     auto_renew: bool | None = None,
 ) -> dict[str, Any]:
     return {
@@ -124,7 +102,7 @@ def _make_license(
         "platform": platform,
         "count": 5,
         "expiry_date": expiry_date,
-        "contract_term": contract_term,
+        "contract_term": None,
         "auto_renew": auto_renew,
     }
 
@@ -184,7 +162,6 @@ async def test_sync_populates_expiry_date_from_subscription():
     assert update_calls, "update_license should have been called"
     assert update_calls[0]["expiry_date"] == date(2027, 3, 1)
     assert update_calls[0]["auto_renew"] is True
-    assert update_calls[0]["contract_term"] == "Annual"
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +214,7 @@ async def test_sync_populates_auto_renew_false():
 
 @pytest.mark.anyio("asyncio")
 async def test_sync_preserves_fields_when_subscriptions_call_fails():
-    """When directory/subscriptions raises, existing expiry_date and contract_term are kept."""
+    """When directory/subscriptions raises, existing expiry_date is kept."""
     existing_expiry = date(2026, 12, 31)
     m365_skus = [_make_sku("SKU_C", "sku-id-c")]
     update_calls: list[dict[str, Any]] = []
@@ -259,7 +236,7 @@ async def test_sync_preserves_fields_when_subscriptions_call_fails():
         patch.object(
             m365_service.license_repo,
             "get_license_by_company_and_sku",
-            AsyncMock(return_value=_make_license(1, "SKU_C", expiry_date=existing_expiry, contract_term="Annual")),
+            AsyncMock(return_value=_make_license(1, "SKU_C", expiry_date=existing_expiry)),
         ),
         patch.object(m365_service.license_repo, "update_license", side_effect=capture_update),
         patch.object(m365_service.license_repo, "record_usage_if_changed", AsyncMock(return_value=False)),
@@ -271,7 +248,6 @@ async def test_sync_preserves_fields_when_subscriptions_call_fails():
 
     assert update_calls, "update_license should have been called even after subscription fetch failure"
     assert update_calls[0]["expiry_date"] == existing_expiry
-    assert update_calls[0]["contract_term"] == "Annual"
     assert update_calls[0]["auto_renew"] is None
 
 
@@ -282,9 +258,9 @@ async def test_sync_preserves_fields_when_subscriptions_call_fails():
 
 @pytest.mark.anyio("asyncio")
 async def test_sync_creates_license_with_subscription_data():
-    """New licenses should be created with expiry_date, auto_renew, contract_term from subscription."""
+    """New licenses should be created with expiry_date and auto_renew from subscription."""
     m365_skus = [_make_sku("SKU_NEW", "sku-id-new")]
-    subscriptions = [_make_subscription("sku-id-new", "2026-09-15T00:00:00Z", True, "P1M")]
+    subscriptions = [_make_subscription("sku-id-new", "2026-09-15T00:00:00Z", True)]
     create_calls: list[dict[str, Any]] = []
 
     async def fake_graph_get(token, url):
@@ -317,7 +293,7 @@ async def test_sync_creates_license_with_subscription_data():
     assert create_calls, "create_license should have been called"
     assert create_calls[0]["expiry_date"] == date(2026, 9, 15)
     assert create_calls[0]["auto_renew"] is True
-    assert create_calls[0]["contract_term"] == "Monthly"
+    assert create_calls[0]["contract_term"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +306,7 @@ async def test_sync_uses_sku_part_number_fallback():
     """When directory/subscriptions has no skuId, match by skuPartNumber instead."""
     m365_skus = [_make_sku("SPB", "sku-id-spb")]
     # Subscription without a skuId – only skuPartNumber is present.
-    subscriptions = [_make_subscription_by_part("SPB", "2027-06-01T00:00:00Z", True, "P1Y")]
+    subscriptions = [_make_subscription_by_part("SPB", "2027-06-01T00:00:00Z", True)]
     update_calls: list[dict[str, Any]] = []
 
     async def fake_graph_get(token, url):
@@ -363,7 +339,6 @@ async def test_sync_uses_sku_part_number_fallback():
 
     assert update_calls, "update_license should have been called"
     assert update_calls[0]["auto_renew"] is True
-    assert update_calls[0]["contract_term"] == "Annual"
     assert update_calls[0]["expiry_date"] == date(2027, 6, 1)
 
 
@@ -377,7 +352,7 @@ async def test_sync_sku_id_case_insensitive_match():
     """skuId matching is case-insensitive: uppercase in subscriptions, lowercase in subscribedSkus."""
     m365_skus = [_make_sku("SKU_X", "abc-123-def")]
     # Subscription has the same UUID but in uppercase.
-    subscriptions = [_make_subscription("ABC-123-DEF", "2028-01-01T00:00:00Z", False, "P1Y")]
+    subscriptions = [_make_subscription("ABC-123-DEF", "2028-01-01T00:00:00Z", False)]
     update_calls: list[dict[str, Any]] = []
 
     async def fake_graph_get(token, url):
@@ -410,19 +385,17 @@ async def test_sync_sku_id_case_insensitive_match():
 
     assert update_calls, "update_license should have been called"
     assert update_calls[0]["auto_renew"] is False
-    assert update_calls[0]["contract_term"] == "Annual"
 
 
 @pytest.mark.anyio("asyncio")
 async def test_sync_uses_auto_renew_enabled_and_commitment_term_fallbacks():
-    """Variant Graph payload keys should still populate auto-renew and contract term."""
+    """Variant Graph payload keys should still populate auto-renew via autoRenewEnabled."""
     m365_skus = [_make_sku("SKU_VAR", "sku-id-var")]
     subscriptions = [
         {
             "skuId": "sku-id-var",
             "nextLifecycleDateTime": "2028-05-01T00:00:00Z",
             "autoRenewEnabled": "false",
-            "commitmentTerm": "annual",
         }
     ]
     update_calls: list[dict[str, Any]] = []
@@ -457,4 +430,48 @@ async def test_sync_uses_auto_renew_enabled_and_commitment_term_fallbacks():
 
     assert update_calls, "update_license should have been called"
     assert update_calls[0]["auto_renew"] is False
-    assert update_calls[0]["contract_term"] == "Annual"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_auto_renew_from_status_enabled():
+    """When autoRenew/autoRenewEnabled are absent, status='Enabled' should set auto_renew=True."""
+    m365_skus = [_make_sku("SKU_ST", "sku-id-st")]
+    subscriptions = [
+        {
+            "skuId": "sku-id-st",
+            "nextLifecycleDateTime": "2028-06-01T00:00:00Z",
+            "status": "Enabled",
+        }
+    ]
+    update_calls: list[dict[str, Any]] = []
+
+    async def fake_graph_get(token, url):
+        if "subscribedSkus" in url:
+            return {"value": m365_skus}
+        return {"value": []}
+
+    async def capture_update(license_id, **kwargs):
+        update_calls.append(kwargs)
+        return _make_license(license_id, kwargs["platform"])
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", side_effect=fake_graph_get),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=subscriptions)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.sku_friendly_repo, "get_friendly_name", AsyncMock(return_value=None)),
+        patch.object(
+            m365_service.license_repo,
+            "get_license_by_company_and_sku",
+            AsyncMock(return_value=_make_license(1, "SKU_ST")),
+        ),
+        patch.object(m365_service.license_repo, "update_license", side_effect=capture_update),
+        patch.object(m365_service.license_repo, "record_usage_if_changed", AsyncMock(return_value=False)),
+        patch.object(m365_service, "_sync_staff_assignments", AsyncMock()),
+        patch.object(m365_service.license_repo, "list_company_licenses", AsyncMock(return_value=[])),
+        patch.object(m365_service, "log_info", lambda *a, **kw: None),
+    ):
+        await m365_service.sync_company_licenses(1)
+
+    assert update_calls, "update_license should have been called"
+    assert update_calls[0]["auto_renew"] is True

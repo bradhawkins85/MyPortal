@@ -266,7 +266,7 @@
           <table class="report-table">
             <thead><tr>
               <th>Name</th><th>Total</th><th>Allocated</th>
-              <th>Expiry</th><th>Contract term</th><th>Auto-renew</th>
+              <th>Expiry</th><th>Auto-renew</th>
             </tr></thead>
             <tbody>
               {% for lic in licenses %}
@@ -275,7 +275,6 @@
                   <td>{{ lic.total }}</td>
                   <td>{{ lic.allocated }}</td>
                   <td>{{ lic.expiry_date or '—' }}</td>
-                  <td>{{ lic.contract_term or '—' }}</td>
                   <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
                 </tr>
               {% endfor %}
@@ -636,7 +635,8 @@
           {% if licenses %}
             <table class="report-table">
               <thead><tr>
-                <th>Name</th><th>Total</th><th>Allocated</th><th>Assigned Staff</th>
+                <th>Name</th><th>Total</th><th>Allocated</th><th>Available</th>
+                <th>Usage %</th><th>Expiry</th><th>Auto-renew</th>
               </tr></thead>
               <tbody>
                 {% for lic in licenses %}
@@ -644,13 +644,10 @@
                     <td>{{ lic.name }}</td>
                     <td>{{ lic.total }}</td>
                     <td>{{ lic.allocated }}</td>
-                    <td>
-                      {% if lic.staff %}
-                        {% for member in lic.staff %}{{ member.name }}{% if not loop.last %}<br>{% endif %}{% endfor %}
-                      {% else %}
-                        —
-                      {% endif %}
-                    </td>
+                    <td>{{ lic.available }}</td>
+                    <td>{{ lic.usage_percentage }}%</td>
+                    <td>{{ lic.expiry_date or '—' }}</td>
+                    <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
                   </tr>
                 {% endfor %}
               </tbody>
