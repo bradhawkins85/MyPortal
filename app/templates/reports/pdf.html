@@ -36,7 +36,11 @@
       padding: 55mm 20mm 20mm;
       min-height: 297mm;
       text-align: center;
+      {% if pdf_cover_image_data_uri %}
+      background: url("{{ pdf_cover_image_data_uri }}") center center / cover no-repeat;
+      {% else %}
       background: linear-gradient(180deg, #0e4f8a 0%, #0e4f8a 55%, #ffffff 55%);
+      {% endif %}
       color: #ffffff;
       page-break-after: always;
     }
@@ -55,7 +59,11 @@
     }
     .cover__footer {
       margin-top: 80mm;
+      {% if pdf_cover_image_data_uri %}
+      color: #ffffff;
+      {% else %}
       color: #1f2937;
+      {% endif %}
       font-size: 9pt;
     }
     .report-section {
