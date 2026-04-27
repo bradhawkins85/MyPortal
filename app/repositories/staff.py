@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, time, timezone
 from typing import Any, Iterable, List, Sequence
 
 from app.core.database import db
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
-
-# Matches staff emails auto-generated for package mailbox accounts,
-# e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae@tenant.onmicrosoft.com
-_PACKAGE_STAFF_RE = re.compile(
-    r"^package_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@",
-    re.IGNORECASE,
-)
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
