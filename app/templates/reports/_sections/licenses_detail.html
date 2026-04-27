@@ -12,12 +12,7 @@
             <th>Name</th>
             <th>Total</th>
             <th>Allocated</th>
-            <th>Available</th>
-            <th>Usage %</th>
-            <th>Expiry</th>
-            <th>Contract term</th>
-            <th>Auto-renew</th>
-            <th>Notes</th>
+            <th>Assigned Staff</th>
           </tr>
         </thead>
         <tbody>
@@ -26,21 +21,13 @@
               <td>{{ lic.name }}</td>
               <td>{{ lic.total }}</td>
               <td>{{ lic.allocated }}</td>
-              <td>{{ lic.available }}</td>
               <td>
-                {% set pct = lic.usage_percentage | default(0) %}
-                {% if pct >= 90 %}
-                  <span class="status status--danger">{{ pct }}%</span>
-                {% elif pct >= 75 %}
-                  <span class="status status--warning">{{ pct }}%</span>
+                {% if lic.staff %}
+                  {{ lic.staff | map(attribute='name') | join(', ') }}
                 {% else %}
-                  {{ pct }}%
+                  —
                 {% endif %}
               </td>
-              <td>{{ lic.expiry_date or '—' }}</td>
-              <td>{{ lic.contract_term or '—' }}</td>
-              <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
-              <td>{{ lic.notes or '—' }}</td>
             </tr>
           {% endfor %}
         </tbody>
