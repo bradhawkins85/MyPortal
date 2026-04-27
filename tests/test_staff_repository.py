@@ -113,3 +113,149 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
     assert "ORDER BY s.updated_at ASC, s.id ASC" in (dummy_db.last_sql or "")
     assert "LIMIT %s" in (dummy_db.last_sql or "")
     assert dummy_db.last_params[-1] == 100
+
+
+@pytest.mark.anyio
+async def test_list_staff_exclude_package_staff_filters_package_emails(monkeypatch):
+    """list_staff with exclude_package_staff=True removes staff whose email matches package_UUID@ pattern."""
+    dummy_rows = [
+        {
+            "id": 1,
+            "company_id": 3,
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@example.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+        {
+            "id": 2,
+            "company_id": 3,
+            "first_name": "Unknown",
+            "last_name": "",
+            "email": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae@tenant.onmicrosoft.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+        {
+            "id": 3,
+            "company_id": 3,
+            "first_name": "Unknown",
+            "last_name": "",
+            "email": "Package_61fd5e57-4ae4-431b-9f34-16dfeed01fbb@TENANT.COM",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+    monkeypatch.setattr(staff, "staff_custom_fields_repo", _DummyCustomFieldsRepo())
+
+    result = await staff.list_staff(3, enabled=True, exclude_package_staff=True)
+
+    assert len(result) == 1
+    assert result[0]["email"] == "alice@example.com"
+
+
+@pytest.mark.anyio
+async def test_list_staff_without_exclude_package_staff_keeps_all(monkeypatch):
+    """list_staff without exclude_package_staff keeps package_ staff in results."""
+    dummy_rows = [
+        {
+            "id": 1,
+            "company_id": 3,
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@example.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+        {
+            "id": 2,
+            "company_id": 3,
+            "first_name": "Unknown",
+            "last_name": "",
+            "email": "package_9024cbae-6e9a-4cee-934e-5f05143cd7ae@tenant.onmicrosoft.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+    monkeypatch.setattr(staff, "staff_custom_fields_repo", _DummyCustomFieldsRepo())
+
+    result = await staff.list_staff(3, enabled=True, exclude_package_staff=False)
+
+    assert len(result) == 2
+
+
+@pytest.mark.anyio
+async def test_list_staff_exclude_package_staff_keeps_non_uuid_package_prefix(monkeypatch):
+    """list_staff keeps staff whose email starts with 'package_' but isn't a UUID pattern."""
+    dummy_rows = [
+        {
+            "id": 1,
+            "company_id": 3,
+            "first_name": "Bob",
+            "last_name": "Jones",
+            "email": "package_not-a-uuid@example.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+    monkeypatch.setattr(staff, "staff_custom_fields_repo", _DummyCustomFieldsRepo())
+
+    result = await staff.list_staff(3, enabled=True, exclude_package_staff=True)
+
+    assert len(result) == 1
+    assert result[0]["email"] == "package_not-a-uuid@example.com"

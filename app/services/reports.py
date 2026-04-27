@@ -26,6 +26,7 @@ from app.repositories import report_sections as report_sections_repo
 from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.services.m365 import PACKAGE_MAILBOX_RE
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +172,7 @@ async def _build_assets(company_id: int) -> dict[str, Any]:
 
 
 async def _build_staff(company_id: int) -> dict[str, Any]:
-    total = await staff_repo.count_staff(company_id, enabled=True)
+    total = await staff_repo.count_staff(company_id, enabled=True, exclude_package_staff=True)
     return {"total_active": int(total)}
 
 
@@ -228,7 +229,6 @@ async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
         FROM m365_mailboxes
         WHERE company_id = %s AND mailbox_type = %s
         ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
-        LIMIT 5
     """
     try:
         user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
@@ -239,9 +239,15 @@ async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
     except Exception:  # pragma: no cover - defensive when table missing
         shared_rows = []
 
+    def _is_package(row: Any) -> bool:
+        return bool(PACKAGE_MAILBOX_RE.match(row.get("display_name") or ""))
+
+    user_filtered = [r for r in (user_rows or []) if not _is_package(r)][:5]
+    shared_filtered = [r for r in (shared_rows or []) if not _is_package(r)][:5]
+
     return {
-        "user_mailboxes": [_to_mailbox_row(r) for r in user_rows or []],
-        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_rows or []],
+        "user_mailboxes": [_to_mailbox_row(r) for r in user_filtered],
+        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_filtered],
     }
 
 
@@ -604,7 +610,9 @@ async def _build_assets_detail(company_id: int) -> dict[str, Any]:
 
 async def _build_staff_detail(company_id: int) -> dict[str, Any]:
     """Full list of enabled staff for the detail page."""
-    rows = await staff_repo.list_staff(company_id, enabled=True, page_size=500)
+    rows = await staff_repo.list_staff(
+        company_id, enabled=True, exclude_package_staff=True, page_size=500
+    )
     staff: list[dict[str, Any]] = []
     for row in rows:
         staff.append(
@@ -676,11 +684,14 @@ async def _build_top_mailboxes_detail(company_id: int) -> dict[str, Any]:
     except Exception:  # pragma: no cover
         shared_rows = []
 
+    user_filtered = [r for r in (user_rows or []) if not PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
+    shared_filtered = [r for r in (shared_rows or []) if not PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
+
     return {
-        "user_mailboxes": [_to_mailbox_row(r) for r in user_rows or []],
-        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_rows or []],
-        "total_user": len(user_rows or []),
-        "total_shared": len(shared_rows or []),
+        "user_mailboxes": [_to_mailbox_row(r) for r in user_filtered],
+        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_filtered],
+        "total_user": len(user_filtered),
+        "total_shared": len(shared_filtered),
     }
 
 
