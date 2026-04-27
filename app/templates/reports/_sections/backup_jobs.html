@@ -1,0 +1,23 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="backup_jobs">
+  <header class="card__header report-section__header">
+    <h2>Backup history</h2>
+    <span class="report-section__meta">
+      {{ section.data.total_jobs or 0 }} job{{ '' if section.data.total_jobs == 1 else 's' }}
+      ({{ section.data.active_jobs or 0 }} active) — last 30 days
+    </span>
+  </header>
+  <div class="card__body">
+    {{ counter_strip(
+      total=section.data.total_events,
+      total_label='Reported events',
+      items=[
+        {'label': 'Pass', 'value': section.data.counts.pass | default(0), 'variant': 'success'},
+        {'label': 'Warn', 'value': section.data.counts.warn | default(0), 'variant': 'warning'},
+        {'label': 'Fail', 'value': section.data.counts.fail | default(0), 'variant': 'danger'},
+        {'label': 'Unknown', 'value': section.data.counts.unknown | default(0), 'variant': 'neutral'},
+        {'label': 'Pass rate', 'value': (section.data.pass_percentage | default(0)) ~ '%', 'variant': 'info'},
+      ]
+    ) }}
+  </div>
+</section>

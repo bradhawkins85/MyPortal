@@ -60,6 +60,7 @@ from app.api.routes import (
     audit_logs,
     auth,
     automations as automations_api,
+    backup_jobs as backup_jobs_api,
     bc5,
     bc11,
     bcp,
@@ -207,6 +208,7 @@ from app.services import xero as xero_service
 from app.services import issues as issues_service
 from app.services import reports as reports_service
 from app.services import service_status as service_status_service
+from app.services import backup_jobs as backup_jobs_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
 from app.services.redis import close_redis_client, get_redis_client
@@ -754,6 +756,7 @@ app.add_middleware(
     exempt_paths=(
         "/api/webhooks/smtp2go",
         "/api/integration-modules/uptimekuma/alerts",
+        "/api/backup-status",
     ),
 )
 
@@ -1016,6 +1019,7 @@ app.include_router(mcp_api.copilot_router)
 app.include_router(system.router)
 app.include_router(uptimekuma.router)
 app.include_router(service_status_api.router)
+app.include_router(backup_jobs_api.router)
 app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
@@ -12383,6 +12387,205 @@ async def admin_service_status_check_now(request: Request, service_id: int):
     paths and bookmarked/admin-proxied URLs.
     """
     return await _admin_service_status_check_now_handler(request, service_id)
+
+
+# ---------------------------------------------------------------------------
+# Backup History admin pages
+# ---------------------------------------------------------------------------
+
+
+def _backup_status_webhook_url(request: Request) -> str:
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/api/backup-status"
+
+
+@app.head("/admin/backup-jobs", response_class=HTMLResponse)
+@app.get("/admin/backup-jobs", response_class=HTMLResponse)
+async def admin_backup_jobs_page(request: Request):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    company_filter_raw = (request.query_params.get("company_id") or "").strip()
+    status_filter = (request.query_params.get("status_filter") or "").strip().lower()
+    company_filter: int | None = None
+    if company_filter_raw:
+        try:
+            company_filter = int(company_filter_raw)
+        except ValueError:
+            company_filter = None
+
+    jobs = await backup_jobs_service.list_jobs_with_latest(
+        company_id=company_filter, include_inactive=True
+    )
+    if status_filter and status_filter in backup_jobs_service.KNOWN_STATUSES:
+        jobs = [job for job in jobs if job.get("today_status") == status_filter]
+
+    summary = backup_jobs_service.summarise_jobs(jobs)
+    companies = await company_repo.list_companies()
+    company_lookup = {
+        int(company["id"]): company.get("name")
+        for company in companies
+        if company.get("id") is not None
+    }
+
+    job_id_param = request.query_params.get("jobId")
+    editing_job: dict[str, Any] | None = None
+    if job_id_param:
+        try:
+            editing_job = await backup_jobs_service.get_job(int(job_id_param))
+        except (TypeError, ValueError):
+            editing_job = None
+
+    history = await backup_jobs_service.build_history_grid(
+        company_id=company_filter, days=14, include_inactive=True
+    )
+
+    extra = {
+        "title": "Backup history",
+        "backup_jobs": jobs,
+        "backup_jobs_summary": summary,
+        "backup_status_definitions": backup_jobs_service.STATUS_DEFINITIONS,
+        "backup_status_default": backup_jobs_service.DEFAULT_STATUS,
+        "backup_companies": companies,
+        "backup_company_lookup": company_lookup,
+        "backup_company_filter": company_filter,
+        "backup_status_filter": status_filter,
+        "backup_editing_job": editing_job,
+        "backup_history": history,
+        "backup_status_url": _backup_status_webhook_url(request),
+    }
+    return await _render_template("admin/backup_jobs.html", request, user, extra=extra)
+
+
+def _extract_backup_job_form(form: FormData) -> dict[str, Any]:
+    company_id_raw = (form.get("company_id") or "").strip()
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        company_id = 0
+    return {
+        "company_id": company_id,
+        "name": (form.get("name") or "").strip(),
+        "description": (form.get("description") or "").strip() or None,
+        "is_active": form.get("is_active") in {"on", "true", "1", "yes"},
+    }
+
+
+@app.post("/admin/backup-jobs", response_class=HTMLResponse)
+async def admin_create_backup_job(request: Request):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    payload = _extract_backup_job_form(form)
+    try:
+        job = await backup_jobs_service.create_job(
+            company_id=payload["company_id"],
+            name=payload["name"],
+            description=payload["description"],
+            is_active=payload["is_active"],
+            created_by=int(user.get("id")) if user.get("id") else None,
+        )
+    except ValueError as exc:
+        url = f"/admin/backup-jobs?error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    await audit_service.log_action(
+        action="backup_job.create",
+        user_id=user.get("id"),
+        entity_type="backup_job",
+        entity_id=job["id"],
+        metadata={"company_id": job["company_id"], "name": job["name"]},
+        request=request,
+    )
+    return RedirectResponse(
+        url=f"/admin/backup-jobs?success={quote('Backup job created.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/backup-jobs/{job_id}", response_class=HTMLResponse)
+async def admin_update_backup_job(request: Request, job_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    payload = _extract_backup_job_form(form)
+    try:
+        updated = await backup_jobs_service.update_job(
+            job_id,
+            company_id=payload["company_id"] or None,
+            name=payload["name"],
+            description=payload["description"],
+            is_active=payload["is_active"],
+        )
+    except ValueError as exc:
+        url = f"/admin/backup-jobs?jobId={job_id}&error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    if not updated:
+        url = f"/admin/backup-jobs?error={quote('Backup job not found.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    await audit_service.log_action(
+        action="backup_job.update",
+        user_id=user.get("id"),
+        entity_type="backup_job",
+        entity_id=job_id,
+        metadata={
+            "company_id": updated["company_id"],
+            "name": updated["name"],
+            "is_active": updated["is_active"],
+        },
+        request=request,
+    )
+    return RedirectResponse(
+        url=f"/admin/backup-jobs?success={quote('Backup job updated.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/backup-jobs/{job_id}/delete", response_class=HTMLResponse)
+async def admin_delete_backup_job(request: Request, job_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        await backup_jobs_service.delete_job(job_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        url = f"/admin/backup-jobs?error={quote(str(exc))}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    await audit_service.log_action(
+        action="backup_job.delete",
+        user_id=user.get("id"),
+        entity_type="backup_job",
+        entity_id=job_id,
+        request=request,
+    )
+    return RedirectResponse(
+        url=f"/admin/backup-jobs?success={quote('Backup job deleted.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/backup-jobs/{job_id}/regenerate-token", response_class=HTMLResponse)
+async def admin_regenerate_backup_job_token(request: Request, job_id: int):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    updated = await backup_jobs_service.regenerate_token(job_id)
+    if not updated:
+        url = f"/admin/backup-jobs?error={quote('Backup job not found.')}"
+        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    await audit_service.log_action(
+        action="backup_job.regenerate_token",
+        user_id=user.get("id"),
+        entity_type="backup_job",
+        entity_id=job_id,
+        request=request,
+    )
+    return RedirectResponse(
+        url=f"/admin/backup-jobs?jobId={job_id}&success={quote('Token regenerated.')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/admin/profile", response_class=HTMLResponse)

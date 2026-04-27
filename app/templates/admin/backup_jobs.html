@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">Backup history</span>
+    <span class="header__title-meta">Manage per-company backup jobs and review reported status events.</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "View report", "type": "link", "href": "/reports/company-overview"},
+    {"label": "API docs", "type": "link", "href": "/api/openapi.json", "attrs": {"target": "_blank", "rel": "noopener"}}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+{% set success = request.query_params.get('success') %}
+{% set error = request.query_params.get('error') %}
+
+{% if success %}
+  <div class="card card--panel card--success" role="status">
+    <div class="card__body">{{ success }}</div>
+  </div>
+{% endif %}
+{% if error %}
+  <div class="card card--panel card--danger" role="alert">
+    <div class="card__body">{{ error }}</div>
+  </div>
+{% endif %}
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Today's status</h2>
+      <p class="card__subtitle">Each active job receives an <em>Unknown</em> event automatically each day; the status reported by the backup script overrides it.</p>
+    </div>
+    {% set strip_items = [] %}
+    {% for definition in backup_status_definitions %}
+      {% set _ = strip_items.append({
+        "label": definition.label,
+        "value": backup_jobs_summary.by_status.get(definition.value, 0),
+        "variant": ('success' if definition.value == 'pass'
+                    else 'warning' if definition.value == 'warn'
+                    else 'danger' if definition.value == 'fail'
+                    else 'neutral'),
+      }) %}
+    {% endfor %}
+    {{ counter_strip(strip_items, total=backup_jobs_summary.total, total_label='Jobs') }}
+  </header>
+
+  <div class="card__body">
+    <form method="get" action="/admin/backup-jobs" class="table-toolbar">
+      <div class="table-toolbar__field">
+        <label for="filter-company">Company</label>
+        <select id="filter-company" name="company_id" class="form-input" onchange="this.form.submit()">
+          <option value="">All companies</option>
+          {% for company in backup_companies %}
+            <option value="{{ company.id }}" {% if backup_company_filter == company.id %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="table-toolbar__field">
+        <label for="filter-status">Status</label>
+        <select id="filter-status" name="status_filter" class="form-input" onchange="this.form.submit()">
+          <option value="">All statuses</option>
+          {% for definition in backup_status_definitions %}
+            <option value="{{ definition.value }}" {% if backup_status_filter == definition.value %}selected{% endif %}>{{ definition.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="table-toolbar__field">
+        <a class="button button--ghost button--small" href="/admin/backup-jobs">Reset filters</a>
+      </div>
+    </form>
+
+    <div class="table-wrapper">
+      <table class="table" id="backup-jobs-table" data-table data-table-id="backup-jobs">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="company">Company</th>
+            <th scope="col" data-sort="string" data-column-key="name">Job</th>
+            <th scope="col" data-sort="string" data-column-key="today">Today</th>
+            <th scope="col" data-sort="string" data-column-key="latest">Last reported</th>
+            <th scope="col" data-sort="string" data-column-key="active">Active</th>
+            <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in backup_jobs %}
+            {% set today_status = job.today_status or backup_status_default %}
+            {% set today_variant = ('success' if today_status == 'pass'
+                                    else 'warning' if today_status == 'warn'
+                                    else 'danger' if today_status == 'fail'
+                                    else 'neutral') %}
+            {% set latest_event = job.latest_event %}
+            <tr>
+              <td data-label="Company" data-column-key="company">
+                {{ backup_company_lookup.get(job.company_id, 'Company #' ~ job.company_id) }}
+              </td>
+              <td data-label="Job" data-column-key="name">
+                <div><strong>{{ job.name }}</strong></div>
+                {% if job.description %}
+                  <div class="table__meta">{{ job.description }}</div>
+                {% endif %}
+              </td>
+              <td data-label="Today" data-column-key="today">
+                <span class="status status--{{ today_variant }}">{{ today_status | title }}</span>
+                {% if job.today_event and job.today_event.status_message %}
+                  <div class="table__meta">{{ job.today_event.status_message }}</div>
+                {% endif %}
+              </td>
+              <td data-label="Last reported" data-column-key="latest">
+                {% if latest_event and latest_event.reported_at %}
+                  <span data-utc="{{ latest_event.reported_at.isoformat() if latest_event.reported_at.__class__.__name__ == 'datetime' else latest_event.reported_at }}">{{ latest_event.reported_at }}</span>
+                {% elif latest_event and latest_event.event_date %}
+                  {{ latest_event.event_date }}
+                {% else %}
+                  <span class="text-muted">No reports yet</span>
+                {% endif %}
+              </td>
+              <td data-label="Active" data-column-key="active">
+                {% if job.is_active %}
+                  <span class="status status--success">Active</span>
+                {% else %}
+                  <span class="status status--neutral">Disabled</span>
+                {% endif %}
+              </td>
+              <td class="table__actions" data-column-key="actions">
+                <div class="action-menu">
+                  <a class="button button--ghost button--small" href="/admin/backup-jobs?jobId={{ job.id }}">Edit</a>
+                  <form action="/admin/backup-jobs/{{ job.id }}/regenerate-token" method="post" class="inline-form" data-confirm="Regenerate the JobID token? Existing scripts will need to be updated.">
+                    {% include "partials/csrf.html" %}
+                    <button type="submit" class="button button--ghost button--small">New token</button>
+                  </form>
+                  <form action="/admin/backup-jobs/{{ job.id }}/delete" method="post" class="inline-form" data-confirm="Delete this backup job and all of its events?">
+                    {% include "partials/csrf.html" %}
+                    <button type="submit" class="button button--ghost button--danger button--small">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="table__empty">No backup jobs match the current filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Last {{ backup_history.dates | length }} days</h2>
+      <p class="card__subtitle">Cells are colour-coded by reported status.</p>
+    </div>
+  </header>
+  <div class="card__body">
+    {% if backup_history.rows %}
+      <div class="table-wrapper">
+        <table class="table backup-grid">
+          <thead>
+            <tr>
+              <th scope="col">Job</th>
+              {% for day in backup_history.dates %}
+                <th scope="col" class="backup-grid__day">{{ day.strftime('%d %b') }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in backup_history.rows %}
+              <tr>
+                <td>
+                  <div><strong>{{ row.job.name }}</strong></div>
+                  <div class="table__meta">{{ backup_company_lookup.get(row.job.company_id, 'Company #' ~ row.job.company_id) }}</div>
+                </td>
+                {% for cell in row.events %}
+                  <td class="backup-grid__cell" title="{{ cell.date }} — {{ cell.label }}{% if cell.message %}: {{ cell.message }}{% endif %}">
+                    <span class="status status--{{ cell.variant }} backup-grid__pill">{{ cell.label[0] }}</span>
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted">No backup jobs configured yet.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">{{ 'Update backup job' if backup_editing_job else 'Add backup job' }}</h2>
+      <p class="card__subtitle">{{ 'Modify the selected backup job.' if backup_editing_job else 'Create a new backup job for a company. The unique JobID is generated automatically.' }}</p>
+    </div>
+  </header>
+  <div class="card__body card__body--stacked">
+    <form
+      action="{{ '/admin/backup-jobs/' ~ backup_editing_job.id if backup_editing_job else '/admin/backup-jobs' }}"
+      method="post"
+      class="form"
+    >
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label" for="backup-company">Company</label>
+        <select id="backup-company" name="company_id" class="form-input" required>
+          <option value="">Select a company…</option>
+          {% for company in backup_companies %}
+            <option value="{{ company.id }}" {% if backup_editing_job and backup_editing_job.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="backup-name">Job name</label>
+        <input id="backup-name" name="name" class="form-input" required maxlength="200"
+          value="{{ backup_editing_job.name if backup_editing_job else '' }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="backup-description">Description</label>
+        <textarea id="backup-description" name="description" class="form-input form-input--textarea" rows="3" maxlength="2000">{{ backup_editing_job.description if backup_editing_job else '' }}</textarea>
+        <p class="form-help">Optional, e.g. <em>Veeam — File server, nightly</em>.</p>
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="form-checkbox">
+          <input type="checkbox" name="is_active" {% if backup_editing_job is none or backup_editing_job.is_active %}checked{% endif %} />
+          <span>Active (seed daily Unknown events and accept status reports)</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button button--primary">{{ 'Save changes' if backup_editing_job else 'Create job' }}</button>
+        {% if backup_editing_job %}
+          <a class="button button--ghost" href="/admin/backup-jobs">Cancel</a>
+        {% endif %}
+      </div>
+    </form>
+
+    {% if backup_editing_job %}
+      <div class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <h3 class="card__title">Webhook</h3>
+        </header>
+        <div class="card__body">
+          <p>Have your backup script <code>POST</code> to:</p>
+          <pre><code>{{ backup_status_url }}</code></pre>
+          <p>with this JSON body:</p>
+<pre><code>{
+  "job_id": "{{ backup_editing_job.token }}",
+  "status": "pass",
+  "message": "Optional human readable message"
+}</code></pre>
+          <p class="form-help">Accepted <code>status</code> values: <code>pass</code>, <code>fail</code>, <code>warn</code>, <code>unknown</code> (aliases such as <code>ok</code>, <code>error</code>, <code>warning</code> also work).</p>
+          <details>
+            <summary>PowerShell example</summary>
+<pre><code>$body = @{ job_id = "{{ backup_editing_job.token }}"; status = "pass"; message = "Backup OK" } | ConvertTo-Json
+Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -ContentType "application/json"</code></pre>
+          </details>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+
+{% block styles %}
+<style>
+  .backup-grid__day { text-align: center; font-size: 0.75rem; }
+  .backup-grid__cell { text-align: center; padding: 4px 2px; }
+  .backup-grid__pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6em; height: 1.6em;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  pre { background: var(--color-bg-muted, #f4f4f5); padding: 0.5rem; border-radius: 4px; overflow-x: auto; }
+</style>
+{% endblock %}
