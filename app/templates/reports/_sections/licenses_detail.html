@@ -15,7 +15,6 @@
             <th>Available</th>
             <th>Usage %</th>
             <th>Expiry</th>
-            <th>Contract term</th>
             <th>Auto-renew</th>
             <th>Notes</th>
           </tr>
@@ -38,7 +37,6 @@
                 {% endif %}
               </td>
               <td>{{ lic.expiry_date or '—' }}</td>
-              <td>{{ lic.contract_term or '—' }}</td>
               <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
               <td>{{ lic.notes or '—' }}</td>
             </tr>
