@@ -2028,6 +2028,40 @@ _TERM_DURATION_LABELS: dict[str, str] = {
 }
 
 
+def _coerce_optional_bool(value: Any) -> bool | None:
+    """Convert Graph boolean-like values into a real bool while preserving None."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalised = value.strip().lower()
+        if normalised in {"true", "1", "yes", "y"}:
+            return True
+        if normalised in {"false", "0", "no", "n"}:
+            return False
+    return None
+
+
+def _normalise_contract_term(term_duration: Any) -> str | None:
+    """Map common Graph contract-term values into display labels."""
+    if term_duration is None:
+        return None
+    value = str(term_duration).strip()
+    if not value:
+        return None
+    upper = value.upper()
+    if upper in _TERM_DURATION_LABELS:
+        return _TERM_DURATION_LABELS[upper]
+    if upper in {"MONTHLY", "MONTH"}:
+        return "Monthly"
+    if upper in {"ANNUAL", "YEARLY", "YEAR"}:
+        return "Annual"
+    return value
+
+
 def _parse_subscription_date(value: str | None) -> date | None:
     """Parse an ISO 8601 datetime string returned by the Graph API into a date."""
     if not value:
@@ -2179,14 +2213,16 @@ async def sync_company_licenses(company_id: int) -> None:
         if sub_info:
             api_expiry_date = _parse_subscription_date(sub_info.get("nextLifecycleDateTime"))
             raw_auto_renew = sub_info.get("autoRenew")
-            if raw_auto_renew is not None:
-                api_auto_renew = bool(raw_auto_renew)
+            if raw_auto_renew is None:
+                # Some tenants expose this flag as autoRenewEnabled instead.
+                raw_auto_renew = sub_info.get("autoRenewEnabled")
+            api_auto_renew = _coerce_optional_bool(raw_auto_renew)
             term_info = sub_info.get("subscriptionTermInfo") or {}
             term_duration = term_info.get("termDuration") if isinstance(term_info, dict) else None
-            if term_duration:
-                api_contract_term = _TERM_DURATION_LABELS.get(
-                    str(term_duration).upper(), str(term_duration)
-                )
+            if term_duration is None:
+                # Fallbacks seen in older/variant payloads.
+                term_duration = sub_info.get("termDuration") or sub_info.get("commitmentTerm")
+            api_contract_term = _normalise_contract_term(term_duration)
 
         existing = await license_repo.get_license_by_company_and_sku(
             company_id, part_number
