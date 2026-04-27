@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import math
 import random
@@ -4621,7 +4622,6 @@ async def company_overview_report_page(request: Request):
 
 @app.get("/reports/company-overview.pdf")
 async def company_overview_report_pdf(request: Request):
-    import base64
     from fastapi.responses import StreamingResponse
 
     user, _membership, company, company_id, redirect = await _load_report_context(request)
@@ -4826,9 +4826,8 @@ async def admin_report_cover_image_upload(request: Request, image: UploadFile = 
             uploads_root=_private_uploads_path,
         )
     except HTTPException as exc:
-        from urllib.parse import quote as _quote
         return RedirectResponse(
-            url=f"/admin/reports/pdf-cover-image?error={_quote(exc.detail)}",
+            url=f"/admin/reports/pdf-cover-image?error={quote(exc.detail)}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
