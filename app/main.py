@@ -3764,12 +3764,22 @@ async def on_startup() -> None:
         if migrated:
             log_info("sync_m365_data migration complete", companies_migrated=migrated)
 
+    async def _seed_demo_data_once() -> None:
+        from app.services import demo_seeding as demo_seeding_service
+
+        result = await demo_seeding_service.seed_demo_data()
+        if result.get("skipped"):
+            log_info("Demo data already seeded – skipping startup seed")
+        else:
+            log_info("Demo data seeded on startup", **{k: v for k, v in result.items() if k != "skipped"})
+
     startup_tasks = [
         ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
         ("ensure_default_modules", modules_service.ensure_default_modules()),
         ("refresh_all_schedules", automations_service.refresh_all_schedules()),
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
         ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
+        ("seed_demo_data_once", _seed_demo_data_once()),
     ]
 
     results = await asyncio.gather(
