@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set subs = section.detail_data.subscriptions or [] %}
     {% if subs %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Product</th>
@@ -42,6 +43,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No subscriptions are recorded for this company.</p>
     {% endif %}

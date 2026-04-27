@@ -8,7 +8,8 @@
   <div class="card__body">
     {% set orders = section.detail_data.orders or [] %}
     {% if orders %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Order #</th>
@@ -30,6 +31,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No orders in the past 90 days.</p>
     {% endif %}

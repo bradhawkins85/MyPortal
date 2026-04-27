@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set staff = section.detail_data.staff or [] %}
     {% if staff %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Name</th>
@@ -30,6 +31,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No active staff are recorded for this company.</p>
     {% endif %}

@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set issues = section.data.issues or [] %}
     {% if issues %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Issue</th>
@@ -37,6 +38,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No issues are currently assigned to this company.</p>
     {% endif %}
