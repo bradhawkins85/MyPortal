@@ -2096,10 +2096,9 @@ async def sync_company_licenses(company_id: int) -> None:
     # logged but do not abort the rest of the sync.
     subscription_by_sku_id: dict[str, dict[str, Any]] = {}
     subscription_by_sku_part: dict[str, dict[str, Any]] = {}
+    _subs_url = "https://graph.microsoft.com/v1.0/directory/subscriptions"
     try:
-        subs = await _graph_get_all(
-            access_token, "https://graph.microsoft.com/v1.0/directory/subscriptions"
-        )
+        subs = await _graph_get_all(access_token, _subs_url)
         for sub in subs:
             sku_id = sub.get("skuId")
             sku_part = sub.get("skuPartNumber")
@@ -2107,10 +2106,54 @@ async def sync_company_licenses(company_id: int) -> None:
                 subscription_by_sku_id[str(sku_id).lower()] = sub
             if sku_part:
                 subscription_by_sku_part[str(sku_part).upper()] = sub
-    except Exception:  # noqa: BLE001
-        log_info(
-            "M365 could not retrieve subscription details; expiry/term/auto-renew will not be updated",
+    except M365Error as exc:
+        if exc.http_status == 403:
+            # The Organisation.Read.All permission may not be granted yet on this
+            # app registration (e.g. provisioned before it was added to the required
+            # role list).  Attempt a best-effort permission self-heal then retry.
+            log_warning(
+                "M365 directory/subscriptions returned 403; attempting permission self-heal",
+                company_id=company_id,
+            )
+            try:
+                delegated_token = await acquire_delegated_token(company_id)
+                if delegated_token:
+                    await try_grant_missing_permissions(company_id, access_token=delegated_token)
+                    access_token = await acquire_access_token(
+                        company_id, force_client_credentials=True
+                    )
+                    subs = await _graph_get_all(access_token, _subs_url)
+                    for sub in subs:
+                        sku_id = sub.get("skuId")
+                        sku_part = sub.get("skuPartNumber")
+                        if sku_id:
+                            subscription_by_sku_id[str(sku_id).lower()] = sub
+                        if sku_part:
+                            subscription_by_sku_part[str(sku_part).upper()] = sub
+                else:
+                    log_warning(
+                        "M365 could not retrieve subscription details (403 Forbidden); "
+                        "re-authorise portal access to grant Organisation.Read.All permission",
+                        company_id=company_id,
+                    )
+            except Exception as retry_exc:  # noqa: BLE001
+                log_warning(
+                    "M365 could not retrieve subscription details after permission self-heal; "
+                    "contract term and auto-renew will not be updated",
+                    company_id=company_id,
+                    error=str(retry_exc),
+                )
+        else:
+            log_warning(
+                "M365 could not retrieve subscription details; contract term and auto-renew will not be updated",
+                company_id=company_id,
+                error=str(exc),
+            )
+    except Exception as exc:  # noqa: BLE001
+        log_warning(
+            "M365 could not retrieve subscription details; contract term and auto-renew will not be updated",
             company_id=company_id,
+            error=str(exc),
         )
 
     synced_skus: set[str] = set()
