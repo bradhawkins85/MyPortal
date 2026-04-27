@@ -174,6 +174,7 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
         "warn": 0,
         "error": 0,
         "not_applicable": 0,
+        "unknown": 0,
         "other": 0,
     }
     for row in results:
@@ -183,8 +184,10 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
         else:
             counts["other"] += 1
     total = len(results)
+    # Exclude N/A and unknown from the pass-rate denominator
+    rated_total = total - counts["not_applicable"] - counts["unknown"] - counts["other"]
     passed = counts["pass"]
-    pass_percentage = round((passed / total * 100.0), 1) if total else 0.0
+    pass_percentage = round((passed / rated_total * 100.0), 1) if rated_total else 0.0
     return {
         "total": total,
         "counts": counts,
