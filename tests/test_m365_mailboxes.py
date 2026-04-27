@@ -1650,3 +1650,387 @@ async def test_sync_mailboxes_skips_forwarding_rules_on_403():
     for row in upserted:
         if row["mailbox_type"] == "UserMailbox":
             assert row["forwarding_rule_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Archive mailbox size sync via Exchange Online Get-MailboxStatistics -Archive
+# ---------------------------------------------------------------------------
+
+
+def test_parse_exo_total_item_size_handles_byte_quantified_string():
+    """Display strings with parenthesised byte counts are parsed correctly."""
+    from app.services.m365 import _parse_exo_total_item_size
+
+    assert (
+        _parse_exo_total_item_size("1.5 GB (1,610,612,736 bytes)") == 1_610_612_736
+    )
+    assert _parse_exo_total_item_size("0 B (0 bytes)") == 0
+    assert (
+        _parse_exo_total_item_size("123.45 MB (129,456,789 bytes)") == 129_456_789
+    )
+
+
+def test_parse_exo_total_item_size_handles_dict_and_numeric_inputs():
+    """Nested dicts and plain numeric inputs are normalised to ints."""
+    from app.services.m365 import _parse_exo_total_item_size
+
+    assert _parse_exo_total_item_size({"Value": "2,048"}) == 2048
+    assert (
+        _parse_exo_total_item_size({"value": "5 GB (5,368,709,120 bytes)"})
+        == 5_368_709_120
+    )
+    assert _parse_exo_total_item_size({"ToBytes": 4096}) == 4096
+    assert _parse_exo_total_item_size(1024) == 1024
+    assert _parse_exo_total_item_size("9999") == 9999
+
+
+def test_parse_exo_total_item_size_handles_invalid_inputs():
+    """Unparseable values yield ``None`` rather than raising."""
+    from app.services.m365 import _parse_exo_total_item_size
+
+    assert _parse_exo_total_item_size(None) is None
+    assert _parse_exo_total_item_size("") is None
+    assert _parse_exo_total_item_size("Unlimited") is None
+    assert _parse_exo_total_item_size({}) is None
+    assert _parse_exo_total_item_size(True) is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_archive_mailbox_size_returns_bytes():
+    """A successful Get-MailboxStatistics response yields the archive size in bytes."""
+    from app.services.m365 import _exo_get_archive_mailbox_size
+
+    captured: dict[str, Any] = {}
+
+    class _FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "value": [
+                    {
+                        "DisplayName": "Alice",
+                        "TotalItemSize": "1.5 GB (1,610,612,736 bytes)",
+                    }
+                ]
+            }
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(
+            self,
+            url: str,
+            headers: dict[str, str] | None = None,
+            json: dict[str, Any] | None = None,
+        ):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return _FakeResponse()
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        size = await _exo_get_archive_mailbox_size(
+            "exo-tok", "tenant-1", "user@example.com"
+        )
+
+    assert size == 1_610_612_736
+    assert "InvokeCommand" in captured["url"]
+    assert captured["json"]["CmdletInput"]["CmdletName"] == "Get-MailboxStatistics"
+    assert captured["json"]["CmdletInput"]["Parameters"] == {
+        "Identity": "user@example.com",
+        "Archive": True,
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_archive_mailbox_size_no_archive_returns_none():
+    """Mailboxes without an archive return ``None`` instead of raising."""
+    from app.services.m365 import _exo_get_archive_mailbox_size
+
+    class _FakeResponse:
+        status_code = 400
+        text = (
+            "The mailbox 'user@example.com' isn't enabled for archive."
+        )
+
+        def json(self) -> dict[str, Any]:
+            return {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, *args: Any, **kwargs: Any):
+            return _FakeResponse()
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        size = await _exo_get_archive_mailbox_size(
+            "exo-tok", "tenant-1", "user@example.com"
+        )
+
+    assert size is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exo_get_archive_mailbox_size_403_raises():
+    """A 403 from Exchange Online surfaces as M365Error so callers can short-circuit."""
+    from app.services.m365 import _exo_get_archive_mailbox_size
+
+    class _FakeResponse:
+        status_code = 403
+        text = "Forbidden"
+
+        def json(self) -> dict[str, Any]:
+            return {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, *args: Any, **kwargs: Any):
+            return _FakeResponse()
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        with pytest.raises(M365Error) as exc_info:
+            await _exo_get_archive_mailbox_size(
+                "exo-tok", "tenant-1", "user@example.com"
+            )
+    assert exc_info.value.http_status == 403
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_archive_mailbox_sizes_returns_empty_when_token_unavailable():
+    """When EXO token cannot be acquired the helper degrades silently to {}."""
+    from app.services.m365 import _fetch_exo_archive_mailbox_sizes
+
+    with patch.object(
+        m365_service,
+        "_acquire_exo_access_token",
+        AsyncMock(side_effect=M365Error("no exo")),
+    ):
+        result = await _fetch_exo_archive_mailbox_sizes(1, {"user@example.com"})
+
+    assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_archive_mailbox_sizes_collects_sizes():
+    """Per-mailbox sizes are collected; mailboxes without archives are omitted."""
+    from app.services.m365 import _fetch_exo_archive_mailbox_sizes
+
+    async def fake_get_size(
+        exo_token: str, tenant_id: str, mailbox_email: str
+    ) -> int | None:
+        return {
+            "alice@example.com": 1_000_000,
+            "shared@example.com": 5_000_000,
+        }.get(mailbox_email)
+
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("tok", "tenant")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_archive_mailbox_size",
+            AsyncMock(side_effect=fake_get_size),
+        ),
+    ):
+        result = await _fetch_exo_archive_mailbox_sizes(
+            1,
+            {"alice@example.com", "shared@example.com", "noarchive@example.com"},
+        )
+
+    assert result == {
+        "alice@example.com": 1_000_000,
+        "shared@example.com": 5_000_000,
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_exo_archive_mailbox_sizes_short_circuits_on_403():
+    """A 403 from any mailbox stops further lookups (same permission affects all)."""
+    from app.services.m365 import _fetch_exo_archive_mailbox_sizes
+
+    call_count = 0
+
+    async def fake_get_size(
+        exo_token: str, tenant_id: str, mailbox_email: str
+    ) -> int | None:
+        nonlocal call_count
+        call_count += 1
+        raise M365Error("forbidden", http_status=403)
+
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("tok", "tenant")),
+        ),
+        patch.object(
+            m365_service,
+            "_exo_get_archive_mailbox_size",
+            AsyncMock(side_effect=fake_get_size),
+        ),
+    ):
+        result = await _fetch_exo_archive_mailbox_sizes(
+            1, {"a@example.com", "b@example.com", "c@example.com"}
+        )
+
+    assert result == {}
+    assert call_count == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_overrides_archive_size_from_exchange_online():
+    """Archive sizes from Get-MailboxStatistics override the (zero) report values.
+
+    Microsoft Graph's getMailboxUsageDetail report does not expose archive
+    storage, so the archive_storage_used_bytes value from the report is
+    effectively always 0.  When Exchange Online's Get-MailboxStatistics
+    -Archive cmdlet returns a real size, that value must be persisted and
+    has_archive must be set to True.
+    """
+    report = [
+        # Report says the user has an archive but reports 0 bytes (real-world
+        # Microsoft Graph behaviour).
+        _make_report_entry(
+            "user@example.com",
+            "Alice",
+            storage_bytes=500,
+            archive_bytes=0,
+            has_archive=True,
+        ),
+        # Shared mailbox where the report does not even claim an archive,
+        # but Exchange Online confirms one exists.
+        _make_report_entry(
+            "shared@example.com",
+            "Shared Box",
+            storage_bytes=200,
+            archive_bytes=0,
+            has_archive=False,
+        ),
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    archive_sizes = {
+        "user@example.com": 1_610_612_736,
+        "shared@example.com": 524_288_000,
+    }
+
+    with (
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
+        patch.object(
+            m365_service,
+            "_fetch_exo_archive_mailbox_sizes",
+            AsyncMock(return_value=archive_sizes),
+        ),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    by_upn = {r["user_principal_name"]: r for r in upserted}
+    assert by_upn["user@example.com"]["has_archive"] is True
+    assert by_upn["user@example.com"]["archive_storage_used_bytes"] == 1_610_612_736
+    assert by_upn["shared@example.com"]["has_archive"] is True
+    assert by_upn["shared@example.com"]["archive_storage_used_bytes"] == 524_288_000
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_keeps_report_values_when_exchange_online_unavailable():
+    """When EXO archive lookup returns no data the report-derived values are kept."""
+    report = [
+        _make_report_entry(
+            "user@example.com",
+            "Alice",
+            storage_bytes=500,
+            archive_bytes=200,
+            has_archive=True,
+        ),
+    ]
+    users = [
+        {"id": "u1", "userPrincipalName": "user@example.com", "displayName": "Alice"}
+    ]
+
+    upserted: list[dict[str, Any]] = []
+
+    async def fake_upsert(**kwargs: Any) -> None:
+        upserted.append(kwargs)
+
+    with (
+        patch.object(
+            m365_service, "acquire_access_token", AsyncMock(return_value="tok")
+        ),
+        patch.object(
+            m365_service, "_fetch_mailbox_usage_report", AsyncMock(return_value=report)
+        ),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=users)),
+        patch.object(
+            m365_service, "_count_forwarding_rules", AsyncMock(return_value=0)
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox", side_effect=fake_upsert),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(
+            m365_service, "_get_user_mail_enabled_groups", AsyncMock(return_value=[])
+        ),
+        patch.object(m365_service.m365_repo, "upsert_mailbox_member", AsyncMock()),
+        patch.object(
+            m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()
+        ),
+        patch.object(
+            m365_service,
+            "_fetch_exo_archive_mailbox_sizes",
+            AsyncMock(return_value={}),
+        ),
+    ):
+        await m365_service.sync_mailboxes(1)
+
+    assert upserted[0]["has_archive"] is True
+    assert upserted[0]["archive_storage_used_bytes"] == 200
