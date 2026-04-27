@@ -14,7 +14,10 @@
         color: #666;
       }
     }
-    @page :first { margin: 0; }
+    @page :first {
+      margin: 0;
+      @bottom-center { content: none; }
+    }
     * { box-sizing: border-box; }
     body {
       font-family: Arial, Helvetica, sans-serif;
@@ -31,7 +34,7 @@
     .cover {
       page: cover;
       padding: 55mm 20mm 20mm;
-      min-height: 257mm;
+      min-height: 297mm;
       text-align: center;
       background: linear-gradient(180deg, #0e4f8a 0%, #0e4f8a 55%, #ffffff 55%);
       color: #ffffff;
@@ -65,6 +68,8 @@
       width: 100%;
       border-collapse: collapse;
       margin-top: 6pt;
+      table-layout: fixed;
+      word-break: break-word;
     }
     table.report-table th, table.report-table td {
       border: 1px solid #d1d5db;
@@ -449,9 +454,10 @@
 
     {% for section in report.sections if section.enabled and section.detailed %}
       {% set dd = section.detail_data %}
+      {% set pb = '' if loop.first else 'page-break-before: always;' %}
 
       {% if section.key == 'assets' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Assets — Full list</h2>
           {% set assets = dd.assets or [] %}
           {% if assets %}
@@ -480,7 +486,7 @@
         </section>
 
       {% elif section.key == 'staff' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Staff — Full list</h2>
           {% set staff = dd.staff or [] %}
           {% if staff %}
@@ -506,7 +512,7 @@
         </section>
 
       {% elif section.key == 'm365_best_practices' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>M365 best practices — Per-check breakdown</h2>
           {% set checks = dd.checks or [] %}
           {% if checks %}
@@ -531,7 +537,7 @@
         </section>
 
       {% elif section.key == 'top_mailboxes' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Mailboxes — All mailboxes</h2>
           {% set user_mbs = dd.user_mailboxes or [] %}
           {% set shared_mbs = dd.shared_mailboxes or [] %}
@@ -579,7 +585,7 @@
         </section>
 
       {% elif section.key == 'orders_current_month' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Orders — Last 90 days</h2>
           <p class="section-meta">{{ dd.total or 0 }} orders since {{ dd.since or '' }}</p>
           {% set orders = dd.orders or [] %}
@@ -606,7 +612,7 @@
         </section>
 
       {% elif section.key == 'licenses' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Licenses — Full breakdown</h2>
           {% set licenses = dd.licenses or [] %}
           {% if licenses %}
@@ -636,7 +642,7 @@
         </section>
 
       {% elif section.key == 'subscriptions' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Subscriptions — Full breakdown</h2>
           {% set subs = dd.subscriptions or [] %}
           {% if subs %}
@@ -666,7 +672,7 @@
         </section>
 
       {% elif section.key == 'essential8' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Essential 8 — Per-control breakdown</h2>
           {% set controls = dd.controls or [] %}
           {% if controls %}
@@ -691,7 +697,7 @@
         </section>
 
       {% elif section.key == 'compliance_checks' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Compliance checks — Full assignment list</h2>
           {% set assignments = dd.assignments or [] %}
           {% if assignments %}
@@ -718,7 +724,7 @@
         </section>
 
       {% elif section.key == 'tickets_last_month' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Tickets — Full list (past 30 days)</h2>
           <p class="section-meta">{{ dd.total or 0 }} tickets since {{ dd.since or '' }}</p>
           {% set tickets = dd.tickets or [] %}
@@ -745,7 +751,7 @@
         </section>
 
       {% elif section.key == 'asset_custom_fields' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Asset custom fields — Full value distribution</h2>
           {% set fields = dd.fields or [] %}
           {% if fields %}
@@ -777,7 +783,7 @@
         </section>
 
       {% elif section.key == 'issues' %}
-        <section class="report-section" style="page-break-before: always;">
+        <section class="report-section" style="{{ pb }}">
           <h2>Issues — Full detail</h2>
           {% set issues = dd.issues or [] %}
           {% if issues %}
