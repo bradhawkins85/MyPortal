@@ -2097,8 +2097,8 @@ async def sync_company_licenses(company_id: int) -> None:
     subscription_by_sku_id: dict[str, dict[str, Any]] = {}
     subscription_by_sku_part: dict[str, dict[str, Any]] = {}
     _subs_url = "https://graph.microsoft.com/v1.0/directory/subscriptions"
-    try:
-        subs = await _graph_get_all(access_token, _subs_url)
+
+    def _index_subscriptions(subs: list[dict[str, Any]]) -> None:
         for sub in subs:
             sku_id = sub.get("skuId")
             sku_part = sub.get("skuPartNumber")
@@ -2106,6 +2106,9 @@ async def sync_company_licenses(company_id: int) -> None:
                 subscription_by_sku_id[str(sku_id).lower()] = sub
             if sku_part:
                 subscription_by_sku_part[str(sku_part).upper()] = sub
+
+    try:
+        _index_subscriptions(await _graph_get_all(access_token, _subs_url))
     except M365Error as exc:
         if exc.http_status == 403:
             # The Organisation.Read.All permission may not be granted yet on this
@@ -2122,14 +2125,7 @@ async def sync_company_licenses(company_id: int) -> None:
                     access_token = await acquire_access_token(
                         company_id, force_client_credentials=True
                     )
-                    subs = await _graph_get_all(access_token, _subs_url)
-                    for sub in subs:
-                        sku_id = sub.get("skuId")
-                        sku_part = sub.get("skuPartNumber")
-                        if sku_id:
-                            subscription_by_sku_id[str(sku_id).lower()] = sub
-                        if sku_part:
-                            subscription_by_sku_part[str(sku_part).upper()] = sub
+                    _index_subscriptions(await _graph_get_all(access_token, _subs_url))
                 else:
                     log_warning(
                         "M365 could not retrieve subscription details (403 Forbidden); "
