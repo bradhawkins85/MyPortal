@@ -20,7 +20,8 @@
               {% endfor %}
               {{ counter_strip(items=counter_items) }}
             {% else %}
-              <table class="report-table">
+              <div class="table-wrapper">
+              <table class="table">
                 <thead>
                   <tr>
                     <th>Value</th>
@@ -36,6 +37,7 @@
                   {% endfor %}
                 </tbody>
               </table>
+              </div>
             {% endif %}
           {% else %}
             <p class="report-empty">No recorded values for this field.</p>

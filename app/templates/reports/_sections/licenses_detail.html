@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set licenses = section.detail_data.licenses or [] %}
     {% if licenses %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Name</th>
@@ -43,6 +44,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No licenses are recorded for this company.</p>
     {% endif %}
