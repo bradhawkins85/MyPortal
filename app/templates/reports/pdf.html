@@ -636,7 +636,7 @@
             <table class="report-table">
               <thead><tr>
                 <th>Name</th><th>Total</th><th>Allocated</th><th>Available</th>
-                <th>Usage %</th><th>Expiry</th><th>Auto-renew</th>
+                <th>Usage %</th><th>Expiry</th><th>Auto-renew</th><th>Assigned Users</th>
               </tr></thead>
               <tbody>
                 {% for lic in licenses %}
@@ -648,6 +648,7 @@
                     <td>{{ lic.usage_percentage }}%</td>
                     <td>{{ lic.expiry_date or '—' }}</td>
                     <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
+                    <td>{% if lic.assigned_users %}{% for user in lic.assigned_users %}<div>{{ user }}</div>{% endfor %}{% else %}—{% endif %}</td>
                   </tr>
                 {% endfor %}
               </tbody>

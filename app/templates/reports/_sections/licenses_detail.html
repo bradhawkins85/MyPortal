@@ -18,6 +18,7 @@
             <th>Expiry</th>
             <th>Auto-renew</th>
             <th>Notes</th>
+            <th>Assigned Users</th>
           </tr>
         </thead>
         <tbody>
@@ -40,6 +41,15 @@
               <td>{{ lic.expiry_date or '—' }}</td>
               <td>{% if lic.auto_renew is none or lic.auto_renew == '' %}—{% elif lic.auto_renew %}Yes{% else %}No{% endif %}</td>
               <td>{{ lic.notes or '—' }}</td>
+              <td>
+                {% if lic.assigned_users %}
+                  {% for user in lic.assigned_users %}
+                    <div>{{ user }}</div>
+                  {% endfor %}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
