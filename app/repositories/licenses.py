@@ -184,7 +184,7 @@ async def list_staff_by_license_for_company(company_id: int) -> dict[int, list[d
     """Return a mapping of license_id -> list of assigned staff for a company."""
     rows = await db.fetch_all(
         """
-        SELECT DISTINCT l.id AS license_id, s.id, s.first_name, s.last_name, s.email
+        SELECT DISTINCT l.id AS license_id, s.id AS staff_id, s.first_name, s.last_name, s.email
         FROM licenses AS l
         INNER JOIN (
             SELECT sl.license_id, sl.staff_id
@@ -205,7 +205,7 @@ async def list_staff_by_license_for_company(company_id: int) -> dict[int, list[d
         lid = int(row["license_id"])
         result.setdefault(lid, []).append(
             {
-                "id": row["id"],
+                "id": row["staff_id"],
                 "first_name": row["first_name"],
                 "last_name": row["last_name"],
                 "email": row["email"],

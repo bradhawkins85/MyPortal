@@ -692,7 +692,11 @@ async def _build_licenses_detail(company_id: int) -> dict[str, Any]:
                 "allocated": allocated,
                 "staff": [
                     {
-                        "name": f"{s.get('first_name', '')} {s.get('last_name', '')}".strip(),
+                        "name": (
+                            f"{s.get('first_name', '')} {s.get('last_name', '')}".strip()
+                            or s.get("email")
+                            or "Unknown"
+                        ),
                         "email": s.get("email"),
                     }
                     for s in staff
