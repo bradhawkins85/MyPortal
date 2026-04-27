@@ -434,6 +434,24 @@
           <p class="empty">No issues are currently assigned to this company.</p>
         {% endif %}
       </section>
+
+    {% elif section.key == 'backup_jobs' %}
+      <section class="report-section">
+        <h2>Backup history (last 30 days)</h2>
+        {% if section.data.total_jobs %}
+          {{ stats([
+            {'label': 'Jobs', 'value': section.data.total_jobs, 'variant': 'info'},
+            {'label': 'Active', 'value': section.data.active_jobs, 'variant': 'info'},
+            {'label': 'Pass', 'value': section.data.counts.pass, 'variant': 'success'},
+            {'label': 'Warn', 'value': section.data.counts.warn, 'variant': 'warning'},
+            {'label': 'Fail', 'value': section.data.counts.fail, 'variant': 'danger'},
+            {'label': 'Unknown', 'value': section.data.counts.unknown, 'variant': 'neutral'},
+            {'label': 'Pass rate', 'value': section.data.pass_percentage ~ '%', 'variant': 'info'},
+          ]) }}
+        {% else %}
+          <p class="empty">No backup jobs configured for this company.</p>
+        {% endif %}
+      </section>
     {% endif %}
 
   {% endfor %}
@@ -803,6 +821,48 @@
             {% endfor %}
           {% else %}
             <p class="empty">No issues currently assigned.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'backup_jobs' %}
+        <section class="report-section" style="{{ pb }}">
+          <h2>Backup history — Daily grid</h2>
+          {% set rows = dd.rows or [] %}
+          {% set dates = dd.dates or [] %}
+          <p class="section-meta">
+            {{ dd.start_date }} → {{ dd.end_date }} ({{ dd.total_jobs or 0 }} job{{ '' if dd.total_jobs == 1 else 's' }})
+          </p>
+          {% if rows %}
+            <table class="report-table" style="font-size: 7pt; table-layout: fixed;">
+              <thead>
+                <tr>
+                  <th style="width: 22%; text-align: left;">Job</th>
+                  {% for day in dates %}
+                    <th style="text-align: center; padding: 2pt 1pt; font-size: 6pt;">{{ day[5:] }}</th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in rows %}
+                  <tr>
+                    <td style="word-break: break-word;">{{ row.name }}{% if not row.is_active %} <i>(disabled)</i>{% endif %}</td>
+                    {% for cell in row.events %}
+                      <td style="background-color: {{ cell.pdf_color }}; color: #ffffff; text-align: center; padding: 3pt 1pt; font-weight: bold;">{{ cell.label[0] }}</td>
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <p class="section-meta" style="margin-top: 6pt;">
+              Legend:
+              <span style="display:inline-block;background:#10b981;color:#fff;padding:1pt 6pt;margin-right:4pt;">P Pass</span>
+              <span style="display:inline-block;background:#f59e0b;color:#fff;padding:1pt 6pt;margin-right:4pt;">W Warn</span>
+              <span style="display:inline-block;background:#ef4444;color:#fff;padding:1pt 6pt;margin-right:4pt;">F Fail</span>
+              <span style="display:inline-block;background:#9ca3af;color:#fff;padding:1pt 6pt;margin-right:4pt;">U Unknown</span>
+              <span style="display:inline-block;background:#e5e7eb;color:#444;padding:1pt 6pt;">No data</span>
+            </p>
+          {% else %}
+            <p class="empty">No backup jobs configured for this company.</p>
           {% endif %}
         </section>
       {% endif %}

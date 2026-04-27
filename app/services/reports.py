@@ -15,6 +15,7 @@ from typing import Any, Iterable, Mapping
 from app.core.database import db
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as assets_repo
+from app.repositories import backup_jobs as backup_jobs_repo
 from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as compliance_checks_repo
 from app.repositories import essential8 as essential8_repo
@@ -102,6 +103,14 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
         key="issues",
         label="Issue tracker issues",
         description="Issues currently assigned to the company.",
+    ),
+    ReportSection(
+        key="backup_jobs",
+        label="Backup history",
+        description=(
+            "Per-day backup status for every job configured for the company. "
+            "The detailed report renders a colour-coded grid for the last 30 days."
+        ),
     ),
 )
 
@@ -516,6 +525,32 @@ async def _build_issues(company_id: int) -> dict[str, Any]:
     return {"issues": rows, "total": len(rows)}
 
 
+async def _build_backup_jobs(company_id: int) -> dict[str, Any]:
+    """Backup history summary: counts per status across the past 30 days."""
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=29)
+    jobs = await backup_jobs_repo.list_jobs(company_id=company_id, include_inactive=True)
+    job_ids = [int(job["id"]) for job in jobs]
+    events = await backup_jobs_repo.list_events_in_range(
+        job_ids=job_ids, start_date=start, end_date=end
+    )
+    counts: dict[str, int] = {"pass": 0, "warn": 0, "fail": 0, "unknown": 0}
+    for event in events:
+        value = str(event.get("status") or "unknown")
+        counts[value] = counts.get(value, 0) + 1
+    total_events = sum(counts.values())
+    pass_pct = round((counts.get("pass", 0) / total_events) * 100, 1) if total_events else 0
+    return {
+        "total_jobs": len(jobs),
+        "active_jobs": sum(1 for job in jobs if job.get("is_active")),
+        "total_events": total_events,
+        "counts": counts,
+        "pass_percentage": pass_pct,
+        "since": start.isoformat(),
+        "until": end.isoformat(),
+    }
+
+
 # Maps section keys to their builder coroutine.
 _SECTION_BUILDERS = {
     "assets": _build_assets,
@@ -530,6 +565,7 @@ _SECTION_BUILDERS = {
     "tickets_last_month": _build_tickets_last_month,
     "asset_custom_fields": _build_asset_custom_fields,
     "issues": _build_issues,
+    "backup_jobs": _build_backup_jobs,
 }
 
 
@@ -844,6 +880,45 @@ async def _build_issues_detail(company_id: int) -> dict[str, Any]:
     return await _build_issues(company_id)
 
 
+async def _build_backup_jobs_detail(company_id: int) -> dict[str, Any]:
+    """Per-day backup history grid for the detail page (last 30 days)."""
+    # Imported lazily to avoid a circular dependency between reports and
+    # backup_jobs services (they both consume the same repository).
+    from app.services import backup_jobs as backup_jobs_service
+
+    end = datetime.now(timezone.utc).date()
+    grid = await backup_jobs_service.build_history_grid(
+        company_id=company_id, days=30, end_date=end, include_inactive=True
+    )
+    rows: list[dict[str, Any]] = []
+    for row in grid["rows"]:
+        job = row["job"]
+        rows.append(
+            {
+                "name": job.get("name"),
+                "is_active": bool(job.get("is_active", True)),
+                "events": [
+                    {
+                        "date": cell["date"].isoformat(),
+                        "status": cell["status"],
+                        "label": cell["label"],
+                        "variant": cell["variant"],
+                        "pdf_color": cell["pdf_color"],
+                        "message": cell.get("message"),
+                    }
+                    for cell in row["events"]
+                ],
+            }
+        )
+    return {
+        "dates": [d.isoformat() for d in grid["dates"]],
+        "rows": rows,
+        "start_date": grid["start_date"].isoformat(),
+        "end_date": grid["end_date"].isoformat(),
+        "total_jobs": len(rows),
+    }
+
+
 # Maps section keys to their detail builder coroutine.
 _DETAIL_BUILDERS: dict[str, Any] = {
     "assets": _build_assets_detail,
@@ -858,6 +933,7 @@ _DETAIL_BUILDERS: dict[str, Any] = {
     "tickets_last_month": _build_tickets_detail,
     "asset_custom_fields": _build_asset_custom_fields_detail,
     "issues": _build_issues_detail,
+    "backup_jobs": _build_backup_jobs_detail,
 }
 
 
@@ -1038,6 +1114,8 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return len(fields) == 0
     if key == "issues":
         return int(data.get("total") or 0) == 0
+    if key == "backup_jobs":
+        return int(data.get("total_jobs") or 0) == 0
     return False
 
 
