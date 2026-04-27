@@ -221,6 +221,39 @@ async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
 
 async def delete_company(company_id: int) -> None:
     log_info("Deleting company", company_id=company_id)
+    # Nullify FK references that use SET NULL semantics so existing rows are preserved.
+    await db.execute(
+        "UPDATE user_sessions SET active_company_id = NULL WHERE active_company_id = %s",
+        (company_id,),
+    )
+    await db.execute(
+        "UPDATE users SET company_id = NULL WHERE company_id = %s",
+        (company_id,),
+    )
+    # Delete child records that reference this company and do not have ON DELETE CASCADE.
+    # Assets must be removed before staff because ticket_asset rows cascade from assets.
+    await db.execute("DELETE FROM assets WHERE company_id = %s", (company_id,))
+    # Deleting staff cascades to staff_licenses (via 203_staff_licenses_cascade),
+    # staff_verification_codes, staff_custom_fields, and other staff-linked tables.
+    await db.execute("DELETE FROM staff WHERE company_id = %s", (company_id,))
+    # Remove licenses after staff (and therefore staff_licenses) are gone.
+    await db.execute("DELETE FROM licenses WHERE company_id = %s", (company_id,))
+    # invoice_lines and related rows cascade when invoices are deleted.
+    await db.execute("DELETE FROM invoices WHERE company_id = %s", (company_id,))
+    await db.execute(
+        "DELETE FROM external_api_settings WHERE company_id = %s", (company_id,)
+    )
+    await db.execute(
+        "DELETE FROM company_app_prices WHERE company_id = %s", (company_id,)
+    )
+    # office_group_members and group_licenses cascade from office_groups.
+    await db.execute("DELETE FROM office_groups WHERE company_id = %s", (company_id,))
+    await db.execute(
+        "DELETE FROM user_companies WHERE company_id = %s", (company_id,)
+    )
+    await db.execute(
+        "DELETE FROM staff_requests WHERE company_id = %s", (company_id,)
+    )
     await db.execute("DELETE FROM companies WHERE id = %s", (company_id,))
     log_info("Company deleted successfully", company_id=company_id)
 
