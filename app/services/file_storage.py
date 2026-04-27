@@ -172,6 +172,64 @@ async def store_product_image(
     return public_url, destination
 
 
+async def store_report_cover_image(
+    *,
+    upload: UploadFile,
+    uploads_root: Path,
+    max_size: int = 10 * 1024 * 1024,
+) -> tuple[str, Path]:
+    """Persist a validated report cover image in the private uploads directory.
+
+    Returns a tuple of (relative_path, filesystem_path).  The image is
+    validated to ensure only common web image formats are stored and that
+    oversized uploads are rejected before touching disk.
+    """
+
+    uploads_root.mkdir(parents=True, exist_ok=True)
+    cover_directory = uploads_root / "report-cover"
+    cover_directory.mkdir(parents=True, exist_ok=True)
+
+    original_name = sanitize_filename(upload.filename or upload.content_type or "upload")
+    suffix = Path(original_name).suffix.lower()
+    content_type = (upload.content_type or "").lower()
+
+    if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+        suffix = _IMAGE_CONTENT_TYPE_MAP.get(content_type, suffix)
+    if suffix not in _ALLOWED_IMAGE_EXTENSIONS:
+        await upload.close()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported image type. Upload PNG, JPEG, GIF, or WebP files.",
+        )
+
+    stored_name = f"{uuid4().hex}{suffix}"
+    destination = cover_directory / stored_name
+
+    total_size = 0
+    try:
+        async with aiofiles.open(destination, "wb") as buffer:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Uploaded image exceeds the 10 MB limit.",
+                    )
+                await buffer.write(chunk)
+    except Exception:
+        if destination.exists():
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()
+
+    relative_path = f"private_uploads/report-cover/{stored_name}"
+    return relative_path, destination
+
+
 async def store_knowledge_base_image(
     *,
     upload: UploadFile,

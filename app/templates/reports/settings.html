@@ -5,6 +5,9 @@
 
 {% block header_actions %}
 <div class="header-actions header-actions--right">
+  {% if is_super_admin %}
+    <a class="button button--ghost" href="/admin/reports/pdf-cover-image">PDF cover image</a>
+  {% endif %}
   <a class="button button--ghost" href="/reports/company-overview">Back to report</a>
 </div>
 {% endblock %}
