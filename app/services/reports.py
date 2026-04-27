@@ -26,7 +26,6 @@ from app.repositories import report_sections as report_sections_repo
 from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import subscriptions as subscriptions_repo
-from app.services.m365 import PACKAGE_MAILBOX_RE
 
 
 # ---------------------------------------------------------------------------
@@ -206,29 +205,40 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
     }
 
 
+def _mailbox_row_to_dict(row: Any) -> dict[str, Any]:
+    """Convert a raw m365_mailboxes DB row into a serialisable dict."""
+    primary = int(row.get("storage_used_bytes") or 0)
+    raw_archive = row.get("archive_storage_used_bytes")
+    archive: int | None = int(raw_archive) if raw_archive is not None else None
+    total = primary + (archive or 0)
+    return {
+        "user_principal_name": row.get("user_principal_name"),
+        "display_name": row.get("display_name") or row.get("user_principal_name"),
+        "mailbox_type": row.get("mailbox_type") or "UserMailbox",
+        "total_bytes": total,
+        "primary_bytes": primary,
+        "archive_bytes": archive,
+    }
+
+
+# SQL fragment shared by both mailbox builders to exclude auto-generated
+# package mailboxes (display_name starts with 'package_').
+_EXCLUDE_PACKAGE_MAILBOX_SQL = (
+    "NOT (LOWER(SUBSTR(display_name, 1, 8)) = 'package_')"
+)
+
+
 async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
     """Top five user mailboxes and top five shared mailboxes by size."""
 
-    def _to_mailbox_row(row: Any) -> dict[str, Any]:
-        primary = int(row.get("storage_used_bytes") or 0)
-        raw_archive = row.get("archive_storage_used_bytes")
-        archive: int | None = int(raw_archive) if raw_archive is not None else None
-        total = primary + (archive or 0)
-        return {
-            "user_principal_name": row.get("user_principal_name"),
-            "display_name": row.get("display_name") or row.get("user_principal_name"),
-            "mailbox_type": row.get("mailbox_type") or "UserMailbox",
-            "total_bytes": total,
-            "primary_bytes": primary,
-            "archive_bytes": archive,
-        }
-
-    _query = """
+    _query = f"""
         SELECT user_principal_name, display_name, mailbox_type,
                storage_used_bytes, archive_storage_used_bytes
         FROM m365_mailboxes
         WHERE company_id = %s AND mailbox_type = %s
+          AND {_EXCLUDE_PACKAGE_MAILBOX_SQL}
         ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
+        LIMIT 5
     """
     try:
         user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
@@ -239,15 +249,9 @@ async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
     except Exception:  # pragma: no cover - defensive when table missing
         shared_rows = []
 
-    def _is_package(row: Any) -> bool:
-        return bool(PACKAGE_MAILBOX_RE.match(row.get("display_name") or ""))
-
-    user_filtered = [r for r in (user_rows or []) if not _is_package(r)][:5]
-    shared_filtered = [r for r in (shared_rows or []) if not _is_package(r)][:5]
-
     return {
-        "user_mailboxes": [_to_mailbox_row(r) for r in user_filtered],
-        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_filtered],
+        "user_mailboxes": [_mailbox_row_to_dict(r) for r in user_rows or []],
+        "shared_mailboxes": [_mailbox_row_to_dict(r) for r in shared_rows or []],
     }
 
 
@@ -654,25 +658,12 @@ async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
 async def _build_top_mailboxes_detail(company_id: int) -> dict[str, Any]:
     """All mailboxes (not just top 5) for the detail page."""
 
-    def _to_mailbox_row(row: Any) -> dict[str, Any]:
-        primary = int(row.get("storage_used_bytes") or 0)
-        raw_archive = row.get("archive_storage_used_bytes")
-        archive: int | None = int(raw_archive) if raw_archive is not None else None
-        total = primary + (archive or 0)
-        return {
-            "user_principal_name": row.get("user_principal_name"),
-            "display_name": row.get("display_name") or row.get("user_principal_name"),
-            "mailbox_type": row.get("mailbox_type") or "UserMailbox",
-            "total_bytes": total,
-            "primary_bytes": primary,
-            "archive_bytes": archive,
-        }
-
-    _query = """
+    _query = f"""
         SELECT user_principal_name, display_name, mailbox_type,
                storage_used_bytes, archive_storage_used_bytes
         FROM m365_mailboxes
         WHERE company_id = %s AND mailbox_type = %s
+          AND {_EXCLUDE_PACKAGE_MAILBOX_SQL}
         ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
     """
     try:
@@ -684,14 +675,14 @@ async def _build_top_mailboxes_detail(company_id: int) -> dict[str, Any]:
     except Exception:  # pragma: no cover
         shared_rows = []
 
-    user_filtered = [r for r in (user_rows or []) if not PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
-    shared_filtered = [r for r in (shared_rows or []) if not PACKAGE_MAILBOX_RE.match(r.get("display_name") or "")]
+    user_list = list(user_rows or [])
+    shared_list = list(shared_rows or [])
 
     return {
-        "user_mailboxes": [_to_mailbox_row(r) for r in user_filtered],
-        "shared_mailboxes": [_to_mailbox_row(r) for r in shared_filtered],
-        "total_user": len(user_filtered),
-        "total_shared": len(shared_filtered),
+        "user_mailboxes": [_mailbox_row_to_dict(r) for r in user_list],
+        "shared_mailboxes": [_mailbox_row_to_dict(r) for r in shared_list],
+        "total_user": len(user_list),
+        "total_shared": len(shared_list),
     }
 
 
