@@ -286,6 +286,12 @@
 <pre><code>$body = @{ job_id = "{{ backup_editing_job.token }}"; status = "pass"; message = "Backup OK" } | ConvertTo-Json
 Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -ContentType "application/json"</code></pre>
           </details>
+          <details>
+            <summary>curl example</summary>
+<pre><code>curl -X POST "{{ backup_status_url }}" \
+  -H "Content-Type: application/json" \
+  -d '{"job_id": "{{ backup_editing_job.token }}", "status": "pass", "message": "Backup OK"}'</code></pre>
+          </details>
         </div>
       </div>
     {% endif %}
@@ -385,7 +391,7 @@ Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -Conte
     font-weight: 600;
   }
   pre { background: var(--color-bg-muted, #f4f4f5); padding: 0.5rem; border-radius: 4px; overflow-x: auto; }
-  .backup-token__value { word-break: break-all; white-space: pre-wrap; }
+  .backup-token__value { word-break: break-all; white-space: pre-wrap; color: var(--color-text, #111); }
   .backup-token__actions { margin-top: 0.75rem; }
 </style>
 {% endblock %}
