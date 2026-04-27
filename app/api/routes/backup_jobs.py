@@ -130,6 +130,9 @@ async def create_backup_job(
             description=payload.description,
             is_active=payload.is_active,
             created_by=int(user.get("id")) if user.get("id") else None,
+            alert_no_success_days=payload.alert_no_success_days,
+            alert_fail_days=payload.alert_fail_days,
+            alert_unknown_days=payload.alert_unknown_days,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -153,6 +156,15 @@ async def update_backup_job(
             description=payload.description,
             company_id=payload.company_id,
             is_active=payload.is_active,
+            alert_no_success_days=payload.alert_no_success_days,
+            alert_fail_days=payload.alert_fail_days,
+            alert_unknown_days=payload.alert_unknown_days,
+            clear_alert_no_success_days=payload.alert_no_success_days is None
+            and "alert_no_success_days" in payload.model_fields_set,
+            clear_alert_fail_days=payload.alert_fail_days is None
+            and "alert_fail_days" in payload.model_fields_set,
+            clear_alert_unknown_days=payload.alert_unknown_days is None
+            and "alert_unknown_days" in payload.model_fields_set,
         )
     except ValueError as exc:
         raise HTTPException(

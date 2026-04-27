@@ -51,6 +51,21 @@ class BackupJobBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
+    alert_no_success_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Raise a ticket when no successful backup has been recorded in this many days. Leave empty to disable.",
+    )
+    alert_fail_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Raise a ticket when the backup has failed for this many consecutive days. Leave empty to disable.",
+    )
+    alert_unknown_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Raise a ticket when the backup status has been unknown for this many consecutive days. Leave empty to disable.",
+    )
 
 
 class BackupJobCreate(BackupJobBase):
@@ -62,6 +77,9 @@ class BackupJobUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
+    alert_no_success_days: int | None = Field(default=None, ge=1)
+    alert_fail_days: int | None = Field(default=None, ge=1)
+    alert_unknown_days: int | None = Field(default=None, ge=1)
 
 
 class BackupJobResponse(BaseModel):
@@ -76,6 +94,9 @@ class BackupJobResponse(BaseModel):
     updated_at: datetime | None = None
     latest_status: str | None = None
     latest_event_date: date | None = None
+    alert_no_success_days: int | None = None
+    alert_fail_days: int | None = None
+    alert_unknown_days: int | None = None
 
 
 def serialise_job(job: dict[str, Any]) -> BackupJobResponse:
@@ -92,6 +113,9 @@ def serialise_job(job: dict[str, Any]) -> BackupJobResponse:
         updated_at=job.get("updated_at"),
         latest_status=latest.get("status"),
         latest_event_date=latest.get("event_date"),
+        alert_no_success_days=job.get("alert_no_success_days"),
+        alert_fail_days=job.get("alert_fail_days"),
+        alert_unknown_days=job.get("alert_unknown_days"),
     )
 
 

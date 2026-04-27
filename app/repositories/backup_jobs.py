@@ -67,7 +67,8 @@ async def list_jobs(
     rows = await db.fetch_all(
         f"""
         SELECT id, company_id, name, description, token, is_active,
-               created_by, created_at, updated_at
+               created_by, created_at, updated_at,
+               alert_no_success_days, alert_fail_days, alert_unknown_days
         FROM backup_jobs
         {where}
         ORDER BY company_id, name
@@ -81,7 +82,8 @@ async def get_job(job_id: int) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
         SELECT id, company_id, name, description, token, is_active,
-               created_by, created_at, updated_at
+               created_by, created_at, updated_at,
+               alert_no_success_days, alert_fail_days, alert_unknown_days
         FROM backup_jobs WHERE id = %s
         """,
         (int(job_id),),
@@ -95,7 +97,8 @@ async def get_job_by_token(token: str) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
         SELECT id, company_id, name, description, token, is_active,
-               created_by, created_at, updated_at
+               created_by, created_at, updated_at,
+               alert_no_success_days, alert_fail_days, alert_unknown_days
         FROM backup_jobs WHERE token = %s
         """,
         (token,),
@@ -111,12 +114,16 @@ async def create_job(
     token: str,
     is_active: bool = True,
     created_by: int | None = None,
+    alert_no_success_days: int | None = None,
+    alert_fail_days: int | None = None,
+    alert_unknown_days: int | None = None,
 ) -> dict[str, Any]:
     new_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO backup_jobs
-            (company_id, name, description, token, is_active, created_by)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (company_id, name, description, token, is_active, created_by,
+             alert_no_success_days, alert_fail_days, alert_unknown_days)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             int(company_id),
@@ -125,6 +132,9 @@ async def create_job(
             token,
             1 if is_active else 0,
             int(created_by) if created_by else None,
+            int(alert_no_success_days) if alert_no_success_days else None,
+            int(alert_fail_days) if alert_fail_days else None,
+            int(alert_unknown_days) if alert_unknown_days else None,
         ),
     )
     job = await get_job(int(new_id))
@@ -141,6 +151,12 @@ async def update_job(
     company_id: int | None = None,
     is_active: bool | None = None,
     token: str | None = None,
+    alert_no_success_days: int | None = None,
+    alert_fail_days: int | None = None,
+    alert_unknown_days: int | None = None,
+    clear_alert_no_success_days: bool = False,
+    clear_alert_fail_days: bool = False,
+    clear_alert_unknown_days: bool = False,
 ) -> dict[str, Any] | None:
     sets: list[str] = []
     params: list[Any] = []
@@ -159,6 +175,21 @@ async def update_job(
     if token is not None:
         sets.append("token = %s")
         params.append(token)
+    if alert_no_success_days is not None:
+        sets.append("alert_no_success_days = %s")
+        params.append(int(alert_no_success_days))
+    elif clear_alert_no_success_days:
+        sets.append("alert_no_success_days = NULL")
+    if alert_fail_days is not None:
+        sets.append("alert_fail_days = %s")
+        params.append(int(alert_fail_days))
+    elif clear_alert_fail_days:
+        sets.append("alert_fail_days = NULL")
+    if alert_unknown_days is not None:
+        sets.append("alert_unknown_days = %s")
+        params.append(int(alert_unknown_days))
+    elif clear_alert_unknown_days:
+        sets.append("alert_unknown_days = NULL")
     if not sets:
         return await get_job(job_id)
     params.append(int(job_id))
