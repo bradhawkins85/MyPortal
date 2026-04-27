@@ -12520,7 +12520,7 @@ async def admin_update_backup_job(request: Request, job_id: int):
             is_active=payload["is_active"],
         )
     except ValueError as exc:
-        url = f"/admin/backup-jobs?jobId={job_id}&error={quote(str(exc))}"
+        url = f"/admin/backup-jobs?jobId={int(job_id)}&error={quote(str(exc))}"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
     if not updated:
         url = f"/admin/backup-jobs?error={quote('Backup job not found.')}"
@@ -12583,7 +12583,7 @@ async def admin_regenerate_backup_job_token(request: Request, job_id: int):
         request=request,
     )
     return RedirectResponse(
-        url=f"/admin/backup-jobs?jobId={job_id}&success={quote('Token regenerated.')}",
+        url=f"/admin/backup-jobs?jobId={int(job_id)}&success={quote('Token regenerated.')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
