@@ -12550,7 +12550,11 @@ async def admin_service_status_check_now(request: Request, service_id: int):
 
 
 def _backup_status_webhook_url(request: Request) -> str:
-    base = str(request.base_url).rstrip("/")
+    if settings.portal_url:
+        base = str(settings.portal_url).rstrip("/")
+    else:
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        base = f"{scheme}://{request.url.netloc}"
     return f"{base}/api/backup-status"
 
 
