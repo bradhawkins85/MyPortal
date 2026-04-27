@@ -2020,14 +2020,6 @@ async def _sync_staff_assignments(
     await license_repo.bulk_unlink_staff(license_id, to_unlink)
 
 
-_TERM_DURATION_LABELS: dict[str, str] = {
-    "P1M": "Monthly",
-    "P1Y": "Annual",
-    "P2Y": "2-Year",
-    "P3Y": "3-Year",
-}
-
-
 def _coerce_optional_bool(value: Any) -> bool | None:
     """Convert Graph boolean-like values into a real bool while preserving None."""
     if value is None:
@@ -2043,23 +2035,6 @@ def _coerce_optional_bool(value: Any) -> bool | None:
         if normalised in {"false", "0", "no", "n"}:
             return False
     return None
-
-
-def _normalise_contract_term(term_duration: Any) -> str | None:
-    """Map common Graph contract-term values into display labels."""
-    if term_duration is None:
-        return None
-    value = str(term_duration).strip()
-    if not value:
-        return None
-    upper = value.upper()
-    if upper in _TERM_DURATION_LABELS:
-        return _TERM_DURATION_LABELS[upper]
-    if upper in {"MONTHLY", "MONTH"}:
-        return "Monthly"
-    if upper in {"ANNUAL", "YEARLY", "YEAR"}:
-        return "Annual"
-    return value
 
 
 def _parse_subscription_date(value: str | None) -> date | None:
@@ -2121,7 +2096,7 @@ async def sync_company_licenses(company_id: int) -> None:
                 http_status=403,
             ) from exc
 
-    # Fetch subscription details (renewal date, auto-renew, contract term).
+    # Fetch subscription details (renewal date, auto-renew).
     # Indexed primarily by skuId (lowercase) with skuPartNumber as a fallback key so
     # that matches succeed even when one endpoint omits or uses a different skuId.
     # _graph_get_all is used to follow @odata.nextLink pagination and avoid missing
@@ -2169,19 +2144,19 @@ async def sync_company_licenses(company_id: int) -> None:
             except Exception as retry_exc:  # noqa: BLE001
                 log_warning(
                     "M365 could not retrieve subscription details after permission self-heal; "
-                    "contract term and auto-renew will not be updated",
+                    "auto-renew will not be updated",
                     company_id=company_id,
                     error=str(retry_exc),
                 )
         else:
             log_warning(
-                "M365 could not retrieve subscription details; contract term and auto-renew will not be updated",
+                "M365 could not retrieve subscription details; auto-renew will not be updated",
                 company_id=company_id,
                 error=str(exc),
             )
     except Exception as exc:  # noqa: BLE001
         log_warning(
-            "M365 could not retrieve subscription details; contract term and auto-renew will not be updated",
+            "M365 could not retrieve subscription details; auto-renew will not be updated",
             company_id=company_id,
             error=str(exc),
         )
@@ -2209,20 +2184,18 @@ async def sync_company_licenses(company_id: int) -> None:
             sub_info = subscription_by_sku_part.get(str(part_number).upper())
         api_expiry_date: date | None = None
         api_auto_renew: bool | None = None
-        api_contract_term: str | None = None
         if sub_info:
             api_expiry_date = _parse_subscription_date(sub_info.get("nextLifecycleDateTime"))
             raw_auto_renew = sub_info.get("autoRenew")
             if raw_auto_renew is None:
                 # Some tenants expose this flag as autoRenewEnabled instead.
                 raw_auto_renew = sub_info.get("autoRenewEnabled")
+            if raw_auto_renew is None:
+                # Fall back to the subscription status field: "Enabled" = auto-renew on.
+                status_val = sub_info.get("status")
+                if isinstance(status_val, str):
+                    raw_auto_renew = status_val.strip().lower() == "enabled"
             api_auto_renew = _coerce_optional_bool(raw_auto_renew)
-            term_info = sub_info.get("subscriptionTermInfo") or {}
-            term_duration = term_info.get("termDuration") if isinstance(term_info, dict) else None
-            if term_duration is None:
-                # Fallbacks seen in older/variant payloads.
-                term_duration = sub_info.get("termDuration") or sub_info.get("commitmentTerm")
-            api_contract_term = _normalise_contract_term(term_duration)
 
         existing = await license_repo.get_license_by_company_and_sku(
             company_id, part_number
@@ -2230,8 +2203,6 @@ async def sync_company_licenses(company_id: int) -> None:
         if existing:
             # Use API expiry if retrieved, otherwise keep the manually-set value.
             final_expiry = api_expiry_date if api_expiry_date is not None else existing.get("expiry_date")
-            # Use API contract term if retrieved, otherwise preserve the existing value.
-            final_contract_term = api_contract_term if api_contract_term is not None else existing.get("contract_term")
             updated = await license_repo.update_license(
                 existing["id"],
                 company_id=company_id,
@@ -2239,7 +2210,7 @@ async def sync_company_licenses(company_id: int) -> None:
                 platform=part_number,
                 count=count,
                 expiry_date=final_expiry,
-                contract_term=final_contract_term,
+                contract_term=existing.get("contract_term"),
                 auto_renew=api_auto_renew if api_auto_renew is not None else existing.get("auto_renew"),
             )
             license_id = existing["id"]
@@ -2255,7 +2226,7 @@ async def sync_company_licenses(company_id: int) -> None:
                 platform=part_number,
                 count=count,
                 expiry_date=api_expiry_date,
-                contract_term=api_contract_term or "",
+                contract_term=None,
                 auto_renew=api_auto_renew,
             )
             license_id = created["id"]
