@@ -7,7 +7,8 @@
     {% set controls = section.detail_data.controls or [] %}
     {% if controls %}
       {% set status_variant = {'compliant': 'success', 'in_progress': 'warning', 'not_started': 'neutral'} %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Control</th>
@@ -44,6 +45,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No Essential 8 control data is available for this company.</p>
     {% endif %}

@@ -197,7 +197,97 @@ element to `<a>` when writing markup by hand.
 
 ---
 
-## 3. Popup modals
+## 4. Data tables
+
+**Reference implementation:** `/assets` (`app/templates/assets/index.html`)
+
+All data tables across MyPortal use a consistent structure based on the assets
+page.  The standard applies to every page that renders a list of records —
+including report sections.
+
+### Structure
+
+```html
+<div class="table-wrapper">
+  <table class="table" id="<page>-table" data-table data-table-id="<page>">
+    <thead>
+      <tr>
+        <th scope="col" data-sort="string">Column heading</th>
+        <!-- repeat for each column -->
+        <th scope="col" class="table__actions">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td data-label="Column heading">{{ row.value or '' }}</td>
+          <!-- ... -->
+          <td class="table__actions">
+            <button type="button" class="button button--ghost button--small">Edit</button>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+```
+
+Empty state when no rows exist:
+
+```html
+<div class="empty-state">
+  <h3 class="empty-state__title">No items yet</h3>
+  <p class="empty-state__subtitle">Hint text explaining how to add items.</p>
+</div>
+```
+
+Client-side pagination bar (used when JS-driven pagination is needed):
+
+```html
+<div class="table-pagination" data-pagination="<page>-table">
+  <div class="table-pagination__group">
+    <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>Previous</button>
+    <button type="button" class="button button--ghost table-pagination__button" data-page-next>Next</button>
+  </div>
+  <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+</div>
+```
+
+### Rules
+
+- Always wrap every `<table>` in `<div class="table-wrapper">` to enable
+  horizontal scrolling on narrow viewports.
+- Use `class="table"` on the `<table>` element — never define a custom table
+  class (e.g. `report-table`) for layout purposes.
+- Use `data-table` and `data-table-id` on the `<table>` when the page uses
+  `tables.js` for client-side sorting, filtering, or pagination.
+- Mark cells that represent empty / missing data with
+  `<span class="text-muted">—</span>` rather than leaving them blank.
+- Render timestamp cells with `<span data-utc="…">…</span>` so the existing
+  JS in `main.js` localises them to the visitor's timezone.
+- Include `{% include "partials/csrf.html" %}` in any form that performs a
+  state-changing action triggered from the table (delete, bulk action, etc.).
+- The search input in the card header uses `data-table-filter="<table-id>"` to
+  connect it to the table JS without additional configuration.
+- When a column picker is needed, use the `asset-columns` / `.asset-column-toggle`
+  pattern or the `table_column_picker` macro from `macros/tables.html`.
+
+### CSS classes reference
+
+| Class | Purpose |
+|---|---|
+| `.table-wrapper` | Horizontal-scroll container |
+| `.table` | Full-width, border-collapsed table |
+| `.table th` | Bold column heading, sortable via `data-sort` |
+| `.table td` | Standard cell with consistent padding |
+| `.table__actions` | Right-aligned cell for row action buttons |
+| `.table__col--truncate` | Truncates long text with ellipsis |
+| `.table-pagination` | Flex bar containing Prev / Next controls |
+| `.table-pagination__status` | Live-region showing "Page N of M" |
+| `.empty-state` | Centred placeholder shown when no rows exist |
+| `.empty-state__title` | Heading inside the empty state |
+| `.empty-state__subtitle` | Helper text inside the empty state |
+
 
 **Reference implementation:** Create ticket modal in `/admin/tickets`
 (`app/templates/admin/tickets.html`, `id="create-ticket-modal"`)
