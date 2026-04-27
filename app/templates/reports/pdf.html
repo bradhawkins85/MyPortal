@@ -76,6 +76,8 @@
       padding: 4pt 6pt;
       text-align: left;
       vertical-align: top;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     table.report-table thead th {
       background: #f3f4f6;
@@ -518,7 +520,7 @@
           {% if checks %}
             <table class="report-table">
               <thead><tr>
-                <th>Check</th><th>Status</th><th>Details</th><th>Remediation</th>
+                <th>Check</th><th>Status</th><th>Details</th>
               </tr></thead>
               <tbody>
                 {% for check in checks %}
@@ -526,7 +528,6 @@
                     <td><strong>{{ check.check_name or check.check_id or '—' }}</strong></td>
                     <td>{{ check.status or '—' }}</td>
                     <td>{{ check.details or '—' }}</td>
-                    <td>{{ check.remediation_status or '—' }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
