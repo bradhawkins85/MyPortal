@@ -94,6 +94,7 @@ async def update_license(
         count=int(data["count"]),
         expiry_date=data.get("expiry_date"),
         contract_term=data.get("contract_term"),
+        auto_renew=data.get("auto_renew"),
     )
     await staff_workflow_service.process_paused_license_executions(company_id=int(updated["company_id"]))
     await license_repo.record_usage_if_changed(
