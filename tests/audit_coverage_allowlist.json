@@ -1,4 +1,5 @@
 [
+  "DELETE /api/backup-jobs/{job_id}",
   "DELETE /api/bc/plans/{plan_id}",
   "DELETE /api/bc/plans/{plan_id}/attachments/{attachment_id}",
   "DELETE /api/bc/plans/{plan_id}/contacts/{contact_id}",
@@ -122,6 +123,9 @@
   "POST /admin/tickets/{ticket_id}/status",
   "POST /api/agent/query",
   "POST /api/automations/{automation_id}/execute",
+  "POST /api/backup-jobs",
+  "POST /api/backup-jobs/{job_id}/regenerate-token",
+  "POST /api/backup-status",
   "POST /api/bc/plans",
   "POST /api/bc/plans/{plan_id}/acknowledge",
   "POST /api/bc/plans/{plan_id}/acknowledgments/notify",
@@ -302,6 +306,7 @@
   "POST /switch-company",
   "POST /tickets",
   "POST /tickets/{ticket_id}/replies",
+  "PUT /api/backup-jobs/{job_id}",
   "PUT /api/bc/plans/{plan_id}/contacts/{contact_id}",
   "PUT /api/bc/plans/{plan_id}/processes/{process_id}",
   "PUT /api/bc/plans/{plan_id}/vendors/{vendor_id}",
