@@ -1,7 +1,7 @@
 """Tests for the Backup History admin page and webhook endpoint."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import app.main as main_module
 import pytest
@@ -262,3 +262,195 @@ def test_backup_status_webhook_rejects_invalid_status(monkeypatch):
 
     assert response.status_code == 400
     assert "Unsupported status" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Alert check tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_check_backup_alerts_no_jobs_no_tickets(monkeypatch):
+    """When no jobs have alert thresholds configured, no tickets are created."""
+    import app.services.backup_jobs as backup_jobs_service
+    from app.repositories import backup_jobs as backup_jobs_repo
+
+    async def fake_list_jobs(include_inactive=True):
+        return [
+            _sample_job(alert_no_success_days=None, alert_fail_days=None, alert_unknown_days=None)
+        ]
+
+    monkeypatch.setattr(backup_jobs_repo, "list_jobs", fake_list_jobs)
+
+    result = await backup_jobs_service.check_backup_alerts()
+    assert result["checked"] == 0
+    assert result["tickets_created"] == 0
+
+
+@pytest.mark.asyncio
+async def test_check_backup_alerts_creates_ticket_for_no_success(monkeypatch):
+    """When no successful backup in threshold days, a ticket is created."""
+    import app.services.backup_jobs as backup_jobs_service
+    from app.repositories import backup_jobs as backup_jobs_repo
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    today = date(2026, 4, 27)
+    job = _sample_job(alert_no_success_days=3, alert_fail_days=None, alert_unknown_days=None)
+
+    async def fake_list_jobs(include_inactive=True):
+        return [job]
+
+    # Return only fail/unknown events in the window – no 'pass'
+    async def fake_list_events_in_range(*, job_ids, start_date, end_date):
+        return [
+            {"backup_job_id": 1, "event_date": today, "status": "fail"},
+            {"backup_job_id": 1, "event_date": today - timedelta(days=1), "status": "fail"},
+            {"backup_job_id": 1, "event_date": today - timedelta(days=2), "status": "unknown"},
+        ]
+
+    async def fake_find_open_ticket(external_reference):
+        return None  # No existing open ticket
+
+    tickets_created = []
+
+    async def fake_create_ticket(*, subject, description, requester_id, company_id,
+                                  assigned_user_id, priority, status, category,
+                                  module_slug, external_reference, trigger_automations=True,
+                                  **kwargs):
+        tickets_created.append({"subject": subject, "external_reference": external_reference})
+        return {"id": 99, "subject": subject}
+
+    monkeypatch.setattr(backup_jobs_repo, "list_jobs", fake_list_jobs)
+    monkeypatch.setattr(backup_jobs_repo, "list_events_in_range", fake_list_events_in_range)
+    monkeypatch.setattr(tickets_repo, "find_open_ticket_by_external_reference", fake_find_open_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+
+    result = await backup_jobs_service.check_backup_alerts()
+    assert result["checked"] == 1
+    assert result["tickets_created"] == 1
+    assert len(tickets_created) == 1
+    assert "No Successful Backups" in tickets_created[0]["subject"]
+    assert tickets_created[0]["external_reference"] == "backup_alert:no_success:1"
+
+
+@pytest.mark.asyncio
+async def test_check_backup_alerts_skips_when_open_ticket_exists(monkeypatch):
+    """No duplicate ticket is created when an open alert ticket already exists."""
+    import app.services.backup_jobs as backup_jobs_service
+    from app.repositories import backup_jobs as backup_jobs_repo
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    today = date(2026, 4, 27)
+    job = _sample_job(alert_no_success_days=2, alert_fail_days=None, alert_unknown_days=None)
+
+    async def fake_list_jobs(include_inactive=True):
+        return [job]
+
+    async def fake_list_events_in_range(*, job_ids, start_date, end_date):
+        return [
+            {"backup_job_id": 1, "event_date": today, "status": "fail"},
+            {"backup_job_id": 1, "event_date": today - timedelta(days=1), "status": "fail"},
+        ]
+
+    # An open ticket already exists for this alert
+    async def fake_find_open_ticket(external_reference):
+        return {"id": 50, "subject": "Existing open alert ticket", "closed_at": None}
+
+    tickets_created = []
+
+    async def fake_create_ticket(**kwargs):
+        tickets_created.append(kwargs)
+        return {"id": 99}
+
+    monkeypatch.setattr(backup_jobs_repo, "list_jobs", fake_list_jobs)
+    monkeypatch.setattr(backup_jobs_repo, "list_events_in_range", fake_list_events_in_range)
+    monkeypatch.setattr(tickets_repo, "find_open_ticket_by_external_reference", fake_find_open_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+
+    result = await backup_jobs_service.check_backup_alerts()
+    assert result["checked"] == 1
+    assert result["tickets_created"] == 0
+    assert len(tickets_created) == 0
+
+
+@pytest.mark.asyncio
+async def test_check_backup_alerts_no_alert_when_recent_success(monkeypatch):
+    """No alert is raised when a successful backup exists within the threshold window."""
+    import app.services.backup_jobs as backup_jobs_service
+    from app.repositories import backup_jobs as backup_jobs_repo
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    today = date(2026, 4, 27)
+    job = _sample_job(alert_no_success_days=3, alert_fail_days=None, alert_unknown_days=None)
+
+    async def fake_list_jobs(include_inactive=True):
+        return [job]
+
+    # Yesterday was a pass – within the 3-day window
+    async def fake_list_events_in_range(*, job_ids, start_date, end_date):
+        return [
+            {"backup_job_id": 1, "event_date": today, "status": "fail"},
+            {"backup_job_id": 1, "event_date": today - timedelta(days=1), "status": "pass"},
+        ]
+
+    tickets_created = []
+
+    async def fake_create_ticket(**kwargs):
+        tickets_created.append(kwargs)
+        return {"id": 99}
+
+    monkeypatch.setattr(backup_jobs_repo, "list_jobs", fake_list_jobs)
+    monkeypatch.setattr(backup_jobs_repo, "list_events_in_range", fake_list_events_in_range)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+
+    result = await backup_jobs_service.check_backup_alerts()
+    assert result["checked"] == 1
+    assert result["tickets_created"] == 0
+    assert len(tickets_created) == 0
+
+
+@pytest.mark.asyncio
+async def test_check_backup_alerts_unknown_status(monkeypatch):
+    """Ticket is created when unknown status threshold is exceeded."""
+    import app.services.backup_jobs as backup_jobs_service
+    from app.repositories import backup_jobs as backup_jobs_repo
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    today = date(2026, 4, 27)
+    job = _sample_job(alert_no_success_days=None, alert_fail_days=None, alert_unknown_days=2)
+
+    async def fake_list_jobs(include_inactive=True):
+        return [job]
+
+    async def fake_list_events_in_range(*, job_ids, start_date, end_date):
+        return [
+            {"backup_job_id": 1, "event_date": today, "status": "unknown"},
+            {"backup_job_id": 1, "event_date": today - timedelta(days=1), "status": "unknown"},
+        ]
+
+    async def fake_find_open_ticket(external_reference):
+        return None
+
+    tickets_created = []
+
+    async def fake_create_ticket(*, subject, description, requester_id, company_id,
+                                  assigned_user_id, priority, status, category,
+                                  module_slug, external_reference, trigger_automations=True,
+                                  **kwargs):
+        tickets_created.append({"subject": subject, "external_reference": external_reference})
+        return {"id": 99, "subject": subject}
+
+    monkeypatch.setattr(backup_jobs_repo, "list_jobs", fake_list_jobs)
+    monkeypatch.setattr(backup_jobs_repo, "list_events_in_range", fake_list_events_in_range)
+    monkeypatch.setattr(tickets_repo, "find_open_ticket_by_external_reference", fake_find_open_ticket)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+
+    result = await backup_jobs_service.check_backup_alerts()
+    assert result["checked"] == 1
+    assert result["tickets_created"] == 1
+    assert "Unknown Backup Job Status" in tickets_created[0]["subject"]
+    assert tickets_created[0]["external_reference"] == "backup_alert:unknown:1"

@@ -142,6 +142,9 @@ async def create_job(
     description: str | None = None,
     is_active: bool = True,
     created_by: int | None = None,
+    alert_no_success_days: int | None = None,
+    alert_fail_days: int | None = None,
+    alert_unknown_days: int | None = None,
 ) -> dict[str, Any]:
     cleaned_name = _validate_name(name)
     cleaned_description = _validate_description(description)
@@ -157,6 +160,9 @@ async def create_job(
         token=token,
         is_active=bool(is_active),
         created_by=created_by,
+        alert_no_success_days=alert_no_success_days,
+        alert_fail_days=alert_fail_days,
+        alert_unknown_days=alert_unknown_days,
     )
     log_info("Backup job created", job_id=job["id"], company_id=company_id_int)
     return job
@@ -169,6 +175,12 @@ async def update_job(
     description: str | None = None,
     company_id: int | None = None,
     is_active: bool | None = None,
+    alert_no_success_days: int | None = None,
+    alert_fail_days: int | None = None,
+    alert_unknown_days: int | None = None,
+    clear_alert_no_success_days: bool = False,
+    clear_alert_fail_days: bool = False,
+    clear_alert_unknown_days: bool = False,
 ) -> dict[str, Any] | None:
     cleaned_name = _validate_name(name) if name is not None else None
     cleaned_description = (
@@ -186,6 +198,12 @@ async def update_job(
         description=cleaned_description,
         company_id=company_id_int,
         is_active=is_active,
+        alert_no_success_days=alert_no_success_days,
+        alert_fail_days=alert_fail_days,
+        alert_unknown_days=alert_unknown_days,
+        clear_alert_no_success_days=clear_alert_no_success_days,
+        clear_alert_fail_days=clear_alert_fail_days,
+        clear_alert_unknown_days=clear_alert_unknown_days,
     )
 
 
@@ -302,8 +320,197 @@ async def seed_unknown_events_for_date(target_date: date | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Aggregation helpers
+# Alert checks (runs at midnight)
 # ---------------------------------------------------------------------------
+
+_ALERT_MODULE_SLUG = "backup-alerts"
+
+
+async def check_backup_alerts() -> dict[str, int]:
+    """Check all active backup jobs for alert conditions and create tickets.
+
+    Runs once per day (at midnight) via the scheduler.  For each active job
+    that has at least one threshold configured, we look at the most-recent
+    events and raise a ticket when the threshold is exceeded.
+
+    To avoid flooding the ticket queue, one open ticket per job per alert
+    type is kept alive.  A new ticket is only created when no open ticket
+    with the same ``external_reference`` exists.
+
+    Returns a dict ``{"checked": int, "tickets_created": int}``.
+    """
+    # Import here to avoid circular imports at module level.
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    today = datetime.now(timezone.utc).date()
+    jobs = await backup_jobs_repo.list_jobs(include_inactive=False)
+    checked = 0
+    tickets_created = 0
+
+    for job in jobs:
+        job_id = int(job["id"])
+        company_id = int(job["company_id"])
+        job_name = str(job.get("name") or "")
+
+        alert_no_success = job.get("alert_no_success_days") or 0
+        alert_fail = job.get("alert_fail_days") or 0
+        alert_unknown = job.get("alert_unknown_days") or 0
+
+        if not (alert_no_success or alert_fail or alert_unknown):
+            continue
+
+        checked += 1
+
+        # Fetch enough events to cover the widest threshold.
+        window = max(alert_no_success, alert_fail, alert_unknown)
+        start_date = today - timedelta(days=window - 1)
+        events = await backup_jobs_repo.list_events_in_range(
+            job_ids=[job_id], start_date=start_date, end_date=today
+        )
+
+        # Build a date → status map for quick lookup.
+        status_by_date: dict[date, str] = {}
+        for ev in events:
+            ev_date = ev.get("event_date")
+            if isinstance(ev_date, datetime):
+                ev_date = ev_date.date()
+            if isinstance(ev_date, date):
+                status_by_date[ev_date] = str(ev.get("status") or DEFAULT_STATUS)
+
+        # ---- No successful backup in X days --------------------------------
+        if alert_no_success:
+            ref = f"backup_alert:no_success:{job_id}"
+            window_dates = [
+                today - timedelta(days=i) for i in range(alert_no_success)
+            ]
+            has_success = any(
+                status_by_date.get(d) == "pass" for d in window_dates
+            )
+            if not has_success:
+                created = await _maybe_create_alert_ticket(
+                    tickets_repo=tickets_repo,
+                    tickets_service=tickets_service,
+                    external_reference=ref,
+                    company_id=company_id,
+                    subject=f"No Successful Backups in {alert_no_success} Day{'s' if alert_no_success != 1 else ''} — {job_name}",
+                    description=(
+                        f"Backup job **{job_name}** has not reported a successful "
+                        f"backup in the last {alert_no_success} day{'s' if alert_no_success != 1 else ''}.\n\n"
+                        f"Please investigate the backup job and resolve any issues."
+                    ),
+                )
+                if created:
+                    tickets_created += 1
+
+        # ---- Failed backups for X days -------------------------------------
+        if alert_fail:
+            ref = f"backup_alert:fail:{job_id}"
+            window_dates = [today - timedelta(days=i) for i in range(alert_fail)]
+            all_fail = all(
+                status_by_date.get(d) == "fail" for d in window_dates
+            )
+            if all_fail and len(window_dates) == alert_fail:
+                created = await _maybe_create_alert_ticket(
+                    tickets_repo=tickets_repo,
+                    tickets_service=tickets_service,
+                    external_reference=ref,
+                    company_id=company_id,
+                    subject=f"Failed Backups for {alert_fail} Day{'s' if alert_fail != 1 else ''} — {job_name}",
+                    description=(
+                        f"Backup job **{job_name}** has reported a **failed** status "
+                        f"for the last {alert_fail} consecutive day{'s' if alert_fail != 1 else ''}.\n\n"
+                        f"Please investigate the backup job and resolve any issues."
+                    ),
+                )
+                if created:
+                    tickets_created += 1
+
+        # ---- Unknown job status for X days ---------------------------------
+        if alert_unknown:
+            ref = f"backup_alert:unknown:{job_id}"
+            window_dates = [
+                today - timedelta(days=i) for i in range(alert_unknown)
+            ]
+            all_unknown = all(
+                status_by_date.get(d, DEFAULT_STATUS) in ("unknown", None)
+                for d in window_dates
+            )
+            if all_unknown and len(window_dates) == alert_unknown:
+                created = await _maybe_create_alert_ticket(
+                    tickets_repo=tickets_repo,
+                    tickets_service=tickets_service,
+                    external_reference=ref,
+                    company_id=company_id,
+                    subject=f"Unknown Backup Job Status for {alert_unknown} Day{'s' if alert_unknown != 1 else ''} — {job_name}",
+                    description=(
+                        f"Backup job **{job_name}** has had an **unknown** status "
+                        f"for the last {alert_unknown} consecutive day{'s' if alert_unknown != 1 else ''}. "
+                        f"No status reports have been received from the backup script.\n\n"
+                        f"Please verify that the backup script is running and reporting correctly."
+                    ),
+                )
+                if created:
+                    tickets_created += 1
+
+    if checked:
+        log_info(
+            "Backup alert check completed",
+            checked=checked,
+            tickets_created=tickets_created,
+            check_date=today.isoformat(),
+        )
+    return {"checked": checked, "tickets_created": tickets_created}
+
+
+async def _maybe_create_alert_ticket(
+    *,
+    tickets_repo: Any,
+    tickets_service: Any,
+    external_reference: str,
+    company_id: int,
+    subject: str,
+    description: str,
+) -> bool:
+    """Create a ticket for the given alert if no open ticket already exists.
+
+    Returns ``True`` when a new ticket was created, ``False`` when skipped.
+    """
+    existing = await tickets_repo.find_open_ticket_by_external_reference(
+        external_reference
+    )
+    if existing:
+        return False
+    try:
+        await tickets_service.create_ticket(
+            subject=subject,
+            description=description,
+            requester_id=None,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority="normal",
+            status="open",
+            category=None,
+            module_slug=_ALERT_MODULE_SLUG,
+            external_reference=external_reference,
+            trigger_automations=True,
+        )
+        log_info(
+            "Backup alert ticket created",
+            external_reference=external_reference,
+            company_id=company_id,
+        )
+        return True
+    except Exception as exc:  # pragma: no cover - defensive
+        log_warning(
+            "Failed to create backup alert ticket",
+            external_reference=external_reference,
+            error=str(exc),
+        )
+        return False
+
+
+
 
 
 def summarise_latest(latest_by_job: Mapping[int, Mapping[str, Any]]) -> dict[str, Any]:
@@ -462,6 +669,7 @@ __all__ = [
     "STATUS_DEFINITIONS",
     "StatusDefinition",
     "build_history_grid",
+    "check_backup_alerts",
     "create_job",
     "delete_job",
     "get_job",
