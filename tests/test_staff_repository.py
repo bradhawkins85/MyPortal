@@ -113,3 +113,66 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
     assert "ORDER BY s.updated_at ASC, s.id ASC" in (dummy_db.last_sql or "")
     assert "LIMIT %s" in (dummy_db.last_sql or "")
     assert dummy_db.last_params[-1] == 100
+
+
+@pytest.mark.anyio
+async def test_list_staff_exclude_package_staff_adds_sql_condition(monkeypatch):
+    """list_staff with exclude_package_staff=True includes the SQL condition to exclude package_ staff."""
+    dummy_rows = [
+        {
+            "id": 1,
+            "company_id": 3,
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@example.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+    monkeypatch.setattr(staff, "staff_custom_fields_repo", _DummyCustomFieldsRepo())
+
+    await staff.list_staff(3, enabled=True, exclude_package_staff=True)
+
+    assert "LOWER(SUBSTR(s.email, 1, 8))" in (dummy_db.last_sql or "")
+    assert "'package_'" in (dummy_db.last_sql or "")
+
+
+@pytest.mark.anyio
+async def test_list_staff_without_exclude_package_staff_omits_sql_condition(monkeypatch):
+    """list_staff without exclude_package_staff does not add the package_ SQL condition."""
+    dummy_rows = [
+        {
+            "id": 1,
+            "company_id": 3,
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@example.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+    monkeypatch.setattr(staff, "staff_custom_fields_repo", _DummyCustomFieldsRepo())
+
+    await staff.list_staff(3, enabled=True, exclude_package_staff=False)
+
+    assert "LOWER(SUBSTR(s.email, 1, 8))" not in (dummy_db.last_sql or "")

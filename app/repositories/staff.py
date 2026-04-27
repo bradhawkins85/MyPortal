@@ -93,12 +93,19 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     return mapped
 
 
-async def count_staff(company_id: int, *, enabled: bool | None = None) -> int:
+async def count_staff(
+    company_id: int,
+    *,
+    enabled: bool | None = None,
+    exclude_package_staff: bool = False,
+) -> int:
     conditions = ["company_id = %s"]
     params: list[Any] = [company_id]
     if enabled is not None:
         conditions.append("enabled = %s")
         params.append(1 if enabled else 0)
+    if exclude_package_staff:
+        conditions.append("NOT (LOWER(SUBSTR(email, 1, 8)) = 'package_')")
     where_clause = " AND ".join(conditions)
     row = await db.fetch_one(
         f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",
@@ -112,6 +119,7 @@ async def list_staff(
     *,
     enabled: bool | None = None,
     exclude_ex_staff: bool = False,
+    exclude_package_staff: bool = False,
     onboarding_complete: bool | None = None,
     onboarding_status: str | None = None,
     offboarding_complete: bool | None = None,
@@ -133,6 +141,8 @@ async def list_staff(
         params.append(1 if enabled else 0)
     if exclude_ex_staff:
         conditions.append("s.is_ex_staff = 0")
+    if exclude_package_staff:
+        conditions.append("NOT (LOWER(SUBSTR(s.email, 1, 8)) = 'package_')")
     if onboarding_complete is not None:
         conditions.append("s.onboarding_complete = %s")
         params.append(1 if onboarding_complete else 0)

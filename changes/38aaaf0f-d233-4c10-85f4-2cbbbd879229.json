@@ -3,5 +3,5 @@
   "occurred_at": "2026-04-27T06:40Z",
   "change_type": "Fix",
   "summary": "Fetch M365 archive mailbox sizes via Exchange Online Get-MailboxStatistics -Archive so user and shared mailboxes display real archive size (Microsoft Graph getMailboxUsageDetail does not expose archive storage).",
-  "content_hash": "f977599b067740649ccbdbb15ae70b1493c04194be2ea1384c3f07059c03fa77"
+  "content_hash": "041a694fd093221341b52d5e977872d1b3e2507b882708f516d86597c8b4878e"
 }
