@@ -53,6 +53,7 @@ async def test_build_company_report_assembles_all_sections():
         reports.licenses_repo, "list_company_licenses",
         new=AsyncMock(return_value=[
             {
+                "id": 1,
                 "display_name": "Business Basic",
                 "count": 10,
                 "allocated": 7,
@@ -60,6 +61,11 @@ async def test_build_company_report_assembles_all_sections():
                 "contract_term": "annual",
             },
         ]),
+    ), patch.object(
+        reports.licenses_repo, "list_staff_by_license_for_company",
+        new=AsyncMock(return_value={
+            1: [{"first_name": "Alice", "last_name": "Smith", "email": "alice@example.com"}],
+        }),
     ), patch.object(
         reports.subscriptions_repo, "list_subscriptions",
         new=AsyncMock(return_value=[

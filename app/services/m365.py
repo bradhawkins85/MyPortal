@@ -3553,6 +3553,221 @@ async def _exo_get_mailbox_permission(
     return records
 
 
+def _parse_exo_total_item_size(value: Any) -> int | None:
+    """Parse an Exchange Online ``ByteQuantifiedSize`` value into bytes.
+
+    The Exchange Online ``InvokeCommand`` REST API can serialize the
+    ``TotalItemSize`` property in several shapes:
+
+    * A display string such as ``"1.5 GB (1,610,612,736 bytes)"`` – the value
+      inside the parentheses is the authoritative byte count.
+    * A nested object exposing ``Value``/``value``/``ToBytes`` keys, sometimes
+      with a further nested ``Value`` integer.
+    * A plain numeric string or integer representing bytes directly.
+
+    Returns ``None`` when the value cannot be interpreted (including ``None``
+    / empty inputs).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        # ``bool`` is a subclass of ``int``; treat it as not-a-size to avoid
+        # accidentally returning 0/1.
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        try:
+            return int(value) if value >= 0 else None
+        except (OverflowError, ValueError):
+            return None
+    if isinstance(value, dict):
+        for key in (
+            "Value",
+            "value",
+            "ToBytes",
+            "toBytes",
+            "TotalBytes",
+            "totalBytes",
+        ):
+            if key in value:
+                parsed = _parse_exo_total_item_size(value.get(key))
+                if parsed is not None:
+                    return parsed
+        return None
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    # "1.5 GB (1,610,612,736 bytes)" – pull the bytes out of the parens.
+    match = re.search(r"\(([\d,\s]+)\s*bytes?\)", candidate, re.IGNORECASE)
+    if match:
+        digits = match.group(1).replace(",", "").replace(" ", "")
+        if digits.isdigit():
+            return int(digits)
+    # Plain integer string ("1610612736") or float string.
+    cleaned = candidate.replace(",", "").replace(" ", "")
+    try:
+        return int(float(cleaned))
+    except (TypeError, ValueError):
+        return None
+
+
+# Exchange Online error codes / phrases returned by ``Get-MailboxStatistics
+# -Archive`` when the target mailbox does not have an in-place archive
+# provisioned.  These are treated as "no archive" rather than hard failures.
+_EXO_NO_ARCHIVE_PHRASES = (
+    "no archive",
+    "archive does not exist",
+    "isn't enabled for archive",
+    "is not enabled for archive",
+    "archive is not enabled",
+    "archive mailbox isn't enabled",
+)
+
+
+def _exo_response_indicates_no_archive(body: str) -> bool:
+    """Return True when an EXO error response indicates the mailbox has no archive."""
+    lowered = (body or "").lower()
+    return any(phrase in lowered for phrase in _EXO_NO_ARCHIVE_PHRASES)
+
+
+async def _exo_get_archive_mailbox_size(
+    exo_token: str,
+    tenant_id: str,
+    mailbox_email: str,
+) -> int | None:
+    """Return the archive mailbox size in bytes for ``mailbox_email``.
+
+    Uses the Exchange Online ``InvokeCommand`` REST API to run
+    ``Get-MailboxStatistics -Identity <mailbox_email> -Archive``.  Microsoft
+    Graph's ``getMailboxUsageDetail`` report does not expose the archive
+    mailbox size, so this is the only reliable way to retrieve it.
+
+    Returns the archive size in bytes when available, ``None`` when the
+    mailbox has no archive provisioned, and re-raises :class:`M365Error`
+    (with ``http_status`` preserved) for genuine API/permission failures so
+    callers can stop the loop early on systemic errors (e.g. 403).
+    """
+    url = (
+        f"https://outlook.office365.com/adminapi/beta/"
+        f"{quote(tenant_id, safe='')}/InvokeCommand"
+    )
+    payload = {
+        "CmdletInput": {
+            "CmdletName": "Get-MailboxStatistics",
+            "Parameters": {"Identity": mailbox_email, "Archive": True},
+        }
+    }
+    headers = {
+        "Authorization": f"Bearer {exo_token}",
+        "Accept-Encoding": "identity",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.DecodingError as exc:
+        log_warning(
+            "Exchange Online Get-MailboxStatistics request decode failed",
+            mailbox_email=mailbox_email,
+            error=str(exc),
+        )
+        return None
+    if response.status_code != 200:
+        try:
+            body = response.text[:500] if response.text else ""
+        except httpx.DecodingError:
+            body = "(decompression failed)"
+        if _exo_response_indicates_no_archive(body):
+            return None
+        if response.status_code == 403:
+            raise M365Error(
+                f"Exchange Online Get-MailboxStatistics returned 403 for "
+                f"{mailbox_email}. Ensure the app has the Exchange.ManageAsApp "
+                f"permission and an Exchange RBAC role (e.g. Exchange Administrator).",
+                http_status=403,
+            )
+        log_warning(
+            "Exchange Online Get-MailboxStatistics failed",
+            mailbox_email=mailbox_email,
+            status=response.status_code,
+            body=body,
+        )
+        return None
+    try:
+        data = response.json()
+    except (ValueError, httpx.DecodingError) as exc:
+        log_warning(
+            "Exchange Online Get-MailboxStatistics response parse failed",
+            mailbox_email=mailbox_email,
+            error=str(exc),
+        )
+        return None
+    records = data.get("value") or []
+    if not records:
+        return None
+    record = records[0] if isinstance(records[0], dict) else {}
+    for key in ("TotalItemSize", "totalItemSize"):
+        if key in record:
+            parsed = _parse_exo_total_item_size(record.get(key))
+            if parsed is not None:
+                return parsed
+            break
+    return None
+
+
+async def _fetch_exo_archive_mailbox_sizes(
+    company_id: int,
+    mailbox_emails: set[str],
+) -> dict[str, int]:
+    """Fetch archive mailbox sizes for ``mailbox_emails`` via Exchange Online.
+
+    Microsoft Graph's mailbox usage report does not expose the size of
+    in-place archive mailboxes, so this helper falls back to the Exchange
+    Online ``Get-MailboxStatistics -Archive`` cmdlet.  Returns a dict mapping
+    lower-cased mailbox emails to archive size in bytes (only mailboxes that
+    have an archive are included).
+
+    The function is best-effort: when the Exchange Online token cannot be
+    acquired (e.g. ``Exchange.ManageAsApp`` not granted) it returns an empty
+    dict so the caller falls back to the (zero) values from the Graph report.
+    A 403 from any individual lookup short-circuits the remaining mailboxes
+    because the same permission failure will repeat for every entry.
+    """
+    if not mailbox_emails:
+        return {}
+
+    try:
+        exo_token, effective_tenant_id = await _acquire_exo_access_token(company_id)
+    except M365Error:
+        return {}
+
+    sizes_by_mailbox: dict[str, int] = {}
+    for mailbox_email in mailbox_emails:
+        normalised = str(mailbox_email or "").strip().lower()
+        if not normalised:
+            continue
+        try:
+            size_bytes = await _exo_get_archive_mailbox_size(
+                exo_token, effective_tenant_id, normalised
+            )
+        except M365Error as exc:
+            if exc.http_status == 403:
+                log_warning(
+                    "Exchange Online Get-MailboxStatistics returned 403 – "
+                    "skipping archive size lookups for remaining mailboxes. "
+                    "Ensure the app has the Exchange.ManageAsApp permission "
+                    "and an Exchange RBAC role.",
+                    mailbox_email=normalised,
+                )
+                break
+            raise
+        if size_bytes is not None:
+            sizes_by_mailbox[normalised] = size_bytes
+
+    return sizes_by_mailbox
+
+
 async def _fetch_exo_mailbox_permissions(
     company_id: int,
     mailbox_emails: set[str],
@@ -3930,6 +4145,35 @@ async def sync_mailboxes(company_id: int) -> int:
                 member_display_name=member["member_display_name"],
                 synced_at=member_sync_start,
             )
+
+    # Microsoft Graph's getMailboxUsageDetail report does not include the
+    # archive mailbox size, so the values copied from the report above are
+    # always 0.  Query Exchange Online's Get-MailboxStatistics -Archive
+    # cmdlet for the real size and overlay it onto the rows.  This is
+    # best-effort: when Exchange Online is unavailable, the report-derived
+    # values (and hasArchive flag) are kept as a fallback.
+    archive_sizes_by_mailbox: dict[str, int] = {}
+    if mailbox_emails:
+        try:
+            archive_sizes_by_mailbox = await _fetch_exo_archive_mailbox_sizes(
+                company_id, mailbox_emails
+            )
+        except Exception as exc:
+            log_info(
+                "Skipping archive mailbox size sync; "
+                "Exchange Online PowerShell unavailable",
+                company_id=company_id,
+                error=str(exc),
+            )
+
+    if archive_sizes_by_mailbox:
+        for row in rows_to_upsert:
+            mb_key = str(row.get("user_principal_name") or "").strip().lower()
+            if not mb_key or mb_key not in archive_sizes_by_mailbox:
+                continue
+            size_bytes = archive_sizes_by_mailbox[mb_key]
+            row["archive_storage_used_bytes"] = size_bytes
+            row["has_archive"] = True
 
     # Upsert all rows into the database.
     for row in rows_to_upsert:
