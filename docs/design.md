@@ -197,7 +197,7 @@ element to `<a>` when writing markup by hand.
 
 ---
 
-## 4. Data tables
+## 3. Data tables
 
 **Reference implementation:** `/assets` (`app/templates/assets/index.html`)
 
@@ -288,6 +288,10 @@ Client-side pagination bar (used when JS-driven pagination is needed):
 | `.empty-state__title` | Heading inside the empty state |
 | `.empty-state__subtitle` | Helper text inside the empty state |
 
+
+---
+
+## 4. Popup modals
 
 **Reference implementation:** Create ticket modal in `/admin/tickets`
 (`app/templates/admin/tickets.html`, `id="create-ticket-modal"`)
