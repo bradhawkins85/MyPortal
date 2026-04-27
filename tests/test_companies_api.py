@@ -309,3 +309,38 @@ def test_list_companies_includes_archived_when_requested(monkeypatch, active_ses
     assert len(companies) == 2
     assert companies[0]["name"] == "Active Company"
     assert companies[1]["name"] == "Archived Company"
+
+
+@pytest.mark.anyio
+async def test_delete_company_clears_child_records(monkeypatch):
+    """Ensure delete_company issues DELETE/UPDATE for all FK-constrained child tables."""
+    executed = []
+
+    async def fake_execute(sql, params=None):
+        executed.append(sql.strip())
+
+    monkeypatch.setattr(db, "execute", fake_execute)
+
+    await company_repo.delete_company(42)
+
+    # The final statement must delete the company itself.
+    assert executed[-1] == "DELETE FROM companies WHERE id = %s"
+
+    # All non-CASCADE child tables must be handled before the company row is removed.
+    expected_prefixes = [
+        "UPDATE user_sessions SET active_company_id = NULL",
+        "UPDATE users SET company_id = NULL",
+        "DELETE FROM assets",
+        "DELETE FROM staff",
+        "DELETE FROM licenses",
+        "DELETE FROM invoices",
+        "DELETE FROM external_api_settings",
+        "DELETE FROM company_app_prices",
+        "DELETE FROM office_groups",
+        "DELETE FROM user_companies",
+        "DELETE FROM staff_requests",
+    ]
+    for prefix in expected_prefixes:
+        assert any(
+            stmt.startswith(prefix) for stmt in executed
+        ), f"Expected a statement starting with '{prefix}'"
