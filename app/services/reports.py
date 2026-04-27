@@ -713,12 +713,19 @@ async def _build_orders_detail(company_id: int) -> dict[str, Any]:
 async def _build_licenses_detail(company_id: int) -> dict[str, Any]:
     """License list with computed usage percentage for the detail page."""
     records = await licenses_repo.list_company_licenses(company_id)
+    staff_by_license = await licenses_repo.list_staff_by_license_for_company(company_id)
     licenses: list[dict[str, Any]] = []
     for record in records:
         expiry = _coerce_date(record.get("expiry_date"))
         total = int(record.get("count") or 0)
         allocated = int(record.get("allocated") or 0)
         usage_pct = round((allocated / total * 100.0), 1) if total else 0.0
+        license_id = record.get("id")
+        assigned = staff_by_license.get(license_id, []) if license_id else []
+        assigned_users = [
+            (f"{u.get('first_name', '')} {u.get('last_name', '')}".strip() or u.get("email", ""))
+            for u in assigned
+        ]
         licenses.append(
             {
                 "name": record.get("display_name") or record.get("name"),
@@ -729,6 +736,7 @@ async def _build_licenses_detail(company_id: int) -> dict[str, Any]:
                 "expiry_date": expiry.isoformat() if expiry else None,
                 "auto_renew": record.get("auto_renew"),
                 "notes": record.get("notes"),
+                "assigned_users": assigned_users,
             }
         )
     return {"licenses": licenses, "total": len(licenses)}

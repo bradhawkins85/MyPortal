@@ -460,6 +460,7 @@ def _make_full_patches(reports_module):
         (reports_module.m365_bp_repo, "list_results", AsyncMock(return_value=[])),
         (reports_module.shop_repo, "list_order_summaries", AsyncMock(return_value=[])),
         (reports_module.licenses_repo, "list_company_licenses", AsyncMock(return_value=[])),
+        (reports_module.licenses_repo, "list_staff_by_license_for_company", AsyncMock(return_value={})),
         (reports_module.subscriptions_repo, "list_subscriptions", AsyncMock(return_value=[])),
         (reports_module.essential8_repo, "list_essential8_controls", AsyncMock(return_value=[])),
         (reports_module.essential8_repo, "get_per_maturity_statuses_for_company", AsyncMock(return_value={})),
