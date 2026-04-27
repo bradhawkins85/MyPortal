@@ -582,9 +582,9 @@ async def _build_assets_detail(company_id: int) -> dict[str, Any]:
         last_sync_raw = row.get("last_sync")
         last_sync: str | None = None
         if isinstance(last_sync_raw, datetime):
-            last_sync = last_sync_raw.isoformat()
+            last_sync = last_sync_raw.strftime("%Y-%m-%d")
         elif isinstance(last_sync_raw, str):
-            last_sync = last_sync_raw
+            last_sync = last_sync_raw[:10] if last_sync_raw else None
         assets.append(
             {
                 "name": row.get("name"),

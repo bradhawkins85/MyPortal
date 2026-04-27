@@ -12,11 +12,9 @@
             <th>Name</th>
             <th>Type</th>
             <th>OS</th>
-            <th>Status</th>
             <th>Serial number</th>
             <th>Last user</th>
             <th>Last sync</th>
-            <th>Warranty end</th>
           </tr>
         </thead>
         <tbody>
@@ -25,17 +23,9 @@
               <td>{{ asset.name or '—' }}</td>
               <td>{{ asset.type or '—' }}</td>
               <td>{{ asset.os_name or '—' }}</td>
-              <td>{{ asset.status or '—' }}</td>
               <td>{{ asset.serial_number or '—' }}</td>
               <td>{{ asset.last_user or '—' }}</td>
-              <td>
-                {% if asset.last_sync %}
-                  <span data-utc="{{ asset.last_sync }}">{{ asset.last_sync }}</span>
-                {% else %}
-                  —
-                {% endif %}
-              </td>
-              <td>{{ asset.warranty_end_date or '—' }}</td>
+              <td>{{ asset.last_sync or '—' }}</td>
             </tr>
           {% endfor %}
         </tbody>
