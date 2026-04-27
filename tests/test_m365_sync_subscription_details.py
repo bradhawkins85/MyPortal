@@ -17,7 +17,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services import m365 as m365_service
-from app.services.m365 import _parse_subscription_date, _TERM_DURATION_LABELS
+from app.services.m365 import (
+    _coerce_optional_bool,
+    _normalise_contract_term,
+    _parse_subscription_date,
+    _TERM_DURATION_LABELS,
+)
 
 
 @pytest.fixture
@@ -50,6 +55,18 @@ def test_parse_subscription_date_empty_string() -> None:
 
 def test_parse_subscription_date_invalid() -> None:
     assert _parse_subscription_date("not-a-date") is None
+
+
+def test_coerce_optional_bool_handles_strings() -> None:
+    assert _coerce_optional_bool("true") is True
+    assert _coerce_optional_bool("FALSE") is False
+    assert _coerce_optional_bool("unknown") is None
+
+
+def test_normalise_contract_term_handles_aliases() -> None:
+    assert _normalise_contract_term("P1Y") == "Annual"
+    assert _normalise_contract_term("monthly") == "Monthly"
+    assert _normalise_contract_term(None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +399,53 @@ async def test_sync_sku_id_case_insensitive_match():
             m365_service.license_repo,
             "get_license_by_company_and_sku",
             AsyncMock(return_value=_make_license(1, "SKU_X")),
+        ),
+        patch.object(m365_service.license_repo, "update_license", side_effect=capture_update),
+        patch.object(m365_service.license_repo, "record_usage_if_changed", AsyncMock(return_value=False)),
+        patch.object(m365_service, "_sync_staff_assignments", AsyncMock()),
+        patch.object(m365_service.license_repo, "list_company_licenses", AsyncMock(return_value=[])),
+        patch.object(m365_service, "log_info", lambda *a, **kw: None),
+    ):
+        await m365_service.sync_company_licenses(1)
+
+    assert update_calls, "update_license should have been called"
+    assert update_calls[0]["auto_renew"] is False
+    assert update_calls[0]["contract_term"] == "Annual"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_uses_auto_renew_enabled_and_commitment_term_fallbacks():
+    """Variant Graph payload keys should still populate auto-renew and contract term."""
+    m365_skus = [_make_sku("SKU_VAR", "sku-id-var")]
+    subscriptions = [
+        {
+            "skuId": "sku-id-var",
+            "nextLifecycleDateTime": "2028-05-01T00:00:00Z",
+            "autoRenewEnabled": "false",
+            "commitmentTerm": "annual",
+        }
+    ]
+    update_calls: list[dict[str, Any]] = []
+
+    async def fake_graph_get(token, url):
+        if "subscribedSkus" in url:
+            return {"value": m365_skus}
+        return {"value": []}
+
+    async def capture_update(license_id, **kwargs):
+        update_calls.append(kwargs)
+        return _make_license(license_id, kwargs["platform"])
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", side_effect=fake_graph_get),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=subscriptions)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.sku_friendly_repo, "get_friendly_name", AsyncMock(return_value=None)),
+        patch.object(
+            m365_service.license_repo,
+            "get_license_by_company_and_sku",
+            AsyncMock(return_value=_make_license(1, "SKU_VAR")),
         ),
         patch.object(m365_service.license_repo, "update_license", side_effect=capture_update),
         patch.object(m365_service.license_repo, "record_usage_if_changed", AsyncMock(return_value=False)),
