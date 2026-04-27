@@ -9607,3 +9607,26 @@ a.stat-strip__stat:focus-visible {
   font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', ui-monospace, monospace;
   font-size: 0.875em;
 }
+
+/* Backup grid — cell colour coding (matches stat-strip palette) */
+.backup-grid__cell {
+  text-align: center;
+  vertical-align: middle;
+  transition: background 0.15s ease;
+}
+
+.backup-grid__cell--success {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.18), rgba(22, 163, 74, 0.12));
+}
+
+.backup-grid__cell--warning {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(234, 179, 8, 0.12));
+}
+
+.backup-grid__cell--danger {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.18), rgba(220, 38, 38, 0.12));
+}
+
+.backup-grid__cell--neutral {
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.12), rgba(100, 116, 139, 0.08));
+}

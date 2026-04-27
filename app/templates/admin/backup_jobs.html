@@ -191,7 +191,7 @@
           <thead>
             <tr>
               <th scope="col">Job</th>
-              {% for day in backup_history.dates %}
+              {% for day in backup_history.dates | reverse %}
                 <th scope="col" class="backup-grid__day">{{ day.strftime('%d %b') }}</th>
               {% endfor %}
             </tr>
@@ -203,8 +203,8 @@
                   <div><strong>{{ row.job.name }}</strong></div>
                   <div class="table__meta">{{ backup_company_lookup.get(row.job.company_id, 'Company #' ~ row.job.company_id) }}</div>
                 </td>
-                {% for cell in row.events %}
-                  <td class="backup-grid__cell" title="{{ cell.date }} — {{ cell.label }}{% if cell.message %}: {{ cell.message }}{% endif %}">
+                {% for cell in row.events | reverse %}
+                  <td class="backup-grid__cell backup-grid__cell--{{ cell.variant }}" title="{{ cell.date }} — {{ cell.label }}{% if cell.message %}: {{ cell.message }}{% endif %}">
                     <span class="status status--{{ cell.variant }} backup-grid__pill">{{ cell.label[0] }}</span>
                   </td>
                 {% endfor %}
