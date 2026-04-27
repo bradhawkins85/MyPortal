@@ -129,17 +129,43 @@
                 {% endif %}
               </td>
               <td class="table__actions" data-column-key="actions">
-                <div class="action-menu">
-                  <a class="button button--ghost button--small" href="/admin/backup-jobs?jobId={{ job.id }}">Edit</a>
-                  <form action="/admin/backup-jobs/{{ job.id }}/regenerate-token" method="post" class="inline-form" data-confirm="Regenerate the JobID token? Existing scripts will need to be updated.">
-                    {% include "partials/csrf.html" %}
-                    <button type="submit" class="button button--ghost button--small">New token</button>
-                  </form>
-                  <form action="/admin/backup-jobs/{{ job.id }}/delete" method="post" class="inline-form" data-confirm="Delete this backup job and all of its events?">
-                    {% include "partials/csrf.html" %}
-                    <button type="submit" class="button button--ghost button--danger button--small">Delete</button>
-                  </form>
-                </div>
+                <details class="header-title-menu__dropdown" data-header-menu>
+                  <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                    Actions
+                    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                      <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                    </svg>
+                    <span class="visually-hidden">Toggle row actions menu</span>
+                  </summary>
+                  <ul class="header-title-menu__list" role="menu">
+                    <li class="header-title-menu__item" role="none">
+                      <a class="header-title-menu__link" role="menuitem" href="/admin/backup-jobs?jobId={{ job.id }}">Edit</a>
+                    </li>
+                    <li class="header-title-menu__item" role="none">
+                      <button
+                        type="button"
+                        class="header-title-menu__link"
+                        role="menuitem"
+                        data-backup-token="{{ job.token }}"
+                        data-backup-job-name="{{ job.name | e }}"
+                      >
+                        Get token
+                      </button>
+                    </li>
+                    <li class="header-title-menu__item" role="none">
+                      <form action="/admin/backup-jobs/{{ job.id }}/regenerate-token" method="post" class="inline-form" data-confirm="Regenerate the JobID token? Existing scripts will need to be updated.">
+                        {% include "partials/csrf.html" %}
+                        <button type="submit" class="header-title-menu__link" role="menuitem">New token</button>
+                      </form>
+                    </li>
+                    <li class="header-title-menu__item" role="none">
+                      <form action="/admin/backup-jobs/{{ job.id }}/delete" method="post" class="inline-form" data-confirm="Delete this backup job and all of its events?">
+                        {% include "partials/csrf.html" %}
+                        <button type="submit" class="header-title-menu__link header-title-menu__link--danger" role="menuitem">Delete</button>
+                      </form>
+                    </li>
+                  </ul>
+                </details>
               </td>
             </tr>
           {% else %}
@@ -265,6 +291,85 @@ Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -Conte
     {% endif %}
   </div>
 </section>
+
+<div class="modal" id="backup-token-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close</span>
+    </button>
+    <h2 class="modal__title" id="backup-token-modal-title">Job token</h2>
+    <div class="modal__body">
+      <p class="modal__subtitle text-muted" id="backup-token-modal-subtitle"></p>
+      <pre id="backup-token-value" class="backup-token__value"></pre>
+      <div class="form-actions backup-token__actions">
+        <button type="button" class="button button--primary" id="backup-token-copy-btn">Copy token</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function () {
+  const modal = document.getElementById('backup-token-modal');
+  const subtitle = document.getElementById('backup-token-modal-subtitle');
+  const valueEl = document.getElementById('backup-token-value');
+  const copyBtn = document.getElementById('backup-token-copy-btn');
+
+  function openModal(token, jobName) {
+    subtitle.textContent = jobName ? 'Token for: ' + jobName : 'Current job token';
+    valueEl.textContent = token;
+    modal.hidden = false;
+    copyBtn.textContent = 'Copy token';
+  }
+
+  function closeModal() {
+    modal.hidden = true;
+  }
+
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-backup-token]');
+    if (btn) {
+      e.preventDefault();
+      // Close the dropdown
+      const details = btn.closest('details');
+      if (details) details.open = false;
+      openModal(btn.dataset.backupToken, btn.dataset.backupJobName || '');
+      return;
+    }
+    if (e.target.closest('[data-modal-close]') || e.target === modal) {
+      closeModal();
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !modal.hidden) closeModal();
+  });
+
+  copyBtn.addEventListener('click', function () {
+    const token = valueEl.textContent;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(token).then(function () {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
+      });
+    } else {
+      // Fallback for browsers without Clipboard API (legacy/restricted contexts).
+      const ta = document.createElement('textarea');
+      ta.value = token;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
+    }
+  });
+})();
+</script>
 {% endblock %}
 
 {% block styles %}
@@ -280,5 +385,7 @@ Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -Conte
     font-weight: 600;
   }
   pre { background: var(--color-bg-muted, #f4f4f5); padding: 0.5rem; border-radius: 4px; overflow-x: auto; }
+  .backup-token__value { word-break: break-all; white-space: pre-wrap; }
+  .backup-token__actions { margin-top: 0.75rem; }
 </style>
 {% endblock %}
