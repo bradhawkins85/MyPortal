@@ -2990,6 +2990,12 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
 
         normalised_item = {_normalise_key(k): v for k, v in item.items()}
 
+        def _first_normalised_value(*keys: str) -> Any:
+            for key in keys:
+                if key in normalised_item:
+                    return normalised_item.get(key)
+            return None
+
         upn = (
             str(
                 item.get("userPrincipalName")
@@ -3014,9 +3020,11 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             item.get("archiveMailboxStorageUsedInBytes")
             if "archiveMailboxStorageUsedInBytes" in item
             else (
-                normalised_item.get("archive mailbox storage used (byte)")
-                if "archive mailbox storage used (byte)" in normalised_item
-                else normalised_item.get("archive storage used (byte)")
+                _first_normalised_value(
+                    "archive mailbox storage used (byte)",
+                    "archive storage used (byte)",
+                    "archive mailbox size (byte)",
+                )
             )
         )
         is_deleted_raw = (
@@ -3035,7 +3043,11 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             str(
                 item.get("hasArchive")
                 if "hasArchive" in item
-                else normalised_item.get("has archive") or "false"
+                else _first_normalised_value(
+                    "has archive",
+                    "has archive mailbox",
+                )
+                or "false"
             )
             .strip()
             .lower()
@@ -3050,7 +3062,11 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
             str(
                 item.get("archiveStatus")
                 if "archiveStatus" in item
-                else normalised_item.get("archive status") or ""
+                else _first_normalised_value(
+                    "archive status",
+                    "in-place archive status",
+                )
+                or ""
             )
             .strip()
             .lower()
