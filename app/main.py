@@ -12623,11 +12623,25 @@ def _extract_backup_job_form(form: FormData) -> dict[str, Any]:
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
         company_id = 0
+
+    def _parse_alert_days(key: str) -> int | None:
+        raw = (form.get(key) or "").strip()
+        if not raw:
+            return None
+        try:
+            val = int(raw)
+            return val if val > 0 else None
+        except (TypeError, ValueError):
+            return None
+
     return {
         "company_id": company_id,
         "name": (form.get("name") or "").strip(),
         "description": (form.get("description") or "").strip() or None,
         "is_active": form.get("is_active") in {"on", "true", "1", "yes"},
+        "alert_no_success_days": _parse_alert_days("alert_no_success_days"),
+        "alert_fail_days": _parse_alert_days("alert_fail_days"),
+        "alert_unknown_days": _parse_alert_days("alert_unknown_days"),
     }
 
 
@@ -12645,6 +12659,9 @@ async def admin_create_backup_job(request: Request):
             description=payload["description"],
             is_active=payload["is_active"],
             created_by=int(user.get("id")) if user.get("id") else None,
+            alert_no_success_days=payload["alert_no_success_days"],
+            alert_fail_days=payload["alert_fail_days"],
+            alert_unknown_days=payload["alert_unknown_days"],
         )
     except ValueError as exc:
         url = f"/admin/backup-jobs?error={quote(str(exc))}"
@@ -12677,6 +12694,12 @@ async def admin_update_backup_job(request: Request, job_id: int):
             name=payload["name"],
             description=payload["description"],
             is_active=payload["is_active"],
+            alert_no_success_days=payload["alert_no_success_days"],
+            alert_fail_days=payload["alert_fail_days"],
+            alert_unknown_days=payload["alert_unknown_days"],
+            clear_alert_no_success_days=payload["alert_no_success_days"] is None,
+            clear_alert_fail_days=payload["alert_fail_days"] is None,
+            clear_alert_unknown_days=payload["alert_unknown_days"] is None,
         )
     except ValueError as exc:
         url = f"/admin/backup-jobs?jobId={int(job_id)}&error={quote(str(exc))}"

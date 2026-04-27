@@ -644,6 +644,15 @@ async def get_ticket_by_external_reference(external_reference: str) -> TicketRec
     return _normalise_ticket(row) if row else None
 
 
+async def find_open_ticket_by_external_reference(external_reference: str) -> TicketRecord | None:
+    """Return the first non-closed ticket with the given external_reference, or None."""
+    row = await db.fetch_one(
+        "SELECT * FROM tickets WHERE external_reference = %s AND closed_at IS NULL LIMIT 1",
+        (external_reference,),
+    )
+    return _normalise_ticket(row) if row else None
+
+
 async def list_tickets_by_requester_phone(
     phone_number: str,
     limit: int = 100,
