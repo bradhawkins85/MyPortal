@@ -23,7 +23,7 @@
               <td>{{ lic.allocated }}</td>
               <td>
                 {% if lic.staff %}
-                  {{ lic.staff | map(attribute='name') | join(', ') }}
+                  {% for member in lic.staff %}{{ member.name }}{% if not loop.last %}<br>{% endif %}{% endfor %}
                 {% else %}
                   —
                 {% endif %}
