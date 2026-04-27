@@ -483,8 +483,8 @@
           {% if assets %}
             <table class="report-table">
               <thead><tr>
-                <th>Name</th><th>Type</th><th>OS</th><th>Status</th>
-                <th>Serial</th><th>Last user</th><th>Warranty end</th>
+                <th>Name</th><th>Type</th><th>OS</th>
+                <th>Serial</th><th>Last user</th><th>Last sync</th>
               </tr></thead>
               <tbody>
                 {% for asset in assets %}
@@ -492,10 +492,9 @@
                     <td>{{ asset.name or '—' }}</td>
                     <td>{{ asset.type or '—' }}</td>
                     <td>{{ asset.os_name or '—' }}</td>
-                    <td>{{ asset.status or '—' }}</td>
                     <td>{{ asset.serial_number or '—' }}</td>
                     <td>{{ asset.last_user or '—' }}</td>
-                    <td>{{ asset.warranty_end_date or '—' }}</td>
+                    <td>{{ asset.last_sync or '—' }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
