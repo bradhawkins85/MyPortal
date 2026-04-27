@@ -221,25 +221,26 @@ def _mailbox_row_to_dict(row: Any) -> dict[str, Any]:
     }
 
 
-# SQL fragment shared by both mailbox builders to exclude auto-generated
-# package mailboxes (display_name starts with 'package_').
+# SQL fragment used to exclude auto-generated package mailboxes from queries.
+# This is a hardcoded constant and is safe to embed directly in SQL strings.
 _EXCLUDE_PACKAGE_MAILBOX_SQL = (
     "NOT (LOWER(SUBSTR(display_name, 1, 8)) = 'package_')"
+)
+
+_MAILBOX_BASE_QUERY = (
+    "SELECT user_principal_name, display_name, mailbox_type,"
+    " storage_used_bytes, archive_storage_used_bytes"
+    " FROM m365_mailboxes"
+    " WHERE company_id = %s AND mailbox_type = %s"
+    " AND " + _EXCLUDE_PACKAGE_MAILBOX_SQL +
+    " ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC"
 )
 
 
 async def _build_top_mailboxes(company_id: int) -> dict[str, Any]:
     """Top five user mailboxes and top five shared mailboxes by size."""
 
-    _query = f"""
-        SELECT user_principal_name, display_name, mailbox_type,
-               storage_used_bytes, archive_storage_used_bytes
-        FROM m365_mailboxes
-        WHERE company_id = %s AND mailbox_type = %s
-          AND {_EXCLUDE_PACKAGE_MAILBOX_SQL}
-        ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
-        LIMIT 5
-    """
+    _query = _MAILBOX_BASE_QUERY + " LIMIT 5"
     try:
         user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
     except Exception:  # pragma: no cover - defensive when table missing
@@ -658,20 +659,12 @@ async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
 async def _build_top_mailboxes_detail(company_id: int) -> dict[str, Any]:
     """All mailboxes (not just top 5) for the detail page."""
 
-    _query = f"""
-        SELECT user_principal_name, display_name, mailbox_type,
-               storage_used_bytes, archive_storage_used_bytes
-        FROM m365_mailboxes
-        WHERE company_id = %s AND mailbox_type = %s
-          AND {_EXCLUDE_PACKAGE_MAILBOX_SQL}
-        ORDER BY (COALESCE(storage_used_bytes, 0) + COALESCE(archive_storage_used_bytes, 0)) DESC
-    """
     try:
-        user_rows = await db.fetch_all(_query, (company_id, "UserMailbox"))
+        user_rows = await db.fetch_all(_MAILBOX_BASE_QUERY, (company_id, "UserMailbox"))
     except Exception:  # pragma: no cover
         user_rows = []
     try:
-        shared_rows = await db.fetch_all(_query, (company_id, "SharedMailbox"))
+        shared_rows = await db.fetch_all(_MAILBOX_BASE_QUERY, (company_id, "SharedMailbox"))
     except Exception:  # pragma: no cover
         shared_rows = []
 
