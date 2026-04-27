@@ -925,6 +925,60 @@ async def test_fetch_mailbox_usage_report_csv_has_archive_column():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_fetch_mailbox_usage_report_csv_has_archive_mailbox_column():
+    """CSV fallback reads archive column/header variants used across tenants."""
+
+    class _FakeResponse:
+        def __init__(
+            self,
+            status_code: int,
+            text: str = "",
+            headers: dict[str, str] | None = None,
+        ):
+            self.status_code = status_code
+            self.text = text
+            self.content = text.encode("utf-8")
+            self.headers = headers or {}
+
+    class _FakeAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers: dict[str, str] | None = None):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    302, headers={"Location": "https://download.example/report.csv"}
+                )
+            csv_text = (
+                "User Principal Name,Display Name,Is Deleted,Storage Used (Byte),"
+                "Archive Mailbox Size (Byte),Has Archive Mailbox,In-Place Archive Status\n"
+                "user@example.com,User One,false,1024,0,true,Inactive\n"
+            )
+            return _FakeResponse(200, text=csv_text)
+
+    with patch("app.services.m365.httpx.AsyncClient", _FakeAsyncClient):
+        rows = await m365_service._fetch_mailbox_usage_report("tok")
+
+    assert rows == [
+        {
+            "userPrincipalName": "user@example.com",
+            "displayName": "User One",
+            "storageUsedInBytes": 1024,
+            "archiveMailboxStorageUsedInBytes": 0,
+            "hasArchive": True,
+            "isDeleted": False,
+        }
+    ]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_sync_mailboxes_has_archive_from_report_flag():
     """has_archive is set True when the report's hasArchive flag is True even
     if archive_storage_used_bytes is zero (e.g. newly provisioned archive)."""
