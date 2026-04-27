@@ -1,0 +1,47 @@
+<section class="card card--panel" data-report-section="backup_jobs_detail">
+  <header class="card__header report-section__header">
+    <h2>Backup history — Daily grid (last 30 days)</h2>
+    <span class="report-section__meta">
+      {{ section.detail_data.start_date }} → {{ section.detail_data.end_date }}
+    </span>
+  </header>
+  <div class="card__body">
+    {% set rows = section.detail_data.rows or [] %}
+    {% set dates = section.detail_data.dates or [] %}
+    {% if rows %}
+      <div class="table-wrapper">
+        <table class="report-table backup-grid">
+          <thead>
+            <tr>
+              <th>Job</th>
+              {% for day in dates %}
+                <th class="backup-grid__day">{{ day[5:] }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td><strong>{{ row.name }}</strong>{% if not row.is_active %} <small>(disabled)</small>{% endif %}</td>
+                {% for cell in row.events %}
+                  <td class="backup-grid__cell" style="background-color: {{ cell.pdf_color }};" title="{{ cell.date }} — {{ cell.label }}{% if cell.message %}: {{ cell.message }}{% endif %}">
+                    {{ cell.label[0] }}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="report-section__meta">
+        Legend:
+        <span class="status status--success">Pass</span>
+        <span class="status status--warning">Warn</span>
+        <span class="status status--danger">Fail</span>
+        <span class="status status--neutral">Unknown / No data</span>
+      </p>
+    {% else %}
+      <p class="report-empty">No backup jobs configured for this company.</p>
+    {% endif %}
+  </div>
+</section>

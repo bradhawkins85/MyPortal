@@ -32,6 +32,7 @@ from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
+from app.services import backup_jobs as backup_jobs_service
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -228,6 +229,17 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Seed an "unknown" event for every active backup job each morning so
+        # missing reports remain visible. Runs at 00:05 store-local time.
+        if not self._scheduler.get_job("backup-history-seed"):
+            self._scheduler.add_job(
+                self._run_backup_history_seed,
+                CronTrigger(hour=0, minute=5, timezone=self._scheduler.timezone),
+                id="backup-history-seed",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
@@ -324,6 +336,18 @@ class SchedulerService:
                 log_info("M365 client secret renewal check completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("M365 client secret renewal check failed", error=str(exc))
+
+    async def _run_backup_history_seed(self) -> None:
+        """Seed daily 'unknown' backup events with distributed lock."""
+        async with db.acquire_lock("backup_history_seed", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("Backup history seed already running on another worker, skipping")
+                return
+            try:
+                inserted = await backup_jobs_service.seed_unknown_events_for_date()
+                log_info("Backup history seed completed", inserted=inserted)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Backup history seed failed", error=str(exc))
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
