@@ -35,6 +35,30 @@
       <div class="alert alert--danger" role="alert">{{ error_message }}</div>
     {% endif %}
 
+    {# Hidden bulk-delete form #}
+    <form
+      id="scheduled-tasks-bulk-delete-form"
+      method="post"
+      action="/admin/scheduled-tasks/bulk-delete"
+      data-scheduled-tasks-bulk-form="delete"
+      hidden
+    >
+      {% include "partials/csrf.html" %}
+      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+    </form>
+
+    {# Hidden bulk-rename form #}
+    <form
+      id="scheduled-tasks-bulk-rename-form"
+      method="post"
+      action="/admin/scheduled-tasks/bulk-rename"
+      data-scheduled-tasks-bulk-form="rename"
+      hidden
+    >
+      {% include "partials/csrf.html" %}
+      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+    </form>
+
     <div class="management__body">
       <div class="management__toolbar">
         <div class="management__toolbar-search">
@@ -46,52 +70,77 @@
             data-table-filter="scheduled-tasks-table"
           />
         </div>
-        <div class="management__toolbar-actions" data-scheduled-task-columns>
+        <div class="management__toolbar-actions">
           <button
             type="button"
             class="button button--ghost"
-            data-columns-toggle
-            aria-expanded="false"
-            aria-haspopup="true"
+            id="scheduled-tasks-bulk-delete-btn"
+            form="scheduled-tasks-bulk-delete-form"
+            data-scheduled-tasks-bulk-action="delete"
+            disabled
+            hidden
           >
-            Columns
+            Delete selected
+            <span id="scheduled-tasks-bulk-count" hidden></span>
           </button>
-          <div class="columns-panel" data-columns-panel hidden>
-            <fieldset>
-              <legend class="visually-hidden">Toggle columns</legend>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="id" checked />
-                <span class="form-checkbox-text">ID</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="name" checked disabled />
-                <span class="form-checkbox-text">Name</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="command" checked />
-                <span class="form-checkbox-text">Command</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="company" checked />
-                <span class="form-checkbox-text">Company</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="cron" checked />
-                <span class="form-checkbox-text">Schedule</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="active" checked />
-                <span class="form-checkbox-text">Active</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="last-run" checked />
-                <span class="form-checkbox-text">Last run</span>
-              </label>
-              <label class="form-checkbox-label">
-                <input type="checkbox" class="scheduled-task-column-toggle" data-column="status" checked />
-                <span class="form-checkbox-text">Status</span>
-              </label>
-            </fieldset>
+          <button
+            type="button"
+            class="button button--ghost"
+            id="scheduled-tasks-bulk-rename-btn"
+            form="scheduled-tasks-bulk-rename-form"
+            data-scheduled-tasks-bulk-action="rename"
+            disabled
+            hidden
+          >
+            Rename selected
+          </button>
+          <div data-scheduled-task-columns>
+            <button
+              type="button"
+              class="button button--ghost"
+              data-columns-toggle
+              aria-expanded="false"
+              aria-haspopup="true"
+            >
+              Columns
+            </button>
+            <div class="columns-panel" data-columns-panel hidden>
+              <fieldset>
+                <legend class="visually-hidden">Toggle columns</legend>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="id" checked />
+                  <span class="form-checkbox-text">ID</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="name" checked disabled />
+                  <span class="form-checkbox-text">Name</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="command" checked />
+                  <span class="form-checkbox-text">Command</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="company" checked />
+                  <span class="form-checkbox-text">Company</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="cron" checked />
+                  <span class="form-checkbox-text">Schedule</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="active" checked />
+                  <span class="form-checkbox-text">Active</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="last-run" checked />
+                  <span class="form-checkbox-text">Last run</span>
+                </label>
+                <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="status" checked />
+                  <span class="form-checkbox-text">Status</span>
+                </label>
+              </fieldset>
+            </div>
           </div>
         </div>
       </div>
@@ -100,6 +149,15 @@
         <table class="table" id="scheduled-tasks-table" data-table data-table-id="scheduled-tasks">
           <thead>
             <tr>
+              <th scope="col" class="table__checkbox-col">
+                <input
+                  type="checkbox"
+                  class="form-checkbox"
+                  id="scheduled-tasks-select-all"
+                  aria-label="Select all tasks"
+                  data-scheduled-tasks-select-all
+                />
+              </th>
               <th scope="col" data-sort="int" data-column="id" data-column-key="id">ID</th>
               <th scope="col" data-sort="string" data-column="name" data-column-key="name">Name</th>
               <th scope="col" data-sort="string" data-column="command" data-column-key="command">Command</th>
@@ -115,6 +173,17 @@
             {% if tasks %}
               {% for task in tasks %}
                 <tr data-task='{{ task | tojson }}'>
+                  <td class="table__checkbox-col">
+                    <input
+                      type="checkbox"
+                      class="form-checkbox"
+                      name="taskIds"
+                      value="{{ task.id }}"
+                      aria-label="Select task {{ task.name }}"
+                      form="scheduled-tasks-bulk-delete-form"
+                      data-scheduled-tasks-row-checkbox
+                    />
+                  </td>
                   <td data-label="ID" data-column="id" data-column-key="id">{{ task.id }}</td>
                   <td data-label="Name" data-column="name" data-column-key="name">{{ task.name }}</td>
                   <td data-label="Command" data-column="command" data-column-key="command">
@@ -164,7 +233,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="9" class="table__empty">
+                <td colspan="10" class="table__empty">
                   {% if show_inactive %}
                     No scheduled tasks configured yet.
                   {% else %}
