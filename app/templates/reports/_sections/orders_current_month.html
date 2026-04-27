@@ -10,7 +10,8 @@
     ]) }}
     {% set orders = section.data.orders or [] %}
     {% if orders %}
-      <table class="report-table" style="margin-top: var(--space-3);">
+      <div class="table-wrapper" style="margin-top: var(--space-3);">
+      <table class="table">
         <thead>
           <tr>
             <th>Order #</th>
@@ -32,6 +33,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No orders have been placed so far this month.</p>
     {% endif %}

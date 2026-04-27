@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set assignments = section.detail_data.assignments or [] %}
     {% if assignments %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Check</th>
@@ -47,6 +48,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No compliance check assignments are recorded for this company.</p>
     {% endif %}

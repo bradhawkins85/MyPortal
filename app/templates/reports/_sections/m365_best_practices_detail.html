@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set checks = section.detail_data.checks or [] %}
     {% if checks %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Check</th>
@@ -37,6 +38,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No M365 best practice results have been recorded yet.</p>
     {% endif %}

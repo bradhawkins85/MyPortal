@@ -11,7 +11,8 @@
   <div class="card__body">
     {% set tickets = section.detail_data.tickets or [] %}
     {% if tickets %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>#</th>
@@ -54,6 +55,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No tickets in the past 30 days.</p>
     {% endif %}

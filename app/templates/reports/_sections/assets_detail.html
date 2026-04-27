@@ -6,7 +6,8 @@
   <div class="card__body">
     {% set assets = section.detail_data.assets or [] %}
     {% if assets %}
-      <table class="report-table">
+      <div class="table-wrapper">
+      <table class="table">
         <thead>
           <tr>
             <th>Name</th>
@@ -30,6 +31,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% else %}
       <p class="report-empty">No assets are recorded for this company.</p>
     {% endif %}
