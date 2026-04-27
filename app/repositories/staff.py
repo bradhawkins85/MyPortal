@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timezone
 from typing import Any, Iterable, List, Sequence
 
 from app.core.database import db
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
+
+# Matches staff emails auto-generated for package mailbox accounts,
+# e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae@tenant.onmicrosoft.com
+_PACKAGE_STAFF_RE = re.compile(
+    r"^package_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@",
+    re.IGNORECASE,
+)
 
 
 def _ensure_utc(value: datetime | None) -> datetime | None:
@@ -93,12 +101,19 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     return mapped
 
 
-async def count_staff(company_id: int, *, enabled: bool | None = None) -> int:
+async def count_staff(
+    company_id: int,
+    *,
+    enabled: bool | None = None,
+    exclude_package_staff: bool = False,
+) -> int:
     conditions = ["company_id = %s"]
     params: list[Any] = [company_id]
     if enabled is not None:
         conditions.append("enabled = %s")
         params.append(1 if enabled else 0)
+    if exclude_package_staff:
+        conditions.append("NOT (LOWER(SUBSTR(email, 1, 8)) = 'package_')")
     where_clause = " AND ".join(conditions)
     row = await db.fetch_one(
         f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",
@@ -112,6 +127,7 @@ async def list_staff(
     *,
     enabled: bool | None = None,
     exclude_ex_staff: bool = False,
+    exclude_package_staff: bool = False,
     onboarding_complete: bool | None = None,
     onboarding_status: str | None = None,
     offboarding_complete: bool | None = None,
@@ -208,6 +224,11 @@ async def list_staff(
         tuple([*params, safe_page_size]),
     )
     mapped_rows = [_map_staff_row(row) for row in rows]
+    if exclude_package_staff:
+        mapped_rows = [
+            r for r in mapped_rows
+            if not _PACKAGE_STAFF_RE.match(r.get("email") or "")
+        ]
     if not mapped_rows:
         return mapped_rows
     values_by_staff = await staff_custom_fields_repo.get_all_staff_field_values(

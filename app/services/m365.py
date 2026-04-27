@@ -48,10 +48,11 @@ _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
 _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
-_PACKAGE_MAILBOX_RE = re.compile(
+PACKAGE_MAILBOX_RE = re.compile(
     r"^package_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+_PACKAGE_MAILBOX_RE = PACKAGE_MAILBOX_RE  # backward-compat alias
 
 # Microsoft Graph's own well-known app ID (constant across all tenants)
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
