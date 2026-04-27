@@ -410,7 +410,7 @@ async def check_backup_alerts() -> dict[str, int]:
             all_fail = all(
                 status_by_date.get(d) == "fail" for d in window_dates
             )
-            if all_fail and len(window_dates) == alert_fail:
+            if all_fail:
                 created = await _maybe_create_alert_ticket(
                     tickets_repo=tickets_repo,
                     tickets_service=tickets_service,
@@ -432,11 +432,14 @@ async def check_backup_alerts() -> dict[str, int]:
             window_dates = [
                 today - timedelta(days=i) for i in range(alert_unknown)
             ]
+            # A missing event defaults to DEFAULT_STATUS ("unknown"), so days
+            # without any report are treated as unknown — which is the intended
+            # behaviour given the daily seed task.
             all_unknown = all(
-                status_by_date.get(d, DEFAULT_STATUS) in ("unknown", None)
+                status_by_date.get(d, DEFAULT_STATUS) == DEFAULT_STATUS
                 for d in window_dates
             )
-            if all_unknown and len(window_dates) == alert_unknown:
+            if all_unknown:
                 created = await _maybe_create_alert_ticket(
                     tickets_repo=tickets_repo,
                     tickets_service=tickets_service,
