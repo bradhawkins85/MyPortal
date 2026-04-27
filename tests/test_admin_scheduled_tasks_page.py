@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import app.main as main_module
@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import db
 from app.main import app, scheduler_service
+from app.security.session import SessionData
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +71,31 @@ def super_admin_context(monkeypatch):
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin_page)
     yield
+
+
+@pytest.fixture
+def csrf_session(monkeypatch):
+    """Fixture that provides a session with a known CSRF token for POST tests."""
+    now = datetime.now(timezone.utc)
+    session = SessionData(
+        id=1,
+        user_id=1,
+        session_token="test-token",
+        csrf_token="test-csrf-token",
+        created_at=now,
+        expires_at=now + timedelta(hours=1),
+        last_seen_at=now,
+        ip_address="127.0.0.1",
+        user_agent="pytest",
+        active_company_id=None,
+        pending_totp_secret=None,
+    )
+
+    async def fake_load_session(request, allow_inactive=False):
+        return session
+
+    monkeypatch.setattr(main_module.session_manager, "load_session", fake_load_session)
+    return session
 
 
 def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
@@ -252,3 +278,166 @@ def test_scheduled_tasks_page_failed_task_status(super_admin_context, monkeypatc
     html = response.text
     assert "Failing task" in html
     assert "failed" in html
+
+
+def test_bulk_delete_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
+    """Test that bulk delete removes the selected tasks and redirects with a success message."""
+    deleted: list[list[int]] = []
+
+    async def fake_delete_tasks(task_ids):
+        deleted.append(list(task_ids))
+        return len(task_ids)
+
+    async def fake_refresh():
+        return None
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "delete_tasks", fake_delete_tasks)
+    monkeypatch.setattr(main_module.scheduler_service, "refresh", fake_refresh)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-delete",
+            data={"taskIds": ["1", "2"], "_csrf": csrf_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    assert "success=" in response.headers["location"]
+    assert deleted == [[1, 2]]
+
+
+def test_bulk_delete_scheduled_tasks_no_ids(super_admin_context, csrf_session):
+    """Bulk delete with no IDs redirects with an error message."""
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-delete",
+            data={"_csrf": csrf_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+
+def test_bulk_delete_scheduled_tasks_requires_super_admin(monkeypatch, csrf_session):
+    """Bulk delete redirects non-super-admins."""
+    from fastapi.responses import RedirectResponse
+
+    async def fake_require_super_admin_page(request):
+        return None, RedirectResponse(url="/login", status_code=302)
+
+    monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin_page)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-delete",
+            data={"taskIds": ["1"], "_csrf": csrf_session.csrf_token},
+        )
+
+    assert response.status_code == 302
+
+
+def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
+    """Test that bulk rename updates task names to 'Company — Command' format."""
+    renamed: dict[int, str] = {}
+
+    async def fake_get_task(task_id):
+        tasks = {
+            1: {
+                "id": 1,
+                "name": "Old name",
+                "command": "sync_staff",
+                "company_id": None,
+                "active": True,
+                "last_run_at": None,
+                "last_status": None,
+                "last_error": None,
+                "description": None,
+                "max_retries": 12,
+                "retry_backoff_seconds": 300,
+            },
+            2: {
+                "id": 2,
+                "name": "Another name",
+                "command": "sync_m365_licenses",
+                "company_id": 42,
+                "active": True,
+                "last_run_at": None,
+                "last_status": None,
+                "last_error": None,
+                "description": None,
+                "max_retries": 12,
+                "retry_backoff_seconds": 300,
+            },
+        }
+        return tasks.get(task_id)
+
+    async def fake_rename_task(task_id, name):
+        renamed[task_id] = name
+
+    async def fake_list_companies():
+        return [{"id": 42, "name": "Acme Corp"}]
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "rename_task", fake_rename_task)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-rename",
+            data={"taskIds": ["1", "2"], "_csrf": csrf_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    assert "success=" in response.headers["location"]
+    assert renamed[1] == "All companies \u2014 Sync staff directory"
+    assert renamed[2] == "Acme Corp \u2014 Sync Microsoft 365 licenses"
+
+
+def test_bulk_rename_unknown_command(super_admin_context, csrf_session, monkeypatch):
+    """Bulk rename falls back to the raw command string for unknown commands."""
+    renamed: dict[int, str] = {}
+
+    async def fake_get_task(task_id):
+        return {
+            "id": task_id,
+            "name": "Old name",
+            "command": "custom_command",
+            "company_id": None,
+            "active": True,
+            "last_run_at": None,
+            "last_status": None,
+            "last_error": None,
+            "description": None,
+            "max_retries": 12,
+            "retry_backoff_seconds": 300,
+        }
+
+    async def fake_rename_task(task_id, name):
+        renamed[task_id] = name
+
+    async def fake_list_companies():
+        return []
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "rename_task", fake_rename_task)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-rename",
+            data={"taskIds": ["5"], "_csrf": csrf_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    assert renamed[5] == "All companies \u2014 custom_command"
+
+
+def test_bulk_rename_no_ids(super_admin_context, csrf_session):
+    """Bulk rename with no IDs redirects with an error message."""
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/admin/scheduled-tasks/bulk-rename",
+            data={"_csrf": csrf_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
