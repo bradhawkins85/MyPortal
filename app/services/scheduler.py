@@ -240,6 +240,17 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Check backup job alert thresholds and create tickets when exceeded.
+        # Runs at midnight store-local time (after the seed task at 00:05).
+        if not self._scheduler.get_job("backup-alert-check"):
+            self._scheduler.add_job(
+                self._run_backup_alert_check,
+                CronTrigger(hour=0, minute=15, timezone=self._scheduler.timezone),
+                id="backup-alert-check",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
@@ -348,6 +359,18 @@ class SchedulerService:
                 log_info("Backup history seed completed", inserted=inserted)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Backup history seed failed", error=str(exc))
+
+    async def _run_backup_alert_check(self) -> None:
+        """Check backup alert thresholds and create tickets with distributed lock."""
+        async with db.acquire_lock("backup_alert_check", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("Backup alert check already running on another worker, skipping")
+                return
+            try:
+                result = await backup_jobs_service.check_backup_alerts()
+                log_info("Backup alert check completed", **result)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Backup alert check failed", error=str(exc))
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:

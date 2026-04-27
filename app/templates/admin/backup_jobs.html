@@ -258,6 +258,49 @@
           <span>Active (seed daily Unknown events and accept status reports)</span>
         </label>
       </div>
+      <fieldset class="form-fieldset">
+        <legend class="form-fieldset__legend">Missed backup notifications</legend>
+        <p class="form-help">When any threshold is set, a ticket is automatically created when the condition has been met for that many consecutive days. Leave empty or set to 0 to disable notifications for that status.</p>
+        <div class="form-field">
+          <label class="form-label" for="backup-alert-no-success">No successful backup (days)</label>
+          <input
+            id="backup-alert-no-success"
+            name="alert_no_success_days"
+            type="number"
+            class="form-input form-input--short"
+            min="1"
+            placeholder="e.g. 2"
+            value="{{ backup_editing_job.alert_no_success_days if backup_editing_job and backup_editing_job.alert_no_success_days else '' }}"
+          />
+          <p class="form-help">Create a ticket when no successful backup has been recorded in this many days.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="backup-alert-fail">Failed for (days)</label>
+          <input
+            id="backup-alert-fail"
+            name="alert_fail_days"
+            type="number"
+            class="form-input form-input--short"
+            min="1"
+            placeholder="e.g. 3"
+            value="{{ backup_editing_job.alert_fail_days if backup_editing_job and backup_editing_job.alert_fail_days else '' }}"
+          />
+          <p class="form-help">Create a ticket when the backup has failed for this many consecutive days.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="backup-alert-unknown">Unknown status for (days)</label>
+          <input
+            id="backup-alert-unknown"
+            name="alert_unknown_days"
+            type="number"
+            class="form-input form-input--short"
+            min="1"
+            placeholder="e.g. 3"
+            value="{{ backup_editing_job.alert_unknown_days if backup_editing_job and backup_editing_job.alert_unknown_days else '' }}"
+          />
+          <p class="form-help">Create a ticket when no status report has been received for this many consecutive days.</p>
+        </div>
+      </fieldset>
       <div class="form-actions">
         <button type="submit" class="button button--primary">{{ 'Save changes' if backup_editing_job else 'Create job' }}</button>
         {% if backup_editing_job %}
