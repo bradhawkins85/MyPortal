@@ -281,7 +281,6 @@ async def _build_licenses(company_id: int) -> dict[str, Any]:
                 "total": int(record.get("count") or 0),
                 "allocated": int(record.get("allocated") or 0),
                 "expiry_date": expiry.isoformat() if expiry else None,
-                "contract_term": record.get("contract_term"),
                 "auto_renew": record.get("auto_renew"),
             }
         )
@@ -728,7 +727,6 @@ async def _build_licenses_detail(company_id: int) -> dict[str, Any]:
                 "available": max(0, total - allocated),
                 "usage_percentage": usage_pct,
                 "expiry_date": expiry.isoformat() if expiry else None,
-                "contract_term": record.get("contract_term"),
                 "auto_renew": record.get("auto_renew"),
                 "notes": record.get("notes"),
             }
