@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -169,8 +168,6 @@ async def test_store_report_cover_image_rejects_oversized_file(tmp_path):
 @pytest.mark.asyncio
 async def test_pdf_route_embeds_cover_image_as_data_uri(tmp_path):
     """The PDF report route reads the cover image file and embeds it as a data URI."""
-    import base64
-
     # Create a fake cover image at the path the route expects:
     # _private_uploads_path.parent / "private_uploads/report-cover/test.png"
     cover_dir = tmp_path / "private_uploads" / "report-cover"
