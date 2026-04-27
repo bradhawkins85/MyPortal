@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import math
 import random
@@ -150,6 +151,7 @@ from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
+from app.repositories import site_settings as site_settings_repo
 from app.schemas.api_keys import ALLOWED_API_KEY_HTTP_METHODS
 from app.schemas.staff_onboarding_workflows import (
     CompanyWorkflowPolicyUpsertSchema,
@@ -219,7 +221,7 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
-from app.services.file_storage import delete_stored_file, store_product_image
+from app.services.file_storage import delete_stored_file, store_product_image, store_report_cover_image
 
 configure_logging()
 settings = get_settings()
@@ -4555,6 +4557,23 @@ async def compliance_checks_library_page(request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _delete_cover_image_file(relative_path: str) -> None:
+    """Safely remove a stored PDF cover image file.
+
+    ``relative_path`` is the value returned by
+    :func:`~app.services.file_storage.store_report_cover_image` and stored in
+    the ``site_settings`` table (e.g. ``private_uploads/report-cover/abc.png``).
+    Any path traversal attempt is silently ignored to avoid surfacing errors.
+    """
+    try:
+        base = _private_uploads_path.parent.resolve()
+        candidate = (base / relative_path).resolve()
+        candidate.relative_to(base)  # raises ValueError if outside base
+        candidate.unlink(missing_ok=True)
+    except (ValueError, OSError):  # pragma: no cover - defensive
+        pass
+
+
 async def _load_report_context(request: Request):
     """Authenticate the user and resolve their active company for the report."""
     user, redirect = await _require_authenticated_user(request)
@@ -4622,11 +4641,39 @@ async def company_overview_report_pdf(request: Request):
             ),
         ) from exc
 
+    # Load the global PDF cover image and encode it as a data URI so WeasyPrint
+    # can embed it without needing an authenticated HTTP request.
+    pdf_cover_image_data_uri: str | None = None
+    cover_image_path = await site_settings_repo.get_pdf_cover_image()
+    if cover_image_path:
+        cover_file = (_private_uploads_path.parent / cover_image_path).resolve()
+        uploads_root = _private_uploads_path.parent.resolve()
+        try:
+            cover_file.relative_to(uploads_root)
+            if cover_file.is_file():
+                suffix = cover_file.suffix.lower().lstrip(".")
+                mime = {
+                    "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg",
+                    "png": "image/png",
+                    "gif": "image/gif",
+                    "webp": "image/webp",
+                }.get(suffix, "image/jpeg")
+                encoded = base64.b64encode(cover_file.read_bytes()).decode("ascii")
+                pdf_cover_image_data_uri = f"data:{mime};base64,{encoded}"
+        except (ValueError, OSError):
+            pass
+
     report = await reports_service.build_company_report(company_id)
     base_context = await _build_base_context(
         request,
         user,
-        extra={"report": report, "company": company, "title": "Company overview report"},
+        extra={
+            "report": report,
+            "company": company,
+            "title": "Company overview report",
+            "pdf_cover_image_data_uri": pdf_cover_image_data_uri,
+        },
     )
     template = templates.get_template("reports/pdf.html")
     rendered_html = template.render(base_context)
@@ -4744,7 +4791,114 @@ async def company_overview_report_settings_save(request: Request):
     )
 
 
-@app.head("/invoices", response_class=HTMLResponse)
+@app.get("/admin/reports/pdf-cover-image", response_class=HTMLResponse)
+async def admin_report_cover_image_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    current_image = await site_settings_repo.get_pdf_cover_image()
+    extra = {
+        "title": "PDF cover image",
+        "current_image": current_image,
+    }
+    return await _render_template("admin/report_cover_image.html", request, user, extra=extra)
+
+
+@app.post("/admin/reports/pdf-cover-image", response_class=HTMLResponse)
+async def admin_report_cover_image_upload(request: Request, image: UploadFile = File(None)):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    if image is None or not image.filename:
+        return RedirectResponse(
+            url="/admin/reports/pdf-cover-image?error=No+file+selected",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    try:
+        relative_path, _dest = await store_report_cover_image(
+            upload=image,
+            uploads_root=_private_uploads_path,
+        )
+    except HTTPException as exc:
+        return RedirectResponse(
+            url=f"/admin/reports/pdf-cover-image?error={quote(exc.detail)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # Remove previous cover image file if one existed.
+    previous = await site_settings_repo.get_pdf_cover_image()
+    if previous:
+        _delete_cover_image_file(previous)
+
+    await site_settings_repo.set_pdf_cover_image(relative_path)
+    await audit_service.log_action(
+        action="admin.report.pdf_cover_image.upload",
+        user_id=user.get("id"),
+        entity_type="site_settings",
+        entity_id=1,
+        metadata={"path": relative_path},
+        request=request,
+    )
+    return RedirectResponse(
+        url="/admin/reports/pdf-cover-image?success=Cover+image+updated",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/reports/pdf-cover-image/delete", response_class=HTMLResponse)
+async def admin_report_cover_image_delete(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    current = await site_settings_repo.get_pdf_cover_image()
+    if current:
+        _delete_cover_image_file(current)
+    await site_settings_repo.set_pdf_cover_image(None)
+    await audit_service.log_action(
+        action="admin.report.pdf_cover_image.delete",
+        user_id=user.get("id"),
+        entity_type="site_settings",
+        entity_id=1,
+        metadata={},
+        request=request,
+    )
+    return RedirectResponse(
+        url="/admin/reports/pdf-cover-image?success=Cover+image+removed",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.get("/admin/reports/pdf-cover-image/preview", response_class=FileResponse, include_in_schema=False)
+async def admin_report_cover_image_preview(request: Request):
+    """Serve the current PDF cover image for admin preview (super admin only)."""
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    cover_image_path = await site_settings_repo.get_pdf_cover_image()
+    if not cover_image_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cover image set")
+    cover_file = (_private_uploads_path.parent / cover_image_path).resolve()
+    uploads_root = _private_uploads_path.parent.resolve()
+    try:
+        cover_file.relative_to(uploads_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file path") from exc
+    if not cover_file.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover image not found")
+    return FileResponse(cover_file, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/invoices", response_class=HTMLResponse)
 async def invoices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_invoice_context(request)

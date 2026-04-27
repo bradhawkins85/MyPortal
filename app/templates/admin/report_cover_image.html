@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block header_title %}PDF cover image{% endblock %}
+{% block title %}PDF report cover image{% endblock %}
+
+{% block header_actions %}
+<div class="header-actions header-actions--right">
+  <a class="button button--ghost" href="/reports/company-overview/settings">Back to report settings</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="card card--panel">
+  <div class="card__body">
+    <p>
+      Upload a custom image to replace the default blue gradient on the front page of all PDF
+      company overview reports. The image is used globally across every company and report.
+    </p>
+    <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: var(--space-3);">
+      Accepted formats: PNG, JPEG, GIF, WebP — maximum 10&nbsp;MB.
+      For best results use a portrait image at A4 proportions (e.g. 794&nbsp;×&nbsp;1123&nbsp;px).
+    </p>
+
+    {% if request.query_params.get('success') %}
+      <div class="alert alert--success" style="margin-bottom: var(--space-3);">
+        {{ request.query_params.get('success') }}
+      </div>
+    {% endif %}
+    {% if request.query_params.get('error') %}
+      <div class="alert alert--danger" style="margin-bottom: var(--space-3);">
+        {{ request.query_params.get('error') }}
+      </div>
+    {% endif %}
+
+    {% if current_image %}
+      <div style="margin-bottom: var(--space-4);">
+        <p style="font-weight: 600; margin-bottom: var(--space-2);">Current cover image</p>
+        <img
+          src="/admin/reports/pdf-cover-image/preview"
+          alt="Current PDF cover image"
+          style="max-width: 200px; max-height: 283px; border: 1px solid var(--color-border); border-radius: 4px; display: block; margin-bottom: var(--space-3);"
+        >
+        <form method="post" action="/admin/reports/pdf-cover-image/delete">
+          {% if csrf_token is defined and csrf_token %}
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          {% endif %}
+          <button type="submit" class="button button--danger">Remove cover image</button>
+        </form>
+      </div>
+    {% else %}
+      <p style="color: var(--color-text-muted); margin-bottom: var(--space-3);">
+        No custom cover image set — the default blue gradient will be used.
+      </p>
+    {% endif %}
+
+    <form method="post" action="/admin/reports/pdf-cover-image" enctype="multipart/form-data">
+      {% if csrf_token is defined and csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      {% endif %}
+      <div class="form-group" style="margin-bottom: var(--space-3);">
+        <label for="image-input" style="display: block; font-weight: 600; margin-bottom: var(--space-1);">
+          {% if current_image %}Replace cover image{% else %}Upload cover image{% endif %}
+        </label>
+        <input
+          id="image-input"
+          type="file"
+          name="image"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          required
+          style="display: block; margin-bottom: var(--space-2);"
+        >
+      </div>
+      <button type="submit" class="button button--primary">Upload</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
