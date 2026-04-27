@@ -368,6 +368,15 @@ Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -Conte
       setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
     }
   });
+
+  // Allow row-level action dropdowns to overflow the table wrapper.
+  document.querySelectorAll('[data-header-menu]').forEach(function (details) {
+    var wrapper = details.closest('.table-wrapper');
+    if (!wrapper) return;
+    details.addEventListener('toggle', function () {
+      wrapper.style.overflow = details.open ? 'visible' : '';
+    });
+  });
 })();
 </script>
 {% endblock %}
