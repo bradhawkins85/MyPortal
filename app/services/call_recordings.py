@@ -274,11 +274,12 @@ def _grandstream_pick_phone(row: Mapping[str, Any]) -> str | None:
     internal extension; for outgoing calls those roles are reversed. We want
     to record the external phone number in either direction, so prefer the
     ``new_caller_num`` (which Grandstream populates with the externally
-    visible number when known), and otherwise pick whichever of
-    ``caller_num`` / ``callee_num`` does not look like an internal extension.
+    visible number when known) unless it is itself an internal extension,
+    and otherwise pick whichever of ``caller_num`` / ``callee_num`` does not
+    look like an internal extension.
     """
     new_caller = _coerce_grandstream_phone(row.get("new_caller_num"))
-    if new_caller:
+    if new_caller and not _is_likely_extension(new_caller):
         return new_caller
 
     caller = _coerce_grandstream_phone(row.get("caller_num"))
