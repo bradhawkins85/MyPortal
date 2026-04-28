@@ -12,6 +12,14 @@ MyPortal supports enhanced email delivery and tracking through SMTP2Go, a profes
 - **Spam Reports**: Track spam complaints
 - **Webhook Events**: Real-time delivery status updates
 - **Fallback Support**: Automatic fallback to SMTP relay if API fails
+- **Per-Recipient Status Popup**: For ticket reply emails sent to multiple
+  recipients (To/CC/BCC), the delivery-status badge in the conversation
+  history becomes clickable and opens a popup that breaks delivery down per
+  recipient — including the open-event user-agent and the SMTP2Go bounce
+  reason where applicable. See
+  [docs/email-tracking.md](../docs/email-tracking.md#per-recipient-delivery-popup)
+  for the full description, including the limitation that pixel-driven
+  opens cannot be attributed to an individual recipient.
 
 ## Prerequisites
 

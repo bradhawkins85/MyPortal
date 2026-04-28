@@ -321,8 +321,112 @@ async def test_render_portal_ticket_detail_includes_replies(monkeypatch):
             "email_open_count": 0,
             "has_email_tracking": False,
             "is_email_opened": False,
+            "recipient_count": 0,
         }
     ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_render_portal_ticket_detail_marks_multi_recipient_replies(monkeypatch):
+    """When a reply has more than one recipient, recipient_count > 1 so the
+    template renders the click-through trigger around the delivery badge.
+    A single-recipient reply must keep recipient_count <= 1 so the badge
+    stays as a static span (no UI regression for today's behaviour).
+    """
+    request = _make_request("/tickets/41")
+    user = {"id": 5, "is_super_admin": False}
+
+    ticket = {
+        "id": 41,
+        "subject": "Printer offline",
+        "description": "",
+        "status": "open",
+        "priority": "normal",
+        "company_id": 22,
+        "requester_id": 5,
+        "assigned_user_id": 9,
+        "created_at": datetime(2025, 1, 9, 16, 45, tzinfo=timezone.utc),
+        "updated_at": datetime(2025, 1, 10, 9, 30, tzinfo=timezone.utc),
+    }
+    replies = [
+        {
+            "id": 101,
+            "author_id": 9,
+            "body": "Single recipient",
+            "minutes_spent": 0,
+            "is_billable": False,
+            "is_internal": False,
+            "created_at": datetime(2025, 1, 10, 10, 0, tzinfo=timezone.utc),
+            "email_tracking_id": "trk-1",
+            "email_sent_at": datetime(2025, 1, 10, 10, 0, tzinfo=timezone.utc),
+        },
+        {
+            "id": 102,
+            "author_id": 9,
+            "body": "Multi recipient",
+            "minutes_spent": 0,
+            "is_billable": False,
+            "is_internal": False,
+            "created_at": datetime(2025, 1, 10, 10, 5, tzinfo=timezone.utc),
+            "email_tracking_id": "trk-2",
+            "email_sent_at": datetime(2025, 1, 10, 10, 5, tzinfo=timezone.utc),
+        },
+    ]
+
+    class DummySanitized:
+        def __init__(self, html, has_content):
+            self.html = html
+            self.text_content = html
+            self.has_rich_content = has_content
+
+    def fake_sanitize(value):
+        text = (value or "").strip()
+        if not text:
+            return DummySanitized("", False)
+        return DummySanitized(f"<p>{text}</p>", True)
+
+    async def fake_get_user_by_id(identifier):
+        return {"id": identifier, "first_name": "User", "last_name": str(identifier), "email": f"{identifier}@example.com"}
+
+    async def fake_get_recipient_count_map(reply_ids):
+        # 101 → single recipient (badge stays static), 102 → 3 recipients (trigger).
+        return {101: 1, 102: 3}
+
+    from app.services import email_recipients as _email_recipients
+
+    monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
+    monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
+    monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=replies))
+    monkeypatch.setattr(main.tickets_repo, "is_ticket_watcher", AsyncMock())
+    monkeypatch.setattr(main.tickets_service, "get_public_status_map", AsyncMock(return_value={"open": "Open"}))
+    monkeypatch.setattr(
+        main.tickets_service,
+        "format_reply_time_summary",
+        lambda minutes, is_billable, labour=None: "",
+    )
+    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=False))
+    monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 22, "name": "Example"}))
+    monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(side_effect=fake_get_user_by_id))
+    monkeypatch.setattr(_email_recipients, "get_recipient_count_map", fake_get_recipient_count_map)
+
+    from app.repositories import call_recordings as call_recordings_repo
+    monkeypatch.setattr(call_recordings_repo, "list_ticket_call_recordings", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    await main._render_portal_ticket_detail(request, user, ticket_id=41)
+
+    by_id = {entry["id"]: entry for entry in captured["extra"]["ticket_replies"]}
+    assert by_id[101]["recipient_count"] == 1, "single-recipient reply keeps the static badge"
+    assert by_id[102]["recipient_count"] == 3, "multi-recipient reply opts into the click trigger"
 
 
 @pytest.mark.anyio("asyncio")
