@@ -10,6 +10,29 @@ MyPortal includes built-in email tracking functionality powered by Plausible Ana
 - **Privacy-First**: Events are stored locally and optionally synced to Plausible
 - **Visual Indicators**: Conversation history shows read/unread status for sent emails
 - **Detailed Analytics**: View open counts, timestamps, and click-through data
+- **Per-Recipient Delivery Status**: Click the delivery-status badge on a ticket reply that was sent to multiple addresses to see a per-recipient breakdown (To/CC/BCC) of who has received, opened, or bounced. Powered by SMTP2Go's per-recipient webhook events. The single-status badge above the popup is unchanged for single-recipient sends.
+
+### Per-Recipient Delivery Popup
+
+When a ticket reply email goes to more than one recipient, the existing
+delivery-status badge becomes clickable and opens a popup listing every
+recipient with their individual status:
+
+- **Recipient** — display name (when known) and email address
+- **Role** — To / CC / BCC
+- **Status** — `bounced > spam > rejected > opened > delivered > processed > sent > pending`
+- **Sent / Delivered / Opened** — UTC timestamps localised in the browser
+- **Last event** — most recent event with the SMTP2Go diagnostic detail
+  (e.g. bounce reason on a bounce; client user-agent on an open)
+
+Limitations:
+
+- Open events recorded via the embedded tracking pixel cannot be attributed
+  to a specific recipient — the same pixel URL is fetched no matter which
+  recipient opens the message. Pixel-driven opens still update the
+  aggregate badge but the popup displays a note explaining this.
+- Generic non-SMTP2Go SMTP relay sends only record `sent_at` per recipient
+  because that path has no asynchronous delivery / open feedback channel.
 
 ### App Analytics (Page Views)
 - **Automatic Page Tracking**: Track page views across the entire application

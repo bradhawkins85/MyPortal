@@ -17867,7 +17867,20 @@ async def _render_portal_ticket_detail(
 
     replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
     ordered_replies = list(reversed(replies))
-    
+
+    # Per-recipient delivery counts power the click-through delivery-status
+    # popup. We only show the click trigger when there is more than one
+    # recipient on the send.
+    from app.services import email_recipients as _email_recipients_svc
+
+    reply_recipient_counts: dict[int, int] = {}
+    try:
+        reply_ids_for_counts = [r.get("id") for r in ordered_replies if r.get("id") is not None]
+        reply_recipient_counts = await _email_recipients_svc.get_recipient_count_map(reply_ids_for_counts)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load per-reply recipient counts", error=str(exc))
+        reply_recipient_counts = {}
+
     # Fetch call recordings linked to this ticket
     from app.repositories import call_recordings as call_recordings_repo
     call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
@@ -17943,6 +17956,10 @@ async def _render_portal_ticket_detail(
         email_sent_at = reply.get("email_sent_at")
         has_tracking = email_tracking_id is not None
         is_email_opened = email_opened_at is not None
+        try:
+            recipient_count_for_reply = int(reply_recipient_counts.get(int(reply.get("id")), 0))
+        except (TypeError, ValueError):
+            recipient_count_for_reply = 0
         
         timeline_entries.append(
             {
@@ -17964,6 +17981,7 @@ async def _render_portal_ticket_detail(
                 "email_open_count": email_open_count,
                 "has_email_tracking": has_tracking,
                 "is_email_opened": is_email_opened,
+                "recipient_count": recipient_count_for_reply,
             }
         )
     
@@ -18464,7 +18482,20 @@ async def _render_ticket_detail(
                 hudu_company_url = f"{hudu_base_url}/companies/{company['hudu_id']}"
 
     ordered_replies = list(reversed(replies))
-    
+
+    # Per-recipient delivery counts so the delivery-status badge in the admin
+    # ticket detail can be rendered as a click trigger when the email had
+    # more than one recipient (To/CC/BCC).
+    from app.services import email_recipients as _email_recipients_svc
+
+    admin_reply_recipient_counts: dict[int, int] = {}
+    try:
+        _admin_reply_ids = [r.get("id") for r in ordered_replies if r.get("id") is not None]
+        admin_reply_recipient_counts = await _email_recipients_svc.get_recipient_count_map(_admin_reply_ids)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load per-reply recipient counts (admin)", error=str(exc))
+        admin_reply_recipient_counts = {}
+
     # Fetch call recordings linked to this ticket
     from app.repositories import call_recordings as call_recordings_repo
     call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
@@ -18532,7 +18563,11 @@ async def _render_ticket_detail(
         is_email_opened = email_opened_at is not None
         is_email_delivered = email_delivered_at is not None
         is_email_bounced = email_bounced_at is not None
-        
+        try:
+            recipient_count_for_reply = int(admin_reply_recipient_counts.get(int(reply.get("id")), 0))
+        except (TypeError, ValueError):
+            recipient_count_for_reply = 0
+
         enriched_replies.append(
             {
                 **reply,
@@ -18554,6 +18589,7 @@ async def _render_ticket_detail(
                 "is_email_opened": is_email_opened,
                 "is_email_delivered": is_email_delivered,
                 "is_email_bounced": is_email_bounced,
+                "recipient_count": recipient_count_for_reply,
             }
         )
     
