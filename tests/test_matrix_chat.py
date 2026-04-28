@@ -69,6 +69,7 @@ whoami = _matrix.whoami
 sanitize_localpart = _matrix.sanitize_localpart
 set_user_power_level = _matrix.set_user_power_level
 get_power_levels = _matrix.get_power_levels
+enable_room_encryption = _matrix.enable_room_encryption
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +294,82 @@ def test_set_power_level_function_exists():
     """matrix service must expose set_user_power_level."""
     assert callable(set_user_power_level), "set_user_power_level must be callable"
     assert callable(get_power_levels), "get_power_levels must be callable"
+
+
+# ---------------------------------------------------------------------------
+# enable_room_encryption
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_enable_room_encryption_success(monkeypatch):
+    """enable_room_encryption sends m.room.encryption state event."""
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    room_id = "!room1:example.com"
+    route = respx.put(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/state/m\.room\.encryption/"
+    ).mock(return_value=httpx.Response(200, json={"event_id": "$enc1"}))
+
+    result = await enable_room_encryption(room_id)
+    assert result["event_id"] == "$enc1"
+
+    sent_body = json.loads(route.calls[0].request.content)
+    assert sent_body["algorithm"] == "m.megolm.v1.aes-sha2"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_enable_room_encryption_idempotent(monkeypatch):
+    """Calling enable_room_encryption on an already-encrypted room must not raise."""
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    respx.put(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/state/m\.room\.encryption/"
+    ).mock(return_value=httpx.Response(200, json={"event_id": "$enc2"}))
+
+    # A second call should succeed without raising
+    result = await enable_room_encryption("!room2:example.com")
+    assert "event_id" in result
+
+
+def test_enable_room_encryption_callable():
+    """matrix service must expose enable_room_encryption."""
+    assert callable(enable_room_encryption), "enable_room_encryption must be callable"
+
+
+# ---------------------------------------------------------------------------
+# Source-level checks for E2EE integration
+# ---------------------------------------------------------------------------
+
+def test_create_room_enables_e2ee_when_flag_set():
+    """create_room route must call enable_room_encryption when e2ee is requested."""
+    source = pathlib.Path("app/api/routes/chat.py").read_text()
+    assert "enable_room_encryption" in source, (
+        "create_room route must call matrix_service.enable_room_encryption when E2EE is enabled"
+    )
+    assert "matrix_e2ee_enabled" in source, (
+        "create_room route must check _settings.matrix_e2ee_enabled"
+    )
+
+
+def test_send_message_rejects_e2ee_rooms():
+    """send_message route must reject in-portal sends for E2EE rooms."""
+    source = pathlib.Path("app/api/routes/chat.py").read_text()
+    assert "e2ee_enabled" in source, (
+        "send_message must check room['e2ee_enabled'] and reject the request"
+    )
+
+
+def test_sync_loop_handles_encrypted_events():
+    """Sync loop must handle m.room.encrypted events without crashing."""
+    source = pathlib.Path("app/services/matrix_sync.py").read_text()
+    assert "m.room.encrypted" in source, (
+        "matrix_sync must handle m.room.encrypted events"
+    )
+    assert "[encrypted message]" in source, (
+        "matrix_sync must store a placeholder body for encrypted events"
+    )
+

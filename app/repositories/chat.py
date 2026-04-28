@@ -89,15 +89,16 @@ async def create_room(
     created_by_user_id: int,
     company_id: int,
     linked_ticket_id: int | None = None,
+    e2ee_enabled: bool = False,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     room_id = await db.execute_returning_lastrowid(
         """INSERT INTO chat_rooms
            (matrix_room_id, room_alias, created_by_user_id, company_id, subject,
-            status, created_at, updated_at, linked_ticket_id)
-           VALUES (%s, %s, %s, %s, %s, 'open', %s, %s, %s)""",
+            status, created_at, updated_at, linked_ticket_id, e2ee_enabled)
+           VALUES (%s, %s, %s, %s, %s, 'open', %s, %s, %s, %s)""",
         (matrix_room_id, room_alias, created_by_user_id, company_id, subject,
-         now, now, linked_ticket_id),
+         now, now, linked_ticket_id, e2ee_enabled),
     )
     row = await db.fetch_one("SELECT * FROM chat_rooms WHERE id = %s", (room_id,))
     return dict(row) if row else {}
