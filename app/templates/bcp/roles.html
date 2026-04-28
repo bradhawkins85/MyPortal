@@ -49,7 +49,7 @@
         <h2 class="card-title">{{ role.title }}</h2>
         {% if can_edit %}
         <div class="card-actions">
-          <button class="btn btn-sm btn-secondary" onclick="showEditRoleModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}', {{ role.responsibilities|tojson|safe if role.responsibilities else 'null' }})">
+          <button class="btn btn-sm btn-secondary" onclick="showEditRoleModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}', {{ role.responsibilities|tojson if role.responsibilities else 'null' }})">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
             </svg>
@@ -117,7 +117,7 @@
                 <td>{{ assignment.contact_info or '-' }}</td>
                 {% if can_edit %}
                 <td>
-                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson|safe if assignment.contact_info else 'null' }})" title="Edit">
+                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson if assignment.contact_info else 'null' }})" title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
