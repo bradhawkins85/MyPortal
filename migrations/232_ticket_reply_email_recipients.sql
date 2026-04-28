@@ -27,8 +27,8 @@ CREATE TABLE IF NOT EXISTS ticket_reply_email_recipients (
     last_event_detail TEXT NULL COMMENT 'Optional detail (e.g. bounce reason)',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    INDEX idx_treer_reply (ticket_reply_id),
-    INDEX idx_treer_tracking (tracking_id),
-    INDEX idx_treer_smtp2go (smtp2go_message_id),
-    INDEX idx_treer_recipient (recipient_email)
+    INDEX idx_reply_recipients_reply (ticket_reply_id),
+    INDEX idx_reply_recipients_tracking (tracking_id),
+    INDEX idx_reply_recipients_smtp2go (smtp2go_message_id),
+    INDEX idx_reply_recipients_recipient (recipient_email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
