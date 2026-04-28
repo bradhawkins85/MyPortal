@@ -74,6 +74,12 @@ async def create_room(
     user_id = current_user["id"]
     company_id = current_user.get("company_id")
 
+    # Determine whether E2EE should be enabled for this room.
+    # The per-request flag takes effect only when the global setting is on,
+    # so a client cannot silently enable encryption when it is disabled globally.
+    use_e2ee = _settings.matrix_e2ee_enabled and body.e2ee_enabled
+    e2ee_warning: str | None = None
+
     try:
         matrix_resp = await matrix_service.create_room(
             name=body.subject,
@@ -84,6 +90,16 @@ async def create_room(
         log_error("Failed to create Matrix room", error=str(exc))
         raise HTTPException(status_code=502, detail="Failed to create Matrix room")
 
+    if use_e2ee and matrix_room_id:
+        try:
+            await matrix_service.enable_room_encryption(matrix_room_id)
+        except Exception as exc:
+            log_error("Failed to enable E2EE on Matrix room", room_id=matrix_room_id, error=str(exc))
+            # Non-fatal: room is created, but encryption could not be enabled.
+            # Record a warning so the caller knows the actual state.
+            use_e2ee = False
+            e2ee_warning = "Room was created but end-to-end encryption could not be enabled."
+
     room = await chat_repo.create_room(
         subject=body.subject,
         matrix_room_id=matrix_room_id,
@@ -91,6 +107,7 @@ async def create_room(
         created_by_user_id=user_id,
         company_id=company_id or 0,
         linked_ticket_id=body.linked_ticket_id,
+        e2ee_enabled=use_e2ee,
     )
 
     mxid = current_user.get("matrix_user_id") or _settings.matrix_bot_user_id or ""
@@ -101,10 +118,13 @@ async def create_room(
         entity_type="chat_room",
         entity_id=room["id"],
         user_id=user_id,
-        new_value={"subject": body.subject},
+        new_value={"subject": body.subject, "e2ee_enabled": use_e2ee},
     )
 
-    return JSONResponse(_serialize(dict(room)), status_code=201)
+    response_data = _serialize(dict(room))
+    if e2ee_warning:
+        response_data["e2ee_warning"] = e2ee_warning
+    return JSONResponse(response_data, status_code=201)
 
 
 @router.get("/rooms/{room_id}", summary="Get chat room details")
@@ -143,6 +163,14 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Room not found")
     if room["status"] == "closed":
         raise HTTPException(status_code=400, detail="Cannot send message to closed room")
+    if room.get("e2ee_enabled"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This room has end-to-end encryption enabled. "
+                "Messages must be sent using a Matrix client (e.g. Element)."
+            ),
+        )
 
     user_id = current_user["id"]
     display_name = current_user.get("display_name") or current_user.get("email", "User")

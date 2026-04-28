@@ -27,7 +27,8 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
         events = timeline.get("events", [])
 
         for event in events:
-            if event.get("type") != "m.room.message":
+            event_type = event.get("type")
+            if event_type not in ("m.room.message", "m.room.encrypted"):
                 continue
 
             event_id = event.get("event_id")
@@ -40,10 +41,17 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
 
             sender = event.get("sender", "")
             content = event.get("content", {})
-            body = content.get("body", "")
-            msgtype = content.get("msgtype", "m.text")
             origin_server_ts = event.get("origin_server_ts", 0)
             sent_at = datetime.fromtimestamp(origin_server_ts / 1000, tz=timezone.utc).replace(tzinfo=None)
+
+            if event_type == "m.room.encrypted":
+                # The bot cannot decrypt E2EE messages; store a placeholder so
+                # the room's timeline and last_message_at remain accurate.
+                body = "[encrypted message]"
+                msgtype = "m.room.encrypted"
+            else:
+                body = content.get("body", "")
+                msgtype = content.get("msgtype", "m.text")
 
             link = await chat_repo.get_chat_user_link(matrix_user_id=sender)
             portal_user_id = link["user_id"] if link else None

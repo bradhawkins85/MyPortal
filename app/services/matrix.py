@@ -250,6 +250,21 @@ async def get_display_name(user_id: str) -> str | None:
         return None
 
 
+async def enable_room_encryption(room_id: str) -> dict[str, Any]:
+    """Enable end-to-end encryption on a Matrix room.
+
+    Sends an ``m.room.encryption`` state event with the standard Megolm
+    algorithm.  The room is left unchanged if encryption is already enabled;
+    the homeserver will return the existing state event rather than an error.
+    """
+    return await _request(
+        "PUT",
+        f"/_matrix/client/v3/rooms/{room_id}/state/m.room.encryption/",
+        headers=_bot_headers(),
+        json={"algorithm": "m.megolm.v1.aes-sha2"},
+    )
+
+
 async def get_power_levels(room_id: str) -> dict[str, Any]:
     """Get the current power levels state for a room."""
     return await _request(

@@ -36,6 +36,7 @@ class DeliveryMethod(str, Enum):
 class ChatRoomCreate(BaseModel):
     subject: str = Field(..., min_length=1, max_length=500)
     linked_ticket_id: Optional[int] = None
+    e2ee_enabled: bool = False
 
 
 class ChatRoomResponse(BaseModel):
@@ -50,6 +51,7 @@ class ChatRoomResponse(BaseModel):
     updated_at: Optional[datetime]
     last_message_at: Optional[datetime]
     linked_ticket_id: Optional[int]
+    e2ee_enabled: bool = False
     participant_count: Optional[int] = 0
     message_count: Optional[int] = 0
 
