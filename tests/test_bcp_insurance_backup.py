@@ -136,7 +136,7 @@ async def test_list_backup_items(monkeypatch):
     
     # Mock data - fetchall returns a list of tuples (one per row)
     mock_db.connection_instance.cursor_instance._results = [
-        (1, 1, "Customer Database", "Daily", "AWS S3", "IT Team", 
+        (1, 1, None, "Customer Database", "Daily", "AWS S3", "IT Team", 
          "1. Connect to server\n2. Run backup script", 
          datetime(2024, 1, 1), datetime(2024, 1, 1))
     ]
@@ -157,7 +157,7 @@ async def test_create_backup_item(monkeypatch):
     
     # Mock the get_backup_item_by_id call - fetchone returns a single tuple
     mock_db.connection_instance.cursor_instance._results = [
-        (1, 1, "Financial Records", "Weekly", "Local NAS", "Finance Team",
+        (1, 1, None, "Financial Records", "Weekly", "Local NAS", "Finance Team",
          "Backup procedure steps", datetime(2024, 1, 1), datetime(2024, 1, 1))
     ]
     
@@ -205,6 +205,8 @@ def test_insurance_backup_module_imports():
     assert hasattr(bcp, 'update_backup_item')
     assert hasattr(bcp, 'delete_backup_item')
     assert hasattr(bcp, 'get_backup_item_by_id')
+    assert hasattr(bcp, 'get_backup_item_by_backup_job')
+    assert hasattr(bcp, 'sync_backup_jobs_to_items')
 
 
 @pytest.mark.anyio
@@ -239,7 +241,7 @@ async def test_update_backup_item(monkeypatch):
     
     # Mock the get_backup_item_by_id call - fetchone returns a single tuple
     mock_db.connection_instance.cursor_instance._results = [
-        (1, 1, "Updated Data", "Hourly", "Azure Backup", "New Team",
+        (1, 1, None, "Updated Data", "Hourly", "Azure Backup", "New Team",
          "Updated steps", datetime(2024, 1, 1), datetime(2024, 6, 1))
     ]
     

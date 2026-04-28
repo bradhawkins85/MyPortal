@@ -781,7 +781,7 @@ async def delete_insurance_policy(policy_id: int) -> bool:
 async def list_backup_items(plan_id: int) -> list[dict[str, Any]]:
     """Get all backup items for a plan."""
     query = """
-        SELECT id, plan_id, data_scope, frequency, medium, owner, steps,
+        SELECT id, plan_id, backup_job_id, data_scope, frequency, medium, owner, steps,
                created_at, updated_at
         FROM bcp_backup_item
         WHERE plan_id = %s
@@ -795,13 +795,14 @@ async def list_backup_items(plan_id: int) -> list[dict[str, Any]]:
                 {
                     "id": row[0],
                     "plan_id": row[1],
-                    "data_scope": row[2],
-                    "frequency": row[3],
-                    "medium": row[4],
-                    "owner": row[5],
-                    "steps": row[6],
-                    "created_at": row[7],
-                    "updated_at": row[8],
+                    "backup_job_id": row[2],
+                    "data_scope": row[3],
+                    "frequency": row[4],
+                    "medium": row[5],
+                    "owner": row[6],
+                    "steps": row[7],
+                    "created_at": row[8],
+                    "updated_at": row[9],
                 }
                 for row in rows
             ]
@@ -810,7 +811,7 @@ async def list_backup_items(plan_id: int) -> list[dict[str, Any]]:
 async def get_backup_item_by_id(backup_id: int) -> dict[str, Any] | None:
     """Get a backup item by ID."""
     query = """
-        SELECT id, plan_id, data_scope, frequency, medium, owner, steps,
+        SELECT id, plan_id, backup_job_id, data_scope, frequency, medium, owner, steps,
                created_at, updated_at
         FROM bcp_backup_item
         WHERE id = %s
@@ -824,13 +825,44 @@ async def get_backup_item_by_id(backup_id: int) -> dict[str, Any] | None:
             return {
                 "id": row[0],
                 "plan_id": row[1],
-                "data_scope": row[2],
-                "frequency": row[3],
-                "medium": row[4],
-                "owner": row[5],
-                "steps": row[6],
-                "created_at": row[7],
-                "updated_at": row[8],
+                "backup_job_id": row[2],
+                "data_scope": row[3],
+                "frequency": row[4],
+                "medium": row[5],
+                "owner": row[6],
+                "steps": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
+            }
+
+
+async def get_backup_item_by_backup_job(
+    plan_id: int, backup_job_id: int
+) -> dict[str, Any] | None:
+    """Return the bcp_backup_item linked to a specific backup job, or None."""
+    query = """
+        SELECT id, plan_id, backup_job_id, data_scope, frequency, medium, owner, steps,
+               created_at, updated_at
+        FROM bcp_backup_item
+        WHERE plan_id = %s AND backup_job_id = %s
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (plan_id, backup_job_id))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "plan_id": row[1],
+                "backup_job_id": row[2],
+                "data_scope": row[3],
+                "frequency": row[4],
+                "medium": row[5],
+                "owner": row[6],
+                "steps": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
             }
 
 
@@ -841,23 +873,48 @@ async def create_backup_item(
     medium: str | None = None,
     owner: str | None = None,
     steps: str | None = None,
+    backup_job_id: int | None = None,
 ) -> dict[str, Any]:
     """Create a new backup item."""
     query = """
         INSERT INTO bcp_backup_item 
-        (plan_id, data_scope, frequency, medium, owner, steps)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        (plan_id, backup_job_id, data_scope, frequency, medium, owner, steps)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 query,
-                (plan_id, data_scope, frequency, medium, owner, steps),
+                (plan_id, backup_job_id, data_scope, frequency, medium, owner, steps),
             )
             await conn.commit()
             backup_id = cursor.lastrowid
     
     return await get_backup_item_by_id(backup_id)
+
+
+async def sync_backup_jobs_to_items(plan_id: int, company_id: int) -> None:
+    """Auto-create bcp_backup_item rows for any backup_jobs not yet linked.
+
+    When a new backup job is created in /admin/backup-jobs it will automatically
+    appear on the /bcp/backups page.  Users can then add BCP-specific details
+    (frequency, medium, owner, steps) to each auto-created entry.
+    Rows linked to a backup job are removed automatically via FK CASCADE when
+    the corresponding backup job is deleted.
+    """
+    from app.repositories import backup_jobs as bj_repo
+
+    jobs = await bj_repo.list_jobs(company_id=company_id, include_inactive=False)
+    for job in jobs:
+        job_id = int(job["id"])
+        existing = await get_backup_item_by_backup_job(plan_id, job_id)
+        if existing is None:
+            await create_backup_item(
+                plan_id=plan_id,
+                data_scope=job["name"],
+                steps=job.get("description") or None,
+                backup_job_id=job_id,
+            )
 
 
 async def update_backup_item(
