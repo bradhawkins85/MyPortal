@@ -251,18 +251,57 @@ def _coerce_grandstream_phone(value: Any) -> str | None:
     return text
 
 
+def _is_likely_extension(value: str | None) -> bool:
+    """Return ``True`` when ``value`` looks like an internal PBX extension.
+
+    Extensions are short numeric identifiers (typically 3-5 digits) used to
+    address handsets on the local PBX. External phone numbers are longer and
+    may include a leading ``+`` country code.
+    """
+    if not value:
+        return False
+    digits = value.strip().lstrip("+")
+    if not digits.isdigit():
+        return False
+    return len(digits) <= 5
+
+
 def _grandstream_pick_phone(row: Mapping[str, Any]) -> str | None:
     """Determine the most useful phone number from a Grandstream CSV row.
 
-    The CSV has both ``caller_num`` and ``callee_num``. Prefer the externally
-    visible number (``new_caller_num`` if present), then the caller number,
-    then the callee number, then the ``other_num`` field.
+    The CSV has both ``caller_num`` and ``callee_num``. For incoming calls
+    ``caller_num`` is the external phone number and ``callee_num`` is the
+    internal extension; for outgoing calls those roles are reversed. We want
+    to record the external phone number in either direction, so prefer the
+    ``new_caller_num`` (which Grandstream populates with the externally
+    visible number when known), and otherwise pick whichever of
+    ``caller_num`` / ``callee_num`` does not look like an internal extension.
     """
-    for key in ("new_caller_num", "caller_num", "callee_num", "other_num"):
-        candidate = _coerce_grandstream_phone(row.get(key))
-        if candidate:
-            return candidate
-    return None
+    new_caller = _coerce_grandstream_phone(row.get("new_caller_num"))
+    if new_caller:
+        return new_caller
+
+    caller = _coerce_grandstream_phone(row.get("caller_num"))
+    callee = _coerce_grandstream_phone(row.get("callee_num"))
+
+    # Prefer whichever side is not an internal extension. This ensures that
+    # outgoing calls (where ``caller_num`` is the dialling extension) record
+    # the dialled external number rather than the extension.
+    if caller and callee:
+        caller_is_ext = _is_likely_extension(caller)
+        callee_is_ext = _is_likely_extension(callee)
+        if caller_is_ext and not callee_is_ext:
+            return callee
+        if callee_is_ext and not caller_is_ext:
+            return caller
+        return caller
+
+    if caller:
+        return caller
+    if callee:
+        return callee
+
+    return _coerce_grandstream_phone(row.get("other_num"))
 
 
 def _grandstream_parse_create_time(value: Any) -> datetime | None:
