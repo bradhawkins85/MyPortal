@@ -32,6 +32,7 @@ def _normalise_job(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if job.get("company_id") is not None:
         job["company_id"] = int(job["company_id"])
     job["is_active"] = bool(int(job.get("is_active") or 0))
+    job["pass_protection"] = bool(int(job.get("pass_protection") or 0))
     return job
 
 
@@ -68,7 +69,8 @@ async def list_jobs(
         f"""
         SELECT id, company_id, name, description, token, is_active,
                created_by, created_at, updated_at,
-               alert_no_success_days, alert_fail_days, alert_unknown_days
+               alert_no_success_days, alert_fail_days, alert_unknown_days,
+               pass_protection
         FROM backup_jobs
         {where}
         ORDER BY company_id, name
@@ -83,7 +85,8 @@ async def get_job(job_id: int) -> dict[str, Any] | None:
         """
         SELECT id, company_id, name, description, token, is_active,
                created_by, created_at, updated_at,
-               alert_no_success_days, alert_fail_days, alert_unknown_days
+               alert_no_success_days, alert_fail_days, alert_unknown_days,
+               pass_protection
         FROM backup_jobs WHERE id = %s
         """,
         (int(job_id),),
@@ -98,7 +101,8 @@ async def get_job_by_token(token: str) -> dict[str, Any] | None:
         """
         SELECT id, company_id, name, description, token, is_active,
                created_by, created_at, updated_at,
-               alert_no_success_days, alert_fail_days, alert_unknown_days
+               alert_no_success_days, alert_fail_days, alert_unknown_days,
+               pass_protection
         FROM backup_jobs WHERE token = %s
         """,
         (token,),
@@ -117,13 +121,15 @@ async def create_job(
     alert_no_success_days: int | None = None,
     alert_fail_days: int | None = None,
     alert_unknown_days: int | None = None,
+    pass_protection: bool = False,
 ) -> dict[str, Any]:
     new_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO backup_jobs
             (company_id, name, description, token, is_active, created_by,
-             alert_no_success_days, alert_fail_days, alert_unknown_days)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             alert_no_success_days, alert_fail_days, alert_unknown_days,
+             pass_protection)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             int(company_id),
@@ -135,6 +141,7 @@ async def create_job(
             int(alert_no_success_days) if alert_no_success_days else None,
             int(alert_fail_days) if alert_fail_days else None,
             int(alert_unknown_days) if alert_unknown_days else None,
+            1 if pass_protection else 0,
         ),
     )
     job = await get_job(int(new_id))
@@ -157,6 +164,7 @@ async def update_job(
     clear_alert_no_success_days: bool = False,
     clear_alert_fail_days: bool = False,
     clear_alert_unknown_days: bool = False,
+    pass_protection: bool | None = None,
 ) -> dict[str, Any] | None:
     sets: list[str] = []
     params: list[Any] = []
@@ -190,6 +198,9 @@ async def update_job(
         params.append(int(alert_unknown_days))
     elif clear_alert_unknown_days:
         sets.append("alert_unknown_days = NULL")
+    if pass_protection is not None:
+        sets.append("pass_protection = %s")
+        params.append(1 if pass_protection else 0)
     if not sets:
         return await get_job(job_id)
     params.append(int(job_id))
