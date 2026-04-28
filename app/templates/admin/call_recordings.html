@@ -295,10 +295,12 @@
       }
     }
 
-    // Format date as yyyy-mm-dd hh:MM
+    // Format date as yyyy-mm-dd hh:MM (in local timezone)
     function formatDateTime(dateString) {
       if (!dateString) return 'N/A';
-      const date = new Date(dateString);
+      // Append 'Z' if the string has no timezone info so JS treats it as UTC
+      const normalized = /Z|[+-]\d{2}:\d{2}$/.test(dateString) ? dateString : dateString + 'Z';
+      const date = new Date(normalized);
       if (isNaN(date.getTime())) return 'N/A';
       
       const year = date.getFullYear();
