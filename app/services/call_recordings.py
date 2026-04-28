@@ -1139,9 +1139,15 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
 
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
-                data: dict[str, str] = {"output": "json"}
+                # WhisperX /asr uses FastAPI Query(...) parameters, so options
+                # like ``output`` and ``language`` MUST be sent as URL query
+                # parameters. Sending them as form data is silently ignored
+                # and the server falls back to its default ``output=txt``,
+                # which omits the segment timestamps we need for chronological
+                # merging of stereo channels.
+                params: dict[str, str] = {"output": "json"}
                 if settings.get("language"):
-                    data["language"] = settings["language"]
+                    params["language"] = settings["language"]
 
                 if stereo_channel_paths:
                     # --- stereo: transcribe each channel separately then merge ---
@@ -1156,7 +1162,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                             resp_caller = await client.post(
                                 target_url,
                                 files={"audio_file": (recording["file_name"], cf, "audio/wav")},
-                                data=data or None,
+                                params=params,
                                 headers=headers,
                             )
                         resp_caller.raise_for_status()
@@ -1171,7 +1177,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                             resp_callee = await client.post(
                                 target_url,
                                 files={"audio_file": (recording["file_name"], cf, "audio/wav")},
-                                data=data or None,
+                                params=params,
                                 headers=headers,
                             )
                         resp_callee.raise_for_status()
@@ -1202,7 +1208,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                         response = await client.post(
                             target_url,
                             files=files,
-                            data=data if data else None,
+                            params=params,
                             headers=headers,
                         )
 
