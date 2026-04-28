@@ -4,7 +4,7 @@
   </header>
   <div class="card__body">
     {% macro archive_size(bytes) %}
-      {%- if bytes is none %}None{% else %}{{ (bytes / (1024*1024)) | round(1) }} MB{% endif -%}
+      {%- if bytes is none %}None{% else %}{{ bytes | filesizeformat }}{% endif -%}
     {% endmacro %}
     {% set user_mailboxes = section.data.user_mailboxes or [] %}
     {% set shared_mailboxes = section.data.shared_mailboxes or [] %}
@@ -17,7 +17,7 @@
             <tr>
               <th>Display name</th>
               <th>User principal name</th>
-              <th>Total size</th>
+              <th>Mailbox size</th>
               <th>Archive size</th>
             </tr>
           </thead>
@@ -26,7 +26,7 @@
               <tr>
                 <td>{{ mb.display_name }}</td>
                 <td>{{ mb.user_principal_name }}</td>
-                <td>{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                <td>{{ mb.primary_bytes | filesizeformat }}</td>
                 <td>{{ archive_size(mb.archive_bytes) }}</td>
               </tr>
             {% endfor %}
@@ -42,7 +42,7 @@
             <tr>
               <th>Display name</th>
               <th>User principal name</th>
-              <th>Total size</th>
+              <th>Mailbox size</th>
               <th>Archive size</th>
             </tr>
           </thead>
@@ -51,7 +51,7 @@
               <tr>
                 <td>{{ mb.display_name }}</td>
                 <td>{{ mb.user_principal_name }}</td>
-                <td>{{ (mb.total_bytes / (1024*1024)) | round(1) }} MB</td>
+                <td>{{ mb.primary_bytes | filesizeformat }}</td>
                 <td>{{ archive_size(mb.archive_bytes) }}</td>
               </tr>
             {% endfor %}
