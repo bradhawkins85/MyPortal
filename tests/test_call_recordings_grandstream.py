@@ -421,12 +421,15 @@ async def test_grandstream_ucm_transcription_auto_enables_stereo_split(tmp_path)
         def raise_for_status(self):
             pass
 
-    _channel_responses = iter([
+    _responses = [
         _FakeResponse("Caller says hello."),
         _FakeResponse("Callee says hi."),
-    ])
+    ]
 
     class _MockClient:
+        def __init__(self):
+            self._responses = iter(_responses)
+
         async def __aenter__(self):
             return self
 
@@ -436,7 +439,7 @@ async def test_grandstream_ucm_transcription_auto_enables_stereo_split(tmp_path)
         async def post(self, url, *, files=None, data=None, headers=None):
             nonlocal post_call_count
             post_call_count += 1
-            return next(_channel_responses)
+            return next(self._responses)
 
     updated_recording: dict = dict(recording)
 
@@ -462,7 +465,7 @@ async def test_grandstream_ucm_transcription_auto_enables_stereo_split(tmp_path)
          patch.object(repo, "update_call_recording", side_effect=fake_update), \
          patch("app.services.call_recordings.webhook_monitor.create_manual_event", new_callable=AsyncMock) as mock_wh_create, \
          patch("app.services.call_recordings.webhook_monitor.record_manual_success", new_callable=AsyncMock), \
-         patch("app.services.call_recordings.httpx.AsyncClient", return_value=_MockClient()):
+         patch("app.services.call_recordings.httpx.AsyncClient", lambda *a, **kw: _MockClient()):
         mock_wh_create.return_value = {"id": 42}
 
         result = await service.transcribe_recording(1, force=False)
