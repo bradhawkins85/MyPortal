@@ -136,7 +136,7 @@
 
   <!-- View Transcript Modal -->
   <dialog id="transcript-modal" class="modal" aria-labelledby="transcript-modal-title">
-    <div class="modal__content">
+    <div class="modal__content modal__content--transcript">
       <header class="modal__header">
         <h2 class="modal__title" id="transcript-modal-title">Call Transcription</h2>
         <button type="button" class="modal__close" data-close-modal aria-label="Close">
@@ -145,13 +145,10 @@
           </svg>
         </button>
       </header>
-      <div class="modal__body">
+      <div class="modal__body modal__body--transcript">
         <div id="transcript-info" class="transcript-info"></div>
         <div id="transcript-content" class="transcript-content"></div>
       </div>
-      <footer class="modal__footer">
-        <button type="button" class="button button--ghost" data-close-modal>Close</button>
-      </footer>
     </div>
   </dialog>
 
@@ -471,7 +468,25 @@
           <p><strong>Duration:</strong> ${recording.duration_seconds ? Math.floor(recording.duration_seconds / 60) + ':' + String(recording.duration_seconds % 60).padStart(2, '0') : 'N/A'}</p>
         `;
         
-        content.textContent = recording.transcription || 'No transcription available';
+        const rawTranscript = recording.transcription || '';
+        if (!rawTranscript) {
+          content.innerHTML = '<p class="text-muted">No transcription available</p>';
+        } else {
+          const lines = rawTranscript.split('\n');
+          content.innerHTML = lines.map(line => {
+            const isCaller = /\*\*Caller:\*\*/i.test(line);
+            const isCallee = /\*\*Callee:\*\*/i.test(line);
+            const cls = isCaller ? 'transcript-line transcript-line--caller'
+                      : isCallee ? 'transcript-line transcript-line--callee'
+                      : 'transcript-line';
+            const escaped = line
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/\*\*(Caller|Callee):\*\*/gi, '<strong>$1:</strong>');
+            return `<div class="${cls}">${escaped}</div>`;
+          }).join('');
+        }
         
         modal.showModal();
       } catch (error) {
@@ -847,14 +862,46 @@
       background-color: var(--color-background-secondary);
       border-radius: 0.25rem;
       color: #f9fafb;
+      flex-shrink: 0;
     }
 
     .transcript-content {
       white-space: pre-wrap;
       line-height: 1.6;
-      max-height: 400px;
       overflow-y: auto;
       color: #f9fafb;
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    /* Full-height layout for the transcript modal */
+    .modal__content--transcript {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .modal__body--transcript {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-gap-base);
+      overflow: hidden;
+    }
+
+    /* Alternating caller / callee line highlights */
+    .transcript-line {
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+    }
+
+    .transcript-line--caller {
+      background-color: rgba(59, 130, 246, 0.12);
+    }
+
+    .transcript-line--callee {
+      background-color: rgba(16, 185, 129, 0.10);
     }
 
     /* Ensure modal header elements are white */
