@@ -14,6 +14,7 @@ from app.services.call_recordings import (
     _fmt_time,
     _parse_whisperx_response,
     _split_stereo_wav,
+    _split_text_to_lines,
 )
 
 
@@ -131,10 +132,8 @@ def test_build_stereo_transcription_section_format():
         callee_text="This is the callee speaking.",
         callee_segments=[],
     )
-    assert "**Caller:**" in result
-    assert "Hello, this is the caller." in result
-    assert "**Callee:**" in result
-    assert "This is the callee speaking." in result
+    assert "**Caller:** Hello, this is the caller." in result
+    assert "**Callee:** This is the callee speaking." in result
 
 
 def test_build_stereo_transcription_only_caller():
@@ -144,7 +143,7 @@ def test_build_stereo_transcription_only_caller():
         callee_text="",
         callee_segments=[],
     )
-    assert "**Caller:**" in result
+    assert "**Caller:** Only caller text." in result
     assert "**Callee:**" not in result
 
 
@@ -155,7 +154,7 @@ def test_build_stereo_transcription_only_callee():
         callee_text="Only callee text.",
         callee_segments=[],
     )
-    assert "**Callee:**" in result
+    assert "**Callee:** Only callee text." in result
     assert "**Caller:**" not in result
 
 
@@ -179,6 +178,45 @@ def test_build_stereo_transcription_interleaved_by_segments():
 def test_build_stereo_transcription_empty_both():
     result = _build_stereo_transcription("", [], "", [])
     assert result == ""
+
+
+def test_build_stereo_transcription_multi_sentence_fallback():
+    result = _build_stereo_transcription(
+        caller_text="Hello! How are you? I need help.",
+        caller_segments=[],
+        callee_text="Hi there. Sure thing.",
+        callee_segments=[],
+    )
+    lines = result.splitlines()
+    caller_lines = [l for l in lines if l.startswith("**Caller:**")]
+    callee_lines = [l for l in lines if l.startswith("**Callee:**")]
+    assert len(caller_lines) == 3
+    assert len(callee_lines) == 2
+    assert "**Caller:** Hello!" in result
+    assert "**Callee:** Hi there." in result
+
+
+# ---------------------------------------------------------------------------
+# _split_text_to_lines
+# ---------------------------------------------------------------------------
+
+def test_split_text_to_lines_sentences():
+    lines = _split_text_to_lines("Hello! How are you? I need help.")
+    assert lines == ["Hello!", "How are you?", "I need help."]
+
+
+def test_split_text_to_lines_newlines():
+    lines = _split_text_to_lines("Line one\nLine two\nLine three")
+    assert lines == ["Line one", "Line two", "Line three"]
+
+
+def test_split_text_to_lines_empty():
+    assert _split_text_to_lines("") == []
+    assert _split_text_to_lines("   ") == []
+
+
+def test_split_text_to_lines_single_sentence():
+    assert _split_text_to_lines("Just one sentence.") == ["Just one sentence."]
 
 
 # ---------------------------------------------------------------------------
