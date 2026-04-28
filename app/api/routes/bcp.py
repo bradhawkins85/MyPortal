@@ -1816,10 +1816,12 @@ async def bcp_backups(request: Request):
         plan = await bcp_repo.create_plan(company_id)
         await bcp_repo.seed_default_objectives(plan["id"])
     
-    # Get all backup items
+    # Sync backup jobs for this company into the BCP backup items list
+    await bcp_repo.sync_backup_jobs_to_items(plan["id"], company_id)
+
+    # Get all backup items (manual + auto-created from backup jobs)
     backups = await bcp_repo.list_backup_items(plan["id"])
 
-    
     context = await _build_base_context(
         request,
         user,
