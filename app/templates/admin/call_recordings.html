@@ -295,6 +295,22 @@
       }
     }
 
+    // Extract the last [MM:SS] timestamp from a transcription and return
+    // {display: "MM:SS", seconds: N}, or null if none found.
+    function getTranscriptionDuration(transcription) {
+      if (!transcription) return null;
+      const re = /\[(\d{2,}:\d{2})\]/g;
+      let last = null;
+      let m;
+      while ((m = re.exec(transcription)) !== null) {
+        last = m[1];
+      }
+      if (!last) return null;
+      const parts = last.split(':');
+      const seconds = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+      return { display: last, seconds };
+    }
+
     // Format date as yyyy-mm-dd hh:MM (in local timezone)
     function formatDateTime(dateString) {
       if (!dateString) return 'N/A';
@@ -361,8 +377,11 @@
             
             const date = formatDateTime(rec.call_date);
             const dateValue = rec.call_date || '';
-            const duration = rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A';
-            const durationValue = rec.duration_seconds || 0;
+            const transcriptDur = getTranscriptionDuration(rec.transcription);
+            const duration = transcriptDur
+              ? transcriptDur.display
+              : (rec.duration_seconds ? `${Math.floor(rec.duration_seconds / 60)}:${String(rec.duration_seconds % 60).padStart(2, '0')}` : 'N/A');
+            const durationValue = transcriptDur ? transcriptDur.seconds : (rec.duration_seconds || 0);
             const statusBadge = getStatusBadge(rec.transcription_status);
             const linkedTicket = rec.linked_ticket_number 
               ? `<a href="/admin/tickets/${rec.linked_ticket_id}" class="link">#${rec.linked_ticket_number}</a>` 
@@ -462,12 +481,16 @@
         
         const date = formatDateTime(recording.call_date);
         const phoneNumber = recording.phone_number_e164 || recording.phone_number || 'Unknown';
+        const modalTranscriptDur = getTranscriptionDuration(recording.transcription);
+        const modalDuration = modalTranscriptDur
+          ? modalTranscriptDur.display
+          : (recording.duration_seconds ? Math.floor(recording.duration_seconds / 60) + ':' + String(recording.duration_seconds % 60).padStart(2, '0') : 'N/A');
         
         info.innerHTML = `
           <p><strong>Date:</strong> ${date}</p>
           <p><strong>Phone Number:</strong> ${phoneNumber}</p>
           <p><strong>Staff:</strong> ${staffName}</p>
-          <p><strong>Duration:</strong> ${recording.duration_seconds ? Math.floor(recording.duration_seconds / 60) + ':' + String(recording.duration_seconds % 60).padStart(2, '0') : 'N/A'}</p>
+          <p><strong>Duration:</strong> ${modalDuration}</p>
         `;
         
         const rawTranscript = recording.transcription || '';
