@@ -1105,8 +1105,17 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             settings.get("language"),
         )
 
-        # Attempt stereo channel split (Grandstream UCM: right=caller, left=callee)
+        # Attempt stereo channel split (Grandstream UCM: right=caller, left=callee).
+        # Stereo split is enabled explicitly via the WhisperX module setting OR
+        # automatically when the Call Recordings module is configured for
+        # Grandstream UCM (which records each participant on a separate channel).
         stereo_split = settings.get("stereo_split", False)
+        if not stereo_split:
+            call_recordings_module = await modules_repo.get_module("call-recordings")
+            if call_recordings_module:
+                cr_settings = call_recordings_module.get("settings", {})
+                if _normalize_phone_system_type(cr_settings.get("phone_system_type")) == PHONE_SYSTEM_GRANDSTREAM_UCM:
+                    stereo_split = True
         stereo_channel_paths: tuple[Path, Path] | None = None
         if stereo_split:
             stereo_channel_paths = _split_stereo_wav(Path(file_path))

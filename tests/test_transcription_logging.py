@@ -85,8 +85,9 @@ async def test_transcribe_recording_with_logging_and_webhook():
         # Verify recording was fetched
         mock_get.assert_called_once_with(1)
         
-        # Verify module settings were fetched
-        mock_get_module.assert_called_once_with("whisperx")
+        # Verify module settings were fetched (whisperx + call-recordings for phone_system_type check)
+        mock_get_module.assert_any_call("whisperx")
+        mock_get_module.assert_any_call("call-recordings")
         
         # Verify webhook event was created
         mock_create_webhook.assert_called_once()
