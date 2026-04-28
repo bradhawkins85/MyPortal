@@ -101,7 +101,7 @@
                   <button 
                     type="button" 
                     class="btn btn-sm btn-secondary" 
-                    onclick="openEditModal({{ backup.id }}, '{{ backup.data_scope | replace("'", "\\'") }}', '{{ backup.frequency or '' }}', '{{ backup.medium or '' }}', '{{ backup.owner or '' }}', `{{ backup.steps or '' }}`, {{ 'true' if backup.backup_job_id else 'false' }})"
+                    onclick="openEditModal({{ backup.id }}, {{ backup.data_scope | tojson }}, {{ (backup.frequency or '') | tojson }}, {{ (backup.medium or '') | tojson }}, {{ (backup.owner or '') | tojson }}, {{ (backup.steps or '') | tojson }}, {{ 'true' if backup.backup_job_id else 'false' }})"
                   >
                     Edit
                   </button>
@@ -185,7 +185,7 @@
         <div class="form-group">
           <label for="edit_data_scope" class="form-label required">Data for Backup</label>
           <input type="text" id="edit_data_scope" name="data_scope" class="form-input" required>
-          <small id="edit_data_scope_note" class="text-muted" style="display:none;">
+          <small id="edit_data_scope_note" class="text-muted" hidden>
             Name is managed via the Backup Job in Admin settings.
           </small>
         </div>
@@ -228,7 +228,7 @@ function openEditModal(id, dataScope, frequency, medium, owner, steps, isJobLink
   document.getElementById('edit_owner').value = owner;
   document.getElementById('edit_steps').value = steps;
   var scopeNote = document.getElementById('edit_data_scope_note');
-  if (scopeNote) scopeNote.style.display = isJobLinked ? '' : 'none';
+  if (scopeNote) scopeNote.hidden = !isJobLinked;
   document.getElementById('editBackupModal').showModal();
 }
 </script>
