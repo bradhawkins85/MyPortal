@@ -267,31 +267,39 @@ async def get_recipient_count_map(reply_ids: Iterable[int]) -> dict[int, int]:
             continue
     if not ids:
         return {}
-    counts: dict[int, int] = {}
-    # Iterate one query per id rather than building an IN clause to stay within
-    # the simple key-style parameter binding the rest of the codebase uses.
-    for reply_id in set(ids):
+    unique_ids = sorted(set(ids))
+    counts: dict[int, int] = {rid: 0 for rid in unique_ids}
+    # Use a single IN-clause query so this stays O(1) database round-trips
+    # regardless of how many replies are on the ticket. Parameter names are
+    # generated locally (no caller input flows into the query string), so
+    # this is safe from SQL injection.
+    placeholders = []
+    params: dict[str, int] = {}
+    for index, reply_id in enumerate(unique_ids):
+        key = f"rid_{index}"
+        placeholders.append(f":{key}")
+        params[key] = reply_id
+    query = (
+        "SELECT ticket_reply_id, COUNT(*) AS recipient_count "
+        "FROM ticket_reply_email_recipients "
+        f"WHERE ticket_reply_id IN ({', '.join(placeholders)}) "
+        "GROUP BY ticket_reply_id"
+    )
+    try:
+        rows = await db.fetch_all(query, params)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.opt(exception=True).debug(
+            "Failed to load recipient counts",
+            reply_ids=unique_ids,
+            error=str(exc),
+        )
+        return counts
+    for row in rows or ():
         try:
-            row = await db.fetch_one(
-                """
-                SELECT COUNT(*) AS recipient_count
-                FROM ticket_reply_email_recipients
-                WHERE ticket_reply_id = :reply_id
-                """,
-                {"reply_id": reply_id},
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.opt(exception=True).debug(
-                "Failed to count recipient rows",
-                reply_id=reply_id,
-                error=str(exc),
-            )
+            rid = int(row.get("ticket_reply_id"))
+            counts[rid] = int(row.get("recipient_count") or 0)
+        except (TypeError, ValueError):
             continue
-        if row:
-            try:
-                counts[reply_id] = int(row.get("recipient_count") or 0)
-            except (TypeError, ValueError):
-                counts[reply_id] = 0
     return counts
 
 
