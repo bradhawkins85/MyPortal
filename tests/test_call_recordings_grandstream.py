@@ -1,8 +1,12 @@
 """Tests for Grandstream UCM phone-system call recording processing."""
 from __future__ import annotations
 
+import array
+import asyncio
+import wave
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -341,3 +345,135 @@ async def test_module_handler_passes_grandstream_phone_system_type():
     )
     assert result["phone_system_type"] == "grandstream-ucm"
     assert result["recordings_path"] == "/data/recordings"
+
+
+# ---------------------------------------------------------------------------
+# Transcription tests – Grandstream UCM auto stereo-split
+# ---------------------------------------------------------------------------
+
+def _make_stereo_wav(path: Path) -> None:
+    """Write a minimal 2-channel PCM WAV to *path*."""
+    samples = array.array("h", [100, -100] * 50)  # interleaved L/R
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(samples.tobytes())
+
+
+@pytest.mark.asyncio
+async def test_grandstream_ucm_transcription_auto_enables_stereo_split(tmp_path):
+    """When phone_system_type is grandstream-ucm, transcribe_recording should
+    automatically perform a stereo split and return a labelled Caller/Callee
+    transcription even when the WhisperX module does NOT have stereo_split=True.
+    """
+    from app.repositories import call_recordings as repo
+    from app.repositories import integration_modules as modules_repo_mod
+
+    stereo_wav = tmp_path / "call.wav"
+    _make_stereo_wav(stereo_wav)
+
+    recording = {
+        "id": 1,
+        "file_path": str(stereo_wav),
+        "file_name": stereo_wav.name,
+        "transcription": None,
+        "transcription_status": "queued",
+    }
+
+    whisperx_module = {
+        "slug": "whisperx",
+        "enabled": True,
+        "settings": {
+            "base_url": "http://whisperx.local",
+            "api_key": "",
+            "language": "",
+            # stereo_split is intentionally absent / False
+        },
+    }
+
+    call_recordings_module = {
+        "slug": "call-recordings",
+        "enabled": True,
+        "settings": {
+            "recordings_path": str(tmp_path),
+            "phone_system_type": "grandstream-ucm",
+        },
+    }
+
+    post_call_count = 0
+
+    class _FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, text_value: str):
+            self._text = text_value
+            self.content = text_value.encode()
+
+        @property
+        def text(self):
+            return self._text
+
+        def json(self):
+            return {"text": self._text}
+
+        def raise_for_status(self):
+            pass
+
+    _channel_responses = iter([
+        _FakeResponse("Caller says hello."),
+        _FakeResponse("Callee says hi."),
+    ])
+
+    class _MockClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, *, files=None, data=None, headers=None):
+            nonlocal post_call_count
+            post_call_count += 1
+            return next(_channel_responses)
+
+    updated_recording: dict = dict(recording)
+
+    async def fake_get_module(slug: str):
+        if slug == "whisperx":
+            return whisperx_module
+        if slug == "call-recordings":
+            return call_recordings_module
+        return None
+
+    async def fake_get_by_id(rid):
+        return updated_recording
+
+    async def fake_update(rid, *, transcription=None, transcription_status=None, **kw):
+        if transcription is not None:
+            updated_recording["transcription"] = transcription
+        if transcription_status is not None:
+            updated_recording["transcription_status"] = transcription_status
+        return updated_recording
+
+    with patch.object(modules_repo_mod, "get_module", side_effect=fake_get_module), \
+         patch.object(repo, "get_call_recording_by_id", side_effect=fake_get_by_id), \
+         patch.object(repo, "update_call_recording", side_effect=fake_update), \
+         patch("app.services.call_recordings.webhook_monitor.create_manual_event", new_callable=AsyncMock) as mock_wh_create, \
+         patch("app.services.call_recordings.webhook_monitor.record_manual_success", new_callable=AsyncMock), \
+         patch("app.services.call_recordings.httpx.AsyncClient", return_value=_MockClient()):
+        mock_wh_create.return_value = {"id": 42}
+
+        result = await service.transcribe_recording(1, force=False)
+
+    # Two HTTP calls must have been made (one per stereo channel)
+    assert post_call_count == 2, f"Expected 2 WhisperX calls, got {post_call_count}"
+
+    transcription = result.get("transcription") or updated_recording.get("transcription") or ""
+    assert "**Caller:**" in transcription or "Caller" in transcription, (
+        f"Caller label missing from transcription: {transcription!r}"
+    )
+    assert "**Callee:**" in transcription or "Callee" in transcription, (
+        f"Callee label missing from transcription: {transcription!r}"
+    )
