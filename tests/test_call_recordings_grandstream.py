@@ -111,13 +111,25 @@ def test_grandstream_pick_phone_prefers_external_over_extension():
     incoming = {"caller_num": "61400000001", "callee_num": "1001"}
     assert service._grandstream_pick_phone(incoming) == "61400000001"
 
-    # ``new_caller_num`` always wins when present.
+    # ``new_caller_num`` wins when present and not an internal extension.
     with_new = {
         "caller_num": "1000",
         "callee_num": "61400000002",
         "new_caller_num": "+61400000099",
     }
     assert service._grandstream_pick_phone(with_new) == "+61400000099"
+
+    # ``new_caller_num`` that is itself an extension must be ignored so that
+    # the external callee number is returned instead.  This matches real
+    # Grandstream UCM CSV rows where the originating extension is echoed into
+    # ``new_caller_num`` for outgoing calls:
+    #   caller_num=1000, callee_num=0488936390, new_caller_num=1000
+    with_ext_new = {
+        "caller_num": "1000",
+        "callee_num": "0488936390",
+        "new_caller_num": "1000",
+    }
+    assert service._grandstream_pick_phone(with_ext_new) == "0488936390"
 
     # Both numbers external: keep the original caller_num preference.
     both_external = {"caller_num": "1234567890", "callee_num": "0987654321"}
