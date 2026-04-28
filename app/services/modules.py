@@ -4779,9 +4779,14 @@ async def _invoke_whisperx(
                             original_name,
                         )
 
-                data: dict[str, str] = {"output": "json"}
+                # WhisperX /asr uses FastAPI Query(...) parameters, so options
+                # like ``output`` and ``language`` MUST be sent as URL query
+                # parameters. Sending them as form data is silently ignored
+                # and the server falls back to its default ``output=txt``,
+                # which omits the segment timestamps.
+                params: dict[str, str] = {"output": "json"}
                 if language:
-                    data["language"] = language
+                    params["language"] = language
 
                 if stereo_paths:
                     callee_path, caller_path = stereo_paths
@@ -4790,7 +4795,7 @@ async def _invoke_whisperx(
                             resp_caller = await client.post(
                                 target_url,
                                 files={"audio_file": (original_name, cf, "audio/wav")},
-                                data=data or None,
+                                params=params,
                                 headers=headers,
                             )
                         resp_caller.raise_for_status()
@@ -4800,7 +4805,7 @@ async def _invoke_whisperx(
                             resp_callee = await client.post(
                                 target_url,
                                 files={"audio_file": (original_name, cf, "audio/wav")},
-                                data=data or None,
+                                params=params,
                                 headers=headers,
                             )
                         resp_callee.raise_for_status()
@@ -4820,7 +4825,7 @@ async def _invoke_whisperx(
                         response = await client.post(
                             target_url,
                             files=files,
-                            data=data if data else None,
+                            params=params,
                             headers=headers,
                         )
                         response.raise_for_status()
