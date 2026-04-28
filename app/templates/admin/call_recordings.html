@@ -479,12 +479,14 @@
             const cls = isCaller ? 'transcript-line transcript-line--caller'
                       : isCallee ? 'transcript-line transcript-line--callee'
                       : 'transcript-line';
-            const escaped = line
+            // Use placeholder to safely inject <strong> tags after HTML escaping
+            const marked = line.replace(/\*\*(Caller|Callee):\*\*/gi, '\x00BOLD_$1\x00');
+            const escaped = marked
               .replace(/&/g, '&amp;')
               .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/\*\*(Caller|Callee):\*\*/gi, '<strong>$1:</strong>');
-            return `<div class="${cls}">${escaped}</div>`;
+              .replace(/>/g, '&gt;');
+            const formatted = escaped.replace(/\x00BOLD_(Caller|Callee)\x00/gi, '<strong>$1:</strong>');
+            return `<div class="${cls}">${formatted}</div>`;
           }).join('');
         }
         
