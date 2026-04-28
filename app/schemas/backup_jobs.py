@@ -51,6 +51,14 @@ class BackupJobBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
+    pass_protection: bool = Field(
+        default=False,
+        description=(
+            "When enabled, a Pass status recorded for the current day cannot be "
+            "overwritten by a subsequent Warn or Fail report. Designed for jobs "
+            "that run multiple times a day against unreliable storage."
+        ),
+    )
     alert_no_success_days: int | None = Field(
         default=None,
         ge=1,
@@ -77,6 +85,7 @@ class BackupJobUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
+    pass_protection: bool | None = None
     alert_no_success_days: int | None = Field(default=None, ge=1)
     alert_fail_days: int | None = Field(default=None, ge=1)
     alert_unknown_days: int | None = Field(default=None, ge=1)
@@ -89,6 +98,7 @@ class BackupJobResponse(BaseModel):
     description: str | None = None
     token: str
     is_active: bool = True
+    pass_protection: bool = False
     created_by: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -108,6 +118,7 @@ def serialise_job(job: dict[str, Any]) -> BackupJobResponse:
         description=job.get("description"),
         token=str(job.get("token") or ""),
         is_active=bool(job.get("is_active", True)),
+        pass_protection=bool(job.get("pass_protection", False)),
         created_by=job.get("created_by"),
         created_at=job.get("created_at"),
         updated_at=job.get("updated_at"),

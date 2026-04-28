@@ -145,6 +145,7 @@ async def create_job(
     alert_no_success_days: int | None = None,
     alert_fail_days: int | None = None,
     alert_unknown_days: int | None = None,
+    pass_protection: bool = False,
 ) -> dict[str, Any]:
     cleaned_name = _validate_name(name)
     cleaned_description = _validate_description(description)
@@ -163,6 +164,7 @@ async def create_job(
         alert_no_success_days=alert_no_success_days,
         alert_fail_days=alert_fail_days,
         alert_unknown_days=alert_unknown_days,
+        pass_protection=bool(pass_protection),
     )
     log_info("Backup job created", job_id=job["id"], company_id=company_id_int)
     return job
@@ -181,6 +183,7 @@ async def update_job(
     clear_alert_no_success_days: bool = False,
     clear_alert_fail_days: bool = False,
     clear_alert_unknown_days: bool = False,
+    pass_protection: bool | None = None,
 ) -> dict[str, Any] | None:
     cleaned_name = _validate_name(name) if name is not None else None
     cleaned_description = (
@@ -204,6 +207,7 @@ async def update_job(
         clear_alert_no_success_days=clear_alert_no_success_days,
         clear_alert_fail_days=clear_alert_fail_days,
         clear_alert_unknown_days=clear_alert_unknown_days,
+        pass_protection=pass_protection,
     )
 
 
@@ -267,6 +271,21 @@ async def record_status(
         raise PermissionError("Job is disabled")
     when = when or datetime.now(timezone.utc)
     event_date = when.astimezone(timezone.utc).date()
+
+    # Pass-protection: if the job has already recorded a "pass" today and
+    # pass_protection is enabled, ignore any incoming Warn or Fail report so
+    # the day's status stays locked to Pass.
+    if job.get("pass_protection") and canonical_status in ("warn", "fail"):
+        existing_event = await backup_jobs_repo.get_event(int(job["id"]), event_date)
+        if existing_event and existing_event.get("status") == "pass":
+            log_info(
+                "Backup job status update blocked by pass protection",
+                job_id=int(job["id"]),
+                attempted_status=canonical_status,
+                event_date=event_date.isoformat(),
+            )
+            return {"job": job, "event": existing_event}
+
     event = await backup_jobs_repo.upsert_event(
         int(job["id"]),
         event_date,

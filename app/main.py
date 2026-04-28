@@ -12639,6 +12639,7 @@ def _extract_backup_job_form(form: FormData) -> dict[str, Any]:
         "name": (form.get("name") or "").strip(),
         "description": (form.get("description") or "").strip() or None,
         "is_active": form.get("is_active") in {"on", "true", "1", "yes"},
+        "pass_protection": form.get("pass_protection") in {"on", "true", "1", "yes"},
         "alert_no_success_days": _parse_alert_days("alert_no_success_days"),
         "alert_fail_days": _parse_alert_days("alert_fail_days"),
         "alert_unknown_days": _parse_alert_days("alert_unknown_days"),
@@ -12662,6 +12663,7 @@ async def admin_create_backup_job(request: Request):
             alert_no_success_days=payload["alert_no_success_days"],
             alert_fail_days=payload["alert_fail_days"],
             alert_unknown_days=payload["alert_unknown_days"],
+            pass_protection=payload["pass_protection"],
         )
     except ValueError as exc:
         url = f"/admin/backup-jobs?error={quote(str(exc))}"
@@ -12700,6 +12702,7 @@ async def admin_update_backup_job(request: Request, job_id: int):
             clear_alert_no_success_days=payload["alert_no_success_days"] is None,
             clear_alert_fail_days=payload["alert_fail_days"] is None,
             clear_alert_unknown_days=payload["alert_unknown_days"] is None,
+            pass_protection=payload["pass_protection"],
         )
     except ValueError as exc:
         url = f"/admin/backup-jobs?jobId={int(job_id)}&error={quote(str(exc))}"

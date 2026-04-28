@@ -258,6 +258,19 @@
           <span>Active (seed daily Unknown events and accept status reports)</span>
         </label>
       </div>
+      <div class="form-field form-field--checkbox">
+        <label class="form-checkbox">
+          <input type="checkbox" name="pass_protection" {% if backup_editing_job and backup_editing_job.pass_protection %}checked{% endif %} />
+          <span>Pass Protection</span>
+        </label>
+        <p class="form-help">
+          When enabled, once a <strong>Pass</strong> status has been recorded for the current day, any subsequent
+          <strong>Warn</strong> or <strong>Fail</strong> report from the API will be ignored — the day's status
+          remains locked to <em>Pass</em>. Useful for backup jobs that run multiple times a day against unreliable
+          storage (e.g. external drives or remote NAS devices): as long as one run succeeds, the day is considered
+          good regardless of later failures.
+        </p>
+      </div>
       <fieldset class="form-fieldset">
         <legend class="form-fieldset__legend">Missed backup notifications</legend>
         <p class="form-help">When any threshold is set, a ticket is automatically created when the condition has been met for that many consecutive days. Leave empty or set to 0 to disable notifications for that status.</p>
