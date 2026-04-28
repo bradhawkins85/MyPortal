@@ -58,8 +58,8 @@ class _AsyncClientFactory:
     async def __aexit__(self, *exc):
         return False
 
-    async def post(self, url, *, files=None, data=None, headers=None):
-        self.calls.append({"url": url, "files": files, "data": data, "headers": headers})
+    async def post(self, url, *, files=None, data=None, params=None, headers=None):
+        self.calls.append({"url": url, "files": files, "data": data, "params": params, "headers": headers})
         return self._response
 
 
@@ -184,7 +184,8 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
         call = client_factory.calls[0]
         assert call["url"] == "http://whisperx.local/asr"
         assert call["headers"]["Authorization"] == "Bearer test-key"
-        assert call["data"]["language"] == "en"
+        assert call["params"]["language"] == "en"
+        assert call["params"]["output"] == "json"
     finally:
         if created_target and target_file.exists():
             target_file.unlink()
@@ -489,7 +490,7 @@ def test_invoke_whisperx_stereo_split(monkeypatch, tmp_path):
         async def __aexit__(self, *exc):
             return False
 
-        async def post(self, url, *, files=None, data=None, headers=None):
+        async def post(self, url, *, files=None, data=None, params=None, headers=None):
             self.calls.append({"url": url})
             return next(_responses)
 
