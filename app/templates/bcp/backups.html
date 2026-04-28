@@ -79,7 +79,12 @@
           <tbody>
             {% for backup in backups %}
             <tr>
-              <td><strong>{{ backup.data_scope }}</strong></td>
+              <td>
+                <strong>{{ backup.data_scope }}</strong>
+                {% if backup.backup_job_id %}
+                <span class="status status--info" style="font-size: 0.7rem; margin-left: 0.4rem;">Backup Job</span>
+                {% endif %}
+              </td>
               <td>{{ backup.frequency or '-' }}</td>
               <td>{{ backup.medium or '-' }}</td>
               <td>{{ backup.owner or '-' }}</td>
@@ -96,16 +101,18 @@
                   <button 
                     type="button" 
                     class="btn btn-sm btn-secondary" 
-                    onclick="openEditModal({{ backup.id }}, '{{ backup.data_scope }}', '{{ backup.frequency or '' }}', '{{ backup.medium or '' }}', '{{ backup.owner or '' }}', `{{ backup.steps or '' }}`)"
+                    onclick="openEditModal({{ backup.id }}, {{ backup.data_scope | tojson }}, {{ (backup.frequency or '') | tojson }}, {{ (backup.medium or '') | tojson }}, {{ (backup.owner or '') | tojson }}, {{ (backup.steps or '') | tojson }}, {{ 'true' if backup.backup_job_id else 'false' }})"
                   >
                     Edit
                   </button>
+                  {% if not backup.backup_job_id %}
                   <form method="post" action="/bcp/backups/{{ backup.id }}/delete" class="inline">
                     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
                     <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this backup item?')">
                       Delete
                     </button>
                   </form>
+                  {% endif %}
                 </div>
               </td>
               {% endif %}
@@ -178,6 +185,9 @@
         <div class="form-group">
           <label for="edit_data_scope" class="form-label required">Data for Backup</label>
           <input type="text" id="edit_data_scope" name="data_scope" class="form-input" required>
+          <small id="edit_data_scope_note" class="text-muted" hidden>
+            Name is managed via the Backup Job in Admin settings.
+          </small>
         </div>
 
         <div class="form-group">
@@ -209,13 +219,16 @@
 </dialog>
 {% endif %}
 <script>
-function openEditModal(id, dataScope, frequency, medium, owner, steps) {
+function openEditModal(id, dataScope, frequency, medium, owner, steps, isJobLinked) {
   document.getElementById('editBackupForm').action = '/bcp/backups/' + id + '/update';
   document.getElementById('edit_data_scope').value = dataScope;
+  document.getElementById('edit_data_scope').readOnly = isJobLinked;
   document.getElementById('edit_frequency').value = frequency;
   document.getElementById('edit_medium').value = medium;
   document.getElementById('edit_owner').value = owner;
   document.getElementById('edit_steps').value = steps;
+  var scopeNote = document.getElementById('edit_data_scope_note');
+  if (scopeNote) scopeNote.hidden = !isJobLinked;
   document.getElementById('editBackupModal').showModal();
 }
 </script>
