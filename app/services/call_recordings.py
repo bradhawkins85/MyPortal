@@ -882,6 +882,16 @@ def _parse_whisperx_response(response: httpx.Response) -> tuple[str, list[dict[s
         return response.text.strip(), []
 
 
+def _split_text_to_lines(text: str) -> list[str]:
+    """Split a transcription text into individual sentence lines.
+
+    Splits on sentence-ending punctuation (.!?) followed by whitespace
+    (preserving the punctuation via lookbehind), or on newlines.
+    """
+    lines = re.split(r'(?<=[.!?])\s+|\n+', text.strip())
+    return [line.strip() for line in lines if line.strip()]
+
+
 def _build_stereo_transcription(
     caller_text: str,
     caller_segments: list[dict[str, Any]],
@@ -890,9 +900,10 @@ def _build_stereo_transcription(
 ) -> str:
     """Combine caller and callee channel results into a labelled transcription.
 
-    When both channels supply timing segments the output is a single
-    chronologically-ordered conversation.  Otherwise two labelled sections
-    are returned.
+    When either channel supplies timing segments the output is a single
+    chronologically-ordered conversation with timestamps on each line.
+    Otherwise the text from each channel is split into individual sentences
+    and presented as labelled lines.
     """
     if caller_segments or callee_segments:
         tagged: list[dict[str, Any]] = []
@@ -905,12 +916,12 @@ def _build_stereo_transcription(
         lines = [f"[{_fmt_time(s['start'])}] **{s['label']}:** {s['text']}" for s in tagged]
         return "\n".join(lines)
 
-    parts: list[str] = []
-    if caller_text:
-        parts.append(f"**Caller:**\n{caller_text}")
-    if callee_text:
-        parts.append(f"**Callee:**\n{callee_text}")
-    return "\n\n".join(parts)
+    lines: list[str] = []
+    for sentence in _split_text_to_lines(caller_text):
+        lines.append(f"**Caller:** {sentence}")
+    for sentence in _split_text_to_lines(callee_text):
+        lines.append(f"**Callee:** {sentence}")
+    return "\n".join(lines)
 
 
 async def queue_pending_transcriptions() -> dict[str, Any]:
@@ -1128,7 +1139,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
 
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
-                data: dict[str, str] = {}
+                data: dict[str, str] = {"output": "json"}
                 if settings.get("language"):
                     data["language"] = settings["language"]
 
