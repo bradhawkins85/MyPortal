@@ -399,7 +399,7 @@
                       ${rec.transcription && !rec.linked_ticket_id ? `<button type="button" class="header-menu__item" role="menuitem" onclick="createTicket(${rec.id})">Create Ticket</button>` : ''}
                       ${!rec.linked_ticket_id ? `<button type="button" class="header-menu__item" role="menuitem" onclick="linkToTicket(${rec.id})">Link to Ticket</button>` : ''}
                       ${rec.transcription_status !== 'completed' ? `<button type="button" class="header-menu__item" role="menuitem" onclick="transcribe(${rec.id}, false)">Transcribe</button>` : ''}
-                      <button type="button" class="header-menu__item" role="menuitem" onclick="transcribe(${rec.id}, true)">Re-transcribe</button>
+                      ${rec.transcription ? `<button type="button" class="header-menu__item" role="menuitem" onclick="transcribe(${rec.id}, true)">Re-transcribe</button>` : ''}
                     </div>
                   </div>
                 </td>
