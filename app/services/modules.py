@@ -2144,6 +2144,30 @@ async def _invoke_smtp2go(
                 has_smtp2go_message_id=smtp2go_message_id is not None,
                 has_tracking_id=response_tracking_id is not None,
             )
+
+        # Record per-recipient rows for the To/CC/BCC fan-out so the
+        # delivery-status badge popup can show each recipient independently.
+        # email_sent_at is intentionally left NULL here for SMTP2Go; it is
+        # stamped when the 'processed' webhook arrives per recipient.
+        if ticket_reply_id:
+            try:
+                from app.services import email_recipients as _email_recipients
+
+                await _email_recipients.record_recipients(
+                    reply_id=ticket_reply_id,
+                    tracking_id=response_tracking_id,
+                    smtp2go_message_id=smtp2go_message_id,
+                    to=recipients,
+                    cc=cc,
+                    bcc=bcc,
+                    sent_at=None,
+                )
+            except Exception as recipients_exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to record per-recipient rows for SMTP2Go module send",
+                    reply_id=ticket_reply_id,
+                    error=str(recipients_exc),
+                )
     except Exception as exc:  # pragma: no cover - defensive logging
         updated_event = await _record_failure(
             event_id,

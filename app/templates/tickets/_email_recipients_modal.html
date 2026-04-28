@@ -1,0 +1,41 @@
+{# Shared modal used by ticket detail pages to show the per-recipient
+   email delivery status when the aggregate delivery-status badge is
+   clicked. Populated by /static/js/email_recipients.js. #}
+<div class="modal" id="email-recipients-modal" role="dialog" aria-modal="true" aria-labelledby="email-recipients-modal-title" hidden>
+  <div class="modal__content modal__content--wide" role="document">
+    <button type="button" class="modal__close" data-modal-close data-email-recipients-close>
+      <span class="visually-hidden">Close email recipient details</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="email-recipients-modal-title">Email delivery status</h2>
+    <p class="form-help" data-email-recipients-summary></p>
+    <div class="card card--panel" data-email-recipients-body>
+      <div class="card__body">
+        <div data-email-recipients-loading>Loading delivery status…</div>
+        <p class="form-help form-help--error" data-email-recipients-error role="alert" hidden></p>
+        <div class="table-responsive" data-email-recipients-table-wrap hidden>
+          <table class="data-table data-table--compact">
+            <thead>
+              <tr>
+                <th scope="col">Recipient</th>
+                <th scope="col">Role</th>
+                <th scope="col">Status</th>
+                <th scope="col">Sent</th>
+                <th scope="col">Delivered</th>
+                <th scope="col">Opened</th>
+                <th scope="col">Last event</th>
+              </tr>
+            </thead>
+            <tbody data-email-recipients-rows></tbody>
+          </table>
+        </div>
+        <p class="form-help" data-email-recipients-empty hidden>
+          No per-recipient delivery information is available for this email yet.
+        </p>
+        <p class="form-help form-help--muted">
+          Note: opens recorded via the tracking pixel apply to all recipients of the same send and cannot be attributed to an individual address.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>

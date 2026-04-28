@@ -1025,9 +1025,11 @@
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
                             {% if reply.has_email_tracking %}
+                              {% set _reply_recipient_count = reply.recipient_count|default(0) %}
+                              {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
                               {% if reply.is_email_bounced %}
                                 {% set bounce_time = reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' %}
-                                <span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>
+                                {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>{% endset %}
                               {% elif reply.is_email_opened %}
                                 {% set open_count_text = reply.email_open_count ~ (' time' if reply.email_open_count == 1 else ' times') %}
                                 {% set first_open = reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_opened_at else '' %}
@@ -1035,14 +1037,28 @@
                                 {% if first_open %}
                                   {% set tooltip = tooltip ~ ' · First opened: ' ~ first_open %}
                                 {% endif %}
-                                <span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>
+                                {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>{% endset %}
                               {% elif reply.is_email_delivered %}
                                 {% set delivery_time = reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' %}
-                                <span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>
+                                {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>{% endset %}
                               {% else %}
                                 {% set sent_time = reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_sent_at else '' %}
                                 {% set tooltip = 'Email sent' ~ (' on ' ~ sent_time if sent_time else '') ~ ', not yet delivered' %}
-                                <span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>
+                                {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>{% endset %}
+                              {% endif %}
+                              {% if _is_multi_recipient %}
+                                <button
+                                  type="button"
+                                  class="badge-trigger"
+                                  data-email-recipients-trigger
+                                  data-reply-id="{{ reply.id }}"
+                                  data-recipient-count="{{ _reply_recipient_count }}"
+                                  aria-haspopup="dialog"
+                                  aria-controls="email-recipients-modal"
+                                  title="Show per-recipient delivery status ({{ _reply_recipient_count }} recipients)"
+                                >{{ _badge_html|safe }}</button>
+                              {% else %}
+                                {{ _badge_html|safe }}
                               {% endif %}
                             {% endif %}
                           </span>
@@ -1301,6 +1317,8 @@
       </form>
     </div>
   </div>
+
+  {% include "tickets/_email_recipients_modal.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -1309,6 +1327,7 @@
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/email_recipients.js') }}" defer></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const descriptionField = document.getElementById('ticket-description-editor');

@@ -13,12 +13,18 @@ async def test_webhook_processed_event_sets_email_sent_at(monkeypatch):
     db_calls = []
     
     async def mock_fetch_one(query, params):
-        """Return a mock ticket reply that was previously stored with smtp2go_message_id."""
-        return {
-            'id': 123,
-            'email_tracking_id': 'test-tracking-id',
-        }
-    
+        """Distinguish between the ticket_replies lookup and the per-recipient
+        lookup. The ticket_replies lookup must return the reply id; the new
+        per-recipient lookup must return None so the webhook processor can
+        lazy-create the recipient row.
+        """
+        if "FROM ticket_replies" in query:
+            return {
+                'id': 123,
+                'email_tracking_id': 'test-tracking-id',
+            }
+        return None
+
     async def mock_execute(query, params):
         db_calls.append({'query': query, 'params': params})
         return 456  # event_id
@@ -40,15 +46,18 @@ async def test_webhook_processed_event_sets_email_sent_at(monkeypatch):
     
     assert result is not None
     assert result['event_type'] == 'processed'
-    
-    # Should have 2 execute calls: insert tracking event + update ticket_replies
-    assert len(db_calls) == 2
-    
-    # The update query should set BOTH email_processed_at AND email_sent_at
-    update_call = db_calls[1]
-    assert "email_processed_at" in update_call['query']
-    assert "email_sent_at" in update_call['query']
-    assert "UPDATE ticket_replies" in update_call['query']
+
+    # The webhook handler now also writes per-recipient rows; we still
+    # require the historic two writes (insert event + update aggregate)
+    # to be present so the single-status badge keeps working.
+    queries = [c['query'] for c in db_calls]
+    assert any("INSERT INTO email_tracking_events" in q for q in queries), queries
+    assert any(
+        "UPDATE ticket_replies" in q
+        and "email_processed_at" in q
+        and "email_sent_at" in q
+        for q in queries
+    ), queries
 
 
 @pytest.mark.asyncio
