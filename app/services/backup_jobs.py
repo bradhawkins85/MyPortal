@@ -546,7 +546,7 @@ async def build_history_grid(
     The result has the shape::
 
         {
-            "dates": [date, date, ...],     # oldest -> newest
+            "dates": [date, date, ...],     # newest -> oldest
             "rows": [
                 {
                     "job": {...},
@@ -582,7 +582,7 @@ async def build_history_grid(
             continue
         by_job.setdefault(int(event["backup_job_id"]), {})[ev_date] = event
 
-    dates = _date_range(start_date, end_date)
+    dates = list(reversed(_date_range(start_date, end_date)))
     rows: list[dict[str, Any]] = []
     for job in jobs:
         job_events = by_job.get(int(job["id"]), {})
