@@ -100,6 +100,38 @@ def test_normalize_settings_accepts_grandstream_and_3cx():
         assert normalised["phone_system_type"] == value
 
 
+def test_grandstream_pick_phone_prefers_external_over_extension():
+    """Outgoing calls have the extension in ``caller_num`` and the dialled
+    external number in ``callee_num``; the external number must be picked."""
+    # Outgoing call: caller is an internal extension, callee is external.
+    outgoing = {"caller_num": "1000", "callee_num": "61400000002"}
+    assert service._grandstream_pick_phone(outgoing) == "61400000002"
+
+    # Incoming call: caller is external, callee is an internal extension.
+    incoming = {"caller_num": "61400000001", "callee_num": "1001"}
+    assert service._grandstream_pick_phone(incoming) == "61400000001"
+
+    # ``new_caller_num`` always wins when present.
+    with_new = {
+        "caller_num": "1000",
+        "callee_num": "61400000002",
+        "new_caller_num": "+61400000099",
+    }
+    assert service._grandstream_pick_phone(with_new) == "+61400000099"
+
+    # Both numbers external: keep the original caller_num preference.
+    both_external = {"caller_num": "1234567890", "callee_num": "0987654321"}
+    assert service._grandstream_pick_phone(both_external) == "1234567890"
+
+    # Both extensions (internal call): fall back to caller_num.
+    both_ext = {"caller_num": "1000", "callee_num": "1001"}
+    assert service._grandstream_pick_phone(both_ext) == "1000"
+
+    # Falls back to ``other_num`` when caller/callee are missing.
+    other_only = {"other_num": "61400000003"}
+    assert service._grandstream_pick_phone(other_only) == "61400000003"
+
+
 @pytest.mark.asyncio
 async def test_grandstream_sync_creates_records_from_csv(tmp_path):
     """Grandstream UCM sync should create recordings from the CSV index."""
@@ -155,8 +187,9 @@ async def test_grandstream_sync_creates_records_from_csv(tmp_path):
     assert first_kwargs["file_name"].endswith(".wav")
 
     second_kwargs = mock_create.await_args_list[1].kwargs
-    # Falls back to caller_num when new_caller_num is not provided.
-    assert second_kwargs["phone_number"] == "1002"
+    # Outgoing call: caller_num is the originating extension (1002), so we
+    # should record the dialled external callee number instead.
+    assert second_kwargs["phone_number"] == "61400000002"
     # Duration like ``HH:MM:SS`` should be coerced to total seconds.
     assert second_kwargs["duration_seconds"] == 150
 
