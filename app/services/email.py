@@ -124,6 +124,29 @@ async def send_email(
                     has_smtp2go_message_id=smtp2go_message_id is not None,
                     has_tracking_id=response_tracking_id is not None,
                 )
+
+            # Record per-recipient rows so the delivery-status badge popup
+            # can break delivery down per recipient. email_sent_at is left
+            # NULL here for the SMTP2Go path; it will be stamped when the
+            # 'processed' webhook event arrives, mirroring the aggregate
+            # ticket_replies.email_sent_at behaviour.
+            if ticket_reply_id:
+                try:
+                    from app.services import email_recipients
+
+                    await email_recipients.record_recipients(
+                        reply_id=ticket_reply_id,
+                        tracking_id=response_tracking_id,
+                        smtp2go_message_id=smtp2go_message_id,
+                        to=to_addresses,
+                        sent_at=None,
+                    )
+                except Exception as recipients_exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "Failed to record per-recipient rows for SMTP2Go send",
+                        reply_id=ticket_reply_id,
+                        error=str(recipients_exc),
+                    )
             
             logger.info(
                 "Email dispatched via SMTP2Go API",
@@ -337,6 +360,26 @@ async def send_email(
                 reply_id=ticket_reply_id,
                 tracking_id=tracking_id,
                 error=str(tracking_exc),
+            )
+
+    # Record per-recipient rows for the SMTP relay path. Stamp email_sent_at
+    # immediately because the SMTP relay path has no asynchronous webhook
+    # confirmation — once smtp.send_message returns, the message is gone.
+    if ticket_reply_id:
+        try:
+            from app.services import email_recipients
+
+            await email_recipients.record_recipients(
+                reply_id=ticket_reply_id,
+                tracking_id=tracking_id,
+                smtp2go_message_id=None,
+                to=to_addresses,
+            )
+        except Exception as recipients_exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to record per-recipient rows for SMTP send",
+                reply_id=ticket_reply_id,
+                error=str(recipients_exc),
             )
     
     logger.info(

@@ -3975,6 +3975,34 @@ button.header-title-menu__link {
   font-size: 0.7rem;
 }
 
+.badge-trigger {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  line-height: inherit;
+}
+
+.badge-trigger:hover .badge,
+.badge-trigger:focus-visible .badge {
+  filter: brightness(1.1);
+  text-decoration: underline;
+}
+
+.badge-trigger:focus {
+  outline: none;
+}
+
+.badge-trigger:focus-visible {
+  outline: 2px solid var(--color-accent, currentColor);
+  outline-offset: 2px;
+  border-radius: 0.4rem;
+}
+
 .alert {
   border-radius: 0.85rem;
   padding: var(--space-gap-base) var(--space-gap-roomy);

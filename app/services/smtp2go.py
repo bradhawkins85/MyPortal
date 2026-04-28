@@ -650,14 +650,30 @@ async def process_webhook_event(
 
     # Extract relevant fields from webhook
     smtp2go_message_id = _extract_tracking_identifier(event_data)
-    recipient = event_data.get("recipient")
-    timestamp_str = event_data.get("timestamp")
+    # SMTP2Go uses different keys depending on event type:
+    #   * delivered/open/click/bounce → "rcpt" (single address)
+    #   * processed                   → "recipients" (list)
+    # Older payloads (and our existing tests) use "recipient".
+    recipient = (
+        event_data.get("rcpt")
+        or event_data.get("recipient")
+    )
+    if not recipient:
+        recipients_list = event_data.get("recipients")
+        if isinstance(recipients_list, list) and recipients_list:
+            recipient = recipients_list[0]
+    timestamp_str = event_data.get("timestamp") or event_data.get("time") or event_data.get("sendtime")
+
+    # SMTP2Go uses hyphenated header-style keys for client metadata on
+    # opens; fall back to the underscore form for backwards compatibility.
+    user_agent = event_data.get("user-agent") or event_data.get("user_agent")
+    ip_address = event_data.get("ip") or event_data.get("srchost")
     
     # Parse timestamp
     occurred_at = datetime.now(timezone.utc)
     if timestamp_str:
         try:
-            occurred_at = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            occurred_at = datetime.fromisoformat(str(timestamp_str).replace('Z', '+00:00'))
         except (ValueError, AttributeError):
             logger.warning(
                 "Failed to parse webhook timestamp",
@@ -735,8 +751,8 @@ async def process_webhook_event(
             'tracking_id': tracking_id,
             'event_type': internal_event_type,
             'event_url': event_url,
-            'user_agent': event_data.get('user_agent'),
-            'ip_address': event_data.get('ip'),
+            'user_agent': user_agent,
+            'ip_address': ip_address,
             'occurred_at': occurred_at,
             'smtp2go_data': json.dumps(event_data) if event_data else None,  # Store full webhook data for debugging
         }
@@ -783,6 +799,56 @@ async def process_webhook_event(
                     WHERE id = :reply_id
                 """
                 await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+
+        # Update the per-recipient row so the delivery popup can break the
+        # status down by recipient. For 'processed' events SMTP2Go provides a
+        # list of recipients (one webhook covers all of them); for the other
+        # events the single 'rcpt' applies. We deliberately keep the
+        # aggregate ticket_replies updates above so the existing single-status
+        # badge keeps working unchanged.
+        try:
+            from app.services import email_recipients as _email_recipients
+
+            # Capture detail to display in the popup. For opens this is the
+            # client user-agent (per the new requirement); for bounces /
+            # spam / rejected this is SMTP2Go's diagnostic message.
+            detail: str | None = None
+            if internal_event_type == 'open':
+                detail = user_agent or None
+            elif internal_event_type in ('bounce', 'rejected', 'spam'):
+                detail = (
+                    event_data.get('reason')
+                    or event_data.get('message')
+                    or event_data.get('description')
+                    or None
+                )
+                if detail is not None:
+                    detail = str(detail)
+
+            recipient_addresses: list[str] = []
+            if internal_event_type == 'processed' and isinstance(event_data.get('recipients'), list):
+                recipient_addresses = [str(r) for r in event_data['recipients'] if r]
+            elif recipient:
+                recipient_addresses = [str(recipient)]
+
+            for address in recipient_addresses:
+                await _email_recipients.update_recipient_event(
+                    event_type=internal_event_type,
+                    occurred_at=occurred_at,
+                    recipient_email=address,
+                    smtp2go_message_id=smtp2go_message_id,
+                    tracking_id=tracking_id,
+                    ticket_reply_id=reply_id,
+                    detail=detail,
+                )
+        except Exception as recipients_exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to update per-recipient row from SMTP2Go webhook",
+                event_type=internal_event_type,
+                smtp2go_message_id=smtp2go_message_id,
+                recipient=recipient,
+                error=str(recipients_exc),
+            )
 
         logger.info(
             "Processed SMTP2Go webhook event",
