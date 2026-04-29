@@ -3884,6 +3884,14 @@ async def on_startup() -> None:
         else:
             log_info("Demo data seeded on startup", **{k: v for k, v in result.items() if k != "skipped"})
 
+    async def _fetch_tray_msi() -> None:
+        from app.services import tray_installer as tray_installer_service
+
+        await tray_installer_service.fetch_latest_tray_msi(
+            repo=settings.github_tray_msi_repo,
+            github_token=settings.github_token,
+        )
+
     startup_tasks = [
         ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
         ("ensure_default_modules", modules_service.ensure_default_modules()),
@@ -3891,6 +3899,7 @@ async def on_startup() -> None:
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
         ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
         ("seed_demo_data_once", _seed_demo_data_once()),
+        ("fetch_latest_tray_msi", _fetch_tray_msi()),
     ]
 
     results = await asyncio.gather(
