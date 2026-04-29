@@ -394,3 +394,105 @@ async def mark_command_delivered(command_id: int, *, error: str | None = None) -
         f"delivered_at = {placeholder} WHERE id = {placeholder}",
         (new_status, error, now, command_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+async def save_diagnostic(
+    *,
+    device_id: int,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    stored_path: str,
+) -> int:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    last_id = await db.execute_returning_lastrowid(
+        f"INSERT INTO tray_diagnostics "
+        f"(device_id, filename, content_type, size_bytes, stored_path, uploaded_at) "
+        f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
+        (device_id, filename, content_type, size_bytes, stored_path, now),
+    )
+    return int(last_id) if last_id else 0
+
+
+async def list_diagnostics(
+    device_id: int | None = None,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    p = "?" if db.is_sqlite() else "%s"
+    if device_id is not None:
+        rows = await db.fetch_all(
+            f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "
+            f"JOIN tray_devices dev ON dev.id = d.device_id "
+            f"WHERE d.device_id = {p} ORDER BY d.uploaded_at DESC LIMIT {p}",
+            (device_id, limit),
+        )
+    else:
+        rows = await db.fetch_all(
+            f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "
+            f"JOIN tray_devices dev ON dev.id = d.device_id "
+            f"ORDER BY d.uploaded_at DESC LIMIT {p}",
+            (limit,),
+        )
+    return [dict(r) for r in rows] if rows else []
+
+
+async def get_diagnostic(diagnostic_id: int) -> dict[str, Any] | None:
+    p = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "
+        f"JOIN tray_devices dev ON dev.id = d.device_id "
+        f"WHERE d.id = {p}",
+        (diagnostic_id,),
+    )
+    return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Versions (Phase 5 auto-update)
+# ---------------------------------------------------------------------------
+
+
+async def get_latest_tray_version(platform: str = "all") -> dict[str, Any] | None:
+    p = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_versions WHERE enabled = 1 AND (platform = {p} OR platform = 'all') "
+        f"ORDER BY published_at DESC LIMIT 1",
+        (platform,),
+    )
+    return dict(row) if row else None
+
+
+async def publish_tray_version(
+    *,
+    version: str,
+    platform: str,
+    download_url: str,
+    required: bool,
+    release_notes: str | None,
+    published_by_user_id: int | None,
+) -> int:
+    p = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    last_id = await db.execute_returning_lastrowid(
+        f"INSERT INTO tray_versions "
+        f"(version, platform, download_url, required, release_notes, published_by_user_id, published_at) "
+        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})",
+        (version, platform, download_url, int(required), release_notes, published_by_user_id, now),
+    )
+    return int(last_id) if last_id else 0
+
+
+async def list_tray_versions(limit: int = 20) -> list[dict[str, Any]]:
+    p = "?" if db.is_sqlite() else "%s"
+    rows = await db.fetch_all(
+        f"SELECT * FROM tray_versions ORDER BY published_at DESC LIMIT {p}",
+        (limit,),
+    )
+    return [dict(r) for r in rows] if rows else []

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray diagnostics</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
+    {"label": "Versions", "type": "link", "variant": "ghost", "href": "/admin/tray/versions"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header">
+      <p class="card__lede">Log bundles uploaded by enrolled tray devices via the "Send diagnostics" tray menu item.</p>
+    </header>
+    <div class="card__body card__body--table">
+      {% if bundles %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Device</th><th>Filename</th><th>Size</th>
+              <th>Uploaded</th><th class="data-table__col--actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in bundles %}
+              <tr>
+                <td>
+                  <a href="/admin/tray/devices?search={{ b.device_uid }}">{{ b.hostname or b.device_uid }}</a>
+                </td>
+                <td><code>{{ b.filename }}</code></td>
+                <td>{{ (b.size_bytes // 1024) }}KB</td>
+                <td><span data-utc="{{ b.uploaded_at }}">{{ b.uploaded_at }}</span></td>
+                <td class="data-table__col--actions">
+                  <a href="/admin/tray/diagnostics/{{ b.id }}/download" class="button button--small">Download</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2 class="empty-state__title">No diagnostic bundles</h2>
+          <p>Use the tray menu "Send diagnostics" item on a device to upload logs.</p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

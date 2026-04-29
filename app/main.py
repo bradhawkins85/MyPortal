@@ -15349,7 +15349,95 @@ async def admin_tray_delete_configuration(config_id: int, request: Request):
     return RedirectResponse(url="/admin/tray/configurations", status_code=303)
 
 
-@app.get("/admin/audit-logs", response_class=HTMLResponse)
+# ---------------------------------------------------------------------------
+# Phase 5 – Admin: diagnostics page
+# ---------------------------------------------------------------------------
+
+
+@app.get("/admin/tray/diagnostics", response_class=HTMLResponse)
+async def admin_tray_diagnostics_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    bundles = await tray_repo.list_diagnostics()
+    return await _render_template(
+        "admin/tray/diagnostics.html",
+        request,
+        current_user,
+        extra={"bundles": bundles},
+    )
+
+
+@app.get("/admin/tray/diagnostics/{diag_id}/download")
+async def admin_tray_diagnostics_download(diag_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+    from fastapi.responses import FileResponse
+
+    row = await tray_repo.get_diagnostic(diag_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Diagnostic not found.")
+    path = row.get("stored_path", "")
+    import os
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Diagnostic file not found on disk.")
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=row.get("filename", f"diag-{diag_id}.zip"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 – Admin: versions page
+# ---------------------------------------------------------------------------
+
+
+@app.get("/admin/tray/versions", response_class=HTMLResponse)
+async def admin_tray_versions_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    versions = await tray_repo.list_tray_versions()
+    return await _render_template(
+        "admin/tray/versions.html",
+        request,
+        current_user,
+        extra={"versions": versions},
+    )
+
+
+@app.post("/admin/tray/versions", response_class=HTMLResponse)
+async def admin_tray_versions_publish(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    form = await request.form()
+    version = str(form.get("version", "")).strip()
+    platform = str(form.get("platform", "all")).strip().lower()
+    download_url = str(form.get("download_url", "")).strip()
+    required = bool(form.get("required"))
+    if version and download_url:
+        await tray_repo.publish_tray_version(
+            version=version,
+            platform=platform,
+            download_url=download_url,
+            required=required,
+            release_notes=None,
+            published_by_user_id=int(current_user["id"]),
+        )
+    return RedirectResponse(url="/admin/tray/versions", status_code=303)
+
+
+
 async def admin_audit_logs(
     request: Request,
     entity_type: str | None = None,
