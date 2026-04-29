@@ -3505,6 +3505,15 @@ async def _render_company_edit_page(
             "offboarding_email_forwarding_enabled",
             bool(int(company_record.get("offboarding_email_forwarding_enabled", 1) or 1)),
         ),
+        "trello_board_id": _string_value(
+            "trello_board_id", (company_record.get("trello_board_id") or "").strip()
+        ),
+        "trello_api_key": _string_value(
+            "trello_api_key", (company_record.get("trello_api_key") or "").strip()
+        ),
+        "trello_token": _string_value(
+            "trello_token", (company_record.get("trello_token") or "").strip()
+        ),
     }
 
     form_email_text = form_data.get("email_domains", "")
