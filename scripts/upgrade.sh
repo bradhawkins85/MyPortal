@@ -497,6 +497,11 @@ build_tray_app() {
     return
   fi
 
+  if [[ -z "$GO_BIN" ]]; then
+    echo "Warning: GO_BIN is unset after toolchain detection; skipping tray app build." >&2
+    return
+  fi
+
   echo "Building tray app…"
   local go_dir
   go_dir=$(dirname "$GO_BIN")
