@@ -105,6 +105,24 @@
         },
       }),
     },
+    {
+      label: 'Module equals Trello',
+      value: toJsonTemplate({
+        match: {
+          'ticket.module_slug': 'trello',
+        },
+      }),
+    },
+    {
+      label: 'External ID is not empty',
+      value: toJsonTemplate({
+        not: {
+          match: {
+            'ticket.external_reference': null,
+          },
+        },
+      }),
+    },
   ];
 
   const ACTION_SNIPPETS = {
@@ -484,6 +502,15 @@
           ticket_id: '{{ ticket.id }}',
           add_note: false,
           language: 'en',
+        }),
+      },
+    ],
+    trello: [
+      {
+        label: 'Add comment to linked Trello card',
+        value: toJsonTemplate({
+          card_id: '{{ticket.external_reference}}',
+          text: 'Ticket #{{ticket.number}} updated: {{ticket.subject}}',
         }),
       },
     ],
