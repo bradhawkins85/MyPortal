@@ -170,6 +170,45 @@ async def get_card(
         return None
 
 
+async def list_webhooks(
+    api_key: str,
+    token: str,
+) -> list[dict[str, Any]]:
+    """Return all webhooks registered for *token*.
+
+    Returns an empty list on failure.
+    """
+    url = f"{TRELLO_API_BASE}/tokens/{token}/webhooks"
+    try:
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+            response = await client.get(url, params={"key": api_key})
+            response.raise_for_status()
+            return response.json() or []
+    except Exception as exc:
+        logger.warning("Trello list_webhooks error: {}", exc)
+        return []
+
+
+async def delete_webhook(
+    webhook_id: str,
+    api_key: str,
+    token: str,
+) -> bool:
+    """Delete a Trello webhook by ID.
+
+    Returns ``True`` on success, ``False`` otherwise.
+    """
+    url = f"{TRELLO_API_BASE}/webhooks/{webhook_id}"
+    try:
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+            response = await client.delete(url, params={"key": api_key, "token": token})
+            response.raise_for_status()
+            return True
+    except Exception as exc:
+        logger.warning("Trello delete_webhook {} error: {}", webhook_id, exc)
+        return False
+
+
 async def register_webhook(
     board_id: str,
     callback_url: str,
@@ -180,7 +219,15 @@ async def register_webhook(
 
     *company* must be the full company record with per-company Trello credentials.
 
-    Returns the created webhook object on success, or ``None`` on failure.
+    If Trello reports that a webhook with the same callback/model/token already
+    exists (HTTP 400), the function looks up the existing webhook for this board:
+
+    * If it already points to *callback_url* it is returned as-is (idempotent).
+    * If it points to a *different* URL (e.g. the old ``http://`` address before
+      an HTTP→HTTPS migration) the stale webhook is deleted and a fresh one is
+      created with the new *callback_url*.
+
+    Returns the webhook object on success, or ``None`` on failure.
     """
     if not await _get_module_enabled():
         logger.debug("Trello register_webhook skipped: module not enabled")
@@ -209,6 +256,67 @@ async def register_webhook(
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 400 and "already exists" in exc.response.text:
+            # A webhook for this board/token combination already exists.
+            # Resolve it: find the existing webhook and either return it (if the
+            # callback URL matches) or replace it (if it differs, e.g. after an
+            # HTTP→HTTPS migration).
+            logger.info(
+                "Trello register_webhook: 400 'already exists' for board {}; "
+                "looking up existing webhooks to reconcile",
+                board_id,
+            )
+            existing = await list_webhooks(api_key, token)
+            for hook in existing:
+                if str(hook.get("idModel") or "") == board_id:
+                    existing_callback = str(hook.get("callbackURL") or "")
+                    if existing_callback == callback_url:
+                        # Already correct – treat as success.
+                        logger.info(
+                            "Trello register_webhook: webhook {} already has "
+                            "correct callback URL; returning existing",
+                            hook.get("id"),
+                        )
+                        return hook
+                    # Stale URL (e.g. old http:// address) – delete and re-register.
+                    logger.info(
+                        "Trello register_webhook: replacing stale webhook {} "
+                        "(old callback: {}) with {}",
+                        hook.get("id"),
+                        existing_callback,
+                        callback_url,
+                    )
+                    await delete_webhook(str(hook["id"]), api_key, token)
+                    try:
+                        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+                            retry = await client.post(
+                                url,
+                                params={"key": api_key, "token": token},
+                                json={
+                                    "callbackURL": callback_url,
+                                    "idModel": board_id,
+                                    "description": "MyPortal Trello Integration",
+                                },
+                            )
+                            retry.raise_for_status()
+                            return retry.json()
+                    except httpx.HTTPStatusError as retry_exc:
+                        logger.error(
+                            "Trello register_webhook retry failed: HTTP {} {}",
+                            retry_exc.response.status_code,
+                            retry_exc.response.text[:200],
+                        )
+                        return None
+                    except Exception as retry_exc:
+                        logger.error("Trello register_webhook retry error: {}", retry_exc)
+                        return None
+            # Could not find the conflicting webhook – fall through to generic error.
+            logger.error(
+                "Trello register_webhook failed: HTTP {} {}",
+                exc.response.status_code,
+                exc.response.text[:200],
+            )
+            return None
         logger.error(
             "Trello register_webhook failed: HTTP {} {}",
             exc.response.status_code,
