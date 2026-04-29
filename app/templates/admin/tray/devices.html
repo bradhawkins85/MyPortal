@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray devices</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Install tokens", "type": "link", "variant": "ghost", "href": "/admin/tray/install-tokens"},
+    {"label": "Menu configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <p class="card__lede">Endpoints that have enrolled with the MyPortal tray service. Use the menu configurations and install tokens pages to provision new fleets.</p>
+      <form method="get" class="filter-grid" id="tray-device-filter">
+        <div class="form-field">
+          <label class="form-label" for="filter-search">Search</label>
+          <input class="form-input" id="filter-search" name="search" value="{{ filters.search or '' }}" placeholder="Hostname, console user, or device UID" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="filter-status">Status</label>
+          <select class="form-input" id="filter-status" name="status">
+            <option value="">Any</option>
+            <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>Pending</option>
+            <option value="revoked" {% if filters.status == 'revoked' %}selected{% endif %}>Revoked</option>
+          </select>
+        </div>
+        <div class="form-field form-field--actions">
+          <button type="submit" class="button button--primary">Apply filters</button>
+          <a href="/admin/tray/devices" class="button button--ghost">Reset</a>
+        </div>
+      </form>
+    </header>
+    <div class="card__body card__body--table">
+      {% if devices %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th scope="col">Hostname</th>
+              <th scope="col">Status</th>
+              <th scope="col">OS</th>
+              <th scope="col">Console user</th>
+              <th scope="col">Asset link</th>
+              <th scope="col">Last seen</th>
+              <th scope="col">Agent</th>
+              <th scope="col" class="data-table__col--actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for device in devices %}
+              <tr>
+                <td>
+                  <strong>{{ device.hostname or device.device_uid }}</strong>
+                  <div class="data-table__sub">{{ device.device_uid }}</div>
+                </td>
+                <td>
+                  {% if device.status == 'active' %}
+                    <span class="status status--success">Active</span>
+                  {% elif device.status == 'pending' %}
+                    <span class="status status--warning">Pending</span>
+                  {% else %}
+                    <span class="status status--danger">Revoked</span>
+                  {% endif %}
+                </td>
+                <td>{{ device.os or '—' }} {{ device.os_version or '' }}</td>
+                <td>{{ device.console_user or '—' }}</td>
+                <td>
+                  {% if device.asset_id %}
+                    <a href="/assets/{{ device.asset_id }}">Asset #{{ device.asset_id }}</a>
+                  {% else %}
+                    <span class="status status--neutral">Unlinked</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if device.last_seen_utc %}
+                    <span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ device.agent_version or '—' }}</td>
+                <td class="data-table__col--actions">
+                  {% if device.status == 'active' and matrix_enabled %}
+                    <button type="button" class="button button--small button--primary" data-tray-chat data-device-uid="{{ device.device_uid }}">Open chat</button>
+                  {% endif %}
+                  {% if device.status != 'revoked' %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2 class="empty-state__title">No tray devices yet</h2>
+          <p>Generate an install token, then run the deployment script on a target machine via your RMM. New devices appear here as soon as they enrol.</p>
+          <p><a class="button button--primary" href="/admin/tray/install-tokens">Manage install tokens</a></p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<script type="module">
+  // Helper to launch a tray-initiated chat from this admin list.
+  const csrf = "{{ csrf_token }}";
+  document.querySelectorAll('[data-tray-chat]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const uid = btn.dataset.deviceUid;
+      btn.disabled = true;
+      try {
+        const resp = await fetch(`/api/tray/${encodeURIComponent(uid)}/chat/start`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'Accept': 'application/json'},
+          body: JSON.stringify({subject: 'Helpdesk chat'})
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        if (data.room_id) {
+          window.location.href = `/chat?room=${data.room_id}`;
+        }
+      } catch (err) {
+        alert('Failed to open chat: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+</script>
+{% endblock %}

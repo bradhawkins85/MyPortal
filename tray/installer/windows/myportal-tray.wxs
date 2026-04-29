@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MyPortal Tray App — Windows MSI package definition (WiX v4)
+
+  Build with:
+    wix build myportal-tray.wxs -o myportal-tray.msi
+
+  Properties available at install time (set by the RMM or msiexec command line):
+    MYPORTAL_URL   — full URL of the MyPortal server, e.g. https://portal.example.com
+    ENROL_TOKEN    — one-time install token generated from the MyPortal admin UI
+
+  These are written to the registry key
+    HKLM\Software\MyPortal\Tray
+  so the service can read them on first start and exchange them for a
+  long-lived per-device auth token.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="MyPortal Tray"
+    Manufacturer="MyPortal"
+    Version="!(bind.FileVersion.ServiceExe)"
+    UpgradeCode="A3E7F4C2-8B1D-4F5E-9A2C-1D6E3B7F8A4C"
+    Scope="perMachine">
+
+    <SummaryInformation
+      Description="MyPortal Helpdesk Tray Application"
+      Keywords="MyPortal;Helpdesk;Tray" />
+
+    <!-- Prevent downgrade -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+
+    <!-- Allow MSI properties on the command line -->
+    <Property Id="MYPORTAL_URL" Secure="yes" />
+    <Property Id="ENROL_TOKEN" Secure="yes" />
+    <Property Id="AUTO_UPDATE" Value="true" Secure="yes" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Install directory -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLDIR" Name="MyPortal Tray" />
+    </StandardDirectory>
+
+    <!-- Registry key written at install time -->
+    <ComponentGroup Id="RegistrySettings" Directory="INSTALLDIR">
+      <Component Id="RegSettings" Guid="B1C2D3E4-F5A6-7890-BCDE-F01234567890">
+        <RegistryKey Root="HKLM" Key="Software\MyPortal\Tray" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Name="PortalURL"   Value="[MYPORTAL_URL]" />
+          <RegistryValue Type="string" Name="EnrolToken"  Value="[ENROL_TOKEN]" />
+          <RegistryValue Type="string" Name="AutoUpdate"  Value="[AUTO_UPDATE]" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+
+    <!-- Binaries -->
+    <ComponentGroup Id="Binaries" Directory="INSTALLDIR">
+      <Component Id="ServiceExeComponent" Guid="C2D3E4F5-A6B7-8901-CDEF-012345678901">
+        <File Id="ServiceExe"
+              Name="myportal-tray-service.exe"
+              Source="$(var.BinDir)\myportal-tray-service.exe"
+              KeyPath="yes" />
+        <!-- Install and start the Windows Service -->
+        <ServiceInstall
+          Id="TrayServiceInstall"
+          Name="MyPortalTrayService"
+          DisplayName="MyPortal Tray Service"
+          Description="Maintains the MyPortal helpdesk tray connection."
+          Type="ownProcess"
+          Start="auto"
+          Account="LocalSystem"
+          ErrorControl="normal" />
+        <ServiceControl
+          Id="TrayServiceStart"
+          Name="MyPortalTrayService"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+      <Component Id="UIExeComponent" Guid="D3E4F5A6-B7C8-9012-DEF0-123456789012">
+        <File Id="UIExe"
+              Name="myportal-tray-ui.exe"
+              Source="$(var.BinDir)\myportal-tray-ui.exe"
+              KeyPath="yes" />
+        <!-- Auto-start the UI agent for any user who logs in -->
+        <RegistryValue
+          Root="HKLM"
+          Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+          Name="MyPortalTrayUI"
+          Type="string"
+          Value="[INSTALLDIR]myportal-tray-ui.exe" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="ProductFeature" Title="MyPortal Tray" Level="1">
+      <ComponentGroupRef Id="RegistrySettings" />
+      <ComponentGroupRef Id="Binaries" />
+    </Feature>
+  </Package>
+</Wix>

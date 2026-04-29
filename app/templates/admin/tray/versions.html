@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray installer versions</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
+    {"label": "Diagnostics", "type": "link", "variant": "ghost", "href": "/admin/tray/diagnostics"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header">
+      <p class="card__lede">Manage installer versions served by the auto-update endpoint (<code>GET /api/tray/version</code>). The most recently published enabled entry wins per platform.</p>
+    </header>
+    <div class="card__body">
+      <form method="post" action="/admin/tray/versions" class="form-stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label" for="ver-version">Version</label>
+            <input class="form-input" id="ver-version" name="version" required maxlength="32" placeholder="0.1.0" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="ver-platform">Platform</label>
+            <select class="form-input" id="ver-platform" name="platform">
+              <option value="all">All</option>
+              <option value="windows">Windows</option>
+              <option value="darwin">macOS</option>
+            </select>
+          </div>
+          <div class="form-field" style="flex:2">
+            <label class="form-label" for="ver-url">Download URL</label>
+            <input class="form-input" id="ver-url" name="download_url" type="url" required maxlength="500" placeholder="https://…/myportal-tray.msi" />
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label>
+              <input type="checkbox" name="required" value="1" />
+              Force update
+            </label>
+          </div>
+          <div class="form-field form-field--actions">
+            <button type="submit" class="button button--primary">Publish</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header"><h2>Published versions</h2></header>
+    <div class="card__body card__body--table">
+      {% if versions %}
+        <table class="data-table">
+          <thead>
+            <tr><th>Version</th><th>Platform</th><th>Download URL</th><th>Required</th><th>Published</th></tr>
+          </thead>
+          <tbody>
+            {% for v in versions %}
+              <tr>
+                <td><strong>{{ v.version }}</strong></td>
+                <td>{{ v.platform }}</td>
+                <td><a href="{{ v.download_url }}" target="_blank" rel="noopener">{{ v.download_url | truncate(60) }}</a></td>
+                <td>{% if v.required %}<span class="status status--warning">Yes</span>{% else %}—{% endif %}</td>
+                <td><span data-utc="{{ v.published_at }}">{{ v.published_at }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state"><p>No versions published yet.</p></div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

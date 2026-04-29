@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray menu configurations</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New configuration", "type": "link", "variant": "primary", "href": "/admin/tray/configurations/new"},
+    {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
+    {"label": "Install tokens", "type": "link", "variant": "ghost", "href": "/admin/tray/install-tokens"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header">
+      <p class="card__lede">
+        Menu configurations control what the tray icon shows on each enrolled device. Resolution precedence is
+        <strong>device &gt; tag &gt; company &gt; global</strong>; the most specific enabled config wins.
+      </p>
+    </header>
+    <div class="card__body card__body--table">
+      {% if configurations %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th><th>Scope</th><th>Scope target</th>
+              <th>Status</th><th>Version</th><th>Updated</th>
+              <th class="data-table__col--actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cfg in configurations %}
+              <tr>
+                <td><strong>{{ cfg.name }}</strong></td>
+                <td><span class="status status--info">{{ cfg.scope|capitalize }}</span></td>
+                <td>{{ cfg.scope_target_label or '—' }}</td>
+                <td>
+                  {% if cfg.enabled %}
+                    <span class="status status--success">Enabled</span>
+                  {% else %}
+                    <span class="status status--neutral">Disabled</span>
+                  {% endif %}
+                </td>
+                <td>{{ cfg.version }}</td>
+                <td><span data-utc="{{ cfg.updated_at }}">{{ cfg.updated_at }}</span></td>
+                <td class="data-table__col--actions">
+                  <a href="/admin/tray/configurations/{{ cfg.id }}/edit" class="button button--small">Edit</a>
+                  <form method="post" action="/admin/tray/configurations/{{ cfg.id }}/delete" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <button type="submit" class="button button--small button--danger" data-confirm="Delete this configuration?">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty-state">
+          <h2 class="empty-state__title">No configurations yet</h2>
+          <p>Tray devices will fall back to a default menu. Create a configuration to define your own menu, branding, display text, and environment-variable allowlist.</p>
+          <p><a class="button button--primary" href="/admin/tray/configurations/new">Create configuration</a></p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
