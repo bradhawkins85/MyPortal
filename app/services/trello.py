@@ -286,7 +286,13 @@ async def register_webhook(
                         existing_callback,
                         callback_url,
                     )
-                    await delete_webhook(str(hook["id"]), api_key, token)
+                    deleted = await delete_webhook(str(hook["id"]), api_key, token)
+                    if not deleted:
+                        logger.warning(
+                            "Trello register_webhook: failed to delete stale webhook {}; "
+                            "attempting re-registration anyway",
+                            hook.get("id"),
+                        )
                     try:
                         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
                             retry = await client.post(
