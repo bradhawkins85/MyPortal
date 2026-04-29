@@ -15069,6 +15069,286 @@ async def admin_webhooks(request: Request):
     }
     return await _render_template("admin/webhooks.html", request, current_user, extra=extra)
 
+
+# ---------------------------------------------------------------------------
+# Tray app admin pages
+# ---------------------------------------------------------------------------
+
+
+@app.get("/admin/tray/devices", response_class=HTMLResponse)
+async def admin_tray_devices_page(
+    request: Request,
+    search: str | None = None,
+    status: str | None = None,
+):
+    current_user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        return RedirectResponse(url="/", status_code=303)
+
+    from app.repositories import tray as tray_repo
+
+    devices = await tray_repo.list_devices(status=(status or None))
+    if search:
+        needle = search.strip().lower()
+        devices = [
+            d for d in devices
+            if needle in str(d.get("hostname") or "").lower()
+            or needle in str(d.get("device_uid") or "").lower()
+            or needle in str(d.get("console_user") or "").lower()
+        ]
+    extra = {
+        "title": "Tray devices",
+        "devices": devices,
+        "filters": {"search": search or "", "status": status or ""},
+        "matrix_enabled": settings.matrix_enabled,
+    }
+    return await _render_template("admin/tray/devices.html", request, current_user, extra=extra)
+
+
+@app.post("/admin/tray/devices/{device_id}/revoke", response_class=HTMLResponse)
+async def admin_tray_revoke_device(device_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    await tray_repo.revoke_device(device_id)
+    return RedirectResponse(url="/admin/tray/devices?status=", status_code=303)
+
+
+@app.get("/admin/tray/install-tokens", response_class=HTMLResponse)
+async def admin_tray_install_tokens_page(
+    request: Request,
+    new_token: str | None = None,
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.repositories import tray as tray_repo
+    from app.repositories import companies as companies_repo
+
+    tokens = await tray_repo.list_install_tokens()
+    companies = await companies_repo.list_companies(include_archived=False)
+    extra = {
+        "title": "Tray install tokens",
+        "tokens": tokens,
+        "companies": companies,
+        "new_token": new_token,
+        "now_iso": datetime.now(timezone.utc).isoformat(),
+        "portal_url": str(request.base_url).rstrip("/"),
+    }
+    return await _render_template(
+        "admin/tray/install_tokens.html", request, current_user, extra=extra
+    )
+
+
+@app.post("/admin/tray/install-tokens", response_class=HTMLResponse)
+async def admin_tray_create_install_token(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    label = (str(form.get("label", "")).strip() or "Untitled token")[:150]
+    company_raw = str(form.get("company_id", "")).strip()
+    company_id = int(company_raw) if company_raw.isdigit() else None
+
+    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
+
+    raw_token = tray_service.generate_install_token()
+    await tray_repo.create_install_token(
+        label=label,
+        company_id=company_id,
+        token_hash=tray_service.hash_token(raw_token),
+        token_prefix=tray_service.token_prefix(raw_token),
+        created_by_user_id=int(current_user["id"]),
+    )
+    # Redirect with the raw token in the query string so the admin sees it once.
+    # The token cannot be reconstructed later — only the prefix is displayed.
+    return RedirectResponse(
+        url=f"/admin/tray/install-tokens?new_token={raw_token}", status_code=303
+    )
+
+
+@app.post("/admin/tray/install-tokens/{token_id}/revoke", response_class=HTMLResponse)
+async def admin_tray_revoke_install_token(token_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    await tray_repo.revoke_install_token(token_id)
+    return RedirectResponse(url="/admin/tray/install-tokens", status_code=303)
+
+
+@app.get("/admin/tray/configurations", response_class=HTMLResponse)
+async def admin_tray_configurations_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    configurations = await tray_repo.list_menu_configs()
+    for cfg in configurations:
+        scope = cfg.get("scope")
+        ref = cfg.get("scope_ref_id")
+        cfg["scope_target_label"] = f"#{ref}" if ref else None
+    extra = {
+        "title": "Tray menu configurations",
+        "configurations": configurations,
+    }
+    return await _render_template(
+        "admin/tray/configurations.html", request, current_user, extra=extra
+    )
+
+
+@app.get("/admin/tray/configurations/new", response_class=HTMLResponse)
+async def admin_tray_new_configuration_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    extra = {
+        "title": "New tray configuration",
+        "heading": "New tray menu configuration",
+        "form_action": "/admin/tray/configurations",
+        "config": {
+            "name": "",
+            "scope": "global",
+            "scope_ref_id": None,
+            "enabled": True,
+            "display_text": "",
+            "env_allowlist_csv": "",
+            "branding_icon_url": "",
+            "payload_json": "[]",
+        },
+    }
+    return await _render_template(
+        "admin/tray/configuration_form.html", request, current_user, extra=extra
+    )
+
+
+@app.get("/admin/tray/configurations/{config_id}/edit", response_class=HTMLResponse)
+async def admin_tray_edit_configuration_page(config_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    record = await tray_repo.get_menu_config(config_id)
+    if not record:
+        return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+    extra = {
+        "title": "Edit tray configuration",
+        "heading": f"Edit configuration: {record.get('name')}",
+        "form_action": f"/admin/tray/configurations/{config_id}",
+        "config": {
+            "name": record.get("name"),
+            "scope": record.get("scope"),
+            "scope_ref_id": record.get("scope_ref_id"),
+            "enabled": bool(record.get("enabled")),
+            "display_text": record.get("display_text") or "",
+            "env_allowlist_csv": record.get("env_allowlist") or "",
+            "branding_icon_url": record.get("branding_icon_url") or "",
+            "payload_json": record.get("payload_json") or "[]",
+        },
+    }
+    return await _render_template(
+        "admin/tray/configuration_form.html", request, current_user, extra=extra
+    )
+
+
+async def _save_tray_configuration_from_form(form, current_user, *, config_id: int | None):
+    import json as _json
+    from app.repositories import tray as tray_repo
+    from app.services import sanitization
+
+    name = (str(form.get("name", "")).strip() or "Untitled")[:150]
+    scope = str(form.get("scope", "global")).strip().lower()
+    if scope not in {"global", "company", "tag", "device"}:
+        scope = "global"
+    scope_ref_raw = str(form.get("scope_ref_id", "")).strip()
+    scope_ref_id = int(scope_ref_raw) if scope_ref_raw.isdigit() else None
+    enabled = str(form.get("enabled", "")).lower() in {"1", "true", "on", "yes"}
+    payload_raw = str(form.get("payload_json", "[]")).strip() or "[]"
+    try:
+        parsed = _json.loads(payload_raw)
+        if not isinstance(parsed, list):
+            raise ValueError("Menu payload must be a JSON array")
+    except (ValueError, TypeError):
+        parsed = []
+    payload_json = _json.dumps(parsed)
+    display_text = str(form.get("display_text", "") or "")
+    if display_text:
+        sanitized = sanitization.sanitize_rich_text(display_text)
+        display_text = sanitized.html if sanitized else None
+    else:
+        display_text = None
+    env_csv = ",".join(
+        v.strip()
+        for v in str(form.get("env_allowlist", "") or "").split(",")
+        if v.strip()
+    )
+    branding = (str(form.get("branding_icon_url", "")).strip() or None)
+
+    if config_id is None:
+        await tray_repo.create_menu_config(
+            name=name,
+            scope=scope,
+            scope_ref_id=scope_ref_id,
+            payload_json=payload_json,
+            display_text=display_text,
+            env_allowlist=env_csv,
+            branding_icon_url=branding,
+            enabled=enabled,
+            created_by_user_id=int(current_user["id"]),
+        )
+    else:
+        await tray_repo.update_menu_config(
+            config_id,
+            name=name,
+            payload_json=payload_json,
+            display_text=display_text,
+            env_allowlist=env_csv,
+            branding_icon_url=branding,
+            enabled=enabled,
+            updated_by_user_id=int(current_user["id"]),
+        )
+
+
+@app.post("/admin/tray/configurations", response_class=HTMLResponse)
+async def admin_tray_create_configuration(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    await _save_tray_configuration_from_form(form, current_user, config_id=None)
+    return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+
+
+@app.post("/admin/tray/configurations/{config_id}", response_class=HTMLResponse)
+async def admin_tray_update_configuration(config_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    await _save_tray_configuration_from_form(form, current_user, config_id=config_id)
+    return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+
+
+@app.post("/admin/tray/configurations/{config_id}/delete", response_class=HTMLResponse)
+async def admin_tray_delete_configuration(config_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    await tray_repo.delete_menu_config(config_id)
+    return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+
+
 @app.get("/admin/audit-logs", response_class=HTMLResponse)
 async def admin_audit_logs(
     request: Request,
