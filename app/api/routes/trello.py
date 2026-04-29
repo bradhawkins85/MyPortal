@@ -103,8 +103,7 @@ async def register_trello_webhook(
             ),
         )
 
-    base_url = str(request.base_url).rstrip("/")
-    callback_url = f"{base_url}/api/integration-modules/trello/webhook"
+    callback_url = _build_public_callback_url(request)
     result = await trello_service.register_webhook(board_id, callback_url, company=company)
     if not result:
         raise HTTPException(
@@ -116,6 +115,49 @@ async def register_trello_webhook(
             ),
         )
     return {"status": "ok", "webhook": result, "callback_url": callback_url}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_WEBHOOK_PATH = "/api/integration-modules/trello/webhook"
+
+
+def _build_public_callback_url(request: Request) -> str:
+    """Return the public HTTPS-aware callback URL for the Trello webhook.
+
+    MyPortal typically runs behind a reverse proxy that terminates TLS and
+    redirects ``http://`` requests to ``https://`` with a ``301``. Because
+    Trello follows ``301`` redirects by downgrading the request method to
+    ``GET``, registering an ``http://`` callback URL means real webhook
+    ``POST`` events never reach this application (only the redirected
+    ``GET`` requests do). To avoid that, prefer the proxy-forwarded scheme
+    and host (``X-Forwarded-Proto`` / ``X-Forwarded-Host``) over
+    ``request.base_url``.
+    """
+
+    def _first(value: str) -> str:
+        # Forwarded headers may contain a comma-separated list; the
+        # left-most value is the one closest to the original client.
+        return value.split(",")[0].strip()
+
+    forwarded_proto = _first(request.headers.get("x-forwarded-proto", ""))
+    forwarded_host = _first(request.headers.get("x-forwarded-host", ""))
+
+    scheme = (forwarded_proto or request.url.scheme or "https").lower()
+    if scheme not in ("http", "https"):
+        # Defensive: reject unexpected schemes from spoofed headers.
+        scheme = "https"
+
+    host = forwarded_host or request.headers.get("host") or request.url.netloc
+    # Strip any path/query that a malformed header might contain.
+    host = host.split("/")[0].strip()
+    if not host:
+        # Last-resort fallback to the ASGI base URL.
+        return f"{str(request.base_url).rstrip('/')}{_WEBHOOK_PATH}"
+
+    return f"{scheme}://{host}{_WEBHOOK_PATH}"
 
 
 # ---------------------------------------------------------------------------
