@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
+from app.core.config import get_settings
 from app.repositories import companies as company_repo
 from app.services import tickets as tickets_service
 from app.services import trello as trello_service
@@ -20,8 +21,28 @@ router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"])
 
 @router.head("/webhook", status_code=status.HTTP_200_OK)
 @router.get("/webhook", status_code=status.HTTP_200_OK)
-async def trello_webhook_verify() -> JSONResponse:
-    """Trello sends HEAD/GET requests to verify the callback URL is reachable."""
+async def trello_webhook_verify(request: Request) -> JSONResponse:
+    """Trello sends HEAD/GET requests to verify the callback URL is reachable.
+
+    If a GET arrives carrying both ``x-trello-webhook`` (HMAC signature) and
+    ``content-type: application/json``, log a warning: those headers are only
+    present on real event POSTs, so seeing them on a GET means a 301/302
+    redirect somewhere upstream is downgrading the POST method (the classic
+    cause is the registered ``callbackURL`` being ``http://`` while the proxy
+    redirects to ``https://``).
+    """
+    headers = request.headers
+    if (
+        headers.get("x-trello-webhook")
+        and "application/json" in (headers.get("content-type") or "").lower()
+    ):
+        logger.warning(
+            "Trello webhook GET carries POST-only headers (x-trello-webhook, "
+            "content-type=application/json). This indicates a 301/302 redirect "
+            "is downgrading Trello's POST to GET. Verify the registered "
+            "callbackURL matches the public scheme/host (set PUBLIC_BASE_URL or "
+            "configure the reverse proxy to forward X-Forwarded-Proto)."
+        )
     return JSONResponse(content={}, status_code=200)
 
 
@@ -143,6 +164,11 @@ async def register_trello_webhook(
         )
 
     callback_url = _build_public_callback_url(request)
+    logger.info(
+        "Trello register_webhook: registering board {} with callback URL {}",
+        board_id,
+        callback_url,
+    )
     result = await trello_service.register_webhook(board_id, callback_url, company=company)
     if not result:
         raise HTTPException(
@@ -166,15 +192,30 @@ _WEBHOOK_PATH = "/api/integration-modules/trello/webhook"
 def _build_public_callback_url(request: Request) -> str:
     """Return the public HTTPS-aware callback URL for the Trello webhook.
 
-    MyPortal typically runs behind a reverse proxy that terminates TLS and
-    redirects ``http://`` requests to ``https://`` with a ``301``. Because
-    Trello follows ``301`` redirects by downgrading the request method to
-    ``GET``, registering an ``http://`` callback URL means real webhook
-    ``POST`` events never reach this application (only the redirected
-    ``GET`` requests do). To avoid that, prefer the proxy-forwarded scheme
-    and host (``X-Forwarded-Proto`` / ``X-Forwarded-Host``) over
-    ``request.base_url``.
+    Resolution order (first match wins):
+
+    1. The ``PUBLIC_BASE_URL`` setting, if configured. This is the most
+       reliable source because it does not depend on per-request headers.
+    2. ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` headers from the reverse
+       proxy.
+    3. If the request appears to come from behind a proxy (``X-Forwarded-For``
+       is present) but no ``X-Forwarded-Proto`` was supplied, default the
+       scheme to ``https``. Reverse proxies almost always terminate TLS, so
+       inferring ``http`` from ``request.url.scheme`` (which reflects the
+       hop between the proxy and uvicorn) would register a stale ``http://``
+       callback. Trello would then follow the proxy's HTTP→HTTPS ``301``
+       redirect and downgrade its event ``POST`` to a ``GET``, so MyPortal
+       would never receive real webhook events.
+    4. Fall back to ``request.base_url``.
     """
+
+    settings = get_settings()
+    public_base = (settings.public_base_url or "").strip().rstrip("/")
+    if public_base:
+        # Defensive: if the operator omitted the scheme, assume https.
+        if "://" not in public_base:
+            public_base = f"https://{public_base}"
+        return f"{public_base}{_WEBHOOK_PATH}"
 
     def _first(value: str) -> str:
         # Forwarded headers may contain a comma-separated list; the
@@ -183,8 +224,17 @@ def _build_public_callback_url(request: Request) -> str:
 
     forwarded_proto = _first(request.headers.get("x-forwarded-proto", ""))
     forwarded_host = _first(request.headers.get("x-forwarded-host", ""))
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
 
-    scheme = (forwarded_proto or request.url.scheme or "https").lower()
+    if forwarded_proto:
+        scheme = forwarded_proto.lower()
+    elif forwarded_for:
+        # Behind a proxy but no proto header – default to https since proxies
+        # almost always terminate TLS in front of uvicorn.
+        scheme = "https"
+    else:
+        scheme = (request.url.scheme or "https").lower()
+
     if scheme not in ("http", "https"):
         # Defensive: reject unexpected schemes from spoofed headers.
         scheme = "https"
