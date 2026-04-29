@@ -3732,6 +3732,18 @@ async def _render_company_edit_page(
             await staff_custom_fields_repo.list_company_owned_definitions(company_id)
         )
 
+    # Fetch tray install tokens for this company
+    tray_tokens: list[dict[str, Any]] = []
+    if is_super_admin:
+        try:
+            from app.repositories import tray as tray_repo
+            tray_tokens = await tray_repo.list_install_tokens(company_id=company_id)
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                tray_tokens = []
+            else:
+                raise
+
     assign_form = {
         "company_id": assign_company_id,
         "user_id": assign_user_id,
@@ -3770,6 +3782,7 @@ async def _render_company_edit_page(
         "m365_admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,
+        "tray_tokens": tray_tokens,
     }
 
     response = await _render_template("admin/company_edit.html", request, user, extra=extra)
@@ -15450,6 +15463,128 @@ async def admin_tray_versions_publish(request: Request):
             published_by_user_id=int(current_user["id"]),
         )
     return RedirectResponse(url="/admin/tray/versions", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Per-company tray settings
+# ---------------------------------------------------------------------------
+
+
+@app.get("/admin/companies/{company_id}/tray", response_class=HTMLResponse)
+async def admin_company_tray_settings_page(
+    company_id: int,
+    request: Request,
+    new_token: str | None = None,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.repositories import companies as companies_repo
+    from app.repositories import tray as tray_repo
+
+    company = await companies_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    tokens = await tray_repo.list_install_tokens(company_id=company_id)
+    extra = {
+        "title": f"Tray settings — {company.get('name') or 'company'}",
+        "company": company,
+        "tokens": tokens,
+        "new_token": new_token,
+        "now_iso": datetime.now(timezone.utc).isoformat(),
+        "portal_url": str(request.base_url).rstrip("/"),
+        "success_message": _sanitize_message(success),
+        "error_message": _sanitize_message(error),
+    }
+    return await _render_template(
+        "admin/tray/company_settings.html", request, current_user, extra=extra
+    )
+
+
+@app.post("/admin/companies/{company_id}/tray", response_class=HTMLResponse)
+async def admin_company_tray_settings_save(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+
+    from app.repositories import companies as companies_repo
+
+    company = await companies_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    tray_chat_enabled = 1 if form.get("tray_chat_enabled") else 0
+    tray_notifications_enabled = 1 if form.get("tray_notifications_enabled") else 0
+
+    await companies_repo.update_company(
+        company_id,
+        tray_chat_enabled=tray_chat_enabled,
+        tray_notifications_enabled=tray_notifications_enabled,
+    )
+    cid = int(company_id)
+    return RedirectResponse(
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Tray settings saved."}),
+        status_code=303,
+    )
+
+
+@app.post("/admin/companies/{company_id}/tray/tokens", response_class=HTMLResponse)
+async def admin_company_tray_create_token(company_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+
+    from app.repositories import companies as companies_repo
+    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
+
+    company = await companies_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    label = (str(form.get("label", "")).strip() or f"{company.get('name') or 'Company'} token")[:150]
+    raw_token = tray_service.generate_install_token()
+    await tray_repo.create_install_token(
+        label=label,
+        company_id=company_id,
+        token_hash=tray_service.hash_token(raw_token),
+        token_prefix=tray_service.token_prefix(raw_token),
+        created_by_user_id=int(current_user["id"]),
+    )
+    cid = int(company_id)
+    return RedirectResponse(
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"new_token": raw_token}),
+        status_code=303,
+    )
+
+
+@app.post(
+    "/admin/companies/{company_id}/tray/tokens/{token_id}/revoke",
+    response_class=HTMLResponse,
+)
+async def admin_company_tray_revoke_token(
+    company_id: int, token_id: int, request: Request
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.repositories import tray as tray_repo
+
+    await tray_repo.revoke_install_token(token_id)
+    cid = int(company_id)
+    return RedirectResponse(
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Token revoked."}),
+        status_code=303,
+    )
 
 
 
