@@ -300,7 +300,7 @@ for delivery on the next reconnect (full queued delivery in Phase 5.2).
   (`label`, `link`, `display_text`, `env_var`, `open_chat`, `separator`,
   `submenu`). Chat window via embedded webview; `nowebview` build tag
   falls back to OS default browser (CGO=0 cross-compile).
-- Installers: WiX v4 MSI (Windows) + `pkgbuild`/`productbuild` (macOS).
+- Installers: WiX v7 MSI (Windows) + `pkgbuild`/`productbuild` (macOS).
   RMM deployment scripts: `installer/windows/install.ps1` and
   `installer/macos/install.sh`.
 - GitHub Actions workflow: `.github/workflows/tray-build.yml` — build +
