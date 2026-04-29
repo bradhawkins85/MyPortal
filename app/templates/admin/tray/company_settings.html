@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray settings — {{ company.name }}</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Edit company", "type": "link", "variant": "ghost", "href": "/admin/companies/" ~ company.id ~ "/edit"},
+    {"label": "All devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
+    {"label": "All configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+
+  {% if success_message %}
+    <div class="callout callout--success admin-grid__full">
+      <p>{{ success_message }}</p>
+    </div>
+  {% endif %}
+  {% if error_message %}
+    <div class="callout callout--danger admin-grid__full">
+      <p>{{ error_message }}</p>
+    </div>
+  {% endif %}
+
+  {# ── Feature toggles ─────────────────────────────────────────────── #}
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header">
+      <h2 class="card__title">Tray icon settings</h2>
+      <p class="card__subtitle">Control which tray features are enabled for devices enrolled under <strong>{{ company.name }}</strong>.</p>
+    </header>
+    <div class="card__body card__body--stacked">
+      <form method="post" action="/admin/companies/{{ company.id }}/tray" class="form">
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input
+              type="checkbox"
+              name="tray_chat_enabled"
+              value="1"
+              {% if company.tray_chat_enabled %}checked{% endif %}
+            />
+            Enable technician-initiated chat (requires Matrix)
+          </label>
+          <p class="form-helper">When enabled, helpdesk technicians can push a chat session to any enrolled device belonging to this company.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input
+              type="checkbox"
+              name="tray_notifications_enabled"
+              value="1"
+              {% if company.tray_notifications_enabled %}checked{% endif %}
+            />
+            Enable desktop push notifications
+          </label>
+          <p class="form-helper">When enabled, the server may send OS-native desktop notifications to enrolled devices belonging to this company.</p>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Save settings</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  {# ── Enrol tokens ─────────────────────────────────────────────────── #}
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header">
+      <h2 class="card__title">Enrol tokens</h2>
+      <p class="card__subtitle">Install tokens scoped to <strong>{{ company.name }}</strong>. Devices that enrol with these tokens are automatically assigned to this company.</p>
+    </header>
+    <div class="card__body card__body--stacked">
+
+      {% if new_token %}
+        <div class="callout callout--success">
+          <h3 class="callout__title">Token created</h3>
+          <p>Copy this token now — it will not be shown again.</p>
+          <pre class="code-block"><code>{{ new_token }}</code></pre>
+          <details>
+            <summary>Windows (PowerShell) install snippet</summary>
+            <pre class="code-block"><code>$url = '{{ portal_url }}'
+$token = '{{ new_token }}'
+Invoke-WebRequest -Uri "$url/static/tray/myportal-tray.msi" -OutFile $env:TEMP\myportal-tray.msi
+msiexec.exe /i $env:TEMP\myportal-tray.msi MYPORTAL_URL="$url" ENROL_TOKEN="$token" /qn</code></pre>
+          </details>
+          <details>
+            <summary>macOS (bash) install snippet</summary>
+            <pre class="code-block"><code>URL='{{ portal_url }}'
+TOKEN='{{ new_token }}'
+curl -fsSL "$URL/static/tray/myportal-tray.pkg" -o /tmp/myportal-tray.pkg
+sudo /bin/sh -c "echo MYPORTAL_URL=$URL > /Library/Preferences/io.myportal.tray.env; echo ENROL_TOKEN=$TOKEN >> /Library/Preferences/io.myportal.tray.env"
+sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
+          </details>
+        </div>
+      {% endif %}
+
+      <form method="post" action="/admin/companies/{{ company.id }}/tray/tokens" class="form-stack">
+        {% include "partials/csrf.html" %}
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label" for="token-label">Label</label>
+            <input class="form-input" id="token-label" name="label" required maxlength="150" placeholder="e.g. {{ company.name }} fleet" />
+          </div>
+          <div class="form-field form-field--actions">
+            <button type="submit" class="button button--primary">Generate token</button>
+          </div>
+        </div>
+      </form>
+
+      {% if tokens %}
+        <div class="card__body--table">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Label</th><th>Prefix</th>
+                <th>Status</th><th>Uses</th><th>Last used</th>
+                <th>Created</th><th class="data-table__col--actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for token in tokens %}
+                <tr>
+                  <td>{{ token.label }}</td>
+                  <td><code>{{ token.token_prefix }}…</code></td>
+                  <td>
+                    {% if token.revoked_at %}
+                      <span class="status status--danger">Revoked</span>
+                    {% elif token.expires_at %}
+                      <span class="status status--warning">Expires {{ token.expires_at }}</span>
+                    {% else %}
+                      <span class="status status--success">Active</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ token.use_count }}</td>
+                  <td>
+                    {% if token.last_used_at %}
+                      <span data-utc="{{ token.last_used_at }}">{{ token.last_used_at }}</span>
+                    {% else %}—{% endif %}
+                  </td>
+                  <td><span data-utc="{{ token.created_at }}">{{ token.created_at }}</span></td>
+                  <td class="data-table__col--actions">
+                    {% if not token.revoked_at %}
+                      <form method="post" action="/admin/companies/{{ company.id }}/tray/tokens/{{ token.id }}/revoke" class="inline-form">
+                        {% include "partials/csrf.html" %}
+                        <button type="submit" class="button button--small button--danger" data-confirm="Revoke this install token?">Revoke</button>
+                      </form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty-state"><p>No enrol tokens yet — generate one above.</p></div>
+      {% endif %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}
