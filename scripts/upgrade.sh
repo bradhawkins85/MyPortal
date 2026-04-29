@@ -593,19 +593,16 @@ build_tray_app() {
     return
   fi
 
-  echo "Building tray app…"
   local go_dir
   go_dir=$(dirname "$GO_BIN")
-  if ! (cd "$tray_dir" && PATH="${go_dir}:${PATH}" make build-all); then
-    echo "Warning: Tray app build failed." >&2
-    return
-  fi
-  echo "Tray app build complete. Binaries are in ${tray_dir}/dist/."
 
-  # Build Windows MSI installer; install WiX v4 automatically if not present.
+  # Build Windows MSI installer directly via build-msi (which depends on
+  # build-windows).  We do not run build-all first because that includes
+  # macOS targets which require lipo/pkgbuild and therefore fail on Linux
+  # hosts, causing an early return that skips the MSI entirely.
   if ensure_wix; then
-    echo "WiX found; building Windows MSI installer…"
-    if (cd "$tray_dir" && PATH="${HOME}/.dotnet/tools:${PATH}" make build-msi); then
+    echo "Building Windows MSI installer…"
+    if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
       echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
     else
       echo "Warning: MSI build failed." >&2
