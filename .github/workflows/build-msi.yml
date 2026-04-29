@@ -53,7 +53,9 @@ jobs:
 
           go build -ldflags $ldflags -o dist\windows\myportal-tray-service.exe .\service
           $env:GOFLAGS = "-tags=nowebview"
-          go build -ldflags $ldflags -o dist\windows\myportal-tray-ui.exe     .\ui
+          # -H windowsgui hides the console window so the tray UI runs silently
+          $uiLdflags = "$ldflags -H windowsgui"
+          go build -ldflags $uiLdflags -o dist\windows\myportal-tray-ui.exe     .\ui
 
       - name: Build MSI
         shell: pwsh

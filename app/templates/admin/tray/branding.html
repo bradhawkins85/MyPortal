@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Tray icon</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"},
+    {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
+    {"label": "Install tokens", "type": "link", "variant": "ghost", "href": "/admin/tray/install-tokens"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header">
+      <p class="card__lede">
+        The MyPortal tray app shows this icon in the system tray on every enrolled device.
+        By default it uses an icon derived from the website favicon. Upload a custom
+        Windows <code>.ico</code> file below to override it across all devices.
+      </p>
+    </header>
+    <div class="card__body">
+      {% if success_message %}
+        <p class="status status--success">{{ success_message }}</p>
+      {% endif %}
+      {% if error_message %}
+        <p class="status status--danger">{{ error_message }}</p>
+      {% endif %}
+
+      <p>
+        <strong>Current icon:</strong>
+        {% if current_path %}
+          custom upload (<code>{{ current_path }}</code>)
+        {% else %}
+          default (derived from website favicon)
+        {% endif %}
+      </p>
+      <p>
+        <img src="/tray/icon.ico" alt="Current tray icon"
+             width="32" height="32"
+             style="image-rendering: pixelated; background: var(--color-surface-alt); padding: 4px; border-radius: 4px;" />
+      </p>
+
+      <form method="post" action="/admin/tray/branding"
+            enctype="multipart/form-data" class="form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="form-field">
+          <label for="tray-icon-file">Upload new icon (.ico, max 1&nbsp;MB)</label>
+          <input id="tray-icon-file" type="file" name="icon"
+                 accept=".ico,image/x-icon,image/vnd.microsoft.icon" required />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Upload icon</button>
+        </div>
+      </form>
+
+      {% if current_path %}
+        <form method="post" action="/admin/tray/branding/delete"
+              class="inline-form" style="margin-top: var(--space-md);">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="button button--danger"
+                  data-confirm="Reset the tray icon to the default?">
+            Reset to default
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
