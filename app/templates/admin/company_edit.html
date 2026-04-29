@@ -693,6 +693,53 @@
         </div>
       </details>
 
+      <details class="card card--panel card-collapsible admin-grid__full" data-tray-panel>
+        <summary class="card__header card__header--collapsible card__header--stacked">
+          <div>
+            <h2 class="card__title">Tray icon</h2>
+            <p class="card__subtitle">Enrol tokens and tray icon settings for this company. <a href="/admin/companies/{{ company.id }}/tray">Open full tray settings</a></p>
+          </div>
+          <div class="card__collapsible-meta" aria-hidden="true">
+            <span class="card__toggle-icon"></span>
+          </div>
+        </summary>
+        <div class="card-collapsible__content">
+          {% if tray_tokens %}
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Label</th><th>Prefix</th><th>Status</th><th>Uses</th><th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for token in tray_tokens %}
+                    <tr>
+                      <td>{{ token.label }}</td>
+                      <td><code>{{ token.token_prefix }}…</code></td>
+                      <td>
+                        {% if token.revoked_at %}
+                          <span class="status status--danger">Revoked</span>
+                        {% else %}
+                          <span class="status status--success">Active</span>
+                        {% endif %}
+                      </td>
+                      <td>{{ token.use_count }}</td>
+                      <td><span data-utc="{{ token.created_at }}">{{ token.created_at }}</span></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="text-muted">No enrol tokens yet for this company.</p>
+          {% endif %}
+          <div class="form-actions">
+            <a class="button button--primary" href="/admin/companies/{{ company.id }}/tray">Manage tray settings &amp; tokens</a>
+          </div>
+        </div>
+      </details>
+
       <details class="card card--panel card-collapsible admin-grid__full" data-company-automations open>
         <summary class="card__header card__header--collapsible card__header--stacked">
           <div>
