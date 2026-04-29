@@ -18,8 +18,9 @@ router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"])
 # ---------------------------------------------------------------------------
 
 @router.head("/webhook", status_code=status.HTTP_200_OK)
+@router.get("/webhook", status_code=status.HTTP_200_OK)
 async def trello_webhook_verify() -> JSONResponse:
-    """Trello sends a HEAD request to verify the callback URL is reachable."""
+    """Trello sends HEAD/GET requests to verify the callback URL is reachable."""
     return JSONResponse(content={}, status_code=200)
 
 
