@@ -16,6 +16,7 @@ from app.api.dependencies.auth import (
 from app.api.dependencies.api_keys import get_optional_api_key
 from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
 from app.core.logging import log_error
+from loguru import logger
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_attachments as attachments_repo
@@ -790,8 +791,8 @@ async def add_reply(
                     author_display,
                     sanitised_reply_payload.html,
                 )
-            except Exception:
-                pass  # Trello sync is best-effort; do not fail the reply
+            except Exception as exc:
+                logger.debug("Trello reply sync failed for ticket {}: {}", ticket_id, exc)
 
     # IMPORTANT: never store the reply body in the audit log. We capture only
     # metadata (id, author, visibility, length) so admins can confirm a reply
