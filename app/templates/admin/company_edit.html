@@ -153,20 +153,20 @@
               placeholder="{% if form_data.trello_api_key %}Key saved — enter to replace{% else %}Enter API key{% endif %}"
               maxlength="255"
             />
-            <p class="form-help">Stored securely. Leave blank to keep the existing value. Get your API key from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
+            <p class="form-help">Stored securely. Leave blank to keep the existing value. Copy the <strong>Key</strong> (not the Secret) from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
           </div>
           <div class="form-field">
-            <label class="form-label" for="edit-company-trello-token">Trello token</label>
+            <label class="form-label" for="edit-company-trello-token">Trello OAuth token</label>
             <input
               id="edit-company-trello-token"
               name="trelloToken"
               class="form-input"
               type="password"
               autocomplete="off"
-              placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter token{% endif %}"
+              placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter OAuth token{% endif %}"
               maxlength="255"
             />
-            <p class="form-help">Stored securely. Leave blank to keep the existing value. Generate a token via <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a> → click <strong>Token</strong>.</p>
+            <p class="form-help">Stored securely. Leave blank to keep the existing value. This is the <strong>OAuth Token</strong> — <em>not</em> the Secret shown on the app-key page. Go to <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>, then click <strong>Token</strong> and authorise the app to generate it.</p>
           </div>
           {% if form_data.trello_board_id %}
           <div class="form-field">
