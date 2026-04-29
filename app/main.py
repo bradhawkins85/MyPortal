@@ -15485,6 +15485,152 @@ async def admin_tray_versions_publish(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Tray icon (system-tray branding)
+# ---------------------------------------------------------------------------
+
+
+_TRAY_ICON_DIR = _private_uploads_path / "tray-icon"
+_TRAY_ICON_MAX_BYTES = 1 * 1024 * 1024  # 1 MB is plenty for a multi-res .ico
+
+
+def _tray_icon_uploads_root() -> Path:
+    _TRAY_ICON_DIR.mkdir(parents=True, exist_ok=True)
+    return _private_uploads_path
+
+
+@app.get(
+    "/tray/icon.ico",
+    include_in_schema=False,
+)
+async def tray_icon_endpoint() -> Response:
+    """Serve the active tray-icon ``.ico`` file.
+
+    Returns the admin-uploaded override when present, otherwise a default
+    icon generated at runtime from the website favicon palette. No
+    authentication is required — the icon is public branding consumed by
+    every tray client at startup.
+    """
+    from app.services import tray_icon as tray_icon_service
+
+    data = await tray_icon_service.get_tray_icon_bytes(_private_uploads_path)
+    return Response(
+        content=data,
+        media_type="image/x-icon",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/admin/tray/branding", response_class=HTMLResponse)
+async def admin_tray_branding_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    current_path = await site_settings_repo.get_tray_icon_path()
+    extra = {
+        "title": "Tray icon",
+        "current_path": current_path,
+        "success_message": _sanitize_message(success),
+        "error_message": _sanitize_message(error),
+    }
+    return await _render_template(
+        "admin/tray/branding.html", request, current_user, extra=extra
+    )
+
+
+@app.post("/admin/tray/branding", response_class=HTMLResponse)
+async def admin_tray_branding_upload(
+    request: Request,
+    icon: UploadFile = File(None),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.services import tray_icon as tray_icon_service
+
+    if icon is None or not icon.filename:
+        return RedirectResponse(
+            url="/admin/tray/branding?error=No+file+selected",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    data = await icon.read(_TRAY_ICON_MAX_BYTES + 1)
+    if len(data) > _TRAY_ICON_MAX_BYTES:
+        return RedirectResponse(
+            url="/admin/tray/branding?error=File+too+large+%28max+1+MB%29",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if not tray_icon_service.is_valid_ico(data):
+        return RedirectResponse(
+            url="/admin/tray/branding?error=Not+a+valid+.ico+file",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    uploads_root = _tray_icon_uploads_root()
+    target = _TRAY_ICON_DIR / "tray-icon.ico"
+    try:
+        target.write_bytes(data)
+    except OSError as exc:
+        log_error(f"Failed to write tray icon: {exc}")
+        return RedirectResponse(
+            url="/admin/tray/branding?error=Failed+to+save+icon",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    relative_path = str(target.relative_to(uploads_root)).replace("\\", "/")
+    await site_settings_repo.set_tray_icon_path(relative_path)
+    await audit_service.log_action(
+        action="admin.tray.icon.upload",
+        user_id=current_user.get("id"),
+        entity_type="site_settings",
+        entity_id=1,
+        metadata={"path": relative_path, "bytes": len(data)},
+        request=request,
+    )
+    return RedirectResponse(
+        url="/admin/tray/branding?success=Tray+icon+updated",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/tray/branding/delete", response_class=HTMLResponse)
+async def admin_tray_branding_delete(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    current_path = await site_settings_repo.get_tray_icon_path()
+    if current_path:
+        try:
+            candidate = (_private_uploads_path / current_path).resolve()
+            uploads_root_resolved = _private_uploads_path.resolve()
+            if (
+                uploads_root_resolved == candidate
+                or uploads_root_resolved in candidate.parents
+            ) and candidate.is_file():
+                candidate.unlink()
+        except OSError:
+            pass
+    await site_settings_repo.set_tray_icon_path(None)
+    await audit_service.log_action(
+        action="admin.tray.icon.delete",
+        user_id=current_user.get("id"),
+        entity_type="site_settings",
+        entity_id=1,
+        metadata={},
+        request=request,
+    )
+    return RedirectResponse(
+        url="/admin/tray/branding?success=Tray+icon+reset+to+default",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Per-company tray settings
 # ---------------------------------------------------------------------------
 
