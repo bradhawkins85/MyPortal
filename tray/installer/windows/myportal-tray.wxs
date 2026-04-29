@@ -92,7 +92,7 @@
           Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
           Name="MyPortalTrayUI"
           Type="string"
-          Value="[INSTALLDIR]myportal-tray-ui.exe" />
+          Value="&quot;[INSTALLDIR]myportal-tray-ui.exe&quot;" />
       </Component>
     </ComponentGroup>
 
