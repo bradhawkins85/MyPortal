@@ -481,6 +481,7 @@ ensure_make() {
 
 build_tray_app() {
   local tray_dir="${PROJECT_ROOT}/tray"
+  local static_tray_dir="${PROJECT_ROOT}/app/static/tray"
 
   if [[ ! -f "${tray_dir}/Makefile" ]]; then
     echo "Tray app Makefile not found at ${tray_dir}/Makefile; skipping tray build."
@@ -505,10 +506,40 @@ build_tray_app() {
   echo "Building tray app…"
   local go_dir
   go_dir=$(dirname "$GO_BIN")
-  if (cd "$tray_dir" && PATH="${go_dir}:${PATH}" make build-all); then
-    echo "Tray app build complete. Binaries are in ${tray_dir}/dist/."
-  else
+  if ! (cd "$tray_dir" && PATH="${go_dir}:${PATH}" make build-all); then
     echo "Warning: Tray app build failed." >&2
+    return
+  fi
+  echo "Tray app build complete. Binaries are in ${tray_dir}/dist/."
+
+  # Build Windows MSI installer if WiX v4 is available.
+  # Install WiX via: dotnet tool install --global wix
+  if command -v wix >/dev/null 2>&1; then
+    echo "WiX found; building Windows MSI installer…"
+    if (cd "$tray_dir" && make build-msi); then
+      echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
+    else
+      echo "Warning: MSI build failed." >&2
+    fi
+  else
+    echo "wix tool not found; skipping MSI build. Install with: dotnet tool install --global wix" >&2
+  fi
+
+  # Copy any built installers to app/static/tray/ so they are served via HTTP.
+  mkdir -p "$static_tray_dir"
+  local copied=0
+  if [[ -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
+    cp "${tray_dir}/dist/windows/myportal-tray.msi" "${static_tray_dir}/myportal-tray.msi"
+    echo "Copied myportal-tray.msi → app/static/tray/"
+    copied=1
+  fi
+  if [[ -f "${tray_dir}/dist/darwin/myportal-tray.pkg" ]]; then
+    cp "${tray_dir}/dist/darwin/myportal-tray.pkg" "${static_tray_dir}/myportal-tray.pkg"
+    echo "Copied myportal-tray.pkg → app/static/tray/"
+    copied=1
+  fi
+  if [[ "$copied" -eq 0 ]]; then
+    echo "No installer packages found to copy to app/static/tray/." >&2
   fi
 }
 

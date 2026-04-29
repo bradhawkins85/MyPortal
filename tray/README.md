@@ -28,6 +28,8 @@ tray/
 
 - Go 1.22+
 - For native UI builds: CGO toolchain for the target platform
+- For MSI packaging: .NET SDK 8+ and WiX v4 (`dotnet tool install --global wix`)
+- For macOS .pkg packaging: Xcode command-line tools with `pkgbuild` / `productbuild` (macOS only)
 
 ### Cross-compile (CGO=0, no webview — for RMM deployment)
 
@@ -40,6 +42,23 @@ make build-darwin-arm64
 ```
 
 Binaries land in `dist/<platform>/`.
+
+### Build installer packages
+
+```sh
+# Windows MSI (requires WiX v4 — works on Linux/macOS/Windows)
+make build-msi          # produces dist/windows/myportal-tray.msi
+
+# macOS .pkg (requires pkgbuild — macOS only)
+make build-pkg          # produces dist/darwin/myportal-tray.pkg
+
+# Build all binaries + MSI (+ .pkg on macOS)
+make package-all
+```
+
+The built installers must be copied to `app/static/tray/` on the MyPortal server so
+they are served at `/static/tray/myportal-tray.msi` and `/static/tray/myportal-tray.pkg`.
+The `scripts/upgrade.sh` handles this automatically when WiX is installed on the server.
 
 ### With native webview (requires CGO)
 
