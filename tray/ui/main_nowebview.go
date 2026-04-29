@@ -44,26 +44,38 @@ var (
 	onConfigChanged func(*api.ConfigResponse)
 )
 
+// refreshPortalURL re-reads the portal URL from tray-state.json (written by
+// the service after enrolment).  The MYPORTAL_URL environment variable always
+// takes precedence and is never overwritten.  This is called both at startup
+// and when a config_changed IPC message arrives so that the URL is available
+// even on the very first boot when the service has not yet enrolled.
+func refreshPortalURL() {
+	if envURL := os.Getenv("MYPORTAL_URL"); envURL != "" {
+		gPortalURL = envURL
+		return
+	}
+	p := filepath.Join(stateDir(), "tray-state.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var state struct {
+		PortalURL string `json:"portal_url"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		logger.Warn("Failed to parse tray-state.json: %v", err)
+		return
+	}
+	if state.PortalURL != "" {
+		gPortalURL = state.PortalURL
+	}
+}
+
 func main() {
 	_ = logger.Init("ui")
 	logger.Info("MyPortal Tray UI starting")
 
-	// Prefer the environment variable, then fall back to the state file written
-	// by the service.
-	gPortalURL = os.Getenv("MYPORTAL_URL")
-	if gPortalURL == "" {
-		p := filepath.Join(stateDir(), "tray-state.json")
-		if data, err := os.ReadFile(p); err == nil {
-			var state struct {
-				PortalURL string `json:"portal_url"`
-			}
-			if err := json.Unmarshal(data, &state); err != nil {
-				logger.Warn("Failed to parse tray-state.json: %v", err)
-			} else {
-				gPortalURL = state.PortalURL
-			}
-		}
-	}
+	refreshPortalURL()
 
 	gConfig = loadCachedConfig()
 	go connectIPC()
@@ -156,6 +168,7 @@ func handleIPCMessages(conn net.Conn) {
 			_ = json.Unmarshal(msg.Payload, &payload)
 			openBrowser(buildChatURL(payload.RoomID))
 		case "config_changed":
+			refreshPortalURL()
 			gConfig = loadCachedConfig()
 			if onConfigChanged != nil {
 				onConfigChanged(gConfig)
