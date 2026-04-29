@@ -135,6 +135,17 @@ func (d *daemon) run() {
 	d.ipcSrv, err = ipc.NewServer()
 	if err != nil {
 		logger.Error("IPC server: %v — chat delivery disabled", err)
+	} else {
+		// Re-deliver the latest config_changed event to any UI agent
+		// that connects after the initial broadcast already fired.
+		// Without this, a UI agent that takes >5s to connect after the
+		// service finishes enrolment would never know to re-read the
+		// cached config and would keep showing the default menu /
+		// default icon.
+		d.ipcSrv.OnConnect(func(send func(ipc.Message)) {
+			logger.Debug("ipc onConnect: replaying config_changed to new UI client")
+			send(ipc.Message{Type: "config_changed"})
+		})
 	}
 
 	// Enrol (or restore persisted state).
@@ -174,6 +185,7 @@ func (d *daemon) ensureEnrolled() error {
 	if s := loadState(); s != nil && s.AuthToken != "" {
 		d.client.SetAuth(s.DeviceUID, s.AuthToken)
 		logger.Info("Restored persisted auth (device_uid=%s)", s.DeviceUID)
+		logger.Debug("ensureEnrolled: persisted state at %s, portal=%s", filepath.Join(stateDir(), stateFileName), s.PortalURL)
 		return nil
 	}
 
@@ -182,6 +194,7 @@ func (d *daemon) ensureEnrolled() error {
 	}
 
 	facts := collectFacts()
+	logger.Debug("ensureEnrolled: enrolling against %s as %s/%s", d.cfg.PortalURL, facts.OS, facts.Hostname)
 	resp, err := d.client.Enrol(context.Background(), api.EnrolRequest{
 		InstallToken: d.cfg.EnrolToken,
 		OS:           facts.OS,
@@ -265,6 +278,7 @@ func (d *daemon) handleWS(ctx context.Context, conn *websocket.Conn) {
 }
 
 func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessage) {
+	logger.Debug("WS message received: type=%q", msgType)
 	switch msgType {
 	case "ping":
 		// nothing — pong is sent in the goroutine above
@@ -318,6 +332,7 @@ func (d *daemon) heartbeatLoop() {
 func (d *daemon) refreshConfig() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	logger.Debug("refreshConfig: GET %s/api/tray/config", d.cfg.PortalURL)
 	cfg, err := d.client.GetConfig(ctx)
 	if err != nil {
 		logger.Warn("GetConfig: %v", err)
@@ -327,8 +342,11 @@ func (d *daemon) refreshConfig() {
 	data, _ := json.Marshal(cfg)
 	dir := stateDir()
 	_ = os.MkdirAll(dir, 0700)
-	_ = os.WriteFile(filepath.Join(dir, configCacheName), data, 0644)
+	path := filepath.Join(dir, configCacheName)
+	_ = os.WriteFile(path, data, 0644)
 	logger.Info("Config refreshed (version %d)", cfg.Version)
+	logger.Debug("refreshConfig: wrote %d bytes to %s, menu_nodes=%d, chat_enabled=%t, branding_icon_url=%q",
+		len(data), path, len(cfg.Menu), cfg.ChatEnabled, cfg.BrandingIconURL)
 }
 
 // -----------------------------------------------------------------
