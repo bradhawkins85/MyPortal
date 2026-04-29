@@ -95,6 +95,7 @@ from app.api.routes import (
     subscriptions as subscriptions_api,
     tag_exclusions,
     tickets as tickets_api,
+    tray as tray_api,
     users,
     system,
     uptimekuma,
@@ -759,6 +760,7 @@ app.add_middleware(
         "/api/webhooks/smtp2go",
         "/api/integration-modules/uptimekuma/alerts",
         "/api/backup-status",
+        "/api/tray/enrol",
     ),
 )
 
@@ -940,6 +942,65 @@ async def refresh_updates(websocket: WebSocket) -> None:
         await refresh_notifier.disconnect(websocket)
 
 
+@app.websocket("/ws/tray/{device_uid}")
+async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
+    """Persistent connection used by the tray client.
+
+    The handshake authenticates with a bearer auth_token supplied via the
+    ``Authorization`` header, the ``X-Tray-Token`` header, or the ``token``
+    query parameter (the latter for environments where headers cannot be
+    set on a websocket open).  Messages are JSON; the protocol is documented
+    in ``docs/tray_app.md``.
+    """
+
+    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
+
+    token = (
+        websocket.headers.get("X-Tray-Token")
+        or websocket.query_params.get("token")
+        or ""
+    )
+    if not token:
+        auth_header = websocket.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        await websocket.close(code=4401)
+        return
+
+    device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
+    if not device or device.get("device_uid") != device_uid:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    tray_service.register_connection(device_uid, websocket)
+    try:
+        while True:
+            try:
+                message = await websocket.receive_json()
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            except Exception:  # pragma: no cover - malformed payload
+                continue
+            msg_type = message.get("type") if isinstance(message, dict) else None
+            if msg_type == "pong":
+                continue
+            if msg_type == "heartbeat":
+                await tray_repo.update_device_heartbeat(
+                    int(device["id"]),
+                    console_user=message.get("console_user"),
+                    last_ip=(websocket.client.host if websocket.client else None),
+                    agent_version=message.get("agent_version"),
+                )
+                continue
+            # Other inbound message types (chat_message, env_snapshot, etc.)
+            # are handled by feature-specific services in follow-up phases.
+    finally:
+        tray_service.unregister_connection(device_uid, websocket)
+
+
 # MCP WebSocket endpoint (only enabled if MCP_ENABLED is true)
 if settings.mcp_enabled:
     from app.mcp_server import handle_mcp_connection
@@ -1026,6 +1087,7 @@ app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
+app.include_router(tray_api.router)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
