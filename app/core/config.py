@@ -291,6 +291,16 @@ class Settings(BaseSettings):
         validation_alias="TRUSTED_PROXIES",
     )
 
+    # GitHub integration (used for fetching the latest tray MSI on startup)
+    github_token: str | None = Field(
+        default=None,
+        validation_alias="GITHUB_TOKEN",
+    )
+    github_tray_msi_repo: str = Field(
+        default="bradhawkins85/MyPortal",
+        validation_alias="GITHUB_TRAY_MSI_REPO",
+    )
+
     @model_validator(mode="after")
     def _enforce_production_secret_strength(self) -> "Settings":
         """Refuse to boot in production with weak or placeholder secrets.

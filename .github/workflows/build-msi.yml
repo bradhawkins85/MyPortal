@@ -1,0 +1,69 @@
+# Build the MyPortal Tray MSI installer on Windows and upload it to the
+# GitHub release that triggered this workflow.
+#
+# Triggered by: publishing a new GitHub release (any tag).
+# Runner:       windows-latest (required — WiX v7 only works on Windows)
+#
+# The MSI is built with WiX v7 (installed as a .NET global tool).
+# The -acceptEula wix7 flag accepts the FireGiant OSMF EULA non-interactively
+# per https://docs.firegiant.com/wix/osmf/.
+
+name: Build MSI
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write   # needed to upload the artifact to the release
+
+jobs:
+  build-msi:
+    name: Build Windows MSI
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: tray
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tray/go.mod
+          cache-dependency-path: tray/go.sum
+
+      - name: Install WiX v7
+        shell: pwsh
+        run: dotnet tool install --global wix --version "7.*"
+
+      - name: Build Windows binaries
+        shell: pwsh
+        run: |
+          $env:GOOS      = "windows"
+          $env:GOARCH    = "amd64"
+          $env:CGO_ENABLED = "0"
+          $version = "${{ github.event.release.tag_name }}"
+          $ldflags = "-X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$version'"
+
+          New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
+
+          go build -ldflags $ldflags -o dist\windows\myportal-tray-service.exe .\service
+          $env:GOFLAGS = "-tags=nowebview"
+          go build -ldflags $ldflags -o dist\windows\myportal-tray-ui.exe     .\ui
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $binDir = (Resolve-Path dist\windows).Path
+          wix build -acceptEula wix7 installer\windows\myportal-tray.wxs `
+            -d "BinDir=$binDir" `
+            -o dist\windows\myportal-tray.msi
+
+      - name: Upload MSI to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tray/dist/windows/myportal-tray.msi
