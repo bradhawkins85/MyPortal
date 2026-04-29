@@ -80,8 +80,8 @@ On startup, the application automatically:
 
 ### 6. Access the Application
 
-- **Portal UI**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+- **Portal UI**: https://localhost:8000
+- **API Documentation**: https://localhost:8000/docs
 
 The first visit redirects to registration when no users exist. The first registered user becomes the super administrator.
 
@@ -175,7 +175,7 @@ systemctl restart myportal.service
 
 ## First-Time Setup
 
-1. Access http://localhost:8000
+1. Access https://localhost:8000
 2. You'll be redirected to registration (no users exist yet)
 3. Create the first account - this becomes the super administrator
 4. Configure integration modules from **Admin → Integration modules**
