@@ -1,7 +1,15 @@
 // Package logger provides a simple structured logger for the tray app.
-// On Windows, logs are written to %ProgramData%\MyPortal\tray\logs\service.log
-// On macOS, to /Library/Logs/MyPortal/tray/service.log
-// Standard output is also used (captured by systemd/launchd).
+//
+// Logs are written next to the running executable (in a "logs" subdirectory)
+// so administrators can find them without hunting through %ProgramData%.
+// If that directory cannot be created or written to (typical for the UI
+// agent running as a non-elevated user against C:\Program Files), the
+// logger falls back to the platform-standard location:
+//   - Windows: %ProgramData%\MyPortal\tray\logs\<name>.log
+//   - macOS:   /Library/Logs/MyPortal/tray/<name>.log
+//
+// Standard output is also used (captured by systemd / launchd / the
+// service host).
 package logger
 
 import (
@@ -11,35 +19,115 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	mu     sync.Mutex
-	writer io.Writer = os.Stdout
-	logger           = log.New(os.Stdout, "", 0)
+	mu       sync.Mutex
+	writer   io.Writer = os.Stdout
+	logger             = log.New(os.Stdout, "", 0)
+	debug    bool
+	logPath  string
 )
 
-// Init opens the platform log file in addition to stdout.
+// Init opens the platform log file in addition to stdout. Debug logging is
+// enabled by default; set MYPORTAL_TRAY_DEBUG=0 (or "false") to suppress
+// debug-level lines.
 func Init(name string) error {
-	dir := logDir()
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("logger: create log dir: %w", err)
+	enableDebugFromEnv()
+
+	dirs := candidateLogDirs()
+	var (
+		f       *os.File
+		openErr error
+		path    string
+	)
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			openErr = fmt.Errorf("logger: create log dir %q: %w", dir, err)
+			continue
+		}
+		candidate := filepath.Join(dir, name+".log")
+		file, err := os.OpenFile(candidate, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
+		if err != nil {
+			openErr = fmt.Errorf("logger: open %q: %w", candidate, err)
+			continue
+		}
+		f = file
+		path = candidate
+		openErr = nil
+		break
 	}
-	path := filepath.Join(dir, name+".log")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-	if err != nil {
-		return fmt.Errorf("logger: open log file: %w", err)
+	if f == nil {
+		return openErr
 	}
+
 	mu.Lock()
-	defer mu.Unlock()
 	writer = io.MultiWriter(os.Stdout, f)
 	logger = log.New(writer, "", 0)
+	logPath = path
+	mu.Unlock()
+
+	Info("logger: writing to %s (debug=%t)", path, debug)
 	return nil
 }
 
-func logDir() string {
+// Path returns the resolved log file path (empty before Init succeeds).
+func Path() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return logPath
+}
+
+// SetDebug enables or disables debug-level output at runtime.
+func SetDebug(on bool) {
+	mu.Lock()
+	debug = on
+	mu.Unlock()
+}
+
+// DebugEnabled reports whether debug-level logging is on.
+func DebugEnabled() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return debug
+}
+
+func enableDebugFromEnv() {
+	mu.Lock()
+	defer mu.Unlock()
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MYPORTAL_TRAY_DEBUG")))
+	switch v {
+	case "0", "false", "no", "off":
+		debug = false
+	default:
+		// Default-on: any other value (including empty) enables debug
+		// logging so first-install diagnostics are captured automatically.
+		debug = true
+	}
+}
+
+// candidateLogDirs returns the preferred log directories in priority order:
+//  1. <executable directory>/logs
+//  2. Platform-standard fallback (writable by the running user's privilege).
+func candidateLogDirs() []string {
+	var dirs []string
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "logs"))
+	}
+	dirs = append(dirs, platformFallbackDir())
+	return dirs
+}
+
+func platformFallbackDir() string {
 	switch runtime.GOOS {
 	case "windows":
 		base := os.Getenv("ProgramData")
@@ -58,6 +146,19 @@ func format(level, msg string, args ...any) string {
 		msg = fmt.Sprintf(msg, args...)
 	}
 	return fmt.Sprintf("%s [%s] %s", ts, level, msg)
+}
+
+// Debug logs a debug-level message when debug logging is enabled.
+func Debug(msg string, args ...any) {
+	mu.Lock()
+	on := debug
+	mu.Unlock()
+	if !on {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	logger.Println(format("DEBUG", msg, args...))
 }
 
 // Info logs an informational message.

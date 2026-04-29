@@ -34,10 +34,12 @@ type Handler func(msg Message)
 
 // Server listens on the local socket and dispatches messages.
 type Server struct {
-	ln       net.Listener
-	mu       sync.Mutex
-	clients  []net.Conn
-	handlers map[string]Handler
+	ln          net.Listener
+	mu          sync.Mutex
+	clients     []net.Conn
+	handlers    map[string]Handler
+	onConnect   func(send func(Message))
+	onConnectMu sync.RWMutex
 }
 
 // SocketPath returns the platform socket path.
@@ -72,6 +74,29 @@ func (s *Server) On(msgType string, h Handler) {
 	s.handlers[msgType] = h
 }
 
+// OnConnect registers a callback invoked whenever a new IPC client connects.
+// The callback receives a `send` function that writes a single message to the
+// just-connected client (and only that client). This is used by the service
+// to re-deliver the latest "config_changed" event to UI agents that connect
+// after the initial broadcast has already fired.
+func (s *Server) OnConnect(fn func(send func(Message))) {
+	s.onConnectMu.Lock()
+	defer s.onConnectMu.Unlock()
+	s.onConnect = fn
+}
+
+// SendTo a specific connected client. Returns an error if the client has
+// since disconnected.
+func sendOne(conn net.Conn, msg Message) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, err = conn.Write(data)
+	return err
+}
+
 // Broadcast sends a message to all connected UI agents.
 func (s *Server) Broadcast(msg Message) {
 	data, err := json.Marshal(msg)
@@ -82,15 +107,19 @@ func (s *Server) Broadcast(msg Message) {
 
 	s.mu.Lock()
 	active := make([]net.Conn, 0, len(s.clients))
+	dropped := 0
 	for _, c := range s.clients {
 		if _, err := c.Write(data); err == nil {
 			active = append(active, c)
 		} else {
 			c.Close()
+			dropped++
 		}
 	}
+	delivered := len(active)
 	s.clients = active
 	s.mu.Unlock()
+	logger.Debug("ipc: broadcast %q delivered=%d dropped=%d", msg.Type, delivered, dropped)
 }
 
 // Close shuts down the server.
@@ -106,7 +135,27 @@ func (s *Server) acceptLoop() {
 		}
 		s.mu.Lock()
 		s.clients = append(s.clients, conn)
+		clientCount := len(s.clients)
 		s.mu.Unlock()
+		logger.Debug("ipc: client connected (total=%d, remote=%s)", clientCount, conn.RemoteAddr())
+
+		// Notify the registered onConnect hook so the service can replay
+		// any state-bootstrap messages (e.g. config_changed) to this new
+		// client. Run it in a goroutine to avoid stalling the accept loop.
+		s.onConnectMu.RLock()
+		fn := s.onConnect
+		s.onConnectMu.RUnlock()
+		if fn != nil {
+			c := conn
+			go fn(func(msg Message) {
+				if err := sendOne(c, msg); err != nil {
+					logger.Debug("ipc: onConnect send to %s failed: %v", c.RemoteAddr(), err)
+				} else {
+					logger.Debug("ipc: onConnect sent %q to %s", msg.Type, c.RemoteAddr())
+				}
+			})
+		}
+
 		go s.readLoop(conn)
 	}
 }
