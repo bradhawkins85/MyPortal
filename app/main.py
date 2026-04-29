@@ -13345,6 +13345,8 @@ async def admin_update_company(company_id: int, request: Request):
     xero_id_raw = str(form.get("xeroId", "")).strip()
     hudu_id_raw = str(form.get("huduId", "")).strip()
     trello_board_id_raw = str(form.get("trelloBoardId", "")).strip()
+    trello_api_key_raw = str(form.get("trelloApiKey", "")).strip()
+    trello_token_raw = str(form.get("trelloToken", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
     invoice_prepay_enabled = bool(form.get("invoicePrepay"))
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
@@ -13361,6 +13363,9 @@ async def admin_update_company(company_id: int, request: Request):
     payment_method = ",".join(_selected_methods) if _selected_methods else "invoice_prepay"
     raw_email_domains = form.get("emailDomains")
     email_domains_text = str(raw_email_domains) if raw_email_domains is not None else ""
+    existing = await company_repo.get_company_by_id(company_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     form_values = {
         "name": name,
         "syncro_company_id": syncro_company_raw,
@@ -13368,15 +13373,14 @@ async def admin_update_company(company_id: int, request: Request):
         "xero_id": xero_id_raw,
         "hudu_id": hudu_id_raw,
         "trello_board_id": trello_board_id_raw,
+        "trello_api_key": existing.get("trello_api_key") if not trello_api_key_raw else None,
+        "trello_token": existing.get("trello_token") if not trello_token_raw else None,
         "email_domains": email_domains_text,
         "is_vip": is_vip,
         "payment_method": payment_method,
         "require_po": require_po,
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
     }
-    existing = await company_repo.get_company_by_id(company_id)
-    if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     try:
         email_domains = company_domains.parse_email_domain_text(email_domains_text)
     except company_domains.EmailDomainError as exc:
@@ -13402,6 +13406,9 @@ async def admin_update_company(company_id: int, request: Request):
     xero_id = xero_id_raw or None
     hudu_id = hudu_id_raw or None
     trello_board_id = trello_board_id_raw or None
+    # Only update Trello credentials when a new value was submitted; blank means keep existing.
+    trello_api_key: str | None = trello_api_key_raw if trello_api_key_raw else (existing.get("trello_api_key") or None)
+    trello_token: str | None = trello_token_raw if trello_token_raw else (existing.get("trello_token") or None)
     updates: dict[str, Any] = {
         "name": name,
         "is_vip": 1 if is_vip else 0,
@@ -13410,6 +13417,8 @@ async def admin_update_company(company_id: int, request: Request):
         "xero_id": xero_id,
         "hudu_id": hudu_id,
         "trello_board_id": trello_board_id,
+        "trello_api_key": trello_api_key,
+        "trello_token": trello_token,
         "email_domains": email_domains,
         "payment_method": payment_method,
         "require_po": 1 if require_po else 0,

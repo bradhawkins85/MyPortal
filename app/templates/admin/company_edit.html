@@ -143,6 +143,66 @@
             <p class="form-help">Link this company to a Trello board. Cards created on the board will become tickets. Find the board ID in the board URL or via the Trello API.</p>
           </div>
           <div class="form-field">
+            <label class="form-label" for="edit-company-trello-api-key">Trello API key</label>
+            <input
+              id="edit-company-trello-api-key"
+              name="trelloApiKey"
+              class="form-input"
+              type="password"
+              autocomplete="off"
+              placeholder="{% if form_data.trello_api_key %}Key saved — enter to replace{% else %}Enter API key{% endif %}"
+              maxlength="255"
+            />
+            <p class="form-help">Stored securely. Leave blank to keep the existing value. Get your API key from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company-trello-token">Trello token</label>
+            <input
+              id="edit-company-trello-token"
+              name="trelloToken"
+              class="form-input"
+              type="password"
+              autocomplete="off"
+              placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter token{% endif %}"
+              maxlength="255"
+            />
+            <p class="form-help">Stored securely. Leave blank to keep the existing value. Generate a token via <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a> → click <strong>Token</strong>.</p>
+          </div>
+          {% if form_data.trello_board_id %}
+          <div class="form-field">
+            <label class="form-label">Register Trello webhook</label>
+            <div class="form-field__group">
+              <button
+                type="button"
+                class="button button--ghost"
+                id="trello-register-webhook-btn"
+                data-board-id="{{ form_data.trello_board_id or '' }}"
+              >Register webhook</button>
+            </div>
+            <p class="form-help" id="trello-register-status">Register this company's board with Trello so incoming card events create tickets.</p>
+          </div>
+          <script>
+            (function () {
+              var btn = document.getElementById('trello-register-webhook-btn');
+              if (!btn) return;
+              btn.addEventListener('click', async function () {
+                var boardId = btn.dataset.boardId;
+                var statusEl = document.getElementById('trello-register-status');
+                if (!boardId) { statusEl.textContent = 'Save the board ID first, then register the webhook.'; return; }
+                btn.disabled = true;
+                statusEl.textContent = 'Registering…';
+                try {
+                  var resp = await fetch('/api/integration-modules/trello/boards/' + encodeURIComponent(boardId) + '/register-webhook', {method: 'POST', headers: {'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || ''}});
+                  var data = await resp.json();
+                  if (resp.ok) { statusEl.textContent = 'Webhook registered successfully.'; }
+                  else { statusEl.textContent = 'Error: ' + (data.detail || 'Unknown error'); }
+                } catch (e) { statusEl.textContent = 'Request failed: ' + e.message; }
+                btn.disabled = false;
+              });
+            })();
+          </script>
+          {% endif %}
+          <div class="form-field">
             <label class="form-label" for="edit-company-email-domains">Email domains</label>
             <input
               id="edit-company-email-domains"
