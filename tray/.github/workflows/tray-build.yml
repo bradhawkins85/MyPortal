@@ -39,12 +39,15 @@ jobs:
           - goos: windows
             goarch: amd64
             ext: .exe
+            ui_ldflags_extra: ' -H windowsgui'
           - goos: darwin
             goarch: amd64
             ext: ''
+            ui_ldflags_extra: ''
           - goos: darwin
             goarch: arm64
             ext: ''
+            ui_ldflags_extra: ''
     defaults:
       run:
         working-directory: tray
@@ -73,7 +76,7 @@ jobs:
           GOFLAGS: '-tags nowebview'
         run: |
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
-          LDFLAGS="-X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=${VERSION}'"
+          LDFLAGS="-X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=${VERSION}'${{ matrix.ui_ldflags_extra }}"
           go build -ldflags "${LDFLAGS}" -o dist/${{ matrix.goos }}-${{ matrix.goarch }}/myportal-tray-ui${{ matrix.ext }} ./ui
       - uses: actions/upload-artifact@v4
         with:

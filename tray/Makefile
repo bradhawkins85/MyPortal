@@ -37,7 +37,7 @@ build-windows:
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/windows/myportal-tray-service.exe ./service
 	@echo "Building Windows amd64 UI (no-CGO, no webview)..."
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
-	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/windows/myportal-tray-ui.exe ./ui
+	  go build -ldflags "$(LDFLAGS) -H windowsgui" -o $(DIST)/windows/myportal-tray-ui.exe ./ui
 
 # -----------------------------------------------------------------------
 # macOS amd64 (Intel)
