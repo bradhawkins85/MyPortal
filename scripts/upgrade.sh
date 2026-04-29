@@ -513,8 +513,17 @@ build_tray_app() {
   echo "Tray app build complete. Binaries are in ${tray_dir}/dist/."
 
   # Build Windows MSI installer if WiX v4 is available.
-  # Install WiX via: dotnet tool install --global wix
+  # WiX v4 is installed via: dotnet tool install --global wix
+  # The dotnet global tools directory (~/.dotnet/tools) must be in PATH.
+  local wix_bin=""
   if command -v wix >/dev/null 2>&1; then
+    wix_bin="wix"
+  elif [[ -x "${HOME}/.dotnet/tools/wix" ]]; then
+    wix_bin="${HOME}/.dotnet/tools/wix"
+    export PATH="${HOME}/.dotnet/tools:${PATH}"
+  fi
+
+  if [[ -n "$wix_bin" ]]; then
     echo "WiX found; building Windows MSI installer…"
     if (cd "$tray_dir" && make build-msi); then
       echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"

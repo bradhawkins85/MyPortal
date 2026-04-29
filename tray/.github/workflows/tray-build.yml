@@ -162,15 +162,27 @@ jobs:
           path: artifacts
       - name: Package binary archives
         run: |
-          for dir in artifacts/tray-windows-amd64 artifacts/tray-darwin-amd64 artifacts/tray-darwin-arm64; do
+          for dir in artifacts/tray-*/; do
             [ -d "$dir" ] || continue
+            # Skip installer artifact directories (msi / pkg) — only zip raw binaries.
+            case "$(basename "$dir")" in
+              tray-windows-msi|tray-darwin-pkg) continue ;;
+            esac
             name=$(basename "$dir")
             zip -r "${name}.zip" "$dir"
           done
       - name: Stage installers
         run: |
-          cp artifacts/tray-windows-msi/myportal-tray.msi . 2>/dev/null || true
-          cp artifacts/tray-darwin-pkg/myportal-tray.pkg  . 2>/dev/null || true
+          if [ -f artifacts/tray-windows-msi/myportal-tray.msi ]; then
+            cp artifacts/tray-windows-msi/myportal-tray.msi .
+          else
+            echo "Warning: myportal-tray.msi artifact not found; MSI will be omitted from release." >&2
+          fi
+          if [ -f artifacts/tray-darwin-pkg/myportal-tray.pkg ]; then
+            cp artifacts/tray-darwin-pkg/myportal-tray.pkg .
+          else
+            echo "Warning: myportal-tray.pkg artifact not found; .pkg will be omitted from release." >&2
+          fi
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
