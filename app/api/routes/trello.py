@@ -129,7 +129,7 @@ async def _handle_create_card(
     company_id: int | None = int(company["id"]) if company else None
 
     card_name: str = str(card_data.get("name") or "").strip() or "(no title)"
-    card_desc: str = str(card_data.get("desc") or "").strip() or None  # type: ignore[assignment]
+    card_desc: str | None = str(card_data.get("desc") or "").strip() or None
 
     try:
         ticket = await tickets_service.create_ticket(

@@ -205,6 +205,9 @@ async def post_reply_comment(
     """Post a ticket reply as a comment on a Trello card."""
     plain_body = _strip_html(reply_html)
     if not plain_body:
+        logger.debug(
+            "Trello post_reply_comment: skipping empty body for card {}", card_id
+        )
         return
     author_label = author_display_name or "Staff"
     text = f"{author_label}: {plain_body}"
