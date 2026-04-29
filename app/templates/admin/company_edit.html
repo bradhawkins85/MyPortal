@@ -131,6 +131,18 @@
             </div>
           </div>
           <div class="form-field">
+            <label class="form-label" for="edit-company-trello-board">Trello board ID</label>
+            <input
+              id="edit-company-trello-board"
+              name="trelloBoardId"
+              class="form-input"
+              value="{{ form_data.trello_board_id or '' }}"
+              maxlength="255"
+              placeholder="e.g. 5abbe4b7ddc1b351ef961414"
+            />
+            <p class="form-help">Link this company to a Trello board. Cards created on the board will become tickets. Find the board ID in the board URL or via the Trello API.</p>
+          </div>
+          <div class="form-field">
             <label class="form-label" for="edit-company-email-domains">Email domains</label>
             <input
               id="edit-company-email-domains"

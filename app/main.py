@@ -95,6 +95,7 @@ from app.api.routes import (
     subscriptions as subscriptions_api,
     tag_exclusions,
     tickets as tickets_api,
+    trello as trello_api,
     users,
     system,
     uptimekuma,
@@ -1023,6 +1024,7 @@ app.include_router(uptimekuma.router)
 app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(xero.router)
+app.include_router(trello_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
@@ -13280,6 +13282,7 @@ async def admin_update_company(company_id: int, request: Request):
     tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
     hudu_id_raw = str(form.get("huduId", "")).strip()
+    trello_board_id_raw = str(form.get("trelloBoardId", "")).strip()
     is_vip = _parse_bool(form.get("isVip"))
     invoice_prepay_enabled = bool(form.get("invoicePrepay"))
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
@@ -13302,6 +13305,7 @@ async def admin_update_company(company_id: int, request: Request):
         "tacticalrmm_client_id": tactical_client_raw,
         "xero_id": xero_id_raw,
         "hudu_id": hudu_id_raw,
+        "trello_board_id": trello_board_id_raw,
         "email_domains": email_domains_text,
         "is_vip": is_vip,
         "payment_method": payment_method,
@@ -13335,6 +13339,7 @@ async def admin_update_company(company_id: int, request: Request):
     tactical_client_id = tactical_client_raw or None
     xero_id = xero_id_raw or None
     hudu_id = hudu_id_raw or None
+    trello_board_id = trello_board_id_raw or None
     updates: dict[str, Any] = {
         "name": name,
         "is_vip": 1 if is_vip else 0,
@@ -13342,6 +13347,7 @@ async def admin_update_company(company_id: int, request: Request):
         "tacticalrmm_client_id": tactical_client_id,
         "xero_id": xero_id,
         "hudu_id": hudu_id,
+        "trello_board_id": trello_board_id,
         "email_domains": email_domains,
         "payment_method": payment_method,
         "require_po": 1 if require_po else 0,
@@ -20918,10 +20924,12 @@ async def _render_modules_dashboard(
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
     uptimekuma_webhook_url = str(request.url_for("uptimekuma_receive_alert").replace(scheme="https"))
+    trello_webhook_url = str(request.url_for("trello_webhook_receive").replace(scheme="https"))
     extra = {
         "title": "Integration modules",
         "modules": modules,
         "uptimekuma_webhook_url": uptimekuma_webhook_url,
+        "trello_webhook_url": trello_webhook_url,
         "success_message": success_message,
         "error_message": error_message,
     }
