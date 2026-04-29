@@ -10,7 +10,11 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
+	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/getlantern/systray"
 
@@ -27,8 +31,38 @@ func runUI() {
 func onTrayReady() {
 	systray.SetTitle("MyPortal")
 	systray.SetTooltip("MyPortal Helpdesk")
-	systray.SetIcon(defaultIconICO())
+	systray.SetIcon(loadTrayIcon())
 	buildMenu(gConfig)
+}
+
+// loadTrayIcon attempts to download the branded tray icon from the portal
+// (`<portalURL>/tray/icon.ico`) and falls back to the built-in default if the
+// portal is unreachable or returns an invalid response. The portal serves
+// either an admin-uploaded custom .ico or one derived from the website
+// favicon, so this single fetch covers both cases.
+func loadTrayIcon() []byte {
+	if gPortalURL != "" {
+		url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get(url)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+				if readErr == nil && len(data) >= 4 &&
+					data[0] == 0x00 && data[1] == 0x00 &&
+					data[2] == 0x01 && data[3] == 0x00 {
+					return data
+				}
+				logger.Warn("Tray icon fetch returned invalid ICO data, falling back to default")
+			} else {
+				logger.Warn("Tray icon fetch HTTP %d, falling back to default", resp.StatusCode)
+			}
+		} else {
+			logger.Warn("Tray icon fetch failed: %v, falling back to default", err)
+		}
+	}
+	return defaultIconICO()
 }
 
 func onTrayExit() {
