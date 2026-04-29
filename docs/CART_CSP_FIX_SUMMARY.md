@@ -22,7 +22,7 @@ These errors prevented users from:
 The issue was traced to the CSP validation logic in `app/security/security_headers.py`. Specifically:
 
 1. The `_is_valid_csp_source()` method only accepted HTTPS URLs (line 174: `if not source.startswith("https://")`)
-2. The `PORTAL_URL` environment variable could be set to an HTTP URL (as shown in `.env.example`: `PORTAL_URL=http://localhost:8000`)
+2. The `PORTAL_URL` environment variable could be set to an HTTP URL (as shown in `.env.example`: `PORTAL_URL=https://localhost:8000`)
 3. When a non-HTTPS portal URL was configured, it failed validation and wasn't added to the CSP `form-action` directive
 4. The resulting CSP header only contained `form-action 'self'` without the portal URL as an allowed submission target
 
@@ -61,7 +61,7 @@ if not (source.startswith("https://") or source.startswith("http://")):
    ```
    or
    ```
-   form-action 'self' http://localhost:8000
+   form-action 'self' https://localhost:8000
    ```
 
 4. **Supports All Environments**: Works correctly in:
@@ -104,7 +104,7 @@ Ensure the `PORTAL_URL` environment variable is set correctly:
 
 **Development:**
 ```bash
-PORTAL_URL=http://localhost:8000
+PORTAL_URL=https://localhost:8000
 ```
 
 **Production:**
