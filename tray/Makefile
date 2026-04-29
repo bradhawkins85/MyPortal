@@ -79,12 +79,28 @@ build-darwin-universal: build-darwin-amd64 build-darwin-arm64
 # Windows MSI installer
 # Requires WiX v4: dotnet tool install --global wix --version "4.*"
 # (Pin to v4.x; WiX v7+ requires accepting the OSMF EULA which breaks unattended builds.)
+#
+# IMPORTANT: WiX v4 is Windows-only despite shipping as a .NET global tool.
+# On Linux/macOS the Directory/@Name validator always fails (WIX0389) because
+# it depends on Windows path semantics — see wixtoolset/issues#7154.
+# The MSI must therefore be built on a Windows host (or via a Windows CI
+# runner). On non-Windows hosts this target prints an explanatory message
+# and exits successfully so callers (e.g. scripts/upgrade.sh) don't fail.
 # -----------------------------------------------------------------------
+HOST_OS := $(shell uname -s 2>/dev/null || echo Unknown)
+
 build-msi: build-windows
-	@echo "Building Windows MSI installer..."
-	wix build installer/windows/myportal-tray.wxs \
-	    -d BinDir=$(CURDIR)/$(DIST)/windows \
-	    -o $(DIST)/windows/myportal-tray.msi
+	@case "$(HOST_OS)" in \
+	    MINGW*|MSYS*|CYGWIN*|Windows_NT) \
+	        echo "Building Windows MSI installer..."; \
+	        wix build installer/windows/myportal-tray.wxs \
+	            -d BinDir=$(CURDIR)/$(DIST)/windows \
+	            -o $(DIST)/windows/myportal-tray.msi ;; \
+	    *) \
+	        echo "Skipping MSI build: WiX v4 only supports Windows hosts (host: $(HOST_OS))."; \
+	        echo "Run 'make build-msi' on a Windows machine, or build via the GitHub Actions windows-latest runner."; \
+	        exit 0 ;; \
+	esac
 
 # -----------------------------------------------------------------------
 # macOS .pkg installer

@@ -611,17 +611,33 @@ build_tray_app() {
   # build-windows).  We do not run build-all first because that includes
   # macOS targets which require lipo/pkgbuild and therefore fail on Linux
   # hosts, causing an early return that skips the MSI entirely.
-  if ensure_wix; then
-    echo "Building Windows MSI installer…"
-    if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
-      echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
-    else
-      echo "Warning: MSI build failed." >&2
-    fi
-  else
-    echo "Warning: WiX v4 not available; skipping MSI build." >&2
-    echo "Install WiX v4 manually with: dotnet tool install --global wix --version \"4.*\"" >&2
-  fi
+  #
+  # WiX v4 is Windows-only (see wixtoolset/issues#7154): the Directory/@Name
+  # validator depends on Windows path semantics and always fails on
+  # Linux/macOS with WIX0389.  So on non-Windows hosts we don't even try —
+  # the Makefile target itself also short-circuits, but skipping here keeps
+  # the upgrade output free of the misleading "WiX not available" warning.
+  local host_os
+  host_os=$(uname -s 2>/dev/null || echo Unknown)
+  case "$host_os" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      if ensure_wix; then
+        echo "Building Windows MSI installer…"
+        if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
+          echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
+        else
+          echo "Warning: MSI build failed." >&2
+        fi
+      else
+        echo "Warning: WiX v4 not available; skipping MSI build." >&2
+        echo "Install WiX v4 manually with: dotnet tool install --global wix --version \"4.*\"" >&2
+      fi
+      ;;
+    *)
+      echo "Skipping MSI build: WiX v4 only supports Windows hosts (host: ${host_os})."
+      echo "Build the MSI on a Windows machine and copy it to ${static_tray_dir}/myportal-tray.msi."
+      ;;
+  esac
 
   # Copy any built installers to app/static/tray/ so they are served via HTTP.
   mkdir -p "$static_tray_dir"

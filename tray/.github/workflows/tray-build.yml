@@ -83,7 +83,10 @@ jobs:
   build-msi:
     name: Build Windows MSI installer
     needs: build
-    runs-on: ubuntu-latest
+    # WiX v4 is Windows-only (see wixtoolset/issues#7154); the Directory/@Name
+    # validator always fails on Linux/macOS. Use a Windows runner so the MSI
+    # actually builds.
+    runs-on: windows-latest
     defaults:
       run:
         working-directory: tray
@@ -99,9 +102,10 @@ jobs:
           name: tray-windows-amd64
           path: tray/dist/windows
       - name: Build MSI
+        shell: pwsh
         run: |
-          wix build installer/windows/myportal-tray.wxs \
-            -d BinDir=$(pwd)/dist/windows \
+          wix build installer/windows/myportal-tray.wxs `
+            -d BinDir="$(Resolve-Path dist/windows)" `
             -o dist/windows/myportal-tray.msi
       - uses: actions/upload-artifact@v4
         with:
