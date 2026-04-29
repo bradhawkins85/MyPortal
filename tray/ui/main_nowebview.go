@@ -1,9 +1,9 @@
 //go:build nowebview
 
-// main_nowebview.go provides a minimal tray UI agent that runs without
-// the systray or webview libraries (CGO=0, cross-compiled builds).
-// The agent still connects to the IPC socket and opens chat/browser URLs
-// via the OS default handler.
+// main_nowebview.go provides the shared logic for the tray UI agent when
+// built without the webview library (CGO=0, cross-compiled builds).
+// On Windows a real system-tray icon is shown via getlantern/systray (pure Go).
+// On other platforms the process stays alive headlessly and handles IPC only.
 package main
 
 import (
@@ -38,29 +38,63 @@ var (
 	gConfig    *api.ConfigResponse
 	gIPCConn   net.Conn
 	gPortalURL string
+
+	// onConfigChanged is set by the platform-specific runUI implementation to
+	// rebuild the tray menu whenever a config_changed IPC message is received.
+	onConfigChanged func(*api.ConfigResponse)
 )
 
 func main() {
 	_ = logger.Init("ui")
-	logger.Info("MyPortal Tray UI (headless/nowebview mode) starting")
+	logger.Info("MyPortal Tray UI starting")
 
+	// Prefer the environment variable, then fall back to the state file written
+	// by the service.
 	gPortalURL = os.Getenv("MYPORTAL_URL")
+	if gPortalURL == "" {
+		p := filepath.Join(stateDir(), "tray-state.json")
+		if data, err := os.ReadFile(p); err == nil {
+			var state struct {
+				PortalURL string `json:"portal_url"`
+			}
+			if err := json.Unmarshal(data, &state); err != nil {
+				logger.Warn("Failed to parse tray-state.json: %v", err)
+			} else {
+				gPortalURL = state.PortalURL
+			}
+		}
+	}
+
 	gConfig = loadCachedConfig()
 	go connectIPC()
 
-	// Block forever — the service will send an OS signal to terminate.
-	select {}
+	// runUI is provided by the platform-specific file:
+	//   tray_nowebview_windows.go  – shows a real systray icon on Windows
+	//   tray_nowebview_other.go    – blocks headlessly on macOS/Linux
+	runUI()
+}
+
+func defaultConfig() *api.ConfigResponse {
+	return &api.ConfigResponse{
+		Version: 0,
+		Menu: []api.MenuNode{
+			{Type: "label", Label: "MyPortal"},
+			{Type: "separator"},
+			{Type: "open_chat", Label: "Chat with helpdesk"},
+		},
+		ChatEnabled: true,
+	}
 }
 
 func loadCachedConfig() *api.ConfigResponse {
 	path := filepath.Join(stateDir(), configCacheName)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return &api.ConfigResponse{ChatEnabled: true}
+		return defaultConfig()
 	}
 	var cfg api.ConfigResponse
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return &api.ConfigResponse{ChatEnabled: true}
+		return defaultConfig()
 	}
 	return &cfg
 }
@@ -123,6 +157,9 @@ func handleIPCMessages(conn net.Conn) {
 			openBrowser(buildChatURL(payload.RoomID))
 		case "config_changed":
 			gConfig = loadCachedConfig()
+			if onConfigChanged != nil {
+				onConfigChanged(gConfig)
+			}
 		case "show_notification":
 			var n struct {
 				Title string `json:"title"`
