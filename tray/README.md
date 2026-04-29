@@ -46,7 +46,8 @@ Binaries land in `dist/<platform>/`.
 ### Build installer packages
 
 ```sh
-# Windows MSI (requires WiX v4 — works on Linux/macOS/Windows)
+# Windows MSI (requires WiX v4 on a Windows host — WiX v4 does not support
+# building on Linux/macOS, see wixtoolset/issues#7154)
 make build-msi          # produces dist/windows/myportal-tray.msi
 
 # macOS .pkg (requires pkgbuild — macOS only)
@@ -58,7 +59,10 @@ make package-all
 
 The built installers must be copied to `app/static/tray/` on the MyPortal server so
 they are served at `/static/tray/myportal-tray.msi` and `/static/tray/myportal-tray.pkg`.
-The `scripts/upgrade.sh` handles this automatically when WiX is installed on the server.
+The `scripts/upgrade.sh` handles this automatically when WiX is installed on a
+Windows host. On Linux/macOS upgrade hosts the MSI build is skipped (WiX v4 is
+Windows-only) — build the MSI separately on Windows and copy it into
+`app/static/tray/myportal-tray.msi`.
 
 ### With native webview (requires CGO)
 
