@@ -535,18 +535,19 @@ ensure_dotnet() {
 
 ensure_wix() {
   # Add dotnet global tools directory to PATH so installed tools are found.
-  # We deliberately pin to the v4.x stream because WiX v7 introduced a
-  # mandatory Open Source Maintenance Fee (OSMF) EULA acceptance that
-  # breaks unattended `wix build` invocations (error WIX7015).
+  # WiX v7 requires accepting the FireGiant Open Source Maintenance Fee
+  # (OSMF) EULA. We pass `-acceptEula wix7` on the `wix build` command line
+  # per https://docs.firegiant.com/wix/osmf/ so unattended builds do not
+  # fail with WIX7015.
   export PATH="${HOME}/.dotnet/tools:${PATH}"
 
   if command -v wix >/dev/null 2>&1; then
     local current_version
     current_version=$(wix --version 2>/dev/null | head -n1 | awk '{print $1}')
-    if [[ "$current_version" == 4.* ]]; then
+    if [[ "$current_version" == 7.* ]]; then
       return 0
     fi
-    echo "Found WiX version ${current_version:-unknown}; replacing with v4 to avoid OSMF EULA requirement…"
+    echo "Found WiX version ${current_version:-unknown}; replacing with v7…"
     if [[ -n "$DOTNET_BIN" ]] || ensure_dotnet; then
       "$DOTNET_BIN" tool uninstall --global wix >/dev/null 2>&1 || true
     fi
@@ -559,11 +560,11 @@ ensure_wix() {
     fi
   fi
 
-  echo "WiX v4 not found; installing via dotnet tool install…"
-  if ! "$DOTNET_BIN" tool install --global wix --version "4.*" 2>/dev/null; then
+  echo "WiX v7 not found; installing via dotnet tool install…"
+  if ! "$DOTNET_BIN" tool install --global wix --version "7.*" 2>/dev/null; then
     # If the tool is already installed but outdated, update it.
-    if ! "$DOTNET_BIN" tool update --global wix --version "4.*" 2>/dev/null; then
-      echo "Warning: Failed to install WiX v4 via dotnet tool install." >&2
+    if ! "$DOTNET_BIN" tool update --global wix --version "7.*" 2>/dev/null; then
+      echo "Warning: Failed to install WiX v7 via dotnet tool install." >&2
       return 1
     fi
   fi
@@ -572,11 +573,11 @@ ensure_wix() {
   export PATH="${HOME}/.dotnet/tools:${PATH}"
 
   if command -v wix >/dev/null 2>&1; then
-    echo "WiX v4 installed successfully."
+    echo "WiX v7 installed successfully."
     return 0
   fi
 
-  echo "Warning: WiX v4 installed but wix binary not found on PATH." >&2
+  echo "Warning: WiX v7 installed but wix binary not found on PATH." >&2
   return 1
 }
 
@@ -611,17 +612,33 @@ build_tray_app() {
   # build-windows).  We do not run build-all first because that includes
   # macOS targets which require lipo/pkgbuild and therefore fail on Linux
   # hosts, causing an early return that skips the MSI entirely.
-  if ensure_wix; then
-    echo "Building Windows MSI installer…"
-    if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
-      echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
-    else
-      echo "Warning: MSI build failed." >&2
-    fi
-  else
-    echo "Warning: WiX v4 not available; skipping MSI build." >&2
-    echo "Install WiX v4 manually with: dotnet tool install --global wix --version \"4.*\"" >&2
-  fi
+  #
+  # WiX is Windows-only (see wixtoolset/issues#7154): the Directory/@Name
+  # validator depends on Windows path semantics and always fails on
+  # Linux/macOS with WIX0389.  So on non-Windows hosts we don't even try —
+  # the Makefile target itself also short-circuits, but skipping here keeps
+  # the upgrade output free of the misleading "WiX not available" warning.
+  local host_os
+  host_os=$(uname -s 2>/dev/null || echo Unknown)
+  case "$host_os" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      if ensure_wix; then
+        echo "Building Windows MSI installer…"
+        if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
+          echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
+        else
+          echo "Warning: MSI build failed." >&2
+        fi
+      else
+        echo "Warning: WiX v7 not available; skipping MSI build." >&2
+        echo "Install WiX v7 manually with: dotnet tool install --global wix --version \"7.*\"" >&2
+      fi
+      ;;
+    *)
+      echo "Skipping MSI build: WiX only supports Windows hosts (host: ${host_os})."
+      echo "Build the MSI on a Windows machine and copy it to ${static_tray_dir}/myportal-tray.msi."
+      ;;
+  esac
 
   # Copy any built installers to app/static/tray/ so they are served via HTTP.
   mkdir -p "$static_tray_dir"

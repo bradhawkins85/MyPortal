@@ -83,7 +83,10 @@ jobs:
   build-msi:
     name: Build Windows MSI installer
     needs: build
-    runs-on: ubuntu-latest
+    # WiX is Windows-only (see wixtoolset/issues#7154); the Directory/@Name
+    # validator always fails on Linux/macOS. Use a Windows runner so the MSI
+    # actually builds.
+    runs-on: windows-latest
     defaults:
       run:
         working-directory: tray
@@ -92,16 +95,20 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0'
-      - name: Install WiX v4
-        run: dotnet tool install --global wix --version "4.*"
+      - name: Install WiX v7
+        run: dotnet tool install --global wix --version "7.*"
       - uses: actions/download-artifact@v4
         with:
           name: tray-windows-amd64
           path: tray/dist/windows
       - name: Build MSI
+        # `-acceptEula wix7` accepts the FireGiant OSMF EULA non-interactively
+        # so the build does not fail with WIX7015. See
+        # https://docs.firegiant.com/wix/osmf/
+        shell: pwsh
         run: |
-          wix build installer/windows/myportal-tray.wxs \
-            -d BinDir=$(pwd)/dist/windows \
+          wix build -acceptEula wix7 installer/windows/myportal-tray.wxs `
+            -d BinDir="$(Resolve-Path dist/windows)" `
             -o dist/windows/myportal-tray.msi
       - uses: actions/upload-artifact@v4
         with:

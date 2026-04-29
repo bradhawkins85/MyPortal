@@ -331,7 +331,7 @@ install_exo_module() {
 }
 
 # ---------------------------------------------------------------------------
-# .NET SDK + WiX v4 – required for building the Windows MSI tray installer
+# .NET SDK + WiX v7 – required for building the Windows MSI tray installer
 # ---------------------------------------------------------------------------
 
 install_dotnet() {
@@ -372,20 +372,21 @@ install_dotnet() {
 }
 
 install_wix() {
-  # WiX v4 is a .NET global tool installed per-user under ~/.dotnet/tools.
-  # We deliberately pin to the v4.x stream because WiX v7 introduced a
-  # mandatory Open Source Maintenance Fee (OSMF) EULA acceptance that
-  # breaks unattended `wix build` invocations (error WIX7015).
+  # WiX v7 is a .NET global tool installed per-user under ~/.dotnet/tools.
+  # WiX v7 requires accepting the FireGiant Open Source Maintenance Fee
+  # (OSMF) EULA. We pass `-acceptEula wix7` on the `wix build` command line
+  # per https://docs.firegiant.com/wix/osmf/ so unattended builds do not
+  # fail with WIX7015.
   export PATH="${HOME}/.dotnet/tools:${PATH}"
 
   if command -v wix >/dev/null 2>&1; then
     local current_version
     current_version=$(wix --version 2>/dev/null | head -n1 | awk '{print $1}')
-    if [[ "$current_version" == 4.* ]]; then
-      echo "WiX v4 is already installed (version ${current_version})." >&2
+    if [[ "$current_version" == 7.* ]]; then
+      echo "WiX v7 is already installed (version ${current_version})." >&2
       return
     fi
-    echo "Found WiX version ${current_version:-unknown}; replacing with v4 to avoid OSMF EULA requirement…" >&2
+    echo "Found WiX version ${current_version:-unknown}; replacing with v7…" >&2
     local dotnet_bin_uninstall
     dotnet_bin_uninstall=$(command -v dotnet 2>/dev/null || true)
     if [[ -n "$dotnet_bin_uninstall" ]]; then
@@ -397,16 +398,16 @@ install_wix() {
   dotnet_bin=$(command -v dotnet 2>/dev/null || true)
 
   if [[ -z "$dotnet_bin" ]]; then
-    echo "Warning: dotnet not available – skipping WiX v4 installation." >&2
+    echo "Warning: dotnet not available – skipping WiX v7 installation." >&2
     return
   fi
 
-  echo "Installing WiX v4 (dotnet global tool)…" >&2
+  echo "Installing WiX v7 (dotnet global tool)…" >&2
 
-  if ! "$dotnet_bin" tool install --global wix --version "4.*" 2>/dev/null; then
+  if ! "$dotnet_bin" tool install --global wix --version "7.*" 2>/dev/null; then
     # Already installed at a different version; try updating instead.
-    if ! "$dotnet_bin" tool update --global wix --version "4.*" 2>/dev/null; then
-      echo "Warning: Failed to install WiX v4." >&2
+    if ! "$dotnet_bin" tool update --global wix --version "7.*" 2>/dev/null; then
+      echo "Warning: Failed to install WiX v7." >&2
       return
     fi
   fi
@@ -415,9 +416,9 @@ install_wix() {
   export PATH="${HOME}/.dotnet/tools:${PATH}"
 
   if command -v wix >/dev/null 2>&1; then
-    echo "WiX v4 installed successfully." >&2
+    echo "WiX v7 installed successfully." >&2
   else
-    echo "Warning: WiX v4 installed but wix binary not found on PATH." >&2
+    echo "Warning: WiX v7 installed but wix binary not found on PATH." >&2
     echo "Add \${HOME}/.dotnet/tools to PATH to use it." >&2
   fi
 }
@@ -520,7 +521,7 @@ build_tray_installers() {
   export PATH="${HOME}/.dotnet/tools:${PATH}"
 
   if ! command -v wix >/dev/null 2>&1; then
-    echo "WiX v4 not available; skipping MSI build." >&2
+    echo "WiX v7 not available; skipping MSI build." >&2
     return
   fi
 
