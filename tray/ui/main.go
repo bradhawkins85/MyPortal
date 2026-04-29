@@ -52,6 +52,7 @@ var (
 
 func main() {
 	_ = logger.Init("ui")
+	logger.Info("MyPortal Tray UI (webview) starting")
 
 	gPortalURL = os.Getenv("MYPORTAL_URL")
 	if p := filepath.Join(stateDir(), "tray-state.json"); gPortalURL == "" {
