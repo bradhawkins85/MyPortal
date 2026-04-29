@@ -1,0 +1,32 @@
+#!/bin/bash
+# Package postinstall script — runs as root after the pkg payload is extracted.
+# Loads the LaunchDaemon and registers the LaunchAgent for all current users.
+set -euo pipefail
+
+BIN_DIR="/Library/MyPortal/Tray"
+DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
+AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
+LOG_DIR="/Library/Logs/MyPortal/tray"
+
+# Create log directory.
+mkdir -p "$LOG_DIR"
+chmod 755 "$LOG_DIR"
+
+# Make binaries executable.
+chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui"
+
+# Load the daemon (stops and reloads if already running).
+if launchctl list io.myportal.tray.service &>/dev/null; then
+    launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
+fi
+launchctl load -w "$DAEMON_PLIST"
+
+# Register the agent for all currently logged-in users.
+# New user sessions will pick it up automatically from /Library/LaunchAgents.
+for uid in $(ps -axo uid= -c Aqua 2>/dev/null | sort -u); do
+    if [[ "$uid" -ge 500 ]]; then
+        launchctl asuser "$uid" launchctl load -w "$AGENT_PLIST" 2>/dev/null || true
+    fi
+done
+
+echo "MyPortal Tray postinstall complete."

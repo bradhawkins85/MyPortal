@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">{{ heading }}</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header">
+      <p class="card__lede">Build the menu tree using the form below. Drag the rows to reorder, or use the JSON view as a fallback for advanced edits.</p>
+    </header>
+    <div class="card__body">
+      <form method="post" action="{{ form_action }}" class="form-stack" id="tray-config-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+        <div class="form-row">
+          <div class="form-field">
+            <label class="form-label" for="config-name">Name</label>
+            <input class="form-input" id="config-name" name="name" required maxlength="150" value="{{ config.name or '' }}" />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="config-scope">Scope</label>
+            <select class="form-input" id="config-scope" name="scope">
+              {% for scope in ['global', 'company', 'tag', 'device'] %}
+                <option value="{{ scope }}" {% if config.scope == scope %}selected{% endif %}>{{ scope|capitalize }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="config-scope-ref">Scope target ID</label>
+            <input class="form-input" id="config-scope-ref" name="scope_ref_id" type="number" value="{{ config.scope_ref_id or '' }}" placeholder="Company / Asset / Tag ID" />
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label>
+              <input type="checkbox" name="enabled" {% if config.enabled %}checked{% endif %} value="1" />
+              Enabled
+            </label>
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="config-display-text">Display text (rich)</label>
+          <textarea class="form-input" id="config-display-text" name="display_text" rows="4">{{ config.display_text or '' }}</textarea>
+          <p class="form-help">Shown when a "Display text" menu node is clicked. HTML is sanitised server-side.</p>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="config-env-allowlist">Environment variable allowlist (comma separated)</label>
+          <input class="form-input" id="config-env-allowlist" name="env_allowlist" value="{{ config.env_allowlist_csv or '' }}" placeholder="e.g. USERDOMAIN,USERNAME,COMPUTERNAME" />
+          <p class="form-help">Only variables listed here may be requested by an "Env var" menu node. Values are read by the tray client and never persisted on the server.</p>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="config-branding">Branding icon URL</label>
+          <input class="form-input" id="config-branding" name="branding_icon_url" type="url" value="{{ config.branding_icon_url or '' }}" placeholder="https://…" />
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="config-payload">Menu nodes (JSON)</label>
+          <textarea class="form-input form-input--code" id="config-payload" name="payload_json" rows="14" required>{{ config.payload_json or '[]' }}</textarea>
+          <p class="form-help">
+            Each node is an object with a <code>type</code> of
+            <code>label</code>, <code>link</code>, <code>submenu</code>, <code>display_text</code>,
+            <code>env_var</code>, <code>open_chat</code>, or <code>separator</code>.
+            See <a href="/docs/tray_app">docs/tray_app</a> for the schema.
+          </p>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Save configuration</button>
+          <a href="/admin/tray/configurations" class="button button--ghost">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the MyPortal Tray per-session UI agent.
+  Installed to /Library/LaunchAgents/io.myportal.tray.agent.plist
+  and loaded per-user by the postinstall script (or automatically by
+  launchd at next user login).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.myportal.tray.agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/MyPortal/Tray/myportal-tray-ui</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/io.myportal.tray.agent.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/io.myportal.tray.agent.stderr.log</string>
+
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+</dict>
+</plist>
