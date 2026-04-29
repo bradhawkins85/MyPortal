@@ -582,52 +582,13 @@
               </div>
             {% elif module.slug == 'trello' %}
               <div class="form-field">
-                <label class="form-label" for="trello-api-key">API key</label>
-                <input id="trello-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
-                <p class="form-help">Keys are stored securely. Leave blank to keep the existing value. Get your API key from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="trello-token">Token</label>
-                <input id="trello-token" name="settings.token" class="form-input" type="password" autocomplete="off" placeholder="Enter a new token" />
-                <p class="form-help">Tokens are stored securely. Leave blank to keep the existing value. Generate a token via <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a> → click <strong>Token</strong>.</p>
+                <p class="form-help">API credentials (API key and token) are now configured per company. Visit <strong>Admin → Companies → Edit</strong> for each company to enter its Trello board ID, API key, and token.</p>
               </div>
               <div class="form-field">
                 <label class="form-label" for="trello-webhook-url">Webhook URL</label>
                 <input id="trello-webhook-url" class="form-input" value="{{ trello_webhook_url }}" readonly />
-                <p class="form-help">Register this URL as a Trello webhook for each board you link to a company. Use the <strong>Register webhook</strong> button below after entering a board ID, or call the Trello API directly.</p>
+                <p class="form-help">Register this URL as a Trello webhook for each board you link to a company. Use the <strong>Register webhook</strong> button on the company edit page, or call the Trello API directly.</p>
               </div>
-              <div class="form-field">
-                <label class="form-label" for="trello-register-board-id">Register webhook for board</label>
-                <div class="form-field__group">
-                  <input id="trello-register-board-id" class="form-input" placeholder="Board ID" />
-                  <button
-                    type="button"
-                    class="button button--ghost"
-                    id="trello-register-webhook-btn"
-                  >Register</button>
-                </div>
-                <p class="form-help" id="trello-register-status"></p>
-              </div>
-              <script>
-                (function () {
-                  var btn = document.getElementById('trello-register-webhook-btn');
-                  if (!btn) return;
-                  btn.addEventListener('click', async function () {
-                    var boardId = (document.getElementById('trello-register-board-id').value || '').trim();
-                    var statusEl = document.getElementById('trello-register-status');
-                    if (!boardId) { statusEl.textContent = 'Enter a board ID first.'; return; }
-                    btn.disabled = true;
-                    statusEl.textContent = 'Registering…';
-                    try {
-                      var resp = await fetch('/api/integration-modules/trello/boards/' + encodeURIComponent(boardId) + '/register-webhook', {method: 'POST', headers: {'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || ''}});
-                      var data = await resp.json();
-                      if (resp.ok) { statusEl.textContent = 'Webhook registered successfully.'; }
-                      else { statusEl.textContent = 'Error: ' + (data.detail || 'Unknown error'); }
-                    } catch (e) { statusEl.textContent = 'Request failed: ' + e.message; }
-                    btn.disabled = false;
-                  });
-                })();
-              </script>
             {% else %}
               {% for key, value in settings.items() %}
                 <div class="form-field">

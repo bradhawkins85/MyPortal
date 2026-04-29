@@ -33,21 +33,24 @@ class TrelloAuthError(RuntimeError):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-async def _get_credentials() -> tuple[str, str]:
-    """Return ``(api_key, token)`` from module settings.
+async def _get_credentials_for_company(company: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(api_key, token)`` from a company record.
 
-    Raises :exc:`TrelloModuleDisabledError` if the module is absent or
-    disabled, and :exc:`TrelloAuthError` if the credentials are blank.
+    Raises :exc:`TrelloAuthError` if the credentials are blank.
     """
-    module = await module_repo.get_module(TRELLO_MODULE_SLUG)
-    if not module or not module.get("enabled"):
-        raise TrelloModuleDisabledError("Trello module is not enabled")
-    settings = module.get("settings") or {}
-    api_key = str(settings.get("api_key") or "").strip()
-    token = str(settings.get("token") or "").strip()
+    api_key = str(company.get("trello_api_key") or "").strip()
+    token = str(company.get("trello_token") or "").strip()
     if not api_key or not token:
-        raise TrelloAuthError("Trello API key or token not configured")
+        raise TrelloAuthError(
+            f"Trello API key or token not configured for company {company.get('id')}"
+        )
     return api_key, token
+
+
+async def _get_module_enabled() -> bool:
+    """Return True if the Trello module is enabled."""
+    module = await module_repo.get_module(TRELLO_MODULE_SLUG)
+    return bool(module and module.get("enabled"))
 
 
 def _strip_html(value: str) -> str:
@@ -78,17 +81,31 @@ def _strip_html(value: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def add_comment_to_card(card_id: str, text: str) -> dict[str, Any] | None:
+async def add_comment_to_card(
+    card_id: str,
+    text: str,
+    *,
+    company: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Post a comment on a Trello card.
 
     The comment is prefixed with :data:`MYPORTAL_COMMENT_PREFIX` so that the
     webhook handler can identify and skip our own comments, preventing loops.
 
+    *company* should be the full company record so that per-company credentials
+    can be retrieved.  If not provided, the call is skipped.
+
     Returns the created comment object on success, or ``None`` on failure.
     """
+    if not await _get_module_enabled():
+        logger.debug("Trello add_comment_to_card skipped: module not enabled")
+        return None
+    if not company:
+        logger.debug("Trello add_comment_to_card skipped: no company provided")
+        return None
     try:
-        api_key, token = await _get_credentials()
-    except (TrelloModuleDisabledError, TrelloAuthError) as exc:
+        api_key, token = await _get_credentials_for_company(company)
+    except TrelloAuthError as exc:
         logger.debug("Trello add_comment_to_card skipped: {}", exc)
         return None
 
@@ -115,11 +132,21 @@ async def add_comment_to_card(card_id: str, text: str) -> dict[str, Any] | None:
         return None
 
 
-async def get_card(card_id: str) -> dict[str, Any] | None:
+async def get_card(
+    card_id: str,
+    *,
+    company: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Fetch a Trello card by ID."""
+    if not await _get_module_enabled():
+        logger.debug("Trello get_card skipped: module not enabled")
+        return None
+    if not company:
+        logger.debug("Trello get_card skipped: no company provided")
+        return None
     try:
-        api_key, token = await _get_credentials()
-    except (TrelloModuleDisabledError, TrelloAuthError) as exc:
+        api_key, token = await _get_credentials_for_company(company)
+    except TrelloAuthError as exc:
         logger.debug("Trello get_card skipped: {}", exc)
         return None
 
@@ -143,14 +170,27 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
         return None
 
 
-async def register_webhook(board_id: str, callback_url: str) -> dict[str, Any] | None:
+async def register_webhook(
+    board_id: str,
+    callback_url: str,
+    *,
+    company: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Register a Trello webhook for *board_id* pointing to *callback_url*.
+
+    *company* must be the full company record with per-company Trello credentials.
 
     Returns the created webhook object on success, or ``None`` on failure.
     """
+    if not await _get_module_enabled():
+        logger.debug("Trello register_webhook skipped: module not enabled")
+        return None
+    if not company:
+        logger.debug("Trello register_webhook skipped: no company provided")
+        return None
     try:
-        api_key, token = await _get_credentials()
-    except (TrelloModuleDisabledError, TrelloAuthError) as exc:
+        api_key, token = await _get_credentials_for_company(company)
+    except TrelloAuthError as exc:
         logger.debug("Trello register_webhook skipped: {}", exc)
         return None
 
@@ -191,16 +231,23 @@ async def find_ticket_for_card(card_id: str) -> dict[str, Any] | None:
     return await tickets_repo.get_ticket_by_external_reference(card_id)
 
 
-async def post_ticket_created_comment(card_id: str, ticket_number: str | int) -> None:
+async def post_ticket_created_comment(
+    card_id: str,
+    ticket_number: str | int,
+    *,
+    company: dict[str, Any] | None = None,
+) -> None:
     """Post a 'Support Ticket Created' confirmation comment on a Trello card."""
     text = f"Support Ticket Created - Ticket #{ticket_number}"
-    await add_comment_to_card(card_id, text)
+    await add_comment_to_card(card_id, text, company=company)
 
 
 async def post_reply_comment(
     card_id: str,
     author_display_name: str | None,
     reply_html: str,
+    *,
+    company: dict[str, Any] | None = None,
 ) -> None:
     """Post a ticket reply as a comment on a Trello card."""
     plain_body = _strip_html(reply_html)
@@ -211,18 +258,18 @@ async def post_reply_comment(
         return
     author_label = author_display_name or "Staff"
     text = f"{author_label}: {plain_body}"
-    await add_comment_to_card(card_id, text)
+    await add_comment_to_card(card_id, text, company=company)
 
 
-async def validate_credentials() -> dict[str, Any]:
-    """Validate Trello credentials by calling the /members/me endpoint.
+async def validate_credentials_for_company(company: dict[str, Any]) -> dict[str, Any]:
+    """Validate Trello credentials for a company by calling the /members/me endpoint.
 
     Returns a dict with ``status`` of ``"ok"`` or ``"error"``.
     """
+    if not await _get_module_enabled():
+        return {"status": "error", "message": "Trello module is not enabled"}
     try:
-        api_key, token = await _get_credentials()
-    except TrelloModuleDisabledError as exc:
-        return {"status": "error", "message": str(exc)}
+        api_key, token = await _get_credentials_for_company(company)
     except TrelloAuthError as exc:
         return {"status": "error", "message": str(exc)}
 
@@ -245,3 +292,18 @@ async def validate_credentials() -> dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "error", "message": f"Failed to connect to Trello: {exc}"}
+
+
+async def validate_credentials() -> dict[str, Any]:
+    """Kept for backwards compatibility; validate is now per-company.
+
+    Returns an informational message directing admins to configure credentials
+    on each company's edit page.
+    """
+    module = await module_repo.get_module(TRELLO_MODULE_SLUG)
+    if not module or not module.get("enabled"):
+        return {"status": "error", "message": "Trello module is not enabled"}
+    return {
+        "status": "ok",
+        "message": "Trello module is enabled. API credentials are configured per company.",
+    }

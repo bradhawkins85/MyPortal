@@ -17,6 +17,8 @@ class CompanyBase(BaseModel):
     archived: Optional[int] = None
     email_domains: list[str] = Field(default_factory=list)
     trello_board_id: Optional[str] = None
+    trello_api_key: Optional[str] = None
+    trello_token: Optional[str] = None
 
     @field_validator("email_domains", mode="after")
     @classmethod
@@ -41,6 +43,8 @@ class CompanyUpdate(BaseModel):
     archived: Optional[int] = None
     email_domains: Optional[list[str]] = None
     trello_board_id: Optional[str] = None
+    trello_api_key: Optional[str] = None
+    trello_token: Optional[str] = None
 
 
 class CompanyResponse(CompanyBase):
