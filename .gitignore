@@ -20,3 +20,5 @@ myportal.db
 build/
 test_output.txt
 full_test_output.txt
+app/static/tray/*.msi
+app/static/tray/*.msi.etag
