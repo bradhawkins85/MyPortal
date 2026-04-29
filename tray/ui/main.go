@@ -114,9 +114,6 @@ func onTrayExit() {
 
 // buildMenu constructs the systray menu from a ConfigResponse.
 func buildMenu(cfg *api.ConfigResponse) {
-	// Clear existing items.
-	systray.ResetMenu()
-
 	if cfg == nil {
 		cfg = defaultConfig()
 	}
@@ -240,9 +237,9 @@ func handleIPCMessages(conn net.Conn) {
 			openChatWindow(chatURL, gConfig)
 
 		case "config_changed":
-			// Re-read cached config and rebuild menu.
+			// Re-read cached config. Menu rebuild on config_changed is deferred
+			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()
-			buildMenu(gConfig)
 
 		case "show_notification":
 			var n struct {
