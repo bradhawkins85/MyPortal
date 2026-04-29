@@ -77,7 +77,8 @@ build-darwin-universal: build-darwin-amd64 build-darwin-arm64
 
 # -----------------------------------------------------------------------
 # Windows MSI installer
-# Requires WiX v4: dotnet tool install --global wix
+# Requires WiX v4: dotnet tool install --global wix --version "4.*"
+# (Pin to v4.x; WiX v7+ requires accepting the OSMF EULA which breaks unattended builds.)
 # -----------------------------------------------------------------------
 build-msi: build-windows
 	@echo "Building Windows MSI installer..."

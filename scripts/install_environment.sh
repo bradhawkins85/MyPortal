@@ -373,11 +373,24 @@ install_dotnet() {
 
 install_wix() {
   # WiX v4 is a .NET global tool installed per-user under ~/.dotnet/tools.
+  # We deliberately pin to the v4.x stream because WiX v7 introduced a
+  # mandatory Open Source Maintenance Fee (OSMF) EULA acceptance that
+  # breaks unattended `wix build` invocations (error WIX7015).
   export PATH="${HOME}/.dotnet/tools:${PATH}"
 
   if command -v wix >/dev/null 2>&1; then
-    echo "WiX v4 is already installed." >&2
-    return
+    local current_version
+    current_version=$(wix --version 2>/dev/null | head -n1 | awk '{print $1}')
+    if [[ "$current_version" == 4.* ]]; then
+      echo "WiX v4 is already installed (version ${current_version})." >&2
+      return
+    fi
+    echo "Found WiX version ${current_version:-unknown}; replacing with v4 to avoid OSMF EULA requirement…" >&2
+    local dotnet_bin_uninstall
+    dotnet_bin_uninstall=$(command -v dotnet 2>/dev/null || true)
+    if [[ -n "$dotnet_bin_uninstall" ]]; then
+      "$dotnet_bin_uninstall" tool uninstall --global wix >/dev/null 2>&1 || true
+    fi
   fi
 
   local dotnet_bin
@@ -390,9 +403,9 @@ install_wix() {
 
   echo "Installing WiX v4 (dotnet global tool)…" >&2
 
-  if ! "$dotnet_bin" tool install --global wix 2>/dev/null; then
+  if ! "$dotnet_bin" tool install --global wix --version "4.*" 2>/dev/null; then
     # Already installed at a different version; try updating instead.
-    if ! "$dotnet_bin" tool update --global wix 2>/dev/null; then
+    if ! "$dotnet_bin" tool update --global wix --version "4.*" 2>/dev/null; then
       echo "Warning: Failed to install WiX v4." >&2
       return
     fi
