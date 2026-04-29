@@ -753,6 +753,16 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "api_key": "",
         },
     },
+    {
+        "slug": "trello",
+        "name": "Trello",
+        "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
+        "icon": "📋",
+        "settings": {
+            "api_key": "",
+            "token": "",
+        },
+    },
 ]
 
 
@@ -1199,6 +1209,27 @@ def _coerce_settings(
                 "api_key": api_key,
             }
         )
+    elif slug == "trello":
+        overrides = payload or {}
+        api_key_override = overrides.get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
+        token_override = overrides.get("token")
+        if token_override is None:
+            token = str(merged.get("token") or "").strip()
+        else:
+            candidate_token = str(token_override or "").strip()
+            if not candidate_token and existing_settings and existing_settings.get("token"):
+                token = str(existing_settings.get("token") or "").strip()
+            else:
+                token = candidate_token
+        merged.update({"api_key": api_key, "token": token})
     return merged
 
 
@@ -1219,6 +1250,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
         "hudu": ("api_key",),
+        "trello": ("api_key", "token"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -1309,6 +1341,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "plausible",      # Plausible - email tracking config only
     "m365-admin",     # M365 Admin - configuration only, not an action module
     "hudu",           # Hudu - documentation/password management, not a trigger action module
+    "trello",         # Trello - inbound webhook integration, not a trigger action module
 }
 
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
@@ -1555,6 +1588,7 @@ async def trigger_module(
         "whisperx": _invoke_whisperx,
         "password-pusher": _invoke_password_pusher,
         "hudu": _validate_hudu,
+        "trello": _validate_trello,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -5116,3 +5150,17 @@ async def _validate_hudu(
         }
     except Exception as exc:
         return {"status": "error", "message": f"Failed to connect to Hudu: {exc}"}
+
+
+async def _validate_trello(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Validate Trello module configuration by verifying API connectivity."""
+    if event_future and not event_future.done():
+        event_future.set_result(None)
+
+    from app.services.trello import validate_credentials
+    return await validate_credentials()

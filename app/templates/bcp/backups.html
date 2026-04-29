@@ -101,7 +101,7 @@
                   <button 
                     type="button" 
                     class="btn btn-sm btn-secondary" 
-                    onclick="openEditModal({{ backup.id }}, {{ backup.data_scope | tojson }}, {{ (backup.frequency or '') | tojson }}, {{ (backup.medium or '') | tojson }}, {{ (backup.owner or '') | tojson }}, {{ (backup.steps or '') | tojson }}, {{ 'true' if backup.backup_job_id else 'false' }})"
+                    onclick='openEditModal({{ backup.id }}, {{ backup.data_scope | tojson }}, {{ (backup.frequency or "") | tojson }}, {{ (backup.medium or "") | tojson }}, {{ (backup.owner or "") | tojson }}, {{ (backup.steps or "") | tojson }}, {{ "true" if backup.backup_job_id else "false" }})'
                   >
                     Edit
                   </button>
