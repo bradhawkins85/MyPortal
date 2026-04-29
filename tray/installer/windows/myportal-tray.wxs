@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MyPortal Tray App — Windows MSI package definition (WiX v4)
+  MyPortal Tray App — Windows MSI package definition (WiX v7)
 
   Build with:
-    wix build myportal-tray.wxs -o myportal-tray.msi
+    wix build -acceptEula wix7 myportal-tray.wxs -o myportal-tray.msi
+
+  WiX v7 requires accepting the FireGiant Open Source Maintenance Fee
+  (OSMF) EULA. The `-acceptEula wix7` flag accepts it non-interactively
+  per https://docs.firegiant.com/wix/osmf/.
 
   Properties available at install time (set by the RMM or msiexec command line):
     MYPORTAL_URL   — full URL of the MyPortal server, e.g. https://portal.example.com

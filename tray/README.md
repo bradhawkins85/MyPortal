@@ -16,7 +16,7 @@ tray/
 │   ├── notify/       Push-notification helpers
 │   └── updater/      Auto-update checker (6-hour timer, deferred install)
 ├── installer/
-│   ├── windows/      WiX v4 MSI project + PowerShell RMM deployment script
+│   ├── windows/      WiX v7 MSI project + PowerShell RMM deployment script
 │   └── macos/        pkgbuild scripts + LaunchDaemon/LaunchAgent plists + bash RMM script
 ├── Makefile          Cross-compile Windows + macOS from Linux CI (CGO=0 + nowebview tag)
 └── .github/workflows/tray-build.yml   Build, test, and release workflow
@@ -28,7 +28,9 @@ tray/
 
 - Go 1.22+
 - For native UI builds: CGO toolchain for the target platform
-- For MSI packaging: .NET SDK 8+ and WiX v4 (`dotnet tool install --global wix --version "4.*"`)
+- For MSI packaging: .NET SDK 8+ and WiX v7 (`dotnet tool install --global wix --version "7.*"`).
+  WiX v7 requires accepting the FireGiant OSMF EULA — the Makefile passes
+  `-acceptEula wix7` per https://docs.firegiant.com/wix/osmf/.
 - For macOS .pkg packaging: Xcode command-line tools with `pkgbuild` / `productbuild` (macOS only)
 
 ### Cross-compile (CGO=0, no webview — for RMM deployment)
@@ -46,7 +48,10 @@ Binaries land in `dist/<platform>/`.
 ### Build installer packages
 
 ```sh
-# Windows MSI (requires WiX v4 — works on Linux/macOS/Windows)
+# Windows MSI (requires WiX v7 on a Windows host — WiX does not support
+# building on Linux/macOS, see wixtoolset/issues#7154). The Makefile
+# automatically passes `-acceptEula wix7` to satisfy the FireGiant OSMF
+# EULA (https://docs.firegiant.com/wix/osmf/).
 make build-msi          # produces dist/windows/myportal-tray.msi
 
 # macOS .pkg (requires pkgbuild — macOS only)
@@ -58,7 +63,10 @@ make package-all
 
 The built installers must be copied to `app/static/tray/` on the MyPortal server so
 they are served at `/static/tray/myportal-tray.msi` and `/static/tray/myportal-tray.pkg`.
-The `scripts/upgrade.sh` handles this automatically when WiX is installed on the server.
+The `scripts/upgrade.sh` handles this automatically when WiX is installed on a
+Windows host. On Linux/macOS upgrade hosts the MSI build is skipped (WiX is
+Windows-only) — build the MSI separately on Windows and copy it into
+`app/static/tray/myportal-tray.msi`.
 
 ### With native webview (requires CGO)
 
