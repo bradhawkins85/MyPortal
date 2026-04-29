@@ -28,7 +28,7 @@ tray/
 
 - Go 1.22+
 - For native UI builds: CGO toolchain for the target platform
-- For MSI packaging: .NET SDK 8+ and WiX v4 (`dotnet tool install --global wix`)
+- For MSI packaging: .NET SDK 8+ and WiX v4 (`dotnet tool install --global wix --version "4.*"`)
 - For macOS .pkg packaging: Xcode command-line tools with `pkgbuild` / `productbuild` (macOS only)
 
 ### Cross-compile (CGO=0, no webview — for RMM deployment)
