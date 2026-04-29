@@ -10,6 +10,7 @@ from app.api.dependencies.auth import require_super_admin
 from app.repositories import companies as company_repo
 from app.services import tickets as tickets_service
 from app.services import trello as trello_service
+from app.services import webhook_monitor
 
 router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"])
 
@@ -34,9 +35,20 @@ async def trello_webhook_receive(request: Request) -> JSONResponse:
       comments identified by the :data:`~app.services.trello.MYPORTAL_COMMENT_PREFIX`).
     - ``updateCard`` – add an internal note when a card's description changes.
     """
+    source_url = str(request.url)
+    request_headers = dict(request.headers)
+
     try:
         payload: dict[str, Any] = await request.json()
     except Exception:
+        await webhook_monitor.log_incoming_webhook(
+            name="Trello Webhook - Invalid JSON",
+            source_url=source_url,
+            headers=request_headers,
+            response_status=400,
+            response_body="Invalid JSON payload",
+            error_message="Invalid JSON payload",
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid JSON payload",
@@ -54,14 +66,41 @@ async def trello_webhook_receive(request: Request) -> JSONResponse:
 
     if not board_id or not card_id:
         # Ignore events that lack board/card context (e.g. board-level events)
+        await webhook_monitor.log_incoming_webhook(
+            name=f"Trello Webhook - {action_type or 'unknown'} (ignored)",
+            source_url=source_url,
+            payload=payload,
+            headers=request_headers,
+            response_status=200,
+            response_body="ignored",
+        )
         return JSONResponse(content={"status": "ignored"})
 
-    if action_type == "createCard":
-        await _handle_create_card(board_id, card_id, card_data, action)
-    elif action_type == "commentCard":
-        await _handle_comment_card(card_id, data, action)
-    elif action_type == "updateCard":
-        await _handle_update_card(card_id, data)
+    error_message: str | None = None
+    try:
+        if action_type == "createCard":
+            await _handle_create_card(board_id, card_id, card_data, action)
+        elif action_type == "commentCard":
+            await _handle_comment_card(card_id, data, action)
+        elif action_type == "updateCard":
+            await _handle_update_card(card_id, data)
+    except Exception as exc:
+        error_message = str(exc)
+        logger.error("Trello webhook handler error for {}: {}", action_type, exc)
+
+    # Always return 200 to Trello regardless of internal errors.  A non-200
+    # response would cause Trello to retry indefinitely.  Failures are
+    # surfaced in the webhook monitor (logged as "failed" when error_message
+    # is set) so they remain visible without triggering retries.
+    await webhook_monitor.log_incoming_webhook(
+        name=f"Trello Webhook - {action_type or 'unknown'}",
+        source_url=source_url,
+        payload=payload,
+        headers=request_headers,
+        response_status=200,
+        response_body="ok" if not error_message else error_message,
+        error_message=error_message,
+    )
 
     return JSONResponse(content={"status": "ok"})
 
