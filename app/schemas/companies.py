@@ -16,6 +16,7 @@ class CompanyBase(BaseModel):
     xero_id: Optional[str] = None
     archived: Optional[int] = None
     email_domains: list[str] = Field(default_factory=list)
+    trello_board_id: Optional[str] = None
 
     @field_validator("email_domains", mode="after")
     @classmethod
@@ -39,6 +40,7 @@ class CompanyUpdate(BaseModel):
     xero_id: Optional[str] = None
     archived: Optional[int] = None
     email_domains: Optional[list[str]] = None
+    trello_board_id: Optional[str] = None
 
 
 class CompanyResponse(CompanyBase):

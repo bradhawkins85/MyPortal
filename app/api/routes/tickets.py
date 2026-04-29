@@ -16,6 +16,7 @@ from app.api.dependencies.auth import (
 from app.api.dependencies.api_keys import get_optional_api_key
 from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
 from app.core.logging import log_error
+from loguru import logger
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_attachments as attachments_repo
@@ -774,6 +775,25 @@ async def add_reply(
     if time_summary:
         reply_payload["time_summary"] = time_summary
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
+
+    # Push public replies on Trello-linked tickets back to the Trello card as comments
+    if not reply.get("is_internal") and ticket_payload.get("module_slug") == "trello":
+        card_id = str(ticket_payload.get("external_reference") or "").strip()
+        if card_id:
+            try:
+                from app.services import trello as trello_service
+                first_name = str(current_user.get("first_name") or "").strip()
+                last_name = str(current_user.get("last_name") or "").strip()
+                author_parts = [p for p in (first_name, last_name) if p]
+                author_display = " ".join(author_parts) if author_parts else str(current_user.get("email") or "Staff")
+                await trello_service.post_reply_comment(
+                    card_id,
+                    author_display,
+                    sanitised_reply_payload.html,
+                )
+            except Exception as exc:
+                logger.debug("Trello reply sync failed for ticket {}: {}", ticket_id, exc)
+
     # IMPORTANT: never store the reply body in the audit log. We capture only
     # metadata (id, author, visibility, length) so admins can confirm a reply
     # was made without the audit_logs table mirroring potentially sensitive
