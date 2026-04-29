@@ -153,6 +153,17 @@ class Settings(BaseSettings):
         default=True, validation_alias="DISABLE_CACHING"
     )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
+    public_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PUBLIC_BASE_URL", "PUBLIC_URL"),
+        description=(
+            "Public base URL of this MyPortal instance (e.g. 'https://portal.example.com'). "
+            "Used to build callback URLs registered with external services such as Trello "
+            "webhooks when the reverse proxy does not forward 'X-Forwarded-Proto' / "
+            "'X-Forwarded-Host' headers. If unset, the URL is inferred from the incoming "
+            "request, defaulting to https:// when a proxy is detected."
+        ),
+    )
     opnform_base_url: AnyHttpUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
