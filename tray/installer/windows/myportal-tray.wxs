@@ -38,13 +38,13 @@
 
     <!-- Install directory -->
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLDIR" Name="MyPortal Tray" />
+      <Directory Id="INSTALLDIR" Name="MyPortalTray" />
     </StandardDirectory>
 
     <!-- Registry key written at install time -->
     <ComponentGroup Id="RegistrySettings" Directory="INSTALLDIR">
       <Component Id="RegSettings" Guid="B1C2D3E4-F5A6-7890-BCDE-F01234567890">
-        <RegistryKey Root="HKLM" Key="Software\MyPortal\Tray" Action="createAndRemoveOnUninstall">
+        <RegistryKey Root="HKLM" Key="Software\MyPortal\Tray" ForceCreateOnInstall="yes" ForceDeleteOnUninstall="yes">
           <RegistryValue Type="string" Name="PortalURL"   Value="[MYPORTAL_URL]" />
           <RegistryValue Type="string" Name="EnrolToken"  Value="[ENROL_TOKEN]" />
           <RegistryValue Type="string" Name="AutoUpdate"  Value="[AUTO_UPDATE]" />
