@@ -25,7 +25,7 @@ ALLOWED_ORIGINS=https://app.example.com
 ALLOWED_ORIGINS=https://app.example.com,https://dashboard.example.com
 
 # For development only (NOT for production)
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
+ALLOWED_ORIGINS=https://localhost:3000,https://localhost:8080
 ```
 
 ### Security Best Practices

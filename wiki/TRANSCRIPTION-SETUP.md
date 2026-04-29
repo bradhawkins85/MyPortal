@@ -98,7 +98,7 @@ pending → queued → processing → completed
 
 ```json
 {
-  "base_url": "http://whisperx-service:8000",
+  "base_url": "https://whisperx-service:8000",
   "api_key": "your-api-key-here",
   "language": "en"
 }
@@ -117,7 +117,7 @@ View task run history in the scheduler admin panel:
 
 Via API:
 ```bash
-curl -X GET "http://your-portal/api/call-recordings?transcriptionStatus=queued" \
+curl -X GET "https://your-portal/api/call-recordings?transcriptionStatus=queued" \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
@@ -156,7 +156,7 @@ Failed recordings will NOT be automatically retried. To manually retry:
 
 Or via API:
 ```bash
-curl -X PUT "http://your-portal/api/call-recordings/{recording_id}" \
+curl -X PUT "https://your-portal/api/call-recordings/{recording_id}" \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"transcriptionStatus": "queued"}'
