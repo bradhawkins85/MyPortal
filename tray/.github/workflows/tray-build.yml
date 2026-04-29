@@ -80,24 +80,103 @@ jobs:
           name: tray-${{ matrix.goos }}-${{ matrix.goarch }}
           path: tray/dist/${{ matrix.goos }}-${{ matrix.goarch }}/
 
+  build-msi:
+    name: Build Windows MSI installer
+    needs: build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tray
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0'
+      - name: Install WiX v4
+        run: dotnet tool install --global wix
+      - uses: actions/download-artifact@v4
+        with:
+          name: tray-windows-amd64
+          path: tray/dist/windows
+      - name: Build MSI
+        run: |
+          wix build installer/windows/myportal-tray.wxs \
+            -d BinDir=$(pwd)/dist/windows \
+            -o dist/windows/myportal-tray.msi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tray-windows-msi
+          path: tray/dist/windows/myportal-tray.msi
+
+  build-pkg:
+    name: Build macOS .pkg installer
+    needs: build
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tray
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tray-darwin-amd64
+          path: tray/dist/darwin-amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: tray-darwin-arm64
+          path: tray/dist/darwin-arm64
+      - name: Make binaries executable
+        run: |
+          chmod +x dist/darwin-amd64/myportal-tray-service dist/darwin-amd64/myportal-tray-ui
+          chmod +x dist/darwin-arm64/myportal-tray-service dist/darwin-arm64/myportal-tray-ui
+      - name: Create universal binaries
+        run: |
+          mkdir -p dist/darwin
+          lipo -create -output dist/darwin/myportal-tray-service \
+              dist/darwin-amd64/myportal-tray-service \
+              dist/darwin-arm64/myportal-tray-service
+          lipo -create -output dist/darwin/myportal-tray-ui \
+              dist/darwin-amd64/myportal-tray-ui \
+              dist/darwin-arm64/myportal-tray-ui
+      - name: Build macOS .pkg
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
+          (cd installer/macos && bash build-pkg.sh "${VERSION}")
+          mkdir -p dist/darwin
+          mv installer/macos/myportal-tray-${VERSION}.pkg dist/darwin/myportal-tray.pkg
+          rm -f installer/macos/myportal-tray-${VERSION}-unsigned.pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tray-darwin-pkg
+          path: tray/dist/darwin/myportal-tray.pkg
+
   release:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/tray/')
-    needs: build
+    needs: [build, build-msi, build-pkg]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Package archives
+      - name: Package binary archives
         run: |
-          for dir in artifacts/tray-*/; do
+          for dir in artifacts/tray-windows-amd64 artifacts/tray-darwin-amd64 artifacts/tray-darwin-arm64; do
+            [ -d "$dir" ] || continue
             name=$(basename "$dir")
             zip -r "${name}.zip" "$dir"
           done
+      - name: Stage installers
+        run: |
+          cp artifacts/tray-windows-msi/myportal-tray.msi . 2>/dev/null || true
+          cp artifacts/tray-darwin-pkg/myportal-tray.pkg  . 2>/dev/null || true
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: '*.zip'
+          files: |
+            *.zip
+            myportal-tray.msi
+            myportal-tray.pkg
           generate_release_notes: true
+
