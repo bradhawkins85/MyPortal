@@ -59,6 +59,7 @@ const (
 type persistedState struct {
 	DeviceUID string `json:"device_uid"`
 	AuthToken string `json:"auth_token"`
+	PortalURL string `json:"portal_url"`
 }
 
 func stateDir() string {
@@ -139,6 +140,16 @@ func (d *daemon) run() {
 	// Enrol (or restore persisted state).
 	if err := d.ensureEnrolled(); err != nil {
 		logger.Error("Enrolment failed: %v", err)
+	} else {
+		// Fetch the current config from the server immediately so the UI
+		// agent has an up-to-date copy on disk from the very first launch,
+		// rather than waiting for a config_changed WebSocket event.
+		go func() {
+			d.refreshConfig()
+			if d.ipcSrv != nil {
+				d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
+			}
+		}()
 	}
 
 	// Auto-update checker.
@@ -181,7 +192,7 @@ func (d *daemon) ensureEnrolled() error {
 	if err != nil {
 		return err
 	}
-	saveState(persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken})
+	saveState(persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken, PortalURL: d.cfg.PortalURL})
 	logger.Info("Enrolled: device_uid=%s", resp.DeviceUID)
 	return nil
 }
