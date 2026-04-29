@@ -15518,8 +15518,9 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
         tray_chat_enabled=tray_chat_enabled,
         tray_notifications_enabled=tray_notifications_enabled,
     )
+    cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{company_id}/tray?success=Tray+settings+saved.",
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Tray settings saved."}),
         status_code=303,
     )
 
@@ -15549,8 +15550,9 @@ async def admin_company_tray_create_token(company_id: int, request: Request):
         token_prefix=tray_service.token_prefix(raw_token),
         created_by_user_id=int(current_user["id"]),
     )
+    cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{company_id}/tray?new_token={raw_token}",
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"new_token": raw_token}),
         status_code=303,
     )
 
@@ -15569,8 +15571,9 @@ async def admin_company_tray_revoke_token(
     from app.repositories import tray as tray_repo
 
     await tray_repo.revoke_install_token(token_id)
+    cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{company_id}/tray?success=Token+revoked.",
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Token revoked."}),
         status_code=303,
     )
 
