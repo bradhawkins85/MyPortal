@@ -760,6 +760,7 @@ app.add_middleware(
     exempt_paths=(
         "/api/webhooks/smtp2go",
         "/api/integration-modules/uptimekuma/alerts",
+        "/api/integration-modules/trello/webhook",
         "/api/backup-status",
         "/api/tray/enrol",
     ),
