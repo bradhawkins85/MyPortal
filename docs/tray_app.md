@@ -250,3 +250,58 @@ chat-start and websocket plumbing. Subsequent PRs cover:
    load-test the WS hub at ~10k concurrent devices
 6. Phase 6 — Branding/theming, per-tag config overrides,
    notifications, localisation scaffolding
+
+---
+
+## 10. Phase 5/6 additions
+
+### Auto-update (`GET /api/tray/version`)
+
+The service polls this endpoint every 6 hours. Response:
+
+```json
+{"version": "0.2.0", "download_url": "https://…/myportal-tray.msi", "required": false}
+```
+
+Publish a new version from the **Tray > Versions** admin page or via:
+
+```
+POST /api/tray/admin/versions
+{"version": "0.2.0", "platform": "windows", "download_url": "…", "required": false}
+```
+
+### Diagnostics upload (`POST /api/tray/{device_uid}/diagnostics`)
+
+The "Send diagnostics" tray menu item zips the service log directory and
+posts the bundle to this endpoint (authenticated, 20 MB cap). Bundles are
+stored under `media/tray_diagnostics/` and visible on the **Tray > Diagnostics**
+admin page with a download link.
+
+### Push notification (`POST /api/tray/{device_uid}/notify`)
+
+Helpdesk technicians and super-admins can push an OS notification to any
+active device:
+
+```json
+{"title": "Your ticket is updated", "body": "Ticket #1234 has a new reply."}
+```
+
+The notification is delivered immediately if the device's WebSocket is
+connected to this app instance; otherwise it is queued in `tray_command_log`
+for delivery on the next reconnect (full queued delivery in Phase 5.2).
+
+### Phase 3–4 Go client highlights
+
+- `tray/service/` — Windows Service / macOS LaunchDaemon with
+  `github.com/kardianos/service`. Reads config from registry / plist,
+  enrolls, keeps WS alive with exponential back-off, forwards commands
+  to the UI agent over a local socket.
+- `tray/ui/` — systray icon + menu renderer from `payload_json`
+  (`label`, `link`, `display_text`, `env_var`, `open_chat`, `separator`,
+  `submenu`). Chat window via embedded webview; `nowebview` build tag
+  falls back to OS default browser (CGO=0 cross-compile).
+- Installers: WiX v4 MSI (Windows) + `pkgbuild`/`productbuild` (macOS).
+  RMM deployment scripts: `installer/windows/install.ps1` and
+  `installer/macos/install.sh`.
+- GitHub Actions workflow: `.github/workflows/tray-build.yml` — build +
+  test on every PR; release artifacts on `tray/v*` tags.

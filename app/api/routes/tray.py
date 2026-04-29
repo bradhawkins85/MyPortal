@@ -528,3 +528,233 @@ async def _attach_room_to_device(room_id: int, device_id: int) -> None:
         )
     except Exception as exc:  # pragma: no cover - defensive
         log_error("Failed to link chat room to tray device", room_id=room_id, error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 – Auto-update version endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/version",
+    summary="Check the latest available tray installer version",
+    tags=["Tray App"],
+)
+async def get_tray_version(request: Request) -> JSONResponse:
+    """Public endpoint; devices poll this on a 6-hour timer.
+
+    Returns the latest enabled version record so the service can
+    compare against ``AgentVersion`` and download the signed installer
+    if a newer version is available.
+    """
+    import platform as _platform
+
+    agent_os = request.headers.get("X-Tray-OS", "all").lower()
+    row = await tray_repo.get_latest_tray_version(agent_os)
+    if not row:
+        # Fall back to 'all' platform.
+        row = await tray_repo.get_latest_tray_version("all")
+    if not row:
+        return JSONResponse({"version": "0.0.0", "download_url": None, "required": False})
+    return JSONResponse({
+        "version": row["version"],
+        "download_url": row.get("download_url"),
+        "required": bool(row.get("required")),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 – Diagnostics upload
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{device_uid}/diagnostics",
+    summary="Upload a diagnostic log bundle from the tray service",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_diagnostics(
+    device_uid: str,
+    request: Request,
+    device: dict = Depends(get_current_tray_device),
+) -> JSONResponse:
+    """Accept a ZIP bundle of tray service logs uploaded by the client.
+
+    * Capped at 20 MB.
+    * Stored to the ``tray_diagnostics`` table with a path under the
+      configured media directory.
+    * Viewable from the admin Diagnostics page.
+    """
+    import os
+    import uuid as _uuid
+
+    MAX_SIZE = 20 * 1024 * 1024  # 20 MB
+
+    content_type = request.headers.get("content-type", "application/zip")
+    body = await request.body()
+    if len(body) > MAX_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Diagnostic bundle exceeds {MAX_SIZE // 1024 // 1024} MB limit.",
+        )
+
+    # Determine storage path.
+    media_root = _settings.media_root if hasattr(_settings, "media_root") else "media"
+    diag_dir = os.path.join(str(media_root), "tray_diagnostics")
+    os.makedirs(diag_dir, exist_ok=True)
+    filename = f"{device_uid}_{_uuid.uuid4().hex}.zip"
+    stored_path = os.path.join(diag_dir, filename)
+    with open(stored_path, "wb") as f:
+        f.write(body)
+
+    await tray_repo.save_diagnostic(
+        device_id=int(device["id"]),
+        filename=filename,
+        content_type=content_type,
+        size_bytes=len(body),
+        stored_path=stored_path,
+    )
+    log_info(
+        "Tray diagnostic bundle received",
+        device_uid=device_uid,
+        size=len(body),
+    )
+    return JSONResponse({"accepted": True, "filename": filename})
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 – Admin: diagnostics list
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/admin/diagnostics",
+    summary="List uploaded diagnostic bundles",
+)
+async def admin_list_diagnostics(
+    device_id: int | None = None,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    rows = await tray_repo.list_diagnostics(device_id=device_id)
+    return JSONResponse([
+        {
+            "id": int(r["id"]),
+            "device_id": int(r["device_id"]),
+            "device_uid": r.get("device_uid"),
+            "hostname": r.get("hostname"),
+            "filename": r["filename"],
+            "size_bytes": int(r.get("size_bytes") or 0),
+            "uploaded_at": r["uploaded_at"].isoformat() if hasattr(r.get("uploaded_at"), "isoformat") else str(r.get("uploaded_at")),
+        }
+        for r in rows
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 – Admin: publish a new tray version
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/admin/versions",
+    summary="Publish a new tray installer version",
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_publish_version(
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    body = await request.json()
+    version = str(body.get("version", "")).strip()
+    platform = str(body.get("platform", "all")).strip().lower()
+    download_url = str(body.get("download_url", "")).strip()
+    required = bool(body.get("required", False))
+    release_notes = body.get("release_notes")
+
+    if not version or not download_url:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="version and download_url are required.",
+        )
+
+    await tray_repo.publish_tray_version(
+        version=version,
+        platform=platform,
+        download_url=download_url,
+        required=required,
+        release_notes=release_notes,
+        published_by_user_id=int(current_user["id"]),
+    )
+    return JSONResponse({"published": True, "version": version})
+
+
+@router.get(
+    "/admin/versions",
+    summary="List published tray installer versions",
+)
+async def admin_list_versions(
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    rows = await tray_repo.list_tray_versions()
+    return JSONResponse([
+        {
+            "id": int(r["id"]),
+            "version": r["version"],
+            "platform": r["platform"],
+            "download_url": r["download_url"],
+            "required": bool(r.get("required")),
+            "enabled": bool(r.get("enabled")),
+            "published_at": r["published_at"].isoformat() if hasattr(r.get("published_at"), "isoformat") else str(r.get("published_at")),
+        }
+        for r in rows
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 – Push notification to device
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{device_uid}/notify",
+    summary="Push a notification to a connected tray device (Phase 6)",
+    status_code=status.HTTP_200_OK,
+)
+async def push_notification_to_device(
+    device_uid: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """Send an OS notification to a tray device's UI agent.
+
+    Requires the technician / super admin to be authenticated.
+    The device must be active and connected (or the message is queued
+    in ``tray_command_log`` for delivery on next WS reconnect —
+    full queuing is Phase 5.2).
+    """
+    device = await tray_repo.get_device_by_uid(device_uid)
+    if not device:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+    if device.get("status") != "active":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Device is not active.")
+
+    body = await request.json()
+    title = str(body.get("title", "MyPortal")).strip()[:200]
+    notification_body = str(body.get("body", "")).strip()[:1000]
+
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required.")
+
+    payload = {"type": "show_notification", "title": title, "body": notification_body}
+    delivered = await tray_service.send_to_device(device_uid, payload)
+
+    # Always log the command for the audit trail.
+    import json as _json
+    await tray_repo.log_command(
+        device_id=int(device["id"]),
+        command="show_notification",
+        payload_json=_json.dumps(payload),
+        initiated_by_user_id=int(current_user["id"]),
+        status="delivered" if delivered else "queued",
+    )
+    return JSONResponse({"delivered": delivered})

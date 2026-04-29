@@ -135,3 +135,46 @@ class TrayDeviceSummary(BaseModel):
     last_seen_utc: Optional[datetime] = None
     status: str
     agent_version: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 schemas
+# ---------------------------------------------------------------------------
+
+
+class TrayVersionResponse(BaseModel):
+    version: str
+    download_url: Optional[str] = None
+    required: bool = False
+
+
+class TrayDiagnosticSummary(BaseModel):
+    id: int
+    device_id: int
+    device_uid: Optional[str] = None
+    hostname: Optional[str] = None
+    filename: str
+    size_bytes: int = 0
+    uploaded_at: datetime
+
+
+class TrayVersionPublish(BaseModel):
+    version: str = Field(min_length=1, max_length=32)
+    platform: str = Field(default="all", max_length=16)
+    download_url: str = Field(min_length=1, max_length=500)
+    required: bool = False
+    release_notes: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 schemas
+# ---------------------------------------------------------------------------
+
+
+class TrayNotificationRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=1000)
+
+
+class TrayNotificationResponse(BaseModel):
+    delivered: bool

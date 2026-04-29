@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchDaemon for the MyPortal Tray background service.
+  Installed to /Library/LaunchDaemons/io.myportal.tray.service.plist
+  and loaded by the package postinstall script.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.myportal.tray.service</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/MyPortal/Tray/myportal-tray-service</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>UserName</key>
+  <string>root</string>
+
+  <key>StandardOutPath</key>
+  <string>/Library/Logs/MyPortal/tray/service.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Library/Logs/MyPortal/tray/service.stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>
