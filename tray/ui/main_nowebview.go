@@ -44,31 +44,43 @@ var (
 	onConfigChanged func(*api.ConfigResponse)
 )
 
-// refreshPortalURL re-reads the portal URL from tray-state.json (written by
-// the service after enrolment).  The MYPORTAL_URL environment variable always
-// takes precedence and is never overwritten.  This is called both at startup
-// and when a config_changed IPC message arrives so that the URL is available
-// even on the very first boot when the service has not yet enrolled.
+// refreshPortalURL re-reads the portal URL from the highest-precedence
+// source available, in this order:
+//  1. MYPORTAL_URL environment variable (always wins; never overwritten).
+//  2. tray-state.json (written by the service after a successful enrolment).
+//  3. HKLM\Software\MyPortal\Tray\PortalURL on Windows (written by the MSI
+//     at install time).  This lets the tray fetch its icon from the server
+//     on the very first launch, before the service has finished enrolling.
+//
+// Called both at startup and whenever a config_changed IPC message arrives.
 func refreshPortalURL() {
 	if envURL := os.Getenv("MYPORTAL_URL"); envURL != "" {
 		gPortalURL = envURL
+		logger.Debug("refreshPortalURL: using MYPORTAL_URL env (%s)", envURL)
 		return
 	}
 	p := filepath.Join(stateDir(), "tray-state.json")
 	data, err := os.ReadFile(p)
-	if err != nil {
+	if err == nil {
+		var state struct {
+			PortalURL string `json:"portal_url"`
+		}
+		if jsonErr := json.Unmarshal(data, &state); jsonErr != nil {
+			logger.Warn("Failed to parse tray-state.json: %v", jsonErr)
+		} else if state.PortalURL != "" {
+			gPortalURL = state.PortalURL
+			logger.Debug("refreshPortalURL: using portal_url from %s (%s)", p, state.PortalURL)
+			return
+		}
+	} else {
+		logger.Debug("refreshPortalURL: %s not readable yet (%v)", p, err)
+	}
+	if regURL := portalURLFromRegistry(); regURL != "" {
+		gPortalURL = regURL
+		logger.Debug("refreshPortalURL: using PortalURL from registry (%s)", regURL)
 		return
 	}
-	var state struct {
-		PortalURL string `json:"portal_url"`
-	}
-	if err := json.Unmarshal(data, &state); err != nil {
-		logger.Warn("Failed to parse tray-state.json: %v", err)
-		return
-	}
-	if state.PortalURL != "" {
-		gPortalURL = state.PortalURL
-	}
+	logger.Debug("refreshPortalURL: no portal URL available from any source")
 }
 
 func main() {
@@ -102,12 +114,16 @@ func loadCachedConfig() *api.ConfigResponse {
 	path := filepath.Join(stateDir(), configCacheName)
 	data, err := os.ReadFile(path)
 	if err != nil {
+		logger.Debug("loadCachedConfig: %s not present yet (%v) — using built-in defaults", path, err)
 		return defaultConfig()
 	}
 	var cfg api.ConfigResponse
 	if err := json.Unmarshal(data, &cfg); err != nil {
+		logger.Warn("loadCachedConfig: %s is corrupt (%v) — using built-in defaults", path, err)
 		return defaultConfig()
 	}
+	logger.Debug("loadCachedConfig: loaded version=%d, menu_nodes=%d, chat_enabled=%t from %s",
+		cfg.Version, len(cfg.Menu), cfg.ChatEnabled, path)
 	return &cfg
 }
 
@@ -144,12 +160,15 @@ func connectIPC() {
 	for {
 		conn, err := ipc.Dial()
 		if err != nil {
+			logger.Debug("connectIPC: dial failed (%v) — retry in 5s", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
 		gIPCConn = conn
+		logger.Info("IPC connected to service")
 		handleIPCMessages(conn)
 		gIPCConn = nil
+		logger.Debug("connectIPC: connection closed — reconnecting in 3s")
 		time.Sleep(3 * time.Second)
 	}
 }
@@ -158,8 +177,10 @@ func handleIPCMessages(conn net.Conn) {
 	for {
 		msg, err := ipc.ReadFrom(conn)
 		if err != nil {
+			logger.Debug("handleIPCMessages: read error (%v)", err)
 			return
 		}
+		logger.Debug("handleIPCMessages: received type=%q", msg.Type)
 		switch msg.Type {
 		case "chat_open":
 			var payload struct {

@@ -52,9 +52,11 @@ func onTrayReady() {
 // to the running tray icon.  It is safe to call from any goroutine.
 func fetchAndSetIcon() {
 	if gPortalURL == "" {
+		logger.Debug("fetchAndSetIcon: skipped — gPortalURL is empty (will retry on next config_changed)")
 		return
 	}
 	url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+	logger.Debug("fetchAndSetIcon: GET %s", url)
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -71,6 +73,8 @@ func fetchAndSetIcon() {
 		logger.Warn("Tray icon read error: %v", readErr)
 		return
 	}
+	logger.Debug("fetchAndSetIcon: received %d bytes from %s (status=%d, content-type=%q)",
+		len(data), url, resp.StatusCode, resp.Header.Get("Content-Type"))
 	if len(data) < 4 || data[0] != 0x00 || data[1] != 0x00 || data[2] != 0x01 || data[3] != 0x00 {
 		logger.Warn("Tray icon fetch returned invalid ICO data, falling back to default")
 		return
@@ -130,6 +134,8 @@ func buildMenu(cfg *api.ConfigResponse) {
 	if cfg == nil {
 		cfg = defaultConfig()
 	}
+	logger.Debug("buildMenu: rendering version=%d, %d top-level node(s), chat_enabled=%t",
+		cfg.Version, len(cfg.Menu), cfg.ChatEnabled)
 	for _, node := range cfg.Menu {
 		addNode(node, cfg)
 	}
