@@ -4,7 +4,7 @@ The MyPortal agent provides a permission-aware assistant that searches knowledge
 
 ## Prerequisites
 
-1. **Ollama runtime** – Install and expose an Ollama instance reachable by the application server. The default configuration expects `http://127.0.0.1:11434`.
+1. **Ollama runtime** – Install and expose an Ollama instance reachable by the application server. The default configuration expects `https://127.0.0.1:11434`.
 2. **Portal configuration** – Ensure the following environment variables are defined (already included in `.env.example`):
    - `OLLAMA_BASE_URL` – HTTP(S) endpoint for your Ollama host.
    - `OLLAMA_MODEL` – Default model name (for example `llama3`).

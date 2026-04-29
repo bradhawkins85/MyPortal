@@ -264,7 +264,7 @@ gracefully fall back to an empty string.
    uvicorn app.main:app --reload
    ```
    On startup the application automatically applies any pending SQL migrations and ensures the database exists.
-7. Access `http://localhost:8000` for the responsive portal UI. After signing in, visit `http://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
+7. Access `https://localhost:8000` for the responsive portal UI. After signing in, visit `https://localhost:8000/docs` for the interactive Swagger UI covering every API endpoint.
 8. The first visit will redirect the login flow to the registration page if no users exist, ensuring the first account becomes the super administrator.
 
 ## Database migrations

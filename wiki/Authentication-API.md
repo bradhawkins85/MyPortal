@@ -15,7 +15,7 @@ MyPortal provides comprehensive authentication features including session-based 
 ### First-Time Setup
 
 When no users exist in the system:
-1. Visit the application at http://localhost:8000
+1. Visit the application at https://localhost:8000
 2. You'll be automatically redirected to the registration page
 3. The first registered user becomes the super administrator
 4. Session is automatically established after registration
