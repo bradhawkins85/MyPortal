@@ -386,10 +386,137 @@ run_restart_helper() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Tray app build helpers
+# ---------------------------------------------------------------------------
+
+GO_MIN_MAJOR=1
+GO_MIN_MINOR=22
+GO_BIN=""
+
+go_satisfies_version() {
+  local go_bin="$1"
+  local version_output
+  version_output=$("$go_bin" version 2>/dev/null) || return 1
+  local major minor
+  if [[ "$version_output" =~ go([0-9]+)\.([0-9]+) ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    if [[ "$major" -gt "$GO_MIN_MAJOR" ]] || \
+       [[ "$major" -eq "$GO_MIN_MAJOR" && "$minor" -ge "$GO_MIN_MINOR" ]]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+detect_go() {
+  local -a candidates=("${GOROOT:-/usr/local/go}/bin/go" "go")
+  local candidate resolved
+  for candidate in "${candidates[@]}"; do
+    if [[ "$candidate" == /* ]]; then
+      [[ -x "$candidate" ]] && resolved="$candidate" || continue
+    else
+      command -v "$candidate" >/dev/null 2>&1 && resolved=$(command -v "$candidate") || continue
+    fi
+    if go_satisfies_version "$resolved"; then
+      printf '%s' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_go_toolchain() {
+  local go_bin
+  if go_bin=$(detect_go); then
+    echo "Go toolchain found: $("$go_bin" version)."
+    GO_BIN="$go_bin"
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Warning: apt-get not found; cannot install Go automatically." >&2
+    echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually to enable tray app builds: https://go.dev/doc/install" >&2
+    return 1
+  fi
+
+  echo "Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ not found; installing via apt-get…"
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed; skipping Go installation." >&2
+    return 1
+  fi
+  if ! apt-get install -y -qq golang-go; then
+    echo "Warning: Failed to install golang-go package." >&2
+    return 1
+  fi
+
+  if go_bin=$(detect_go); then
+    echo "Go toolchain installed: $("$go_bin" version)."
+    GO_BIN="$go_bin"
+    return 0
+  fi
+
+  echo "Warning: golang-go installed but Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ was not detected." >&2
+  echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually: https://go.dev/doc/install" >&2
+  return 1
+}
+
+ensure_make() {
+  if command -v make >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Warning: apt-get not found; cannot install make automatically." >&2
+    return 1
+  fi
+
+  echo "make not found; installing via apt-get…"
+  if ! apt-get install -y -qq make; then
+    echo "Warning: Failed to install make." >&2
+    return 1
+  fi
+}
+
+build_tray_app() {
+  local tray_dir="${PROJECT_ROOT}/tray"
+
+  if [[ ! -f "${tray_dir}/Makefile" ]]; then
+    echo "Tray app Makefile not found at ${tray_dir}/Makefile; skipping tray build."
+    return
+  fi
+
+  if ! ensure_go_toolchain; then
+    echo "Skipping tray app build: Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ toolchain not available." >&2
+    return
+  fi
+
+  if ! ensure_make; then
+    echo "Skipping tray app build: make not available." >&2
+    return
+  fi
+
+  if [[ -z "$GO_BIN" ]]; then
+    echo "Warning: GO_BIN is unset after toolchain detection; skipping tray app build." >&2
+    return
+  fi
+
+  echo "Building tray app…"
+  local go_dir
+  go_dir=$(dirname "$GO_BIN")
+  if (cd "$tray_dir" && PATH="${go_dir}:${PATH}" make build-all); then
+    echo "Tray app build complete. Binaries are in ${tray_dir}/dist/."
+  else
+    echo "Warning: Tray app build failed." >&2
+  fi
+}
+
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
   update_version_file
   install_dependencies
+  build_tray_app
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     run_restart_helper
   else
@@ -399,6 +526,7 @@ elif [[ "$FORCE_RESTART" == "1" ]]; then
   echo "No repository changes detected but FORCE_RESTART=1; reinstalling dependencies and restarting service."
   update_version_file
   install_dependencies
+  build_tray_app
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     run_restart_helper
   else
