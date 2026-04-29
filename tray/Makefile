@@ -20,7 +20,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0
 LDFLAGS  := -X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$(VERSION)'
 DIST     := dist
 
-.PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 test lint clean
+.PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
+        build-darwin-universal build-msi build-pkg package-all test lint clean
 
 all: build-all
 
@@ -73,6 +74,40 @@ build-darwin-universal: build-darwin-amd64 build-darwin-arm64
 	lipo -create -output $(DIST)/darwin/myportal-tray-ui \
 	    $(DIST)/darwin-amd64/myportal-tray-ui \
 	    $(DIST)/darwin-arm64/myportal-tray-ui
+
+# -----------------------------------------------------------------------
+# Windows MSI installer
+# Requires WiX v4: dotnet tool install --global wix
+# -----------------------------------------------------------------------
+build-msi: build-windows
+	@echo "Building Windows MSI installer..."
+	wix build installer/windows/myportal-tray.wxs \
+	    -d BinDir=$(CURDIR)/$(DIST)/windows \
+	    -o $(DIST)/windows/myportal-tray.msi
+
+# -----------------------------------------------------------------------
+# macOS .pkg installer
+# Requires pkgbuild / productbuild — macOS only.
+# Depends on the universal binary; run build-darwin-universal first if
+# you want a fat binary, otherwise run build-darwin-amd64 / arm64.
+# -----------------------------------------------------------------------
+build-pkg: build-darwin-universal
+	@echo "Building macOS .pkg installer..."
+	(cd installer/macos && bash build-pkg.sh "$(VERSION)")
+	mv installer/macos/myportal-tray-$(VERSION).pkg $(DIST)/darwin/myportal-tray.pkg
+	rm -f installer/macos/myportal-tray-$(VERSION)-unsigned.pkg
+
+# -----------------------------------------------------------------------
+# Package all installers
+# Builds the MSI on any platform that has WiX v4.
+# Builds the macOS .pkg only when pkgbuild is present (macOS runners).
+# -----------------------------------------------------------------------
+package-all: build-msi
+	@if command -v pkgbuild >/dev/null 2>&1; then \
+	    $(MAKE) build-pkg; \
+	else \
+	    echo "pkgbuild not available; skipping macOS .pkg (macOS-only step)."; \
+	fi
 
 # -----------------------------------------------------------------------
 # Tests
