@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -22,47 +23,97 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
+// lastRestartAt is used to prevent rapid restart loops when config_changed
+// events arrive in quick succession.
+var lastRestartAt time.Time
+
 // runUI starts the systray event loop; it blocks until systray.Quit() is called.
 func runUI() {
 	logger.Info("MyPortal Tray UI (Windows) starting systray")
+
+	// Wire up the config-changed callback before the event loop starts so
+	// that any IPC message arriving during startup is handled correctly.
+	onConfigChanged = handleConfigChanged
+
 	systray.Run(onTrayReady, onTrayExit)
 }
 
 func onTrayReady() {
 	systray.SetTitle("MyPortal")
 	systray.SetTooltip("MyPortal Helpdesk")
-	systray.SetIcon(loadTrayIcon())
+	// Set the default icon immediately so the tray appears without delay,
+	// then fetch the branded icon from the portal in the background.
+	systray.SetIcon(defaultIconICO())
 	buildMenu(gConfig)
+	go fetchAndSetIcon()
 }
 
-// loadTrayIcon attempts to download the branded tray icon from the portal
-// (`<portalURL>/tray/icon.ico`) and falls back to the built-in default if the
-// portal is unreachable or returns an invalid response. The portal serves
-// either an admin-uploaded custom .ico or one derived from the website
-// favicon, so this single fetch covers both cases.
-func loadTrayIcon() []byte {
-	if gPortalURL != "" {
-		url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Get(url)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-				if readErr == nil && len(data) >= 4 &&
-					data[0] == 0x00 && data[1] == 0x00 &&
-					data[2] == 0x01 && data[3] == 0x00 {
-					return data
-				}
-				logger.Warn("Tray icon fetch returned invalid ICO data, falling back to default")
-			} else {
-				logger.Warn("Tray icon fetch HTTP %d, falling back to default", resp.StatusCode)
-			}
-		} else {
-			logger.Warn("Tray icon fetch failed: %v, falling back to default", err)
-		}
+// fetchAndSetIcon downloads the branded .ico from the portal and applies it
+// to the running tray icon.  It is safe to call from any goroutine.
+func fetchAndSetIcon() {
+	if gPortalURL == "" {
+		return
 	}
-	return defaultIconICO()
+	url := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		logger.Warn("Tray icon fetch failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		logger.Warn("Tray icon fetch HTTP %d, falling back to default", resp.StatusCode)
+		return
+	}
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if readErr != nil {
+		logger.Warn("Tray icon read error: %v", readErr)
+		return
+	}
+	if len(data) < 4 || data[0] != 0x00 || data[1] != 0x00 || data[2] != 0x01 || data[3] != 0x00 {
+		logger.Warn("Tray icon fetch returned invalid ICO data, falling back to default")
+		return
+	}
+	systray.SetIcon(data)
+	logger.Info("Tray icon updated from portal")
+}
+
+// handleConfigChanged is called when the service broadcasts a config_changed
+// IPC message.  It refreshes the portal icon immediately and schedules a
+// process restart so the tray menu is rebuilt from the updated config.
+// A 60-second cooldown prevents restart storms if multiple config_changed
+// events arrive in quick succession.
+func handleConfigChanged(cfg *api.ConfigResponse) {
+	// Always refresh the icon — this can be updated without a restart.
+	go fetchAndSetIcon()
+
+	// Restart the process to rebuild the menu from the fresh config cache.
+	if time.Since(lastRestartAt) < 60*time.Second {
+		logger.Info("config_changed: skipping restart (cooldown active)")
+		return
+	}
+	lastRestartAt = time.Now()
+	go func() {
+		// The service writes the config to disk before broadcasting
+		// config_changed, so the updated file is already present.  No
+		// sleep is required — we can start the replacement process
+		// immediately.  cmd.Start() is called before systray.Quit() so
+		// that the new process is guaranteed to be running before the
+		// current one terminates (Quit may unblock main() very quickly).
+		exe, err := os.Executable()
+		if err != nil {
+			logger.Warn("config_changed restart: os.Executable: %v", err)
+			return
+		}
+		cmd := exec.Command(exe, os.Args[1:]...)
+		if startErr := cmd.Start(); startErr != nil {
+			logger.Warn("config_changed restart: Start: %v", startErr)
+			return
+		}
+		logger.Info("config_changed: restarting UI to rebuild menu")
+		systray.Quit()
+	}()
 }
 
 func onTrayExit() {
@@ -74,7 +125,7 @@ func onTrayExit() {
 // buildMenu constructs the systray menu from a ConfigResponse.
 // Note: getlantern/systray v1.2.2 does not expose a ResetMenu API, so this
 // function is only called once (on startup). Dynamic menu rebuilding is
-// deferred to a future systray library upgrade.
+// handled by restarting the UI process when a config_changed event arrives.
 func buildMenu(cfg *api.ConfigResponse) {
 	if cfg == nil {
 		cfg = defaultConfig()
@@ -205,3 +256,4 @@ func defaultIconICO() []byte {
 	buf.Write(pngData)
 	return buf.Bytes()
 }
+
