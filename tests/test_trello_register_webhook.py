@@ -23,7 +23,7 @@ def _http_error(status_code: int, text: str) -> httpx.HTTPStatusError:
 
 
 @pytest.fixture(autouse=True)
-def _module_enabled(monkeypatch):
+def mock_trello_module_enabled(monkeypatch):
     monkeypatch.setattr(
         trello_service,
         "_get_module_enabled",
