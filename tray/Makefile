@@ -35,7 +35,7 @@ build-windows:
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/windows/myportal-tray-service.exe ./service
 	@echo "Building Windows amd64 UI (no-CGO, no webview)..."
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags nowebview" \
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/windows/myportal-tray-ui.exe ./ui
 
 # -----------------------------------------------------------------------
@@ -47,7 +47,7 @@ build-darwin-amd64:
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-amd64/myportal-tray-service ./service
 	@echo "Building macOS amd64 UI (no-CGO, no webview)..."
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags nowebview" \
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-amd64/myportal-tray-ui ./ui
 
 # -----------------------------------------------------------------------
@@ -59,7 +59,7 @@ build-darwin-arm64:
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-arm64/myportal-tray-service ./service
 	@echo "Building macOS arm64 UI (no-CGO, no webview)..."
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 GOFLAGS="-tags nowebview" \
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-arm64/myportal-tray-ui ./ui
 
 # -----------------------------------------------------------------------
