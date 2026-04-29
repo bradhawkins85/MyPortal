@@ -409,6 +409,124 @@ install_wix() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Go toolchain – required for building the tray app binaries
+# ---------------------------------------------------------------------------
+
+GO_MIN_MAJOR=1
+GO_MIN_MINOR=22
+
+_go_satisfies_version() {
+  local go_bin="$1"
+  local version_output
+  version_output=$("$go_bin" version 2>/dev/null) || return 1
+  local major minor
+  if [[ "$version_output" =~ go([0-9]+)\.([0-9]+) ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+    if [[ "$major" -gt "$GO_MIN_MAJOR" ]] || \
+       [[ "$major" -eq "$GO_MIN_MAJOR" && "$minor" -ge "$GO_MIN_MINOR" ]]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+_detect_go() {
+  local -a candidates=("${GOROOT:-/usr/local/go}/bin/go" "go")
+  local candidate resolved
+  for candidate in "${candidates[@]}"; do
+    if [[ "$candidate" == /* ]]; then
+      [[ -x "$candidate" ]] && resolved="$candidate" || continue
+    else
+      command -v "$candidate" >/dev/null 2>&1 && resolved=$(command -v "$candidate") || continue
+    fi
+    if _go_satisfies_version "$resolved"; then
+      printf '%s' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
+
+install_go() {
+  if _detect_go >/dev/null 2>&1; then
+    local go_bin
+    go_bin=$(_detect_go)
+    echo "Go toolchain found: $("$go_bin" version)." >&2
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Warning: apt-get not found – skipping Go installation." >&2
+    echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually to enable tray app builds: https://go.dev/dl/" >&2
+    return
+  fi
+
+  echo "Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ not found; installing via apt-get…" >&2
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed – skipping Go installation." >&2
+    return
+  fi
+  if ! apt-get install -y -qq golang-go; then
+    echo "Warning: Failed to install golang-go package." >&2
+    return
+  fi
+
+  if _detect_go >/dev/null 2>&1; then
+    local go_bin
+    go_bin=$(_detect_go)
+    echo "Go toolchain installed: $("$go_bin" version)." >&2
+  else
+    echo "Warning: golang-go installed but Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ was not detected." >&2
+    echo "Install Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ manually: https://go.dev/dl/" >&2
+  fi
+}
+
+build_tray_installers() {
+  local tray_dir="${PROJECT_ROOT}/tray"
+  local static_tray_dir="${PROJECT_ROOT}/app/static/tray"
+
+  if [[ ! -f "${tray_dir}/Makefile" ]]; then
+    echo "Tray app Makefile not found; skipping tray build." >&2
+    return
+  fi
+
+  local go_bin
+  if ! go_bin=$(_detect_go 2>/dev/null); then
+    echo "Go ${GO_MIN_MAJOR}.${GO_MIN_MINOR}+ not available; skipping tray build." >&2
+    return
+  fi
+
+  if ! command -v make >/dev/null 2>&1; then
+    echo "make not available; skipping tray build." >&2
+    return
+  fi
+
+  # Ensure WiX is on PATH (installed by install_wix above).
+  export PATH="${HOME}/.dotnet/tools:${PATH}"
+
+  if ! command -v wix >/dev/null 2>&1; then
+    echo "WiX v4 not available; skipping MSI build." >&2
+    return
+  fi
+
+  echo "Attempting to build Windows MSI installer…" >&2
+  local go_dir
+  go_dir=$(dirname "$go_bin")
+  if (cd "$tray_dir" && PATH="${go_dir}:${HOME}/.dotnet/tools:${PATH}" make build-msi); then
+    mkdir -p "$static_tray_dir"
+    if [[ -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
+      cp "${tray_dir}/dist/windows/myportal-tray.msi" "${static_tray_dir}/myportal-tray.msi"
+      echo "MSI installer built and copied → app/static/tray/" >&2
+    else
+      echo "Warning: MSI build reported success but myportal-tray.msi was not found at expected path." >&2
+    fi
+  else
+    echo "Warning: MSI build failed." >&2
+  fi
+}
+
 ensure_env_file
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
 ensure_env_default "UVICORN_AUTO_UPDATE_ENABLED" "true"
@@ -441,8 +559,10 @@ install_pwsh
 install_exo_module
 install_dotnet
 install_wix
+install_go
 ensure_virtualenv
 install_dependencies
+build_tray_installers
 
 cat <<MESSAGE
 MyPortal ${ENVIRONMENT} environment is ready.
