@@ -781,7 +781,10 @@ async def add_reply(
         card_id = str(ticket_payload.get("external_reference") or "").strip()
         if card_id:
             try:
+                from app.repositories import companies as company_repo
                 from app.services import trello as trello_service
+                trello_company_id = ticket_payload.get("company_id")
+                trello_company = await company_repo.get_company_by_id(int(trello_company_id)) if trello_company_id else None
                 first_name = str(current_user.get("first_name") or "").strip()
                 last_name = str(current_user.get("last_name") or "").strip()
                 author_parts = [p for p in (first_name, last_name) if p]
@@ -790,6 +793,7 @@ async def add_reply(
                     card_id,
                     author_display,
                     sanitised_reply_payload.html,
+                    company=trello_company,
                 )
             except Exception as exc:
                 logger.debug("Trello reply sync failed for ticket {}: {}", ticket_id, exc)

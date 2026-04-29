@@ -758,10 +758,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "name": "Trello",
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
         "icon": "📋",
-        "settings": {
-            "api_key": "",
-            "token": "",
-        },
+        "settings": {},
     },
 ]
 
@@ -1209,27 +1206,6 @@ def _coerce_settings(
                 "api_key": api_key,
             }
         )
-    elif slug == "trello":
-        overrides = payload or {}
-        api_key_override = overrides.get("api_key")
-        if api_key_override is None:
-            api_key = str(merged.get("api_key") or "").strip()
-        else:
-            candidate = str(api_key_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("api_key"):
-                api_key = str(existing_settings.get("api_key") or "").strip()
-            else:
-                api_key = candidate
-        token_override = overrides.get("token")
-        if token_override is None:
-            token = str(merged.get("token") or "").strip()
-        else:
-            candidate_token = str(token_override or "").strip()
-            if not candidate_token and existing_settings and existing_settings.get("token"):
-                token = str(existing_settings.get("token") or "").strip()
-            else:
-                token = candidate_token
-        merged.update({"api_key": api_key, "token": token})
     return merged
 
 
@@ -1250,7 +1226,6 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
         "hudu": ("api_key",),
-        "trello": ("api_key", "token"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:

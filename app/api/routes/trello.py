@@ -81,7 +81,9 @@ async def register_trello_webhook(
     """Register a Trello webhook for *board_id* pointing back to this server.
 
     The callback URL is derived from the current request's base URL so it works
-    in both development and production environments.
+    in both development and production environments.  The board must already be
+    linked to a company (via the company's Trello board ID field) so that the
+    per-company API credentials can be used.
     """
     board_id = board_id.strip()
     if not board_id:
@@ -90,15 +92,26 @@ async def register_trello_webhook(
             detail="board_id is required",
         )
 
+    company = await trello_service.get_company_for_board(board_id)
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "No company is linked to this board ID. "
+                "Set the Trello board ID on the company first."
+            ),
+        )
+
     base_url = str(request.base_url).rstrip("/")
     callback_url = f"{base_url}/api/integration-modules/trello/webhook"
-    result = await trello_service.register_webhook(board_id, callback_url)
+    result = await trello_service.register_webhook(board_id, callback_url, company=company)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
                 "Failed to register Trello webhook. "
-                "Check that the Trello module is enabled and credentials are correct."
+                "Check that the Trello module is enabled and the company's "
+                "API key and token are configured."
             ),
         )
     return {"status": "ok", "webhook": result, "callback_url": callback_url}
@@ -160,7 +173,7 @@ async def _handle_create_card(
     )
 
     # Post confirmation comment back on the Trello card (new requirement)
-    await trello_service.post_ticket_created_comment(card_id, ticket_number)
+    await trello_service.post_ticket_created_comment(card_id, ticket_number, company=company)
 
 
 async def _handle_comment_card(
