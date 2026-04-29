@@ -783,8 +783,13 @@ async def add_reply(
             try:
                 from app.repositories import companies as company_repo
                 from app.services import trello as trello_service
+                trello_company: dict[str, Any] | None = None
                 trello_company_id = ticket_payload.get("company_id")
-                trello_company = await company_repo.get_company_by_id(int(trello_company_id)) if trello_company_id else None
+                if trello_company_id is not None:
+                    try:
+                        trello_company = await company_repo.get_company_by_id(int(trello_company_id))
+                    except (TypeError, ValueError):
+                        pass
                 first_name = str(current_user.get("first_name") or "").strip()
                 last_name = str(current_user.get("last_name") or "").strip()
                 author_parts = [p for p in (first_name, last_name) if p]
