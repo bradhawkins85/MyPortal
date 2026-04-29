@@ -722,3 +722,38 @@ def test_push_notification_requires_auth(http_client):
     )
     assert resp.status_code in (401, 403)
 
+
+# ---------------------------------------------------------------------------
+# Tray icon (branding)
+# ---------------------------------------------------------------------------
+
+
+def test_tray_icon_default_is_valid_ico():
+    """The default tray icon is a valid PNG-encoded .ico container."""
+    from app.services.tray_icon import build_default_icon_bytes, is_valid_ico
+
+    data = build_default_icon_bytes()
+    assert is_valid_ico(data)
+    # ICO signature + at least one ICONDIRENTRY + a PNG payload
+    assert data[:4] == b"\x00\x00\x01\x00"
+    # PNG magic embedded after the 22-byte header
+    assert data[22:30] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_tray_icon_service_falls_back_when_no_upload(tmp_path, run):
+    from app.services.tray_icon import (
+        build_default_icon_bytes,
+        get_tray_icon_bytes,
+    )
+
+    data = run(get_tray_icon_bytes(tmp_path))
+    assert data == build_default_icon_bytes()
+
+
+def test_tray_icon_rejects_invalid_magic_bytes():
+    from app.services.tray_icon import is_valid_ico
+
+    assert not is_valid_ico(b"")
+    assert not is_valid_ico(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+    assert not is_valid_ico(b"\x00\x00\x02\x00" + b"\x00" * 20)
+
