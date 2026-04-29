@@ -330,6 +330,85 @@ install_exo_module() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# .NET SDK + WiX v4 – required for building the Windows MSI tray installer
+# ---------------------------------------------------------------------------
+
+install_dotnet() {
+  if command -v dotnet >/dev/null 2>&1; then
+    echo ".NET SDK is already installed ($(dotnet --version))." >&2
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Warning: apt-get not found – skipping .NET SDK installation." >&2
+    echo "Install .NET SDK 8+ manually to enable MSI builds: https://dotnet.microsoft.com/download" >&2
+    return
+  fi
+
+  echo "Installing .NET SDK 8.0…" >&2
+
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed – skipping .NET SDK installation." >&2
+    return
+  fi
+
+  # Try 8.0 first (LTS); fall back to 9.0 if the distro only ships the newer SDK.
+  if apt-get install -y -qq dotnet-sdk-8.0 2>/dev/null; then
+    :
+  elif apt-get install -y -qq dotnet-sdk-9.0 2>/dev/null; then
+    :
+  else
+    echo "Warning: Could not install .NET SDK via apt-get." >&2
+    echo "Install .NET SDK 8+ manually: https://dotnet.microsoft.com/download" >&2
+    return
+  fi
+
+  if command -v dotnet >/dev/null 2>&1; then
+    echo ".NET SDK installed ($(dotnet --version))." >&2
+  else
+    echo "Warning: .NET SDK package installed but dotnet not found on PATH." >&2
+  fi
+}
+
+install_wix() {
+  # WiX v4 is a .NET global tool installed per-user under ~/.dotnet/tools.
+  export PATH="${HOME}/.dotnet/tools:${PATH}"
+
+  if command -v wix >/dev/null 2>&1; then
+    echo "WiX v4 is already installed." >&2
+    return
+  fi
+
+  local dotnet_bin
+  dotnet_bin=$(command -v dotnet 2>/dev/null || true)
+
+  if [[ -z "$dotnet_bin" ]]; then
+    echo "Warning: dotnet not available – skipping WiX v4 installation." >&2
+    return
+  fi
+
+  echo "Installing WiX v4 (dotnet global tool)…" >&2
+
+  if ! "$dotnet_bin" tool install --global wix 2>/dev/null; then
+    # Already installed at a different version; try updating instead.
+    if ! "$dotnet_bin" tool update --global wix 2>/dev/null; then
+      echo "Warning: Failed to install WiX v4." >&2
+      return
+    fi
+  fi
+
+  # Re-export so the newly installed binary is on PATH for the rest of this session.
+  export PATH="${HOME}/.dotnet/tools:${PATH}"
+
+  if command -v wix >/dev/null 2>&1; then
+    echo "WiX v4 installed successfully." >&2
+  else
+    echo "Warning: WiX v4 installed but wix binary not found on PATH." >&2
+    echo "Add \${HOME}/.dotnet/tools to PATH to use it." >&2
+  fi
+}
+
 ensure_env_file
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
 ensure_env_default "UVICORN_AUTO_UPDATE_ENABLED" "true"
@@ -360,6 +439,8 @@ REMINDER
 
 install_pwsh
 install_exo_module
+install_dotnet
+install_wix
 ensure_virtualenv
 install_dependencies
 

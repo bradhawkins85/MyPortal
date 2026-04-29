@@ -393,6 +393,7 @@ run_restart_helper() {
 GO_MIN_MAJOR=1
 GO_MIN_MINOR=22
 GO_BIN=""
+DOTNET_BIN=""
 
 go_satisfies_version() {
   local go_bin="$1"
@@ -479,6 +480,95 @@ ensure_make() {
   fi
 }
 
+detect_dotnet() {
+  local -a candidates=("${HOME}/.dotnet/dotnet" "dotnet")
+  local candidate resolved
+  for candidate in "${candidates[@]}"; do
+    if [[ "$candidate" == /* ]]; then
+      [[ -x "$candidate" ]] && resolved="$candidate" || continue
+    else
+      command -v "$candidate" >/dev/null 2>&1 && resolved=$(command -v "$candidate") || continue
+    fi
+    if "$resolved" --version >/dev/null 2>&1; then
+      printf '%s' "$resolved"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_dotnet() {
+  local dotnet_bin
+  if dotnet_bin=$(detect_dotnet); then
+    echo ".NET SDK found: $("$dotnet_bin" --version)."
+    DOTNET_BIN="$dotnet_bin"
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Warning: apt-get not found; cannot install .NET SDK automatically." >&2
+    echo "Install .NET SDK 8+ manually to enable MSI builds: https://dotnet.microsoft.com/download" >&2
+    return 1
+  fi
+
+  echo ".NET SDK not found; installing via apt-get…"
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed; skipping .NET SDK installation." >&2
+    return 1
+  fi
+  if ! apt-get install -y -qq dotnet-sdk-8.0 2>/dev/null && \
+     ! apt-get install -y -qq dotnet-sdk-9.0 2>/dev/null; then
+    echo "Warning: Failed to install .NET SDK via apt-get." >&2
+    echo "Install .NET SDK 8+ manually: https://dotnet.microsoft.com/download" >&2
+    return 1
+  fi
+
+  if dotnet_bin=$(detect_dotnet); then
+    echo ".NET SDK installed: $("$dotnet_bin" --version)."
+    DOTNET_BIN="$dotnet_bin"
+    return 0
+  fi
+
+  echo "Warning: .NET SDK installed but dotnet binary not found on PATH." >&2
+  return 1
+}
+
+ensure_wix() {
+  # Add dotnet global tools directory to PATH so installed tools are found.
+  export PATH="${HOME}/.dotnet/tools:${PATH}"
+
+  if command -v wix >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Ensure .NET SDK is available first.
+  if [[ -z "$DOTNET_BIN" ]]; then
+    if ! ensure_dotnet; then
+      return 1
+    fi
+  fi
+
+  echo "WiX v4 not found; installing via dotnet tool install…"
+  if ! "$DOTNET_BIN" tool install --global wix 2>/dev/null; then
+    # If the tool is already installed but outdated, update it.
+    if ! "$DOTNET_BIN" tool update --global wix 2>/dev/null; then
+      echo "Warning: Failed to install WiX v4 via dotnet tool install." >&2
+      return 1
+    fi
+  fi
+
+  # Re-source PATH so the newly installed wix binary is found.
+  export PATH="${HOME}/.dotnet/tools:${PATH}"
+
+  if command -v wix >/dev/null 2>&1; then
+    echo "WiX v4 installed successfully."
+    return 0
+  fi
+
+  echo "Warning: WiX v4 installed but wix binary not found on PATH." >&2
+  return 1
+}
+
 build_tray_app() {
   local tray_dir="${PROJECT_ROOT}/tray"
   local static_tray_dir="${PROJECT_ROOT}/app/static/tray"
@@ -512,26 +602,17 @@ build_tray_app() {
   fi
   echo "Tray app build complete. Binaries are in ${tray_dir}/dist/."
 
-  # Build Windows MSI installer if WiX v4 is available.
-  # WiX v4 is installed via: dotnet tool install --global wix
-  # The dotnet global tools directory (~/.dotnet/tools) must be in PATH.
-  local wix_bin=""
-  if command -v wix >/dev/null 2>&1; then
-    wix_bin="wix"
-  elif [[ -x "${HOME}/.dotnet/tools/wix" ]]; then
-    wix_bin="${HOME}/.dotnet/tools/wix"
-    export PATH="${HOME}/.dotnet/tools:${PATH}"
-  fi
-
-  if [[ -n "$wix_bin" ]]; then
+  # Build Windows MSI installer; install WiX v4 automatically if not present.
+  if ensure_wix; then
     echo "WiX found; building Windows MSI installer…"
-    if (cd "$tray_dir" && make build-msi); then
+    if (cd "$tray_dir" && PATH="${HOME}/.dotnet/tools:${PATH}" make build-msi); then
       echo "MSI installer built: ${tray_dir}/dist/windows/myportal-tray.msi"
     else
       echo "Warning: MSI build failed." >&2
     fi
   else
-    echo "wix tool not found; skipping MSI build. Install with: dotnet tool install --global wix" >&2
+    echo "Warning: WiX v4 not available; skipping MSI build." >&2
+    echo "Install WiX v4 manually with: dotnet tool install --global wix" >&2
   fi
 
   # Copy any built installers to app/static/tray/ so they are served via HTTP.
