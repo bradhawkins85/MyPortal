@@ -123,9 +123,15 @@ async def find_matching_asset(
 _DEFAULT_MENU: list[dict[str, Any]] = [
     {"type": "label", "label": "MyPortal"},
     {"type": "separator"},
-    {"type": "open_chat", "label": "Chat with helpdesk"},
+    {"type": "label", "label": "Contact Support"},
+    {"type": "label", "label": "Email: myportal@company.com.au"},
+    {"type": "label", "label": "Phone: 0755000000"},
     {"type": "separator"},
-    {"type": "label", "label": "No menu configured"},
+    {"type": "link", "label": "Submit Ticket", "url": "https://www.google.com"},
+    {"type": "separator"},
+    {"type": "link", "label": "Knowledge Base", "url": "/kb"},
+    {"type": "separator"},
+    {"type": "open_chat", "label": "Chat"},
 ]
 
 
