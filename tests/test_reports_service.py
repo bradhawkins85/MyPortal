@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.services import reports as _huntress_reports
+
 
 @pytest.mark.asyncio
 async def test_build_company_report_assembles_all_sections():
@@ -562,8 +564,6 @@ async def test_build_company_report_disabled_section_not_detailed():
 # Huntress sections
 # ---------------------------------------------------------------------------
 
-
-from app.services import reports as _huntress_reports
 
 def test_huntress_sections_are_registered():
     """All five Huntress sections appear in REPORT_SECTIONS."""
