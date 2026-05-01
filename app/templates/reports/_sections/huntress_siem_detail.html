@@ -10,8 +10,7 @@
   </header>
   <div class="card__body">
     {{ counter_strip(items=[
-      {'label': 'Data collected (GB)', 'value': '%.2f' | format(section.detail_data.data_collected_gb_30d or 0), 'variant': 'info'},
-      {'label': 'Bytes collected', 'value': section.detail_data.data_collected_bytes_30d or 0, 'variant': 'neutral'}
+      {'label': 'Logs collected (last 30 days)', 'value': section.detail_data.data_collected_bytes_30d or 0, 'variant': 'info'}
     ]) }}
     {% if section.detail_data.window_start and section.detail_data.window_end %}
       <p class="report-section__meta">

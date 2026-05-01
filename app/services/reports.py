@@ -131,7 +131,7 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
     ReportSection(
         key="huntress_siem",
         label="Huntress Managed SIEM",
-        description="Total SIEM data collected over the trailing 30 days.",
+        description="Total SIEM logs collected over the trailing 30 days.",
     ),
     ReportSection(
         key="huntress_soc",
@@ -1067,7 +1067,6 @@ async def _build_huntress_siem(company_id: int) -> dict[str, Any]:
     bytes_value = int(stats.get("data_collected_bytes_30d") or 0)
     return {
         "data_collected_bytes_30d": bytes_value,
-        "data_collected_gb_30d": _huntress_bytes_to_gb(bytes_value),
         "window_start": _datetime_to_iso(stats.get("window_start")),
         "window_end": _datetime_to_iso(stats.get("window_end")),
         "snapshot_at": _datetime_to_iso(stats.get("snapshot_at")),
