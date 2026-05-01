@@ -168,226 +168,84 @@ async def list_organizations() -> list[dict[str, Any]]:
     return organisations
 
 
-async def get_edr_summary(org_id: str) -> dict[str, int]:
-    """Return ``{active_incidents, resolved_incidents, signals_investigated}``."""
+
+
+async def get_latest_summary_report(org_id: str, report_type: str = "monthly_summary") -> dict[str, Any] | None:
+    """Return the most recent summary report for an organisation."""
     credentials = _get_credentials()
     if not credentials:
         raise HuntressConfigurationError("Huntress credentials are not configured.")
 
     async with _client(credentials) as client:
-        active_payload = await _get_json(
+        payload = await _get_json(
             client,
-            "/incident_reports",
-            {"organization_id": org_id, "status": "sent", "limit": 1},
+            "/reports",
+            {"organization_id": org_id, "type": report_type, "limit": 1},
+            allow_not_found=True,
         )
-        resolved_payload = await _get_json(
-            client,
-            "/incident_reports",
-            {"organization_id": org_id, "status": "closed", "limit": 1},
-        )
-        signals_payload = await _get_json(
-            client,
-            "/signals",
-            {"organization_id": org_id, "product": "edr", "limit": 1},
-        )
+    reports = _extract_list(payload, key="reports")
+    for report in reports:
+        if isinstance(report, Mapping):
+            return dict(report)
+    if isinstance(payload, Mapping):
+        data = payload.get("data")
+        if isinstance(data, Mapping):
+            return dict(data)
+    return None
 
+
+async def get_edr_summary(org_id: str) -> dict[str, int]:
+    """Return EDR counters from the latest Huntress summary report."""
+    report = await get_latest_summary_report(org_id)
+    payload = report if isinstance(report, Mapping) else {}
     return {
-        "active_incidents": _extract_total(active_payload, "incident_reports"),
-        "resolved_incidents": _extract_total(resolved_payload, "incident_reports"),
-        "signals_investigated": _extract_total(signals_payload, "signals"),
+        "active_incidents": _coerce_int(payload.get("incidents_reported")),
+        "resolved_incidents": _coerce_int(payload.get("incidents_resolved")),
+        "signals_investigated": _coerce_int(payload.get("signals_investigated")),
     }
 
 
 async def get_itdr_summary(org_id: str) -> dict[str, int]:
-    """Return ``{signals_investigated}`` for the ITDR product."""
-    credentials = _get_credentials()
-    if not credentials:
-        raise HuntressConfigurationError("Huntress credentials are not configured.")
-
-    async with _client(credentials) as client:
-        payload = await _get_json(
-            client,
-            "/signals",
-            {"organization_id": org_id, "product": "itdr", "limit": 1},
-        )
-    return {"signals_investigated": _extract_total(payload, "signals")}
+    """Return ITDR investigations completed from the latest summary report."""
+    report = await get_latest_summary_report(org_id)
+    payload = report if isinstance(report, Mapping) else {}
+    return {"signals_investigated": _coerce_int(payload.get("itdr_investigations_completed"))}
 
 
 async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
-    """Return aggregated SAT statistics across every learner.
-
-    Returns ``None`` when the SAT product is not available for the account
-    (API returns 404).
-    """
-    credentials = _get_credentials()
-    if not credentials:
-        raise HuntressConfigurationError("Huntress credentials are not configured.")
-
-    async with _client(credentials) as client:
-        summary = await _get_json(
-            client, "/sat/learners/summary", {"organization_id": org_id},
-            allow_not_found=True,
-        )
-        if summary is None:
-            return None
-        phishing = await _get_json(
-            client, "/sat/phishing/summary", {"organization_id": org_id},
-            allow_not_found=True,
-        )
-
-    summary_payload = summary if isinstance(summary, Mapping) else {}
-    # phishing may be None if the phishing summary sub-endpoint is not available;
-    # in that case treat it as an empty mapping so counts default to 0.
-    phishing_payload = phishing if isinstance(phishing, Mapping) else {}
-
-    return {
-        "avg_completion_rate": _coerce_float(summary_payload.get("average_completion_rate")),
-        "avg_score": _coerce_float(summary_payload.get("average_score")),
-        "phishing_clicks": _coerce_int(phishing_payload.get("clicks")),
-        "phishing_compromises": _coerce_int(phishing_payload.get("compromises")),
-        "phishing_reports": _coerce_int(phishing_payload.get("reports")),
-    }
+    """SAT endpoints are not currently exposed in Huntress public API docs."""
+    return None
 
 
 async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
-    """Return per-learner per-assignment progress + phishing rates.
-
-    Returns ``None`` when the SAT product is not available for the account
-    (API returns 404).
-    """
-    credentials = _get_credentials()
-    if not credentials:
-        raise HuntressConfigurationError("Huntress credentials are not configured.")
-
-    rows: list[dict[str, Any]] = []
-    async with _client(credentials) as client:
-        page_token: str | None = None
-        for iteration in range(100):
-            params: dict[str, Any] = {"organization_id": org_id, "limit": 100}
-            if page_token:
-                params["page_token"] = page_token
-            payload = await _get_json(
-                client,
-                "/sat/learners",
-                params,
-                allow_not_found=True,
-            )
-            if payload is None:
-                # 404 on first request means the feature is not available for this account.
-                # 404 on a subsequent page is treated as end of results.
-                if iteration == 0:
-                    return None
-                break
-            learners = _extract_list(payload, key="learners")
-            if not learners:
-                break
-            for learner in learners:
-                if not isinstance(learner, Mapping):
-                    continue
-                learner_id = str(learner.get("id") or learner.get("external_id") or "").strip()
-                if not learner_id:
-                    continue
-                learner_email = (learner.get("email") or "").strip() or None
-                learner_name = (learner.get("name") or "").strip() or None
-                phishing = learner.get("phishing") if isinstance(learner.get("phishing"), Mapping) else {}
-                click_rate = _coerce_float(phishing.get("click_rate"))
-                compromise_rate = _coerce_float(phishing.get("compromise_rate"))
-                report_rate = _coerce_float(phishing.get("report_rate"))
-                assignments = learner.get("assignments")
-                if not isinstance(assignments, list):
-                    continue
-                for assignment in assignments:
-                    if not isinstance(assignment, Mapping):
-                        continue
-                    assignment_id = str(assignment.get("id") or "").strip()
-                    if not assignment_id:
-                        continue
-                    rows.append(
-                        {
-                            "learner_external_id": learner_id,
-                            "learner_email": learner_email,
-                            "learner_name": learner_name,
-                            "assignment_id": assignment_id,
-                            "assignment_name": assignment.get("name"),
-                            "status": assignment.get("status"),
-                            "completion_percent": _coerce_float(
-                                assignment.get("completion_percent")
-                            ),
-                            "score": _coerce_float(assignment.get("score")),
-                            "click_rate": click_rate,
-                            "compromise_rate": compromise_rate,
-                            "report_rate": report_rate,
-                        }
-                    )
-            page_token = _extract_next_page_token(payload)
-            if not page_token:
-                break
-    return rows
+    """SAT learner detail endpoints are not currently exposed in public API docs."""
+    return None
 
 
 async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any] | None:
-    """Return total SIEM data ingested over the trailing ``days`` window.
-
-    Returns ``None`` when the Managed SIEM product is not available for the
-    account (API returns 404).
-    """
-    credentials = _get_credentials()
-    if not credentials:
-        raise HuntressConfigurationError("Huntress credentials are not configured.")
-
+    """Return SIEM log-volume counters from the latest Huntress summary report."""
+    report = await get_latest_summary_report(org_id)
+    payload = report if isinstance(report, Mapping) else {}
+    total_logs = _coerce_int(payload.get("siem_total_logs") or payload.get("siem_ingested_logs"))
+    if total_logs <= 0:
+        return None
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
-    async with _client(credentials) as client:
-        payload = await _get_json(
-            client,
-            "/siem/usage",
-            {
-                "organization_id": org_id,
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-            },
-            allow_not_found=True,
-        )
-    if payload is None:
-        return None
-    payload_map = payload if isinstance(payload, Mapping) else {}
-    bytes_total = _coerce_int(
-        payload_map.get("total_bytes")
-        or payload_map.get("bytes")
-        or payload_map.get("data_bytes")
-    )
     return {
-        "data_collected_bytes_30d": bytes_total,
+        "data_collected_bytes_30d": total_logs,
         "window_start": start.replace(tzinfo=None),
         "window_end": end.replace(tzinfo=None),
     }
 
 
 async def get_soc_event_count(org_id: str) -> dict[str, int] | None:
-    """Return the SOC ``total_events_analysed`` counter.
-
-    Returns ``None`` when the SOC product is not available for the account
-    (API returns 404).
-    """
-    credentials = _get_credentials()
-    if not credentials:
-        raise HuntressConfigurationError("Huntress credentials are not configured.")
-
-    async with _client(credentials) as client:
-        payload = await _get_json(
-            client, "/soc/summary", {"organization_id": org_id},
-            allow_not_found=True,
-        )
-    if payload is None:
+    """Return SOC event-analysis counters from the latest summary report."""
+    report = await get_latest_summary_report(org_id)
+    payload = report if isinstance(report, Mapping) else {}
+    total = _coerce_int(payload.get("events_analyzed"))
+    if total <= 0:
         return None
-    payload_map = payload if isinstance(payload, Mapping) else {}
-    return {
-        "total_events_analysed": _coerce_int(
-            payload_map.get("total_events_analysed")
-            or payload_map.get("events_analysed")
-            or payload_map.get("total_events")
-        )
-    }
+    return {"total_events_analysed": total}
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +487,7 @@ def _coerce_float(value: Any) -> float:
 __all__ = [
     "HuntressConfigurationError",
     "credentials_status",
+    "get_latest_summary_report",
     "get_edr_summary",
     "get_itdr_summary",
     "get_sat_summary",

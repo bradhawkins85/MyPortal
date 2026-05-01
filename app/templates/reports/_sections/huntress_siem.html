@@ -14,7 +14,7 @@
   </header>
   <div class="card__body">
     {{ counter_strip(items=[
-      {'label': 'Data collected (GB, last 30 days)', 'value': '%.2f' | format(section.data.data_collected_gb_30d or 0), 'variant': 'info'}
+      {'label': 'Logs collected (last 30 days)', 'value': section.data.data_collected_bytes_30d or 0, 'variant': 'info'}
     ]) }}
   </div>
 </section>
