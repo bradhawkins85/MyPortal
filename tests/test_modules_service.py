@@ -1092,3 +1092,24 @@ def test_update_module_preserves_ollama_mcp_secret_when_blank(monkeypatch):
     )
 
     assert captured["shared_secret_hash"] == existing_hash
+
+
+def test_huntress_default_module_is_registered():
+    """Huntress must be present in DEFAULT_MODULES with no settings UI."""
+    from app.services import modules
+
+    huntress = next(
+        (module for module in modules.DEFAULT_MODULES if module["slug"] == "huntress"),
+        None,
+    )
+    assert huntress is not None, "Huntress is not registered in DEFAULT_MODULES"
+    assert huntress["name"] == "Huntress"
+    # No UI settings — credentials live in environment variables.
+    assert huntress["settings"] == {}
+
+
+def test_huntress_module_is_non_triggerable():
+    """Huntress is a report ingester, not an action module."""
+    from app.services import modules
+
+    assert "huntress" in modules._NON_TRIGGERABLE_MODULE_SLUGS

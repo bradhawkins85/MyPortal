@@ -580,6 +580,38 @@
                 <input id="hudu-api-key" name="settings.api_key" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API key" />
                 <p class="form-help">Keys are stored securely. Leave blank to keep the existing value. Generate an API key from <strong>Admin → API Keys</strong> inside your Hudu instance.</p>
               </div>
+            {% elif module.slug == 'huntress' %}
+              <div class="form-field">
+                <p class="form-help">The Huntress module has no UI configuration. API credentials are read from the environment so they can be rotated without changing application data.</p>
+              </div>
+              {% set hcred = huntress_credentials or {} %}
+              <fieldset class="form-field">
+                <legend class="form-label">Environment credentials</legend>
+                <ul class="report-section__meta" style="list-style: none; padding-left: 0; margin: 0;">
+                  <li>
+                    <span class="status status--{{ 'success' if hcred.get('api_key_present') else 'danger' }}">
+                      {{ 'Detected' if hcred.get('api_key_present') else 'Missing' }}
+                    </span>
+                    <code>HUNTRESS_API_KEY</code>
+                  </li>
+                  <li>
+                    <span class="status status--{{ 'success' if hcred.get('api_secret_present') else 'danger' }}">
+                      {{ 'Detected' if hcred.get('api_secret_present') else 'Missing' }}
+                    </span>
+                    <code>HUNTRESS_API_SECRET</code>
+                  </li>
+                  <li>
+                    <span class="status status--{{ 'success' if hcred.get('base_url_present') else 'warning' }}">
+                      {{ 'Detected' if hcred.get('base_url_present') else 'Default' }}
+                    </span>
+                    <code>HUNTRESS_BASE_URL</code>
+                  </li>
+                </ul>
+                <p class="form-help">Set these in <code>.env</code> on the host running MyPortal, then restart the application. Values are never displayed; only their presence is shown.</p>
+              </fieldset>
+              <div class="form-field">
+                <p class="form-help">Link companies to Huntress organisations from <strong>Admin → Companies → Edit</strong>. The daily <code>huntress-daily-sync</code> job pulls EDR / ITDR / SAT / SIEM / SOC stats for each linked company.</p>
+              </div>
             {% elif module.slug == 'trello' %}
               <div class="form-field">
                 <p class="form-help">API credentials (API key and token) are now configured per company. Visit <strong>Admin → Companies → Edit</strong> for each company to enter its Trello board ID, API key, and token.</p>

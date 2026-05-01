@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.services import reports as _huntress_reports
+
 
 @pytest.mark.asyncio
 async def test_build_company_report_assembles_all_sections():
@@ -113,7 +115,7 @@ async def test_build_company_report_assembles_all_sections():
 
     assert report.company["name"] == "Acme Pty Ltd"
     # One section for every entry in REPORT_SECTIONS, all enabled.
-    assert len(report.sections) == len(reports.REPORT_SECTIONS)
+    assert len(report.sections) == len(_huntress_reports.REPORT_SECTIONS)
     assert all(s.enabled for s in report.sections)
 
     assets = report.section("assets")
@@ -348,7 +350,7 @@ async def test_build_company_report_respects_section_order():
     preferences = {key: True for key in reports.SECTION_KEYS}
     # Request staff first, then assets.
     custom_order = ["staff", "assets"] + [
-        s.key for s in reports.REPORT_SECTIONS if s.key not in ("staff", "assets")
+        s.key for s in _huntress_reports.REPORT_SECTIONS if s.key not in ("staff", "assets")
     ]
 
     with patch.object(
@@ -397,7 +399,7 @@ async def test_build_company_report_respects_section_order():
 
     assert report.sections[0].key == "staff"
     assert report.sections[1].key == "assets"
-    assert len(report.sections) == len(reports.REPORT_SECTIONS)
+    assert len(report.sections) == len(_huntress_reports.REPORT_SECTIONS)
 
 
 # ---------------------------------------------------------------------------
@@ -556,3 +558,98 @@ async def test_build_company_report_disabled_section_not_detailed():
         assert section.detailed is False
         assert section.detail_data == {}
 
+
+
+# ---------------------------------------------------------------------------
+# Huntress sections
+# ---------------------------------------------------------------------------
+
+
+def test_huntress_sections_are_registered():
+    """All five Huntress sections appear in REPORT_SECTIONS."""
+    keys = {section.key for section in _huntress_reports.REPORT_SECTIONS}
+    assert {
+        "huntress_edr",
+        "huntress_itdr",
+        "huntress_sat",
+        "huntress_siem",
+        "huntress_soc",
+    }.issubset(keys)
+    # Each registered section must have a builder.
+    for key in (
+        "huntress_edr",
+        "huntress_itdr",
+        "huntress_sat",
+        "huntress_siem",
+        "huntress_soc",
+    ):
+        assert key in _huntress_reports._SECTION_BUILDERS
+        assert key in _huntress_reports._DETAIL_BUILDERS
+
+
+def test_huntress_bytes_to_gb_rounding():
+    assert _huntress_reports._huntress_bytes_to_gb(0) == 0.0
+    assert _huntress_reports._huntress_bytes_to_gb(1024 ** 3) == 1.0
+    # 1.5 GiB
+    assert _huntress_reports._huntress_bytes_to_gb(int(1.5 * 1024 ** 3)) == 1.5
+
+
+@pytest.mark.asyncio
+async def test_build_huntress_edr_returns_empty_when_module_disabled(monkeypatch):
+    monkeypatch.setattr(_huntress_reports, "_huntress_company_linked", AsyncMock(return_value=False))
+    result = await _huntress_reports._build_huntress_edr(1)
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_build_huntress_edr_reads_snapshot(monkeypatch):
+    monkeypatch.setattr(_huntress_reports, "_huntress_company_linked", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        _huntress_reports.huntress_repo,
+        "get_edr_stats",
+        AsyncMock(return_value={
+            "active_incidents": 3,
+            "resolved_incidents": 7,
+            "signals_investigated": 12,
+            "snapshot_at": None,
+        }),
+    )
+    result = await _huntress_reports._build_huntress_edr(5)
+    assert result["active_incidents"] == 3
+    assert result["resolved_incidents"] == 7
+    assert result["signals_investigated"] == 12
+
+
+@pytest.mark.asyncio
+async def test_build_huntress_siem_converts_bytes_to_gb(monkeypatch):
+    monkeypatch.setattr(_huntress_reports, "_huntress_company_linked", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        _huntress_reports.huntress_repo,
+        "get_siem_stats",
+        AsyncMock(return_value={
+            "data_collected_bytes_30d": 2 * 1024 ** 3,
+            "window_start": None,
+            "window_end": None,
+            "snapshot_at": None,
+        }),
+    )
+    result = await _huntress_reports._build_huntress_siem(5)
+    assert result["data_collected_gb_30d"] == 2.0
+    assert result["data_collected_bytes_30d"] == 2 * 1024 ** 3
+
+
+def test_huntress_section_is_empty_helpers():
+    # Empty edr -> True
+    assert _huntress_reports._section_is_empty("huntress_edr", {}) is True
+    assert _huntress_reports._section_is_empty(
+        "huntress_edr",
+        {"active_incidents": 0, "resolved_incidents": 0, "signals_investigated": 0},
+    ) is True
+    assert _huntress_reports._section_is_empty(
+        "huntress_edr",
+        {"active_incidents": 0, "resolved_incidents": 0, "signals_investigated": 4},
+    ) is False
+    assert _huntress_reports._section_is_empty("huntress_siem", {"data_collected_bytes_30d": 0}) is True
+    assert _huntress_reports._section_is_empty("huntress_siem", {"data_collected_bytes_30d": 1}) is False
+    assert _huntress_reports._section_is_empty("huntress_soc", {"total_events_analysed": 0}) is True
+    assert _huntress_reports._section_is_empty("huntress_soc", {"total_events_analysed": 5}) is False
