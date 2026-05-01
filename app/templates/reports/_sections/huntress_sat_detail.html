@@ -1,0 +1,73 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="huntress_sat_detail">
+  <header class="card__header report-section__header">
+    <h2>Huntress Security Awareness Training — learner progress</h2>
+    {% if section.detail_data.snapshot_at %}
+      <span class="report-section__meta">
+        Snapshot <span data-utc="{{ section.detail_data.snapshot_at }}">{{ section.detail_data.snapshot_at }}</span>
+      </span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {{ counter_strip(items=[
+      {'label': 'Avg completion', 'value': '%.1f%%' | format(section.detail_data.avg_completion_rate or 0), 'variant': 'info'},
+      {'label': 'Avg score', 'value': '%.1f' | format(section.detail_data.avg_score or 0), 'variant': 'info'},
+      {'label': 'Phishing clicks', 'value': section.detail_data.phishing_clicks or 0, 'variant': 'danger'},
+      {'label': 'Phishing compromises', 'value': section.detail_data.phishing_compromises or 0, 'variant': 'danger'},
+      {'label': 'Phishing reports', 'value': section.detail_data.phishing_reports or 0, 'variant': 'success'}
+    ]) }}
+    {% set learners = section.detail_data.learners or [] %}
+    {% if learners %}
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Learner</th>
+              <th scope="col">Assignment</th>
+              <th scope="col">Status</th>
+              <th scope="col">Completion %</th>
+              <th scope="col">Score</th>
+              <th scope="col">Click rate</th>
+              <th scope="col">Compromise rate</th>
+              <th scope="col">Report rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in learners %}
+              <tr>
+                <td>
+                  <strong>{{ row.learner_name or row.learner_email or row.learner_external_id }}</strong>
+                  {% if row.learner_email and (row.learner_name and row.learner_email != row.learner_name) %}
+                    <div class="report-section__meta">{{ row.learner_email }}</div>
+                  {% endif %}
+                </td>
+                <td>{{ row.assignment_name or row.assignment_id }}</td>
+                <td>
+                  {% set status_value = (row.status or '')|lower %}
+                  {% if status_value in ['completed', 'complete', 'passed'] %}
+                    <span class="status status--success">{{ row.status }}</span>
+                  {% elif status_value in ['in_progress', 'in-progress', 'started'] %}
+                    <span class="status status--warning">{{ row.status }}</span>
+                  {% elif status_value in ['failed', 'overdue'] %}
+                    <span class="status status--danger">{{ row.status }}</span>
+                  {% elif row.status %}
+                    <span class="status status--neutral">{{ row.status }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ '%.0f%%' | format(row.completion_percent or 0) }}</td>
+                <td>{{ '%.1f' | format(row.score or 0) }}</td>
+                <td>{{ '%.1f%%' | format(row.click_rate or 0) }}</td>
+                <td>{{ '%.1f%%' | format(row.compromise_rate or 0) }}</td>
+                <td>{{ '%.1f%%' | format(row.report_rate or 0) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="report-empty">No learner assignments synced from Huntress yet.</p>
+    {% endif %}
+  </div>
+</section>

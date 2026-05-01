@@ -13,6 +13,7 @@ from app.repositories import companies as company_repo
 from app.services import modules as modules_service
 from app.services import syncro, tacticalrmm
 from app.services import hudu as hudu_service
+from app.services import huntress as huntress_service
 
 # Xero API returns 100 contacts per page by default
 XERO_CONTACTS_PER_PAGE = 100
@@ -97,6 +98,7 @@ async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
         "tactical_lookup": "skipped",
         "xero_lookup": "skipped",
         "hudu_lookup": "skipped",
+        "huntress_lookup": "skipped",
         "updates": {},
     }
     
@@ -179,6 +181,26 @@ async def lookup_missing_company_ids(company_id: int) -> dict[str, Any]:
             )
             results["hudu_lookup"] = "error"
             results["hudu_error"] = str(exc)
+
+    # Lookup Huntress organisation ID if missing
+    if not company.get("huntress_organization_id"):
+        try:
+            huntress_org_id = await _lookup_huntress_organization_id(company_name)
+            if huntress_org_id:
+                updates["huntress_organization_id"] = huntress_org_id
+                results["huntress_lookup"] = "found"
+                results["updates"]["huntress_organization_id"] = huntress_org_id
+            else:
+                results["huntress_lookup"] = "not_found"
+        except Exception as exc:
+            log_error(
+                "Failed to lookup Huntress organisation ID",
+                company_id=company_id,
+                company_name=company_name,
+                error=str(exc),
+            )
+            results["huntress_lookup"] = "error"
+            results["huntress_error"] = str(exc)
     
     # Apply updates if any IDs were found
     if updates:
@@ -423,6 +445,42 @@ async def _lookup_hudu_company_id(company_name: str) -> str | None:
         return None
 
 
+async def _lookup_huntress_organization_id(company_name: str) -> str | None:
+    """Search Huntress organisations and return the matching ID."""
+    try:
+        organisations = await huntress_service.list_organizations()
+    except huntress_service.HuntressConfigurationError:
+        log_info("Huntress integration not configured, skipping lookup")
+        return None
+    except Exception as exc:
+        log_error(
+            "Error fetching Huntress organisations",
+            company_name=company_name,
+            error=str(exc),
+        )
+        return None
+
+    search_name = _normalize_company_name(company_name)
+    for org in organisations:
+        if not isinstance(org, dict):
+            continue
+        candidate_name = (
+            org.get("name") or org.get("display_name") or org.get("organization_name") or ""
+        )
+        if _normalize_company_name(candidate_name) == search_name:
+            org_id = org.get("id") or org.get("external_id")
+            if org_id is not None:
+                log_info(
+                    "Found matching Huntress organisation",
+                    company_name=company_name,
+                    huntress_organization_id=str(org_id),
+                )
+                return str(org_id)
+
+    log_info("No exact-match Huntress organisation found", company_name=company_name)
+    return None
+
+
 async def refresh_all_missing_company_ids() -> dict[str, Any]:
     """
     Refresh missing external IDs for all companies in the system.
@@ -452,8 +510,9 @@ async def refresh_all_missing_company_ids() -> dict[str, Any]:
         has_tactical = bool(company.get("tacticalrmm_client_id"))
         has_xero = bool(company.get("xero_id"))
         has_hudu = bool(company.get("hudu_id"))
-        
-        if has_syncro and has_tactical and has_xero and has_hudu:
+        has_huntress = bool(company.get("huntress_organization_id"))
+
+        if has_syncro and has_tactical and has_xero and has_hudu and has_huntress:
             summary["skipped"] += 1
             continue
         

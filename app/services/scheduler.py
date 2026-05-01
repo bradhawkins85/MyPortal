@@ -54,6 +54,7 @@ COMMANDS_BY_MODULE: dict[str, set[str]] = {
     "call-recordings": {"sync_recordings", "queue_transcriptions", "process_transcription"},
     "unifi-talk": {"sync_unifi_talk_recordings"},
     "tacticalrmm": {"push_tactical_companies", "pull_tactical_companies"},
+    "huntress": {"sync_huntress"},
 }
 
 
@@ -229,6 +230,17 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Daily Huntress snapshot sync (04:00 store-local). Pulls EDR / ITDR /
+        # SAT / SIEM / SOC stats for every company linked to a Huntress org.
+        if not self._scheduler.get_job("huntress-daily-sync"):
+            self._scheduler.add_job(
+                self._run_huntress_daily_sync,
+                CronTrigger(hour=4, minute=0, timezone=self._scheduler.timezone),
+                id="huntress-daily-sync",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Seed an "unknown" event for every active backup job each morning so
         # missing reports remain visible. Runs at 00:05 store-local time.
         if not self._scheduler.get_job("backup-history-seed"):
@@ -347,6 +359,29 @@ class SchedulerService:
                 log_info("M365 client secret renewal check completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("M365 client secret renewal check failed", error=str(exc))
+
+    async def _run_huntress_daily_sync(self) -> None:
+        """Refresh Huntress snapshots for every linked company."""
+        async with db.acquire_lock("huntress_daily_sync", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info("Huntress daily sync already running on another worker, skipping")
+                return
+            from app.services import huntress as huntress_service
+
+            try:
+                if not await huntress_service.is_module_enabled():
+                    log_info("Huntress module disabled; skipping daily sync")
+                    return
+                result = await huntress_service.refresh_all_companies()
+                log_info(
+                    "Huntress daily sync completed",
+                    status=result.get("status"),
+                    refreshed=result.get("refreshed"),
+                    skipped=result.get("skipped"),
+                    failed=result.get("failed"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Huntress daily sync failed", error=str(exc))
 
     async def _run_backup_history_seed(self) -> None:
         """Seed daily 'unknown' backup events with distributed lock."""
@@ -611,6 +646,44 @@ class SchedulerService:
                     else:
                         result = await company_id_lookup.refresh_all_missing_company_ids()
                         details = json.dumps(result, default=str) if result else None
+                elif command == "sync_huntress":
+                    from app.services import huntress as huntress_service
+                    from app.repositories import companies as company_repo
+
+                    company_id = task.get("company_id")
+                    if company_id:
+                        company = await company_repo.get_company_by_id(int(company_id))
+                        if not company:
+                            status = "skipped"
+                            details = "Company not found"
+                        elif not company.get("huntress_organization_id"):
+                            status = "skipped"
+                            details = "Company is not linked to a Huntress organisation"
+                        else:
+                            try:
+                                result = await huntress_service.refresh_company(company)
+                                details = json.dumps(result, default=str) if result else None
+                                result_status = str(result.get("status") or "").lower()
+                                if result_status == "failed":
+                                    status = "failed"
+                                elif result_status == "skipped":
+                                    status = "skipped"
+                            except huntress_service.HuntressConfigurationError as exc:
+                                status = "skipped"
+                                details = str(exc)
+                    else:
+                        try:
+                            result = await huntress_service.refresh_all_companies()
+                            details = json.dumps(result, default=str) if result else None
+                            result_status = str(result.get("status") or "").lower()
+                            if result_status == "skipped":
+                                status = "skipped"
+                            elif result.get("failed"):
+                                # Whole-run is "ok" but individual companies failed; keep ok status
+                                pass
+                        except huntress_service.HuntressConfigurationError as exc:
+                            status = "skipped"
+                            details = str(exc)
                 elif command == "update_products":
                     await products_service.update_products_from_feed()
                 elif command == "update_stock_feed":

@@ -506,6 +506,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "sync_unifi_talk_recordings": "Sync Unifi Talk recordings",
     "queue_transcriptions": "Queue transcriptions",
     "process_transcription": "Process transcription",
+    "sync_huntress": "Sync Huntress data",
 }
 
 app = FastAPI(
@@ -3496,6 +3497,10 @@ async def _render_company_edit_page(
         ),
         "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
         "hudu_id": _string_value("hudu_id", (company_record.get("hudu_id") or "").strip()),
+        "huntress_organization_id": _string_value(
+            "huntress_organization_id",
+            (company_record.get("huntress_organization_id") or "").strip(),
+        ),
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
         "payment_method": _string_value(
@@ -13033,6 +13038,7 @@ async def admin_create_company(request: Request):
     tactical_client_id = (str(form.get("tacticalClientId", "")).strip() or None)
     xero_id = (str(form.get("xeroId", "")).strip() or None)
     hudu_id = (str(form.get("huduId", "")).strip() or None)
+    huntress_organization_id = (str(form.get("huntressOrganizationId", "")).strip() or None)
     is_vip = _parse_bool(form.get("isVip"))
     raw_email_domains = form.get("emailDomains")
     try:
@@ -13068,6 +13074,8 @@ async def admin_create_company(request: Request):
         payload["tacticalrmm_client_id"] = tactical_client_id
     if hudu_id:
         payload["hudu_id"] = hudu_id
+    if huntress_organization_id:
+        payload["huntress_organization_id"] = huntress_organization_id
     try:
         created = await company_repo.create_company(**payload)
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -13376,6 +13384,7 @@ async def admin_update_company(company_id: int, request: Request):
     tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
     hudu_id_raw = str(form.get("huduId", "")).strip()
+    huntress_organization_id_raw = str(form.get("huntressOrganizationId", "")).strip()
     trello_board_id_raw = str(form.get("trelloBoardId", "")).strip()
     trello_api_key_raw = str(form.get("trelloApiKey", "")).strip()
     trello_token_raw = str(form.get("trelloToken", "")).strip()
@@ -13404,6 +13413,7 @@ async def admin_update_company(company_id: int, request: Request):
         "tacticalrmm_client_id": tactical_client_raw,
         "xero_id": xero_id_raw,
         "hudu_id": hudu_id_raw,
+        "huntress_organization_id": huntress_organization_id_raw,
         "trello_board_id": trello_board_id_raw,
         "trello_api_key": trello_api_key_raw or existing.get("trello_api_key"),
         "trello_token": trello_token_raw or existing.get("trello_token"),
@@ -13437,6 +13447,7 @@ async def admin_update_company(company_id: int, request: Request):
     tactical_client_id = tactical_client_raw or None
     xero_id = xero_id_raw or None
     hudu_id = hudu_id_raw or None
+    huntress_organization_id = huntress_organization_id_raw or None
     trello_board_id = trello_board_id_raw or None
     # Only update Trello credentials when a new value was submitted; blank means keep existing.
     trello_api_key: str | None = trello_api_key_raw if trello_api_key_raw else (existing.get("trello_api_key") or None)
@@ -13448,6 +13459,7 @@ async def admin_update_company(company_id: int, request: Request):
         "tacticalrmm_client_id": tactical_client_id,
         "xero_id": xero_id,
         "hudu_id": hudu_id,
+        "huntress_organization_id": huntress_organization_id,
         "trello_board_id": trello_board_id,
         "trello_api_key": trello_api_key,
         "trello_token": trello_token,
@@ -21664,11 +21676,14 @@ async def _render_modules_dashboard(
     modules = await modules_service.list_modules()
     uptimekuma_webhook_url = str(request.url_for("uptimekuma_receive_alert").replace(scheme="https"))
     trello_webhook_url = str(request.url_for("trello_webhook_receive").replace(scheme="https"))
+    from app.services import huntress as huntress_service
+    huntress_credentials = huntress_service.credentials_status()
     extra = {
         "title": "Integration modules",
         "modules": modules,
         "uptimekuma_webhook_url": uptimekuma_webhook_url,
         "trello_webhook_url": trello_webhook_url,
+        "huntress_credentials": huntress_credentials,
         "success_message": success_message,
         "error_message": error_message,
     }

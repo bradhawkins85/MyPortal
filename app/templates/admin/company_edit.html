@@ -131,6 +131,18 @@
             </div>
           </div>
           <div class="form-field">
+            <label class="form-label" for="edit-company-huntress">Huntress organisation ID</label>
+            <input
+              id="edit-company-huntress"
+              name="huntressOrganizationId"
+              class="form-input"
+              value="{{ form_data.huntress_organization_id }}"
+              maxlength="64"
+              placeholder="e.g. 12345"
+            />
+            <p class="form-help">Optional. Links this company to a Huntress organisation so EDR / ITDR / SAT / SIEM / SOC report data can be synced once per day. The nightly company-ID lookup task can also populate this automatically when the name matches.</p>
+          </div>
+          <div class="form-field">
             <label class="form-label" for="edit-company-trello-board">Trello board ID</label>
             <input
               id="edit-company-trello-board"

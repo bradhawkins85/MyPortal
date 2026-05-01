@@ -19,6 +19,7 @@ from app.repositories import backup_jobs as backup_jobs_repo
 from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as compliance_checks_repo
 from app.repositories import essential8 as essential8_repo
+from app.repositories import huntress as huntress_repo
 from app.repositories import issues as issues_repo
 from app.repositories import licenses as licenses_repo
 from app.repositories import m365_best_practices as m365_bp_repo
@@ -111,6 +112,31 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
             "Per-day backup status for every job configured for the company. "
             "The detailed report renders a colour-coded grid for the last 30 days."
         ),
+    ),
+    ReportSection(
+        key="huntress_edr",
+        label="Huntress EDR",
+        description="Active and resolved Huntress incident reports plus signals investigated.",
+    ),
+    ReportSection(
+        key="huntress_itdr",
+        label="Huntress ITDR",
+        description="Identity Threat Detection & Response signals investigated by Huntress.",
+    ),
+    ReportSection(
+        key="huntress_sat",
+        label="Huntress Security Awareness Training",
+        description="Average completion / score across SAT learners and phishing simulation outcomes.",
+    ),
+    ReportSection(
+        key="huntress_siem",
+        label="Huntress Managed SIEM",
+        description="Total SIEM data collected over the trailing 30 days.",
+    ),
+    ReportSection(
+        key="huntress_soc",
+        label="Huntress SOC",
+        description="Total events analysed by the Huntress Security Operations Centre.",
     ),
 )
 
@@ -920,6 +946,154 @@ async def _build_backup_jobs_detail(company_id: int) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Huntress builders
+# ---------------------------------------------------------------------------
+
+
+_BYTES_PER_GIB = 1024 ** 3
+
+
+def _huntress_bytes_to_gb(value: Any) -> float:
+    try:
+        bytes_value = int(value or 0)
+    except (TypeError, ValueError):
+        bytes_value = 0
+    if bytes_value <= 0:
+        return 0.0
+    return round(bytes_value / _BYTES_PER_GIB, 2)
+
+
+async def _huntress_company_linked(company_id: int) -> bool:
+    """True when Huntress is enabled and the company has an organisation ID."""
+    # Local import to avoid a circular dependency between reports/modules/huntress.
+    from app.services import huntress as huntress_service
+    from app.services import modules as modules_service
+
+    try:
+        if not await huntress_service.is_module_enabled():
+            return False
+    except Exception:  # pragma: no cover - defensive
+        return False
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        return False
+    return bool(company.get("huntress_organization_id"))
+
+
+async def _build_huntress_edr(company_id: int) -> dict[str, Any]:
+    if not await _huntress_company_linked(company_id):
+        return {}
+    stats = await huntress_repo.get_edr_stats(company_id)
+    if not stats:
+        return {}
+    return {
+        "active_incidents": int(stats.get("active_incidents") or 0),
+        "resolved_incidents": int(stats.get("resolved_incidents") or 0),
+        "signals_investigated": int(stats.get("signals_investigated") or 0),
+        "snapshot_at": _datetime_to_iso(stats.get("snapshot_at")),
+    }
+
+
+async def _build_huntress_edr_detail(company_id: int) -> dict[str, Any]:
+    return await _build_huntress_edr(company_id)
+
+
+async def _build_huntress_itdr(company_id: int) -> dict[str, Any]:
+    if not await _huntress_company_linked(company_id):
+        return {}
+    stats = await huntress_repo.get_itdr_stats(company_id)
+    if not stats:
+        return {}
+    return {
+        "signals_investigated": int(stats.get("signals_investigated") or 0),
+        "snapshot_at": _datetime_to_iso(stats.get("snapshot_at")),
+    }
+
+
+async def _build_huntress_itdr_detail(company_id: int) -> dict[str, Any]:
+    return await _build_huntress_itdr(company_id)
+
+
+async def _build_huntress_sat(company_id: int) -> dict[str, Any]:
+    if not await _huntress_company_linked(company_id):
+        return {}
+    stats = await huntress_repo.get_sat_stats(company_id)
+    if not stats:
+        return {}
+    return {
+        "avg_completion_rate": float(stats.get("avg_completion_rate") or 0),
+        "avg_score": float(stats.get("avg_score") or 0),
+        "phishing_clicks": int(stats.get("phishing_clicks") or 0),
+        "phishing_compromises": int(stats.get("phishing_compromises") or 0),
+        "phishing_reports": int(stats.get("phishing_reports") or 0),
+        "snapshot_at": _datetime_to_iso(stats.get("snapshot_at")),
+    }
+
+
+async def _build_huntress_sat_detail(company_id: int) -> dict[str, Any]:
+    summary = await _build_huntress_sat(company_id)
+    if not summary:
+        return {}
+    rows = await huntress_repo.list_sat_learner_progress(company_id)
+    learners: list[dict[str, Any]] = []
+    for row in rows:
+        learners.append(
+            {
+                "learner_external_id": row.get("learner_external_id"),
+                "learner_email": row.get("learner_email"),
+                "learner_name": row.get("learner_name"),
+                "assignment_id": row.get("assignment_id"),
+                "assignment_name": row.get("assignment_name"),
+                "status": row.get("status"),
+                "completion_percent": float(row.get("completion_percent") or 0),
+                "score": float(row.get("score") or 0),
+                "click_rate": float(row.get("click_rate") or 0),
+                "compromise_rate": float(row.get("compromise_rate") or 0),
+                "report_rate": float(row.get("report_rate") or 0),
+            }
+        )
+    summary["learners"] = learners
+    summary["total_assignments"] = len(learners)
+    return summary
+
+
+async def _build_huntress_siem(company_id: int) -> dict[str, Any]:
+    if not await _huntress_company_linked(company_id):
+        return {}
+    stats = await huntress_repo.get_siem_stats(company_id)
+    if not stats:
+        return {}
+    bytes_value = int(stats.get("data_collected_bytes_30d") or 0)
+    return {
+        "data_collected_bytes_30d": bytes_value,
+        "data_collected_gb_30d": _huntress_bytes_to_gb(bytes_value),
+        "window_start": _datetime_to_iso(stats.get("window_start")),
+        "window_end": _datetime_to_iso(stats.get("window_end")),
+        "snapshot_at": _datetime_to_iso(stats.get("snapshot_at")),
+    }
+
+
+async def _build_huntress_siem_detail(company_id: int) -> dict[str, Any]:
+    return await _build_huntress_siem(company_id)
+
+
+async def _build_huntress_soc(company_id: int) -> dict[str, Any]:
+    if not await _huntress_company_linked(company_id):
+        return {}
+    stats = await huntress_repo.get_soc_stats(company_id)
+    if not stats:
+        return {}
+    return {
+        "total_events_analysed": int(stats.get("total_events_analysed") or 0),
+        "snapshot_at": _datetime_to_iso(stats.get("snapshot_at")),
+    }
+
+
+async def _build_huntress_soc_detail(company_id: int) -> dict[str, Any]:
+    return await _build_huntress_soc(company_id)
+
+
 # Maps section keys to their detail builder coroutine.
 _DETAIL_BUILDERS: dict[str, Any] = {
     "assets": _build_assets_detail,
@@ -935,7 +1109,20 @@ _DETAIL_BUILDERS: dict[str, Any] = {
     "asset_custom_fields": _build_asset_custom_fields_detail,
     "issues": _build_issues_detail,
     "backup_jobs": _build_backup_jobs_detail,
+    "huntress_edr": _build_huntress_edr_detail,
+    "huntress_itdr": _build_huntress_itdr_detail,
+    "huntress_sat": _build_huntress_sat_detail,
+    "huntress_siem": _build_huntress_siem_detail,
+    "huntress_soc": _build_huntress_soc_detail,
 }
+
+# Register Huntress section builders (defined above) into the existing map
+# so the section table stays in declaration order without forward references.
+_SECTION_BUILDERS["huntress_edr"] = _build_huntress_edr
+_SECTION_BUILDERS["huntress_itdr"] = _build_huntress_itdr
+_SECTION_BUILDERS["huntress_sat"] = _build_huntress_sat
+_SECTION_BUILDERS["huntress_siem"] = _build_huntress_siem
+_SECTION_BUILDERS["huntress_soc"] = _build_huntress_soc
 
 
 # ---------------------------------------------------------------------------
@@ -1117,6 +1304,26 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return int(data.get("total") or 0) == 0
     if key == "backup_jobs":
         return int(data.get("total_jobs") or 0) == 0
+    if key == "huntress_edr":
+        return not (
+            int(data.get("active_incidents") or 0)
+            or int(data.get("resolved_incidents") or 0)
+            or int(data.get("signals_investigated") or 0)
+        )
+    if key == "huntress_itdr":
+        return int(data.get("signals_investigated") or 0) == 0
+    if key == "huntress_sat":
+        return not (
+            float(data.get("avg_completion_rate") or 0)
+            or float(data.get("avg_score") or 0)
+            or int(data.get("phishing_clicks") or 0)
+            or int(data.get("phishing_compromises") or 0)
+            or int(data.get("phishing_reports") or 0)
+        )
+    if key == "huntress_siem":
+        return int(data.get("data_collected_bytes_30d") or 0) == 0
+    if key == "huntress_soc":
+        return int(data.get("total_events_analysed") or 0) == 0
     return False
 
 

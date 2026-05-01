@@ -83,6 +83,18 @@ async def get_company_by_hudu_id(hudu_id: str) -> Optional[dict[str, Any]]:
     return company
 
 
+async def get_company_by_huntress_id(huntress_organization_id: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM companies WHERE huntress_organization_id = %s",
+        (huntress_organization_id,),
+    )
+    if not row:
+        return None
+    company = _normalise_company(row)
+    company["email_domains"] = await get_email_domains_for_company(company["id"])
+    return company
+
+
 async def get_company_by_trello_board_id(trello_board_id: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         "SELECT * FROM companies WHERE trello_board_id = %s",
