@@ -530,3 +530,106 @@ async def test_lookup_xero_contact_id_missing_tenant(monkeypatch):
     result = await company_id_lookup._lookup_xero_contact_id("Test Company")
     
     assert result is None
+
+
+@pytest.mark.anyio
+async def test_lookup_huntress_organization_id_found(monkeypatch):
+    """Test that Huntress organisation lookup returns matching ID."""
+    async def fake_list_organizations():
+        return [
+            {"id": 42, "name": "Acme Corp"},
+            {"id": 99, "name": "Other Org"},
+        ]
+
+    monkeypatch.setattr(company_id_lookup.huntress_service, "list_organizations", fake_list_organizations)
+
+    result = await company_id_lookup._lookup_huntress_organization_id("Acme Corp")
+
+    assert result == "42"
+
+
+@pytest.mark.anyio
+async def test_lookup_huntress_organization_id_case_insensitive(monkeypatch):
+    """Test that Huntress organisation lookup is case insensitive."""
+    async def fake_list_organizations():
+        return [
+            {"id": 7, "name": "BETA INDUSTRIES"},
+        ]
+
+    monkeypatch.setattr(company_id_lookup.huntress_service, "list_organizations", fake_list_organizations)
+
+    result = await company_id_lookup._lookup_huntress_organization_id("beta industries")
+
+    assert result == "7"
+
+
+@pytest.mark.anyio
+async def test_lookup_huntress_organization_id_not_found(monkeypatch):
+    """Test that Huntress organisation lookup returns None when no match."""
+    async def fake_list_organizations():
+        return [
+            {"id": 1, "name": "Other Company"},
+        ]
+
+    monkeypatch.setattr(company_id_lookup.huntress_service, "list_organizations", fake_list_organizations)
+
+    result = await company_id_lookup._lookup_huntress_organization_id("Missing Company")
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_lookup_huntress_organization_id_not_configured(monkeypatch):
+    """Test that Huntress organisation lookup handles missing configuration."""
+    async def fake_list_organizations():
+        raise company_id_lookup.huntress_service.HuntressConfigurationError("Not configured")
+
+    monkeypatch.setattr(company_id_lookup.huntress_service, "list_organizations", fake_list_organizations)
+
+    result = await company_id_lookup._lookup_huntress_organization_id("Test Company")
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_lookup_missing_company_ids_finds_huntress_id(monkeypatch):
+    """Test that lookup finds a missing Huntress organisation ID."""
+    companies = [
+        {
+            "id": 1,
+            "name": "Delta Systems",
+            "syncro_company_id": "syncro-1",
+            "tacticalrmm_client_id": "tactical-1",
+            "xero_id": "xero-1",
+            "huntress_organization_id": None,
+        }
+    ]
+
+    async def fake_get_company_by_id(company_id: int):
+        for company in companies:
+            if company["id"] == company_id:
+                return dict(company)
+        return None
+
+    async def fake_update_company(company_id: int, **updates):
+        for company in companies:
+            if company["id"] == company_id:
+                company.update(updates)
+                return dict(company)
+        raise ValueError("Company not found")
+
+    async def fake_list_organizations():
+        return [
+            {"id": 55, "name": "Delta Systems"},
+        ]
+
+    monkeypatch.setattr(company_id_lookup.company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(company_id_lookup.company_repo, "update_company", fake_update_company)
+    monkeypatch.setattr(company_id_lookup.huntress_service, "list_organizations", fake_list_organizations)
+
+    result = await company_id_lookup.lookup_missing_company_ids(1)
+
+    assert result["status"] == "updated"
+    assert result["huntress_lookup"] == "found"
+    assert result["updates"]["huntress_organization_id"] == "55"
+    assert companies[0]["huntress_organization_id"] == "55"

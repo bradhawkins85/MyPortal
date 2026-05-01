@@ -132,14 +132,32 @@
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-company-huntress">Huntress organisation ID</label>
-            <input
-              id="edit-company-huntress"
-              name="huntressOrganizationId"
-              class="form-input"
-              value="{{ form_data.huntress_organization_id }}"
-              maxlength="64"
-              placeholder="e.g. 12345"
-            />
+            <div class="form-field__group">
+              <input
+                id="edit-company-huntress"
+                name="huntressOrganizationId"
+                class="form-input"
+                value="{{ form_data.huntress_organization_id }}"
+                maxlength="64"
+                placeholder="e.g. 12345"
+              />
+              <button
+                type="button"
+                class="button button--ghost"
+                data-lookup-huntress-id
+                title="Lookup Huntress organisation ID"
+                aria-label="Lookup Huntress organisation ID from API"
+              >
+                <span class="button__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+                    <path d="M20 12h2a10 10 0 0 0-10-10v2a8 8 0 0 1 8 8z"/>
+                    <path d="M12 20v2a10 10 0 0 0 10-10h-2a8 8 0 0 1-8 8z"/>
+                    <path d="M4 12H2a10 10 0 0 0 10 10v-2a8 8 0 0 1-8-8z"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
             <p class="form-help">Optional. Links this company to a Huntress organisation so EDR / ITDR / SAT / SIEM / SOC report data can be synced once per day. The nightly company-ID lookup task can also populate this automatically when the name matches.</p>
           </div>
           <div class="form-field">
