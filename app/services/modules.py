@@ -759,6 +759,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
         "icon": "📋",
         "settings": {},
+        "enabled": True,  # Enabled by default so it appears as a trigger action when the module is configured
     },
 ]
 
@@ -1316,7 +1317,6 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "plausible",      # Plausible - email tracking config only
     "m365-admin",     # M365 Admin - configuration only, not an action module
     "hudu",           # Hudu - documentation/password management, not a trigger action module
-    "trello",         # Trello - inbound webhook integration, not a trigger action module
 }
 
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
@@ -1410,6 +1410,12 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             {"name": "deletable_by_viewer", "label": "Deletable by viewer", "type": "boolean"},
             {"name": "retrieval_step", "label": "Add retrieval step", "type": "boolean"},
             {"name": "note", "label": "Note", "type": "string"},
+        ],
+    },
+    "trello": {
+        "fields": [
+            {"name": "card_id", "label": "Card ID", "type": "string", "required": True, "placeholder": "{{ticket.external_reference}}"},
+            {"name": "text", "label": "Comment text", "type": "string", "required": True},
         ],
     },
 }
@@ -1563,7 +1569,7 @@ async def trigger_module(
         "whisperx": _invoke_whisperx,
         "password-pusher": _invoke_password_pusher,
         "hudu": _validate_hudu,
-        "trello": _validate_trello,
+        "trello": _invoke_trello_add_comment,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -5139,3 +5145,55 @@ async def _validate_trello(
 
     from app.services.trello import validate_credentials
     return await validate_credentials()
+
+
+async def _invoke_trello_add_comment(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Post a comment on a Trello card.
+
+    Payload:
+    - card_id: Trello card ID to comment on (required). Supports ``{{ticket.external_reference}}``.
+    - text: Comment text to post on the card (required).
+
+    The comment is prefixed with ``[MyPortal]`` automatically by the Trello service
+    to prevent feedback loops when the webhook handler processes incoming comments.
+    """
+    card_id = str(payload.get("card_id") or "").strip()
+    if not card_id:
+        raise ValueError("card_id is required for the Trello add-comment action")
+
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise ValueError("text is required for the Trello add-comment action")
+
+    # Resolve the company from the automation context so that per-company
+    # Trello credentials are used when posting the comment.
+    context = payload.get("context")
+    company: dict[str, Any] | None = None
+    if isinstance(context, Mapping):
+        ticket_ctx = context.get("ticket")
+        if isinstance(ticket_ctx, Mapping):
+            company_value = ticket_ctx.get("company")
+            if isinstance(company_value, Mapping):
+                company = dict(company_value)
+
+    if event_future and not event_future.done():
+        event_future.set_result(None)
+
+    from app.services.trello import add_comment_to_card
+    result = await add_comment_to_card(card_id, text, company=company)
+    if result is None:
+        return {
+            "status": "skipped",
+            "reason": "Trello comment was not posted (module disabled, credentials missing, or API error)",
+            "card_id": card_id,
+        }
+    return {
+        "status": "succeeded",
+        "card_id": card_id,
+        "comment_id": result.get("id"),
+    }
