@@ -79,7 +79,8 @@ async def test_get_edr_summary_uses_basic_auth_and_parses_totals(monkeypatch):
         path = request.url.path
         if path.endswith("/incident_reports"):
             status_value = request.url.params.get("status")
-            total = 4 if status_value == "open" else 9
+            # API uses "sent" for active/open incidents, not "open"
+            total = 4 if status_value == "sent" else 9
             return httpx.Response(200, json={"total": total, "incident_reports": []})
         if path.endswith("/signals"):
             return httpx.Response(200, json={"total": 17, "signals": []})
@@ -114,6 +115,74 @@ async def test_get_siem_data_volume_returns_window_and_bytes(monkeypatch):
 
     assert result["data_collected_bytes_30d"] == 5 * 1024 ** 3
     assert result["window_start"] is not None and result["window_end"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_siem_data_volume_returns_none_on_404(monkeypatch):
+    """If the Managed SIEM product is not enabled, 404 should return None silently."""
+    from app.services import huntress as huntress_service
+
+    _set_credentials(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with _patch_client(transport):
+        result = await huntress_service.get_siem_data_volume("org-1", days=30)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_sat_summary_returns_none_on_404(monkeypatch):
+    """If the SAT product is not enabled, 404 should return None silently."""
+    from app.services import huntress as huntress_service
+
+    _set_credentials(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with _patch_client(transport):
+        result = await huntress_service.get_sat_summary("org-1")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_sat_learner_breakdown_returns_none_on_404(monkeypatch):
+    """If the SAT product is not enabled, 404 should return None silently."""
+    from app.services import huntress as huntress_service
+
+    _set_credentials(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with _patch_client(transport):
+        result = await huntress_service.get_sat_learner_breakdown("org-1")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_soc_event_count_returns_none_on_404(monkeypatch):
+    """If the SOC product is not enabled, 404 should return None silently."""
+    from app.services import huntress as huntress_service
+
+    _set_credentials(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with _patch_client(transport):
+        result = await huntress_service.get_soc_event_count("org-1")
+
+    assert result is None
 
 
 @pytest.mark.asyncio

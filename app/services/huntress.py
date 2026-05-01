@@ -87,9 +87,18 @@ def _client(credentials: Mapping[str, str]) -> httpx.AsyncClient:
 
 
 async def _get_json(
-    client: httpx.AsyncClient, path: str, params: Mapping[str, Any] | None = None
+    client: httpx.AsyncClient,
+    path: str,
+    params: Mapping[str, Any] | None = None,
+    *,
+    allow_not_found: bool = False,
 ) -> Any:
-    """GET ``path`` and return decoded JSON, applying a small per-call rate-limit."""
+    """GET ``path`` and return decoded JSON, applying a small per-call rate-limit.
+
+    When *allow_not_found* is ``True`` a 404 response is treated as "feature
+    not available for this account" and ``None`` is returned instead of
+    raising an exception.
+    """
 
     async with _request_lock:
         try:
@@ -103,6 +112,12 @@ async def _get_json(
             raise
         await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
 
+    if response.status_code == 404 and allow_not_found:
+        log_info(
+            "Huntress feature not available for this account",
+            url=_redact_url(str(response.request.url)),
+        )
+        return None
     if response.status_code >= 400:
         log_error(
             "Huntress API returned error",
@@ -136,17 +151,20 @@ async def list_organizations() -> list[dict[str, Any]]:
 
     organisations: list[dict[str, Any]] = []
     async with _client(credentials) as client:
-        page = 1
+        page_token: str | None = None
         # Cap pagination so we never loop indefinitely on misconfigured tenants.
-        while page <= 50:
-            payload = await _get_json(client, "/organizations", {"page": page, "limit": 100})
+        for _ in range(50):
+            params: dict[str, Any] = {"limit": 100}
+            if page_token:
+                params["page_token"] = page_token
+            payload = await _get_json(client, "/organizations", params)
             chunk = _extract_list(payload, key="organizations")
             if not chunk:
                 break
             organisations.extend(chunk)
-            if len(chunk) < 100:
+            page_token = _extract_next_page_token(payload)
+            if not page_token:
                 break
-            page += 1
     return organisations
 
 
@@ -160,7 +178,7 @@ async def get_edr_summary(org_id: str) -> dict[str, int]:
         active_payload = await _get_json(
             client,
             "/incident_reports",
-            {"organization_id": org_id, "status": "open", "limit": 1},
+            {"organization_id": org_id, "status": "sent", "limit": 1},
         )
         resolved_payload = await _get_json(
             client,
@@ -195,21 +213,31 @@ async def get_itdr_summary(org_id: str) -> dict[str, int]:
     return {"signals_investigated": _extract_total(payload, "signals")}
 
 
-async def get_sat_summary(org_id: str) -> dict[str, Any]:
-    """Return aggregated SAT statistics across every learner."""
+async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
+    """Return aggregated SAT statistics across every learner.
+
+    Returns ``None`` when the SAT product is not available for the account
+    (API returns 404).
+    """
     credentials = _get_credentials()
     if not credentials:
         raise HuntressConfigurationError("Huntress credentials are not configured.")
 
     async with _client(credentials) as client:
         summary = await _get_json(
-            client, "/sat/learners/summary", {"organization_id": org_id}
+            client, "/sat/learners/summary", {"organization_id": org_id},
+            allow_not_found=True,
         )
+        if summary is None:
+            return None
         phishing = await _get_json(
-            client, "/sat/phishing/summary", {"organization_id": org_id}
+            client, "/sat/phishing/summary", {"organization_id": org_id},
+            allow_not_found=True,
         )
 
     summary_payload = summary if isinstance(summary, Mapping) else {}
+    # phishing may be None if the phishing summary sub-endpoint is not available;
+    # in that case treat it as an empty mapping so counts default to 0.
     phishing_payload = phishing if isinstance(phishing, Mapping) else {}
 
     return {
@@ -221,21 +249,35 @@ async def get_sat_summary(org_id: str) -> dict[str, Any]:
     }
 
 
-async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]]:
-    """Return per-learner per-assignment progress + phishing rates."""
+async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
+    """Return per-learner per-assignment progress + phishing rates.
+
+    Returns ``None`` when the SAT product is not available for the account
+    (API returns 404).
+    """
     credentials = _get_credentials()
     if not credentials:
         raise HuntressConfigurationError("Huntress credentials are not configured.")
 
     rows: list[dict[str, Any]] = []
     async with _client(credentials) as client:
-        page = 1
-        while page <= 100:
+        page_token: str | None = None
+        for iteration in range(100):
+            params: dict[str, Any] = {"organization_id": org_id, "limit": 100}
+            if page_token:
+                params["page_token"] = page_token
             payload = await _get_json(
                 client,
                 "/sat/learners",
-                {"organization_id": org_id, "page": page, "limit": 100},
+                params,
+                allow_not_found=True,
             )
+            if payload is None:
+                # 404 on first request means the feature is not available for this account.
+                # 404 on a subsequent page is treated as end of results.
+                if iteration == 0:
+                    return None
+                break
             learners = _extract_list(payload, key="learners")
             if not learners:
                 break
@@ -277,14 +319,18 @@ async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]]:
                             "report_rate": report_rate,
                         }
                     )
-            if len(learners) < 100:
+            page_token = _extract_next_page_token(payload)
+            if not page_token:
                 break
-            page += 1
     return rows
 
 
-async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any]:
-    """Return total SIEM data ingested over the trailing ``days`` window."""
+async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any] | None:
+    """Return total SIEM data ingested over the trailing ``days`` window.
+
+    Returns ``None`` when the Managed SIEM product is not available for the
+    account (API returns 404).
+    """
     credentials = _get_credentials()
     if not credentials:
         raise HuntressConfigurationError("Huntress credentials are not configured.")
@@ -300,7 +346,10 @@ async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any]:
                 "start": start.isoformat(),
                 "end": end.isoformat(),
             },
+            allow_not_found=True,
         )
+    if payload is None:
+        return None
     payload_map = payload if isinstance(payload, Mapping) else {}
     bytes_total = _coerce_int(
         payload_map.get("total_bytes")
@@ -314,16 +363,23 @@ async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any]:
     }
 
 
-async def get_soc_event_count(org_id: str) -> dict[str, int]:
-    """Return the SOC ``total_events_analysed`` counter."""
+async def get_soc_event_count(org_id: str) -> dict[str, int] | None:
+    """Return the SOC ``total_events_analysed`` counter.
+
+    Returns ``None`` when the SOC product is not available for the account
+    (API returns 404).
+    """
     credentials = _get_credentials()
     if not credentials:
         raise HuntressConfigurationError("Huntress credentials are not configured.")
 
     async with _client(credentials) as client:
         payload = await _get_json(
-            client, "/soc/summary", {"organization_id": org_id}
+            client, "/soc/summary", {"organization_id": org_id},
+            allow_not_found=True,
         )
+    if payload is None:
+        return None
     payload_map = payload if isinstance(payload, Mapping) else {}
     return {
         "total_events_analysed": _coerce_int(
@@ -522,6 +578,18 @@ def _extract_list(payload: Any, *, key: str) -> list[Any]:
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, (dict, list))]
     return []
+
+
+def _extract_next_page_token(payload: Any) -> str | None:
+    """Return the ``next_page_token`` from a Huntress paginated response, or ``None``."""
+    if not isinstance(payload, Mapping):
+        return None
+    pagination = payload.get("pagination")
+    if isinstance(pagination, Mapping):
+        token = pagination.get("next_page_token")
+        if token:
+            return str(token)
+    return None
 
 
 def _extract_total(payload: Any, list_key: str) -> int:
