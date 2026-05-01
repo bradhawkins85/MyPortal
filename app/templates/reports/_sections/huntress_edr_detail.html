@@ -1,0 +1,22 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="huntress_edr_detail">
+  <header class="card__header report-section__header">
+    <h2>Huntress EDR — detail</h2>
+    {% if section.detail_data.snapshot_at %}
+      <span class="report-section__meta">
+        Snapshot <span data-utc="{{ section.detail_data.snapshot_at }}">{{ section.detail_data.snapshot_at }}</span>
+      </span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {{ counter_strip(items=[
+      {'label': 'Active incidents', 'value': section.detail_data.active_incidents or 0, 'variant': 'danger'},
+      {'label': 'Resolved incidents', 'value': section.detail_data.resolved_incidents or 0, 'variant': 'success'},
+      {'label': 'Signals investigated', 'value': section.detail_data.signals_investigated or 0, 'variant': 'info'}
+    ]) }}
+    <p class="report-section__meta">
+      Detailed incident lists are available in the Huntress portal. Counts shown
+      reflect the most recent daily sync.
+    </p>
+  </div>
+</section>

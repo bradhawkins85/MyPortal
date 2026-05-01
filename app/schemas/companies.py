@@ -14,6 +14,7 @@ class CompanyBase(BaseModel):
     syncro_company_id: Optional[str] = None
     tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
+    huntress_organization_id: Optional[str] = None
     archived: Optional[int] = None
     email_domains: list[str] = Field(default_factory=list)
     trello_board_id: Optional[str] = None
@@ -40,6 +41,7 @@ class CompanyUpdate(BaseModel):
     syncro_company_id: Optional[str] = None
     tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
+    huntress_organization_id: Optional[str] = None
     archived: Optional[int] = None
     email_domains: Optional[list[str]] = None
     trello_board_id: Optional[str] = None

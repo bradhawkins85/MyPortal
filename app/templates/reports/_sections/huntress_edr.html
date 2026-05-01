@@ -1,0 +1,18 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="huntress_edr">
+  <header class="card__header report-section__header">
+    <h2>Huntress EDR</h2>
+    {% if section.data.snapshot_at %}
+      <span class="report-section__meta">
+        Snapshot <span data-utc="{{ section.data.snapshot_at }}">{{ section.data.snapshot_at }}</span>
+      </span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {{ counter_strip(items=[
+      {'label': 'Active incidents', 'value': section.data.active_incidents or 0, 'variant': 'danger'},
+      {'label': 'Resolved incidents', 'value': section.data.resolved_incidents or 0, 'variant': 'success'},
+      {'label': 'Signals investigated', 'value': section.data.signals_investigated or 0, 'variant': 'info'}
+    ]) }}
+  </div>
+</section>

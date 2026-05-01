@@ -1,0 +1,25 @@
+{% from "macros/counters.html" import counter_strip %}
+<section class="card card--panel" data-report-section="huntress_siem_detail">
+  <header class="card__header report-section__header">
+    <h2>Huntress Managed SIEM — detail</h2>
+    {% if section.detail_data.snapshot_at %}
+      <span class="report-section__meta">
+        Snapshot <span data-utc="{{ section.detail_data.snapshot_at }}">{{ section.detail_data.snapshot_at }}</span>
+      </span>
+    {% endif %}
+  </header>
+  <div class="card__body">
+    {{ counter_strip(items=[
+      {'label': 'Data collected (GB)', 'value': '%.2f' | format(section.detail_data.data_collected_gb_30d or 0), 'variant': 'info'},
+      {'label': 'Bytes collected', 'value': section.detail_data.data_collected_bytes_30d or 0, 'variant': 'neutral'}
+    ]) }}
+    {% if section.detail_data.window_start and section.detail_data.window_end %}
+      <p class="report-section__meta">
+        Window:
+        <span data-utc="{{ section.detail_data.window_start }}">{{ section.detail_data.window_start }}</span>
+        &nbsp;→&nbsp;
+        <span data-utc="{{ section.detail_data.window_end }}">{{ section.detail_data.window_end }}</span>
+      </p>
+    {% endif %}
+  </div>
+</section>

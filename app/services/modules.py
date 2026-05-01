@@ -754,6 +754,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "huntress",
+        "name": "Huntress",
+        "description": "Huntress EDR / ITDR / SAT / SIEM / SOC statistics for company reports. Credentials are read from environment variables (HUNTRESS_API_KEY, HUNTRESS_API_SECRET).",
+        "icon": "🛡️",
+        "settings": {},
+    },
+    {
         "slug": "trello",
         "name": "Trello",
         "description": "Link companies to Trello boards. Cards created in Trello become tickets; ticket replies sync back as card comments.",
@@ -1317,6 +1324,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "plausible",      # Plausible - email tracking config only
     "m365-admin",     # M365 Admin - configuration only, not an action module
     "hudu",           # Hudu - documentation/password management, not a trigger action module
+    "huntress",       # Huntress - report data ingester, not a trigger action module
 }
 
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
