@@ -29,6 +29,7 @@ async def test_list_trigger_action_modules_excludes_non_triggerable(monkeypatch)
             {"slug": "update-ticket-description", "name": "Update Ticket Description", "enabled": True, "settings": {}},
             {"slug": "reprocess-ai", "name": "Reprocess AI", "enabled": True, "settings": {}},
             {"slug": "add-ticket-reply", "name": "Add Ticket Reply", "enabled": True, "settings": {}},
+            {"slug": "trello", "name": "Trello", "enabled": True, "settings": {}},
         ]
     
     monkeypatch.setattr(module_repo, "list_modules", fake_list_modules)
@@ -44,10 +45,11 @@ async def test_list_trigger_action_modules_excludes_non_triggerable(monkeypatch)
     for slug in excluded_slugs:
         assert slug not in result_slugs, f"{slug} should be excluded from trigger action modules"
     
-    # Check that included modules are in the result (including new ticket action modules)
+    # Check that included modules are in the result (including new ticket action modules and trello)
     included_slugs = {
         "smtp", "sms-gateway", "tacticalrmm", "ntfy", "create-ticket", "create-task",
-        "update-ticket", "update-ticket-description", "reprocess-ai", "add-ticket-reply"
+        "update-ticket", "update-ticket-description", "reprocess-ai", "add-ticket-reply",
+        "trello"
     }
     for slug in included_slugs:
         assert slug in result_slugs, f"{slug} should be included in trigger action modules"
