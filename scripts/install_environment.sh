@@ -216,7 +216,7 @@ install_dependencies() {
     exit 1
   fi
 
-  "$python_bin" -m pip install --upgrade pip
+  "$python_bin" -m pip install --upgrade pip setuptools wheel
   if [[ "$ENVIRONMENT" == "development" ]]; then
     "$python_bin" -m pip install --upgrade -e "$PROJECT_ROOT"
   else
