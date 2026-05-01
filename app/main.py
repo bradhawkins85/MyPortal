@@ -13495,7 +13495,7 @@ async def admin_update_company(company_id: int, request: Request):
                 active=True,
             )
             log_info(
-                "Auto-created scheduled task after Huntress organisation ID was set",
+                "Auto-created scheduled task after Huntress organization ID was set",
                 command="sync_huntress",
                 company_id=company_id,
             )
