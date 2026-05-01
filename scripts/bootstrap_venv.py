@@ -41,7 +41,12 @@ def install_editable(project_root: Path, python_executable: Path) -> None:
         env=env,
     )
     subprocess.check_call(
-        [str(python_executable), "-m", "pip", "install", "-e", str(project_root)],
+        [str(python_executable), "-m", "pip", "install", "--upgrade", "setuptools", "wheel"],
+        cwd=str(project_root),
+        env=env,
+    )
+    subprocess.check_call(
+        [str(python_executable), "-m", "pip", "install", "--no-build-isolation", "-e", str(project_root)],
         cwd=str(project_root),
         env=env,
     )
