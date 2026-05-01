@@ -369,7 +369,10 @@ install_dependencies() {
   fi
 
   echo "Installing updated dependencies…"
-  if ! "$PYTHON_INTERPRETER" -m pip install --no-build-isolation --upgrade "$PROJECT_ROOT"; then
+  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade pip setuptools wheel; then
+    echo "Warning: Failed to upgrade pip/setuptools/wheel; continuing anyway." >&2
+  fi
+  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"; then
     echo "Error: Dependency installation failed." >&2
     return 1
   fi
