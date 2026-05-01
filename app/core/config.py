@@ -302,6 +302,21 @@ class Settings(BaseSettings):
         validation_alias="TRUSTED_PROXIES",
     )
 
+    # Huntress integration. Credentials are kept in environment variables so the
+    # module exposes only an enable/disable toggle in the modules admin UI.
+    huntress_api_key: str | None = Field(
+        default=None,
+        validation_alias="HUNTRESS_API_KEY",
+    )
+    huntress_api_secret: str | None = Field(
+        default=None,
+        validation_alias="HUNTRESS_API_SECRET",
+    )
+    huntress_base_url: str = Field(
+        default="https://api.huntress.io/v1",
+        validation_alias="HUNTRESS_BASE_URL",
+    )
+
     # GitHub integration (used for fetching the latest tray MSI on startup)
     github_token: str | None = Field(
         default=None,

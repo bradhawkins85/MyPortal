@@ -213,6 +213,7 @@ async def test_refresh_all_missing_company_ids(monkeypatch):
             "syncro_company_id": None,
             "tacticalrmm_client_id": None,
             "xero_id": None,
+            "huntress_organization_id": "huntress-100",
         },
         {
             "id": 2,
@@ -220,6 +221,8 @@ async def test_refresh_all_missing_company_ids(monkeypatch):
             "syncro_company_id": "syncro-200",
             "tacticalrmm_client_id": "tactical-200",
             "xero_id": "xero-200",
+            "hudu_id": "hudu-200",
+            "huntress_organization_id": "huntress-200",
         },
         {
             "id": 3,
@@ -227,6 +230,7 @@ async def test_refresh_all_missing_company_ids(monkeypatch):
             "syncro_company_id": None,
             "tacticalrmm_client_id": "tactical-300",
             "xero_id": None,
+            "huntress_organization_id": "huntress-300",
         },
     ]
     
