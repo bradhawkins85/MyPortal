@@ -99,7 +99,8 @@ async def update_company(
     has_missing_ids = (
         not updated.get("syncro_company_id") or
         not updated.get("tacticalrmm_client_id") or
-        not updated.get("xero_id")
+        not updated.get("xero_id") or
+        not updated.get("huntress_organization_id")
     )
     
     final_record: dict[str, Any] = updated
@@ -461,4 +462,33 @@ async def lookup_hudu_company_id(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error looking up Hudu company ID: {str(exc)}"
+        )
+
+
+@router.post("/{company_id}/lookup-huntress-id")
+async def lookup_huntress_organization_id(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup Huntress organisation ID for a company by searching the API."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    company_name = company.get("name", "")
+    if not company_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name is required")
+
+    try:
+        huntress_id = await company_id_lookup._lookup_huntress_organization_id(company_name)
+        if huntress_id:
+            await company_repo.update_company(company_id, huntress_organization_id=huntress_id)
+            return {"status": "found", "id": huntress_id}
+        else:
+            return {"status": "not_found", "id": None}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error looking up Huntress organisation ID: {str(exc)}"
         )
