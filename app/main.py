@@ -3623,6 +3623,7 @@ async def _render_company_edit_page(
             {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
             {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
             {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
+            {"value": "sync_huntress", "label": "Sync Huntress data"},
             {"value": "sync_to_xero", "label": "Sync to Xero"},
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
             {"value": "generate_invoice", "label": "Generate Invoice"},
@@ -13480,6 +13481,25 @@ async def admin_update_company(company_id: int, request: Request):
             error_message="Unable to update company. Please try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+    if huntress_organization_id:
+        existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
+        if "sync_huntress" not in existing_commands:
+            huntress_task_name = (
+                f"{name} - Sync Huntress data" if name else "Sync Huntress data"
+            )
+            await scheduled_tasks_repo.create_task(
+                name=huntress_task_name,
+                command="sync_huntress",
+                cron=_random_daily_cron(),
+                company_id=company_id,
+                active=True,
+            )
+            log_info(
+                "Auto-created scheduled task after Huntress organisation ID was set",
+                command="sync_huntress",
+                company_id=company_id,
+            )
+            asyncio.create_task(scheduler_service.refresh())
     return _company_edit_redirect(
         company_id=company_id,
         success=f"Company {name} updated.",
@@ -14873,6 +14893,7 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
         {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
         {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
+        {"value": "sync_huntress", "label": "Sync Huntress data"},
         {"value": "sync_to_xero", "label": "Sync to Xero"},
         {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
         {"value": "generate_invoice", "label": "Generate Invoice"},
