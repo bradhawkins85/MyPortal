@@ -369,7 +369,7 @@ install_dependencies() {
   fi
 
   echo "Installing updated dependencies…"
-  if ! "$PYTHON_INTERPRETER" -m pip install --upgrade "$PROJECT_ROOT"; then
+  if ! "$PYTHON_INTERPRETER" -m pip install --no-build-isolation --upgrade "$PROJECT_ROOT"; then
     echo "Error: Dependency installation failed." >&2
     return 1
   fi
