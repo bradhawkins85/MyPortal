@@ -21,11 +21,6 @@
 </li>
 {% endblock %}
 
-{% block header_actions %}
-<a class="button-link" href="/register">Create account</a>
-<a class="button-link" href="/knowledge-base">Browse knowledge base</a>
-{% endblock %}
-
 {% block content %}
 <div class="auth-card">
   <header class="auth-card__header">
@@ -88,16 +83,6 @@
           placeholder="123456"
         />
       </div>
-    </div>
-    <div class="form-actions form-actions--stacked">
-      <button
-        type="button"
-        class="button-link"
-        data-auth-toggle-totp
-        aria-controls="login-totp-field"
-      >
-        Use authenticator code
-      </button>
     </div>
     <p class="form-help">Forgotten your password? Contact a super administrator to trigger a reset email.</p>
     <div class="form-error" role="alert" data-auth-error hidden></div>
