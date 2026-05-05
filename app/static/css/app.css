@@ -4645,6 +4645,26 @@ dialog.modal:not([open]) {
   margin-bottom: var(--space-gap-roomy);
 }
 
+.visibility-grid__group {
+  display: contents;
+}
+
+.visibility-grid__group-label {
+  grid-column: 1 / -1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #94a3b8);
+  margin: var(--space-gap-base) 0 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.visibility-grid__sku {
+  display: block;
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+}
+
 .visibility-grid__item {
   background: rgba(30, 41, 59, 0.75);
   padding: var(--space-gap-base);

@@ -13506,6 +13506,70 @@ async def admin_update_company(company_id: int, request: Request):
     )
 
 
+@app.get("/api/admin/companies/{company_id}/shop-items", response_class=JSONResponse)
+async def admin_company_shop_items_api(request: Request, company_id: int):
+    """Return all non-archived shop products with their hidden status for a company."""
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    products = await shop_repo.list_products_with_exclusion_status_for_company(company_id)
+    return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(products)))
+
+
+@app.post(
+    "/admin/companies/{company_id}/shop-visibility",
+    status_code=status.HTTP_303_SEE_OTHER,
+    summary="Update shop item visibility for a company",
+    tags=["Shop"],
+)
+async def admin_update_company_shop_visibility(
+    request: Request,
+    company_id: int,
+    hidden: list[str] = Form(default=[]),
+):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    hidden_product_ids: set[int] = set()
+    for value in hidden:
+        if value in (None, ""):
+            continue
+        try:
+            hidden_product_ids.add(int(value))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid product selection")
+
+    await shop_repo.replace_company_exclusions(company_id, hidden_product_ids)
+
+    log_info(
+        "Company shop visibility updated",
+        company_id=company_id,
+        hidden_product_count=len(hidden_product_ids),
+        updated_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.company.visibility_change",
+        request=request,
+        entity_type="company",
+        entity_id=company_id,
+        after={"hidden_product_ids": sorted(hidden_product_ids)},
+    )
+    return RedirectResponse(
+        url=f"/admin/companies/{company_id}/edit?success=shop_visibility_saved",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post("/admin/companies/{company_id}/staff-fields", response_class=HTMLResponse)
 async def admin_update_company_staff_fields(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
