@@ -15,6 +15,31 @@
 
   var openMenu = null;
 
+  function positionPanel(menu) {
+    var toggle = menu.querySelector('[data-header-menu-toggle]');
+    var panel = menu.querySelector('[data-header-menu-panel]');
+    if (!toggle || !panel) {
+      return;
+    }
+    var rect = toggle.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.top = (rect.bottom + 4) + 'px';
+    panel.style.left = 'auto';
+    panel.style.right = (window.innerWidth - rect.right) + 'px';
+    panel.style.zIndex = '9999';
+  }
+
+  function resetPanelPosition(panel) {
+    if (!panel) {
+      return;
+    }
+    panel.style.position = '';
+    panel.style.top = '';
+    panel.style.left = '';
+    panel.style.right = '';
+    panel.style.zIndex = '';
+  }
+
   function setMenuState(menu, open) {
     var toggle = menu.querySelector('[data-header-menu-toggle]');
     var panel = menu.querySelector('[data-header-menu-panel]');
@@ -23,11 +48,13 @@
     }
     if (open) {
       panel.hidden = false;
+      positionPanel(menu);
       toggle.setAttribute('aria-expanded', 'true');
       menu.classList.add('header-menu--open');
       openMenu = menu;
     } else {
       panel.hidden = true;
+      resetPanelPosition(panel);
       toggle.setAttribute('aria-expanded', 'false');
       menu.classList.remove('header-menu--open');
       if (openMenu === menu) {
