@@ -13564,9 +13564,9 @@ async def admin_update_company_shop_visibility(
         entity_id=company_id,
         after={"hidden_product_ids": sorted(hidden_product_ids)},
     )
-    return RedirectResponse(
-        url=f"/admin/companies/{company_id}/edit?success=shop_visibility_saved",
-        status_code=status.HTTP_303_SEE_OTHER,
+    return _company_edit_redirect(
+        company_id=company_id,
+        success="Shop item visibility saved.",
     )
 
 

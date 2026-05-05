@@ -103,6 +103,8 @@ def test_company_visibility_template_has_shop_section():
     assert "shop-visibility-form" in template
     assert "shop-visibility-grid" in template
     assert "shop-visibility-loading" in template
+    # Form should POST to the correct endpoint
+    assert "/shop-visibility" in template
 
 
 def test_company_visibility_template_explains_semantics():
@@ -111,7 +113,7 @@ def test_company_visibility_template_explains_semantics():
 
     template = Path("app/templates/admin/company_edit.html").read_text()
 
-    assert "hide" in template.lower() or "hidden" in template.lower()
+    assert "Tick an item to hide it from their store" in template
 
 
 def test_shop_admin_visibility_modal_explains_semantics():
@@ -120,6 +122,4 @@ def test_shop_admin_visibility_modal_explains_semantics():
 
     template = Path("app/templates/admin/shop.html").read_text()
 
-    # The modal subtitle should explain that ticking = hiding
-    assert "hide" in template.lower() or "hidden" in template.lower()
-    assert "default" in template.lower()
+    assert "Tick a company to hide this item from their store" in template

@@ -1669,6 +1669,12 @@
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
     <script>
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
       // Billing contacts management
       document.addEventListener('DOMContentLoaded', function() {
         const companyId = {{ company.id }};
@@ -1766,12 +1772,6 @@
             </button>
           `;
           list.appendChild(item);
-        }
-        
-        function escapeHtml(text) {
-          const div = document.createElement('div');
-          div.textContent = text;
-          return div.innerHTML;
         }
       });
 
@@ -1938,11 +1938,6 @@
           }
         });
 
-        function escapeHtml(text) {
-          const div = document.createElement('div');
-          div.textContent = text;
-          return div.innerHTML;
-        }
       });
 
       // Shop item visibility
@@ -1952,12 +1947,6 @@
         const loadingMsg = document.getElementById('shop-visibility-loading');
         const companyId = {{ company.id }};
         let loaded = false;
-
-        function escapeHtmlLocal(text) {
-          const div = document.createElement('div');
-          div.textContent = text;
-          return div.innerHTML;
-        }
 
         if (!panel || !grid) return;
 
@@ -1985,14 +1974,14 @@
               const cat = product.category_name || 'Uncategorised';
               if (cat !== currentCategory) {
                 if (currentCategory !== null) html += '</div>';
-                html += `<div class="visibility-grid__group"><h3 class="visibility-grid__group-label">${escapeHtmlLocal(cat)}</h3>`;
+                html += `<div class="visibility-grid__group"><h3 class="visibility-grid__group-label">${escapeHtml(cat)}</h3>`;
                 currentCategory = cat;
               }
               const checked = product.is_hidden ? ' checked' : '';
               html += `<label class="checkbox visibility-grid__item">
                 <input type="checkbox" name="hidden" value="${product.id}"${checked} />
-                <span>${escapeHtmlLocal(product.name)}</span>
-                ${product.sku ? `<span class="text-muted visibility-grid__sku">${escapeHtmlLocal(product.sku)}</span>` : ''}
+                <span>${escapeHtml(product.name)}</span>
+                ${product.sku ? `<span class="text-muted visibility-grid__sku">${escapeHtml(product.sku)}</span>` : ''}
               </label>`;
             }
             if (currentCategory !== null) html += '</div>';
