@@ -11,6 +11,12 @@
 {% endblock %}
 {% block content %}
   <div data-company-id="{{ company.id }}">
+  {% if success_message %}
+    <div class="alert alert--success" role="alert">{{ success_message }}</div>
+  {% endif %}
+  {% if error_message %}
+    <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+  {% endif %}
   <div class="admin-grid admin-grid--columns">
     <section class="card card--panel admin-grid__full">
       <header class="card__header card__header--actions">
@@ -1245,6 +1251,31 @@
         </div>
       </div>
     </details>
+    <details class="card card--panel card-collapsible admin-grid__full" id="shop-visibility-panel">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Shop item visibility</h2>
+          <p class="card__subtitle">Items are visible to this company by default. Tick an item to hide it from their store.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true">
+          <span class="card__toggle-icon"></span>
+        </div>
+      </summary>
+      <div class="card-collapsible__content">
+        <p class="form-helper" id="shop-visibility-loading">Loading products…</p>
+        <form
+          id="shop-visibility-form"
+          method="post"
+          action="/admin/companies/{{ company.id }}/shop-visibility"
+        >
+          {% include "partials/csrf.html" %}
+          <div id="shop-visibility-grid" class="visibility-grid"></div>
+          <div class="form-actions">
+            <button type="submit" class="button">Save visibility</button>
+          </div>
+        </form>
+      </div>
+    </details>
     {% endif %}
   </div>
   {% if is_super_admin %}
@@ -1638,6 +1669,12 @@
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
     <script>
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
       // Billing contacts management
       document.addEventListener('DOMContentLoaded', function() {
         const companyId = {{ company.id }};
@@ -1735,12 +1772,6 @@
             </button>
           `;
           list.appendChild(item);
-        }
-        
-        function escapeHtml(text) {
-          const div = document.createElement('div');
-          div.textContent = text;
-          return div.innerHTML;
         }
       });
 
@@ -1907,12 +1938,62 @@
           }
         });
 
-        function escapeHtml(text) {
-          const div = document.createElement('div');
-          div.textContent = text;
-          return div.innerHTML;
-        }
       });
+
+      // Shop item visibility
+      (function () {
+        const panel = document.getElementById('shop-visibility-panel');
+        const grid = document.getElementById('shop-visibility-grid');
+        const loadingMsg = document.getElementById('shop-visibility-loading');
+        const companyId = {{ company.id }};
+        let loaded = false;
+
+        if (!panel || !grid) return;
+
+        panel.addEventListener('toggle', async function () {
+          if (!panel.open || loaded) return;
+          loaded = true;
+
+          if (loadingMsg) loadingMsg.hidden = false;
+
+          try {
+            const response = await fetch(`/api/admin/companies/${companyId}/shop-items`);
+            if (!response.ok) throw new Error('Failed to load shop items');
+            const products = await response.json();
+
+            if (loadingMsg) loadingMsg.hidden = true;
+
+            if (!products.length) {
+              grid.innerHTML = '<p class="text-muted">No products are available.</p>';
+              return;
+            }
+
+            let currentCategory = null;
+            let html = '';
+            for (const product of products) {
+              const cat = product.category_name || 'Uncategorised';
+              if (cat !== currentCategory) {
+                if (currentCategory !== null) html += '</div>';
+                html += `<div class="visibility-grid__group"><h3 class="visibility-grid__group-label">${escapeHtml(cat)}</h3>`;
+                currentCategory = cat;
+              }
+              const checked = product.is_hidden ? ' checked' : '';
+              html += `<label class="checkbox visibility-grid__item">
+                <input type="checkbox" name="hidden" value="${product.id}"${checked} />
+                <span>${escapeHtml(product.name)}</span>
+                ${product.sku ? `<span class="text-muted visibility-grid__sku">${escapeHtml(product.sku)}</span>` : ''}
+              </label>`;
+            }
+            if (currentCategory !== null) html += '</div>';
+            grid.innerHTML = html;
+          } catch (err) {
+            if (loadingMsg) {
+              loadingMsg.textContent = 'Unable to load products. Please refresh and try again.';
+              loadingMsg.hidden = false;
+            }
+          }
+        });
+      })();
     </script>
   {% endif %}
 {% endblock %}

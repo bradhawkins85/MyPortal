@@ -1910,6 +1910,70 @@ async def _fetch_recommendation_map(
     return mapping
 
 
+async def list_products_with_exclusion_status_for_company(
+    company_id: int,
+) -> list[dict[str, Any]]:
+    """Return all non-archived products with a flag indicating whether each is
+    hidden from the given company (i.e. present in shop_product_exclusions)."""
+    rows = await db.fetch_all(
+        """
+        SELECT
+            p.id,
+            p.name,
+            p.sku,
+            p.category_id,
+            c.name AS category_name,
+            CASE WHEN e.product_id IS NOT NULL THEN 1 ELSE 0 END AS is_hidden
+        FROM shop_products AS p
+        LEFT JOIN shop_categories AS c ON c.id = p.category_id
+        LEFT JOIN shop_product_exclusions AS e
+            ON e.product_id = p.id AND e.company_id = %s
+        WHERE p.archived = 0
+        ORDER BY c.name ASC, p.name ASC
+        """,
+        (company_id,),
+    )
+    return [
+        {
+            "id": _coerce_int(row.get("id")),
+            "name": row.get("name") or "",
+            "sku": row.get("sku") or "",
+            "category_id": _coerce_optional_int(row.get("category_id")),
+            "category_name": row.get("category_name") or None,
+            "is_hidden": bool(row.get("is_hidden")),
+        }
+        for row in rows
+    ]
+
+
+async def replace_company_exclusions(
+    company_id: int,
+    excluded_product_ids: Iterable[int],
+) -> None:
+    """Replace all shop product exclusions for a company with the given set of
+    product IDs.  Products not in *excluded_product_ids* will be made visible."""
+    ids = sorted({int(pid) for pid in excluded_product_ids})
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "DELETE FROM shop_product_exclusions WHERE company_id = %s",
+                    (company_id,),
+                )
+                if ids:
+                    values = [(pid, company_id) for pid in ids]
+                    await cursor.executemany(
+                        "INSERT INTO shop_product_exclusions (product_id, company_id) VALUES (%s, %s)",
+                        values,
+                    )
+            except Exception:
+                await conn.rollback()
+                raise
+            else:
+                await conn.commit()
+
+
 async def replace_product_exclusions(
     product_id: int,
     excluded_company_ids: Iterable[int],
