@@ -1615,6 +1615,7 @@ async def _render_error_page(
         },
     )
     return templates.TemplateResponse(
+        context["request"],
         "errors/error.html",
         context,
         status_code=status_code,
@@ -2070,7 +2071,7 @@ async def _render_template(
     extra: dict[str, Any] | None = None,
 ):
     context = await _build_base_context(request, user, extra=extra)
-    return templates.TemplateResponse(template_name, context)
+    return templates.TemplateResponse(context["request"], template_name, context)
 
 
 _API_KEY_ORDER_CHOICES: list[tuple[str, str]] = [
@@ -3103,6 +3104,7 @@ async def _render_impersonation_dashboard(
         },
     )
     return templates.TemplateResponse(
+        context["request"],
         "admin/impersonation.html",
         context,
         status_code=status_code,
@@ -9589,7 +9591,7 @@ async def knowledge_base_index(request: Request, article: str | None = Query(Non
         "kb_is_super_admin": bool(user and user.get("is_super_admin")),
     }
     context = await _build_portal_context(request, user, extra=extra_context)
-    return templates.TemplateResponse("knowledge_base/index.html", context)
+    return templates.TemplateResponse(context["request"], "knowledge_base/index.html", context)
 
 
 @app.get("/knowledge-base/articles/{slug}", response_class=HTMLResponse, tags=["Knowledge Base"])
@@ -9611,7 +9613,7 @@ async def knowledge_base_article(request: Request, slug: str):
         "kb_is_super_admin": bool(user and user.get("is_super_admin")),
     }
     context = await _build_portal_context(request, user, extra=extra_context)
-    return templates.TemplateResponse("knowledge_base/article.html", context)
+    return templates.TemplateResponse(context["request"], "knowledge_base/article.html", context)
 
 
 @app.get("/notifications/settings", response_class=HTMLResponse)
@@ -12909,7 +12911,7 @@ async def admin_profile_page(request: Request):
             "profile_totp_devices": totp_devices,
         },
     )
-    return templates.TemplateResponse("admin/profile.html", context)
+    return templates.TemplateResponse(context["request"], "admin/profile.html", context)
 
 
 @app.get("/admin/impersonation", response_class=HTMLResponse)
@@ -16171,6 +16173,7 @@ async def admin_tag_exclusions_page(
         },
     )
     return templates.TemplateResponse(
+        context["request"],
         "admin/tag_exclusions.html",
         context,
     )
@@ -16191,6 +16194,7 @@ async def admin_call_recordings_page(request: Request):
         },
     )
     return templates.TemplateResponse(
+        context["request"],
         "admin/call_recordings.html",
         context,
     )
@@ -22751,7 +22755,7 @@ async def login_page(request: Request):
         "title": "Sign in",
         "plausible_config": {"enabled": False},
     }
-    return templates.TemplateResponse("auth/login.html", context)
+    return templates.TemplateResponse(context["request"], "auth/login.html", context)
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -22776,7 +22780,7 @@ async def register_page(request: Request):
         "is_first_user": is_first_user,
         "plausible_config": {"enabled": False},
     }
-    return templates.TemplateResponse("auth/register.html", context)
+    return templates.TemplateResponse(context["request"], "auth/register.html", context)
 
 
 @app.get("/health")
@@ -22829,7 +22833,7 @@ async def chat_index(
         "unattended_filter": unattended,
         "is_staff": is_staff,
     })
-    return templates.TemplateResponse("chat/index.html", ctx)
+    return templates.TemplateResponse(ctx["request"], "chat/index.html", ctx)
 
 
 @app.get("/chat/{room_id}", response_class=HTMLResponse)
@@ -22887,4 +22891,4 @@ async def chat_room_page(
         "current_user_id": user_id,
         "matrix_is_self_hosted": settings.matrix_is_self_hosted,
     })
-    return templates.TemplateResponse("chat/room.html", ctx)
+    return templates.TemplateResponse(ctx["request"], "chat/room.html", ctx)
