@@ -545,6 +545,16 @@ class M365Error(RuntimeError):
         self.graph_error_code: str | None = graph_error_code
 
 
+class M365NoDelegatedTokenError(M365Error):
+    """Raised when a delegated admin token is required but not available.
+
+    This occurs when :func:`repair_enterprise_app_permissions` is called
+    but no refresh token has been stored (i.e. the admin has not yet
+    completed the 'Authorize portal access' connect flow).  Callers can
+    catch this specific subclass to redirect the user to the connect flow.
+    """
+
+
 def generate_pkce_pair() -> tuple[str, str]:
     """Generate a PKCE ``code_verifier`` / ``code_challenge`` pair.
 
@@ -3028,6 +3038,48 @@ async def get_last_enterprise_app_permissions(
     ordered = [by_app[aid] for aid in catalog_order if aid in by_app]
     extras = [v for aid, v in by_app.items() if aid not in set(catalog_order)]
     return ordered + extras
+
+
+async def repair_enterprise_app_permissions(
+    company_id: int,
+) -> dict[str, Any]:
+    """Attempt to grant any missing enterprise app permissions and re-check results.
+
+    Uses the stored delegated refresh token (acquired during the admin
+    "Authorize portal access" connect flow) to call
+    :func:`try_grant_missing_permissions`.  After the grant attempt the
+    permission check is re-run and the fresh results are returned.
+
+    Returns a dict with keys:
+
+    * ``granted`` – ``True`` if at least one permission was newly granted.
+    * ``results`` – the updated permission check results (same shape as
+      :func:`check_enterprise_app_permissions`).
+
+    Raises :class:`M365Error` when:
+
+    * No M365 credentials are configured for the company.
+    * No delegated refresh token is available (admin has not yet run the
+      "Authorize portal access" flow, so there is no token to use).
+    * The Graph API call to check permissions fails.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials are configured for this company")
+
+    access_token = await acquire_delegated_token(company_id)
+    if not access_token:
+        raise M365NoDelegatedTokenError(
+            "No delegated admin token is available. "
+            "Please use 'Authorize portal access' on the Office 365 page first."
+        )
+
+    granted = await try_grant_missing_permissions(
+        company_id=company_id,
+        access_token=access_token,
+    )
+    results = await check_enterprise_app_permissions(company_id)
+    return {"granted": granted, "results": results}
 
 
 async def _ensure_exchange_admin_role(
