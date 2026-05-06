@@ -2191,11 +2191,6 @@ async def sync_company_licenses(company_id: int) -> None:
             if raw_auto_renew is None:
                 # Some tenants expose this flag as autoRenewEnabled instead.
                 raw_auto_renew = sub_info.get("autoRenewEnabled")
-            if raw_auto_renew is None:
-                # Fall back to the subscription status field: "Enabled" = auto-renew on.
-                status_val = sub_info.get("status")
-                if isinstance(status_val, str):
-                    raw_auto_renew = status_val.strip().lower() == "enabled"
             api_auto_renew = _coerce_optional_bool(raw_auto_renew)
 
         existing = await license_repo.get_license_by_company_and_sku(
