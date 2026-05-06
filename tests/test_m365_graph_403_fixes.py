@@ -328,3 +328,46 @@ async def test_get_all_users_returns_both_enabled_and_disabled():
     emails = {u["mail"] for u in users}
     assert "active@example.com" in emails
     assert "blocked@example.com" in emails
+
+
+# ---------------------------------------------------------------------------
+# _graph_get wraps httpx network errors as M365Error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_graph_get_wraps_timeout_as_m365_error():
+    """_graph_get wraps httpx.ReadTimeout in M365Error with a descriptive message."""
+    import httpx
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=httpx.ReadTimeout("", request=MagicMock()))
+    mock_client_ctx = MagicMock()
+    mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client_ctx):
+        with pytest.raises(M365Error) as exc_info:
+            await _graph_get("token", "https://graph.microsoft.com/v1.0/users")
+
+    assert str(exc_info.value)  # message must never be empty
+    assert "ReadTimeout" in str(exc_info.value)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_graph_get_wraps_connect_error_as_m365_error():
+    """_graph_get wraps httpx.ConnectError in M365Error with a descriptive message."""
+    import httpx
+
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(side_effect=httpx.ConnectError("", request=MagicMock()))
+    mock_client_ctx = MagicMock()
+    mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.m365.httpx.AsyncClient", return_value=mock_client_ctx):
+        with pytest.raises(M365Error) as exc_info:
+            await _graph_get("token", "https://graph.microsoft.com/v1.0/users")
+
+    assert str(exc_info.value)  # message must never be empty
+    assert "ConnectError" in str(exc_info.value)

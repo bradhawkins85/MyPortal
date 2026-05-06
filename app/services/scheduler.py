@@ -521,7 +521,7 @@ class SchedulerService:
                         except Exception as exc:  # noqa: BLE001
                             status = "failed"
                             details = json.dumps(
-                                {"company_id": company_id_int, "licenses_synced": False, "error": str(exc)},
+                                {"company_id": company_id_int, "licenses_synced": False, "error": str(exc) or f"{type(exc).__name__} (no details)"},
                                 default=str,
                             )
                     else:
@@ -549,7 +549,7 @@ class SchedulerService:
                         except Exception as exc:  # noqa: BLE001
                             status = "failed"
                             details = json.dumps(
-                                {"company_id": company_id_int, "staff_sync_error": str(exc)},
+                                {"company_id": company_id_int, "staff_sync_error": str(exc) or f"{type(exc).__name__} (no details)"},
                                 default=str,
                             )
                     else:
@@ -567,8 +567,9 @@ class SchedulerService:
                             )
                         except Exception as exc:  # noqa: BLE001
                             status = "failed"
+                            error_msg = str(exc) or f"{type(exc).__name__} (no details)"
                             details = json.dumps(
-                                {"company_id": company_id_int, "mailboxes_synced": 0, "error": str(exc)},
+                                {"company_id": company_id_int, "mailboxes_synced": 0, "error": error_msg},
                                 default=str,
                             )
                     else:
