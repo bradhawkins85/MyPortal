@@ -635,8 +635,17 @@ async def _exchange_token(
             "grant_type": "client_credentials",
         }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(token_endpoint, data=data)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(token_endpoint, data=data)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft 365 token request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft 365 token request network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code != 200:
         grant_type = "refresh_token" if refresh_token else "client_credentials"
         log_error(
@@ -873,6 +882,14 @@ async def _exo_invoke_command(
         raise M365Error(
             f"Exchange Online {cmdlet_name} request decode error: {exc}"
         ) from exc
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 201, 204):
         log_error(
             "Exchange Online InvokeCommand failed",
@@ -903,8 +920,17 @@ async def _graph_get(
     req_headers: dict[str, str] = {"Authorization": f"Bearer {access_token}"}
     if extra_headers:
         req_headers.update(extra_headers)
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(url, headers=req_headers)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url, headers=req_headers)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code != 200:
         log_error(
             "Microsoft Graph request failed",
@@ -960,8 +986,17 @@ async def _graph_post(
 ) -> dict[str, Any]:
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph POST timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph POST network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 201, 204):
         log_error(
             "Microsoft Graph POST failed",
@@ -1070,8 +1105,17 @@ async def _graph_patch(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.patch(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.patch(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph PATCH timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph PATCH network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 204):
         log_error(
             "Microsoft Graph PATCH failed",
@@ -1106,8 +1150,17 @@ async def _graph_delete(access_token: str, url: str) -> None:
     """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.delete(url, headers=headers)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.delete(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph DELETE timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph DELETE network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 204):
         log_error(
             "Microsoft Graph DELETE failed",
@@ -3345,35 +3398,46 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         # deterministically.
         "Accept": "text/csv",
     }
-    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
-        response = await client.get(csv_report_url, headers=headers)
-        if response.status_code not in (302, 303, 307, 308):
-            log_error(
-                "Mailbox usage CSV export request failed",
-                url=csv_report_url,
-                status=response.status_code,
-                body=response.text,
-            )
-            raise M365Error(
-                f"Microsoft Graph request failed ({response.status_code})",
-                http_status=response.status_code,
-            )
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            response = await client.get(csv_report_url, headers=headers)
+            if response.status_code not in (302, 303, 307, 308):
+                log_error(
+                    "Mailbox usage CSV export request failed",
+                    url=csv_report_url,
+                    status=response.status_code,
+                    body=response.text,
+                )
+                raise M365Error(
+                    f"Microsoft Graph request failed ({response.status_code})",
+                    http_status=response.status_code,
+                )
 
-        download_url = str(response.headers.get("Location") or "").strip()
-        if not download_url:
-            raise M365Error("Mailbox usage CSV export missing download URL")
+            download_url = str(response.headers.get("Location") or "").strip()
+            if not download_url:
+                raise M365Error("Mailbox usage CSV export missing download URL")
 
-        csv_response = await client.get(download_url)
-        if csv_response.status_code != 200:
-            log_error(
-                "Mailbox usage CSV download failed",
-                status=csv_response.status_code,
-                body=csv_response.text,
-            )
-            raise M365Error(
-                f"Microsoft Graph request failed ({csv_response.status_code})",
-                http_status=csv_response.status_code,
-            )
+            csv_response = await client.get(download_url)
+            if csv_response.status_code != 200:
+                log_error(
+                    "Mailbox usage CSV download failed",
+                    status=csv_response.status_code,
+                    body=csv_response.text,
+                )
+                raise M365Error(
+                    f"Microsoft Graph request failed ({csv_response.status_code})",
+                    http_status=csv_response.status_code,
+                )
+    except M365Error:
+        raise
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Mailbox usage report request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Mailbox usage report network error ({type(exc).__name__})"
+        ) from exc
 
     csv_text = csv_response.text
     # Graph report downloads can be UTF-16 encoded without an explicit
