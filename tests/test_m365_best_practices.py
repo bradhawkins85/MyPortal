@@ -52,6 +52,22 @@ def test_get_remediation_unknown_check_returns_default():
     assert "Microsoft" in text
 
 
+def test_provision_app_roles_include_best_practice_permissions():
+    """_PROVISION_APP_ROLES must include all permissions required by best-practice checks."""
+    from app.services import m365 as m365_svc
+    roles = m365_svc._PROVISION_APP_ROLES
+    # UserAuthenticationMethod.Read.All – required for MFA registration details report
+    # (bp_all_members_mfa_capable) and per-user MFA state check (bp_per_user_mfa_disabled)
+    assert "38d9df27-64da-44fd-b7c5-a6fbac20248f" in roles, (
+        "UserAuthenticationMethod.Read.All must be provisioned for MFA registration checks"
+    )
+    # OrgSettings-Forms.Read.All – required for Microsoft Forms phishing protection check
+    # (bp_internal_phishing_forms) via GET /beta/admin/forms/settings
+    assert "434d7c66-07c6-4b1f-ab21-417cf2cdaaca" in roles, (
+        "OrgSettings-Forms.Read.All must be provisioned for the Forms settings check"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
