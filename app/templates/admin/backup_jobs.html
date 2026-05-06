@@ -388,68 +388,68 @@
 <script>
 (function () {
   // ── Backup job add/edit modal ──────────────────────────────────────────────
-  var jobModal = document.getElementById('backup-job-modal');
-  var jobForm = document.getElementById('backup-job-form');
-  var jobTitle = document.getElementById('backup-job-modal-title');
-  var jobSubmitBtn = document.getElementById('backup-job-submit-btn');
-  var webhookSection = document.getElementById('backup-job-webhook');
-  var webhookUrlEl = document.getElementById('backup-job-webhook-url');
-  var webhookBodyEl = document.getElementById('backup-job-webhook-body');
-  var webhookPsEl = document.getElementById('backup-job-webhook-ps');
-  var webhookCurlEl = document.getElementById('backup-job-webhook-curl');
-  var backupStatusUrl = jobModal ? jobModal.dataset.backupStatusUrl : '';
+  const jobModal = document.getElementById('backup-job-modal');
+  const jobForm = document.getElementById('backup-job-form');
+  const jobTitle = document.getElementById('backup-job-modal-title');
+  const jobSubmitBtn = document.getElementById('backup-job-submit-btn');
+  const webhookSection = document.getElementById('backup-job-webhook');
+  const webhookUrlEl = document.getElementById('backup-job-webhook-url');
+  const webhookBodyEl = document.getElementById('backup-job-webhook-body');
+  const webhookPsEl = document.getElementById('backup-job-webhook-ps');
+  const webhookCurlEl = document.getElementById('backup-job-webhook-curl');
+  const backupStatusUrl = jobModal ? jobModal.dataset.backupStatusUrl : '';
 
   function openJobModal(mode, jobData) {
     if (!jobModal) return;
-    // Reset form
-    jobForm.reset();
 
     if (mode === 'edit' && jobData) {
+      jobForm.reset();
       jobTitle.textContent = 'Edit backup job';
       jobSubmitBtn.textContent = 'Save changes';
-      jobForm.action = '/admin/backup-jobs/' + jobData.id;
+      jobForm.action = `/admin/backup-jobs/${jobData.id}`;
 
       // Populate fields
-      var companySelect = document.getElementById('modal-backup-company');
-      if (companySelect) companySelect.value = String(jobData.company_id || '');
-      var nameInput = document.getElementById('modal-backup-name');
+      const companySelect = document.getElementById('modal-backup-company');
+      if (companySelect) companySelect.value = jobData.company_id || '';
+      const nameInput = document.getElementById('modal-backup-name');
       if (nameInput) nameInput.value = jobData.name || '';
-      var descInput = document.getElementById('modal-backup-description');
+      const descInput = document.getElementById('modal-backup-description');
       if (descInput) descInput.value = jobData.description || '';
-      var isActiveChk = document.getElementById('modal-backup-is-active');
+      const isActiveChk = document.getElementById('modal-backup-is-active');
       if (isActiveChk) isActiveChk.checked = !!jobData.is_active;
-      var passProtChk = document.getElementById('modal-backup-pass-protection');
+      const passProtChk = document.getElementById('modal-backup-pass-protection');
       if (passProtChk) passProtChk.checked = !!jobData.pass_protection;
-      var noSuccessInput = document.getElementById('modal-backup-alert-no-success');
+      const noSuccessInput = document.getElementById('modal-backup-alert-no-success');
       if (noSuccessInput) noSuccessInput.value = jobData.alert_no_success_days || '';
-      var failInput = document.getElementById('modal-backup-alert-fail');
+      const failInput = document.getElementById('modal-backup-alert-fail');
       if (failInput) failInput.value = jobData.alert_fail_days || '';
-      var unknownInput = document.getElementById('modal-backup-alert-unknown');
+      const unknownInput = document.getElementById('modal-backup-alert-unknown');
       if (unknownInput) unknownInput.value = jobData.alert_unknown_days || '';
 
       // Show webhook instructions
       if (jobData.token) {
-        var token = jobData.token;
+        const token = jobData.token;
         if (webhookUrlEl) webhookUrlEl.textContent = backupStatusUrl;
-        if (webhookBodyEl) webhookBodyEl.textContent = '{\n  "job_id": "' + token + '",\n  "status": "pass",\n  "message": "Optional human readable message"\n}';
-        if (webhookPsEl) webhookPsEl.textContent = '$body = @{ job_id = "' + token + '"; status = "pass"; message = "Backup OK" } | ConvertTo-Json\nInvoke-RestMethod -Uri "' + backupStatusUrl + '" -Method Post -Body $body -ContentType "application/json"';
-        if (webhookCurlEl) webhookCurlEl.textContent = 'curl -X POST "' + backupStatusUrl + '" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"job_id": "' + token + '", "status": "pass", "message": "Backup OK"}\'';
+        if (webhookBodyEl) webhookBodyEl.textContent = `{\n  "job_id": "${token}",\n  "status": "pass",\n  "message": "Optional human readable message"\n}`;
+        if (webhookPsEl) webhookPsEl.textContent = `$body = @{ job_id = "${token}"; status = "pass"; message = "Backup OK" } | ConvertTo-Json\nInvoke-RestMethod -Uri "${backupStatusUrl}" -Method Post -Body $body -ContentType "application/json"`;
+        if (webhookCurlEl) webhookCurlEl.textContent = `curl -X POST "${backupStatusUrl}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"job_id": "${token}", "status": "pass", "message": "Backup OK"}'`;
         if (webhookSection) webhookSection.hidden = false;
       } else {
         if (webhookSection) webhookSection.hidden = true;
       }
     } else {
+      jobForm.reset();
       jobTitle.textContent = 'Add backup job';
       jobSubmitBtn.textContent = 'Create job';
       jobForm.action = '/admin/backup-jobs';
-      var isActiveChk = document.getElementById('modal-backup-is-active');
+      const isActiveChk = document.getElementById('modal-backup-is-active');
       if (isActiveChk) isActiveChk.checked = true;
       if (webhookSection) webhookSection.hidden = true;
     }
 
     jobModal.hidden = false;
     // Focus first focusable field
-    var firstField = jobModal.querySelector('select, input:not([type=hidden]), textarea');
+    const firstField = jobModal.querySelector('select, input:not([type=hidden]), textarea');
     if (firstField) firstField.focus();
   }
 
@@ -458,14 +458,14 @@
   }
 
   // ── Token display modal ────────────────────────────────────────────────────
-  var tokenModal = document.getElementById('backup-token-modal');
-  var tokenSubtitle = document.getElementById('backup-token-modal-subtitle');
-  var tokenValueEl = document.getElementById('backup-token-value');
-  var copyBtn = document.getElementById('backup-token-copy-btn');
+  const tokenModal = document.getElementById('backup-token-modal');
+  const tokenSubtitle = document.getElementById('backup-token-modal-subtitle');
+  const tokenValueEl = document.getElementById('backup-token-value');
+  const copyBtn = document.getElementById('backup-token-copy-btn');
 
   function openTokenModal(token, jobName) {
     if (!tokenModal) return;
-    tokenSubtitle.textContent = jobName ? 'Token for: ' + jobName : 'Current job token';
+    tokenSubtitle.textContent = jobName ? `Token for: ${jobName}` : 'Current job token';
     tokenValueEl.textContent = token;
     tokenModal.hidden = false;
     copyBtn.textContent = 'Copy token';
@@ -478,14 +478,14 @@
   // ── Event delegation ───────────────────────────────────────────────────────
   document.addEventListener('click', function (e) {
     // Open add/edit modal
-    var modalOpenBtn = e.target.closest('[data-backup-job-modal-open]');
+    const modalOpenBtn = e.target.closest('[data-backup-job-modal-open]');
     if (modalOpenBtn) {
       e.preventDefault();
-      var details = modalOpenBtn.closest('details');
+      const details = modalOpenBtn.closest('details');
       if (details) details.open = false;
-      var mode = modalOpenBtn.dataset.backupJobMode || 'create';
-      var jobDataRaw = modalOpenBtn.dataset.backupJob;
-      var jobData = null;
+      const mode = modalOpenBtn.dataset.backupJobMode || 'create';
+      const jobDataRaw = modalOpenBtn.dataset.backupJob;
+      let jobData = null;
       if (jobDataRaw) {
         try { jobData = JSON.parse(jobDataRaw); } catch (err) { jobData = null; }
       }
@@ -494,10 +494,10 @@
     }
 
     // Open token modal
-    var tokenBtn = e.target.closest('[data-backup-token]');
+    const tokenBtn = e.target.closest('[data-backup-token]');
     if (tokenBtn) {
       e.preventDefault();
-      var details = tokenBtn.closest('details');
+      const details = tokenBtn.closest('details');
       if (details) details.open = false;
       openTokenModal(tokenBtn.dataset.backupToken, tokenBtn.dataset.backupJobName || '');
       return;
@@ -522,14 +522,14 @@
 
   if (copyBtn) {
     copyBtn.addEventListener('click', function () {
-      var token = tokenValueEl.textContent;
+      const token = tokenValueEl.textContent;
       if (navigator.clipboard) {
         navigator.clipboard.writeText(token).then(function () {
           copyBtn.textContent = 'Copied!';
           setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
         });
       } else {
-        var ta = document.createElement('textarea');
+        const ta = document.createElement('textarea');
         ta.value = token;
         document.body.appendChild(ta);
         ta.select();
@@ -543,7 +543,7 @@
 
   // Allow row-level action dropdowns to overflow the table wrapper.
   document.querySelectorAll('[data-header-menu]').forEach(function (details) {
-    var wrapper = details.closest('.table-wrapper');
+    const wrapper = details.closest('.table-wrapper');
     if (!wrapper) return;
     details.addEventListener('toggle', function () {
       wrapper.style.overflow = details.open ? 'visible' : '';
@@ -551,21 +551,17 @@
   });
 
   // Auto-open edit modal when ?jobId= is present in the URL (e.g. after token regen).
+  // Find the matching row's data attribute to avoid duplicating the data structure.
   {% if backup_editing_job %}
   (function () {
-    var editData = {{ {
-      "id": backup_editing_job.id,
-      "company_id": backup_editing_job.company_id,
-      "name": backup_editing_job.name,
-      "description": backup_editing_job.description or "",
-      "is_active": backup_editing_job.is_active,
-      "pass_protection": backup_editing_job.pass_protection if backup_editing_job.pass_protection is defined else false,
-      "alert_no_success_days": backup_editing_job.alert_no_success_days or "",
-      "alert_fail_days": backup_editing_job.alert_fail_days or "",
-      "alert_unknown_days": backup_editing_job.alert_unknown_days or "",
-      "token": backup_editing_job.token
-    } | tojson }};
-    openJobModal('edit', editData);
+    const editId = {{ backup_editing_job.id | tojson }};
+    const buttons = document.querySelectorAll('[data-backup-job-modal-open][data-backup-job-mode="edit"]');
+    for (const btn of buttons) {
+      try {
+        const data = JSON.parse(btn.dataset.backupJob || '{}');
+        if (data.id === editId) { openJobModal('edit', data); break; }
+      } catch (err) { /* ignore */ }
+    }
   })();
   {% endif %}
 })();
