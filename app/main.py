@@ -6086,6 +6086,66 @@ async def run_m365_diagnostics_check(request: Request):
     )
 
 
+@app.post("/m365/diagnostics/repair", response_class=RedirectResponse)
+async def repair_m365_permissions(request: Request):
+    """Grant any missing enterprise app permissions and re-check results.
+
+    Uses the stored delegated refresh token from the admin connect flow.
+    If no token is available the admin is redirected to the connect flow
+    (with ``return_to=diagnostics`` in state) so that the repair runs
+    automatically after they re-authorise.
+    """
+    user, _, __, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        outcome = await m365_service.repair_enterprise_app_permissions(company_id)
+    except m365_service.M365Error as exc:
+        err_msg = str(exc)
+        # If no delegated token is available redirect to the connect flow so the
+        # admin can re-authorise; the callback will automatically grant missing
+        # permissions and then return to the diagnostics page.
+        if "delegated admin token" in err_msg.lower() or "no delegated" in err_msg.lower():
+            credentials = await m365_service.get_credentials(company_id)
+            if credentials:
+                state = oauth_state_serializer.dumps({
+                    "company_id": company_id,
+                    "user_id": user.get("id"),
+                    "return_to": "diagnostics",
+                })
+                params = {
+                    "client_id": credentials["client_id"],
+                    "response_type": "code",
+                    "redirect_uri": _build_m365_redirect_uri(request),
+                    "response_mode": "query",
+                    "scope": m365_service.CONNECT_SCOPE,
+                    "state": state,
+                    "prompt": "consent",
+                }
+                authorize_url = (
+                    f"https://login.microsoftonline.com/{credentials['tenant_id']}"
+                    f"/oauth2/v2.0/authorize?{urlencode(params)}"
+                )
+                return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            url=f"/m365/diagnostics?error={quote(err_msg)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if outcome.get("granted"):
+        msg = "Missing permissions have been granted successfully."
+    else:
+        msg = "No new permissions were needed – all permissions are already granted."
+
+    return RedirectResponse(
+        url=f"/m365/diagnostics?success={quote(msg)}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post("/m365/credentials", response_class=RedirectResponse)
 async def save_m365_credentials(
     request: Request,
@@ -7246,6 +7306,16 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
     )
+    if state_data.get("return_to") == "diagnostics":
+        # Re-run the diagnostics check so the page shows fresh results after repair.
+        try:
+            await m365_service.check_enterprise_app_permissions(company_id)
+        except m365_service.M365Error:
+            pass
+        return RedirectResponse(
+            url="/m365/diagnostics?success=Permissions+repaired+and+re-checked",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
