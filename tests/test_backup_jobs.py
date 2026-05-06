@@ -71,6 +71,7 @@ def _sample_job(**overrides):
         "description": "Nightly backup of file server",
         "token": "TOKEN123",
         "is_active": True,
+        "pass_protection": False,
         "created_by": 1,
         "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
         "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -265,6 +266,263 @@ def test_backup_status_webhook_rejects_invalid_status(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Pass-protection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_event(job_id, event_date, status, **extra):
+    """Build a minimal backup event dict for use in test stubs."""
+    return {
+        "id": 99,
+        "backup_job_id": job_id,
+        "event_date": event_date,
+        "status": status,
+        "status_message": None,
+        "reported_at": None,
+        "source": "test",
+        **extra,
+    }
+
+
+def test_pass_protection_blocks_warn_when_pass_already_recorded(monkeypatch):
+    """When pass_protection is enabled and the day already has a 'pass',
+    a subsequent 'warn' report must be silently ignored — the response
+    still shows 'pass'."""
+    from datetime import date as _date
+
+    today = datetime.now(timezone.utc).date()
+    job = _sample_job(pass_protection=True)
+    existing_pass = _make_event(1, today, "pass")
+
+    async def fake_get_job_by_token(token):
+        return job
+
+    async def fake_get_event(job_id, event_date):
+        return existing_pass
+
+    upsert_called = []
+
+    async def fake_upsert_event(job_id, event_date, *, status, status_message, reported_at, source):
+        upsert_called.append(status)
+        return _make_event(job_id, event_date, status)
+
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_job_by_token",
+        fake_get_job_by_token,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_event",
+        fake_get_event,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "upsert_event",
+        fake_upsert_event,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/backup-status",
+            json={"job_id": "TOKEN123", "status": "warn"},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Pass protection must preserve the 'pass' status.
+    assert body["status"] == "pass"
+    # upsert_event must NOT have been called (warn was blocked).
+    assert upsert_called == []
+
+
+def test_pass_protection_blocks_fail_when_pass_already_recorded(monkeypatch):
+    """When pass_protection is enabled and the day has a 'pass', a 'fail'
+    report must also be blocked."""
+    today = datetime.now(timezone.utc).date()
+    job = _sample_job(pass_protection=True)
+    existing_pass = _make_event(1, today, "pass")
+
+    async def fake_get_job_by_token(token):
+        return job
+
+    async def fake_get_event(job_id, event_date):
+        return existing_pass
+
+    upsert_called = []
+
+    async def fake_upsert_event(job_id, event_date, *, status, status_message, reported_at, source):
+        upsert_called.append(status)
+        return _make_event(job_id, event_date, status)
+
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_job_by_token",
+        fake_get_job_by_token,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_event",
+        fake_get_event,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "upsert_event",
+        fake_upsert_event,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/backup-status",
+            json={"job_id": "TOKEN123", "status": "fail"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "pass"
+    assert upsert_called == []
+
+
+def test_pass_protection_allows_warn_when_no_pass_yet(monkeypatch):
+    """When pass_protection is enabled but no 'pass' has been recorded
+    yet today, a 'warn' report is recorded normally."""
+    today = datetime.now(timezone.utc).date()
+    job = _sample_job(pass_protection=True)
+    # No event yet for today.
+    existing_unknown = _make_event(1, today, "unknown")
+
+    async def fake_get_job_by_token(token):
+        return job
+
+    async def fake_get_event(job_id, event_date):
+        return existing_unknown
+
+    upsert_called = []
+
+    async def fake_upsert_event(job_id, event_date, *, status, status_message, reported_at, source):
+        upsert_called.append(status)
+        return _make_event(job_id, event_date, status)
+
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_job_by_token",
+        fake_get_job_by_token,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_event",
+        fake_get_event,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "upsert_event",
+        fake_upsert_event,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/backup-status",
+            json={"job_id": "TOKEN123", "status": "warn"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "warn"
+    # upsert_event must have been called with "warn".
+    assert upsert_called == ["warn"]
+
+
+def test_pass_protection_allows_pass_to_override_warn(monkeypatch):
+    """Even with pass_protection enabled, a 'pass' report must always be
+    recorded — it should override an existing 'warn' for the day."""
+    today = datetime.now(timezone.utc).date()
+    job = _sample_job(pass_protection=True)
+    existing_warn = _make_event(1, today, "warn")
+
+    async def fake_get_job_by_token(token):
+        return job
+
+    async def fake_get_event(job_id, event_date):
+        return existing_warn
+
+    upsert_called = []
+
+    async def fake_upsert_event(job_id, event_date, *, status, status_message, reported_at, source):
+        upsert_called.append(status)
+        return _make_event(job_id, event_date, status)
+
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_job_by_token",
+        fake_get_job_by_token,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_event",
+        fake_get_event,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "upsert_event",
+        fake_upsert_event,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/backup-status",
+            json={"job_id": "TOKEN123", "status": "pass"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "pass"
+    assert upsert_called == ["pass"]
+
+
+def test_no_pass_protection_warn_overrides_existing_pass(monkeypatch):
+    """When pass_protection is disabled, a 'warn' report overwrites the
+    existing 'pass' for the day — the default behaviour."""
+    today = datetime.now(timezone.utc).date()
+    job = _sample_job(pass_protection=False)
+    existing_pass = _make_event(1, today, "pass")
+
+    async def fake_get_job_by_token(token):
+        return job
+
+    async def fake_get_event(job_id, event_date):
+        return existing_pass
+
+    upsert_called = []
+
+    async def fake_upsert_event(job_id, event_date, *, status, status_message, reported_at, source):
+        upsert_called.append(status)
+        return _make_event(job_id, event_date, status)
+
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_job_by_token",
+        fake_get_job_by_token,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "get_event",
+        fake_get_event,
+    )
+    monkeypatch.setattr(
+        main_module.backup_jobs_service.backup_jobs_repo,
+        "upsert_event",
+        fake_upsert_event,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/backup-status",
+            json={"job_id": "TOKEN123", "status": "warn"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "warn"
+    assert upsert_called == ["warn"]
+
+
+# ---------------------------------------------------------------------------
 # Alert check tests
 # ---------------------------------------------------------------------------
 
@@ -380,16 +638,16 @@ async def test_check_backup_alerts_no_alert_when_recent_success(monkeypatch):
     """No alert is raised when a successful backup exists within the threshold window."""
     import app.services.backup_jobs as backup_jobs_service
     from app.repositories import backup_jobs as backup_jobs_repo
-    from app.repositories import tickets as tickets_repo
     from app.services import tickets as tickets_service
 
-    today = date(2026, 4, 27)
+    today = datetime.now(timezone.utc).date()
     job = _sample_job(alert_no_success_days=3, alert_fail_days=None, alert_unknown_days=None)
 
     async def fake_list_jobs(include_inactive=True):
         return [job]
 
-    # Yesterday was a pass – within the 3-day window
+    # Yesterday was a pass – within the 3-day window; use dates relative to
+    # the real current UTC date so this test never falls outside the window.
     async def fake_list_events_in_range(*, job_ids, start_date, end_date):
         return [
             {"backup_job_id": 1, "event_date": today, "status": "fail"},
