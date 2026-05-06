@@ -162,6 +162,14 @@ AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 # without the premium-only field rather than treating it as a permissions error.
 _NON_PREMIUM_ERROR_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant"
 
+# Microsoft Graph error code returned when the app's service principal is missing
+# a required application permission for the requested field or endpoint.  For example,
+# requesting ``signInActivity`` in a ``$select`` query requires ``AuditLog.Read.All``
+# and returns this code if that permission has not been granted (or has not yet
+# propagated after provisioning).  Callers should detect this and retry without the
+# permission-gated field rather than propagating a hard failure.
+_MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
+
 # Human-readable names for each Graph API application permission role ID.
 # Mirrors the inline comments on _PROVISION_APP_ROLES for structured output.
 _GRAPH_ROLE_NAMES: dict[str, str] = {
@@ -681,8 +689,17 @@ async def _exchange_token(
             "grant_type": "client_credentials",
         }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(token_endpoint, data=data)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(token_endpoint, data=data)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft 365 token request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft 365 token request network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code != 200:
         grant_type = "refresh_token" if refresh_token else "client_credentials"
         log_error(
@@ -919,6 +936,14 @@ async def _exo_invoke_command(
         raise M365Error(
             f"Exchange Online {cmdlet_name} request decode error: {exc}"
         ) from exc
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Exchange Online {cmdlet_name} network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 201, 204):
         log_error(
             "Exchange Online InvokeCommand failed",
@@ -949,8 +974,17 @@ async def _graph_get(
     req_headers: dict[str, str] = {"Authorization": f"Bearer {access_token}"}
     if extra_headers:
         req_headers.update(extra_headers)
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(url, headers=req_headers)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url, headers=req_headers)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code != 200:
         log_error(
             "Microsoft Graph request failed",
@@ -1006,8 +1040,17 @@ async def _graph_post(
 ) -> dict[str, Any]:
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph POST timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph POST network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 201, 204):
         log_error(
             "Microsoft Graph POST failed",
@@ -1116,8 +1159,17 @@ async def _graph_patch(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.patch(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.patch(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph PATCH timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph PATCH network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 204):
         log_error(
             "Microsoft Graph PATCH failed",
@@ -1152,8 +1204,17 @@ async def _graph_delete(access_token: str, url: str) -> None:
     """Issue a DELETE request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.delete(url, headers=headers)
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.delete(url, headers=headers)
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph DELETE timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph DELETE network error ({type(exc).__name__})"
+        ) from exc
     if response.status_code not in (200, 204):
         log_error(
             "Microsoft Graph DELETE failed",
@@ -1472,37 +1533,48 @@ async def _grant_provisioned_roles(
             teams_sp_response = await _graph_get(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id",
+                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
             )
             teams_sp_list = teams_sp_response.get("value", [])
             if teams_sp_list:
-                teams_sp_id: str = teams_sp_list[0]["id"]
-                try:
-                    await _post_app_role_assignment_with_retry(
-                        access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                        {
-                            "principalId": sp_object_id,
-                            "resourceId": teams_sp_id,
-                            "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
-                        },
-                    )
+                teams_sp_obj = teams_sp_list[0]
+                teams_sp_id: str = teams_sp_obj["id"]
+                teams_app_roles = teams_sp_obj.get("appRoles", [])
+                if not any(
+                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE for r in teams_app_roles
+                ):
                     log_info(
-                        "Granted Teams.ManageAsApp role",
+                        "Teams SP does not expose ManageAsApp role in this tenant; "
+                        "skipping Teams.ManageAsApp role grant",
                         sp_object_id=sp_object_id,
                     )
-                except M365Error as exc:
-                    if exc.http_status == 409:
+                else:
+                    try:
+                        await _post_app_role_assignment_with_retry(
+                            access_token,
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            {
+                                "principalId": sp_object_id,
+                                "resourceId": teams_sp_id,
+                                "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
+                            },
+                        )
                         log_info(
-                            "Teams.ManageAsApp role already assigned, skipping",
+                            "Granted Teams.ManageAsApp role",
                             sp_object_id=sp_object_id,
                         )
-                    else:
-                        log_error(
-                            "Failed to grant Teams.ManageAsApp role; "
-                            "Teams PowerShell cmdlets will not be available",
-                            error=str(exc),
-                        )
+                    except M365Error as exc:
+                        if exc.http_status == 409:
+                            log_info(
+                                "Teams.ManageAsApp role already assigned, skipping",
+                                sp_object_id=sp_object_id,
+                            )
+                        else:
+                            log_error(
+                                "Failed to grant Teams.ManageAsApp role; "
+                                "Teams PowerShell cmdlets will not be available",
+                                error=str(exc),
+                            )
             else:
                 log_info(
                     "Skype and Teams Tenant Admin API service principal not found in tenant; "
@@ -2516,13 +2588,19 @@ async def get_all_users(
             users.extend(payload.get("value", []))
             url = payload.get("@odata.nextLink")
     except M365Error as exc:
-        if exc.http_status == 403 and exc.graph_error_code == _NON_PREMIUM_ERROR_CODE:
-            # signInActivity requires Azure AD Premium P1/P2.  Retry without it
-            # so that non-premium tenants can still sync users.
+        if exc.http_status == 403 and exc.graph_error_code in (
+            _NON_PREMIUM_ERROR_CODE,
+            _MISSING_PERMISSION_ERROR_CODE,
+        ):
+            # ``signInActivity`` requires both Azure AD Premium P1/P2 and the
+            # ``AuditLog.Read.All`` application permission.  Either condition
+            # (non-premium tenant or missing permission) produces a 403.  Retry
+            # without ``signInActivity`` so that the contacts sync can still
+            # complete without last-sign-in timestamps.
             log_info(
-                "M365 tenant does not have premium licence; "
-                "retrying get_all_users without signInActivity",
+                "M365 signInActivity unavailable; retrying get_all_users without signInActivity",
                 company_id=company_id,
+                error_code=exc.graph_error_code,
             )
             url = (
                 "https://graph.microsoft.com/v1.0/users?"
@@ -3131,20 +3209,30 @@ async def try_grant_missing_permissions(
         except M365Error:
             pass  # non-fatal – will skip EXO grant
 
+        teams_sp_has_role: bool = False
         try:
             teams_sp_resp = await _graph_get(
                 access_token,
                 "https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id",
+                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
             )
             teams_sp_list = teams_sp_resp.get("value", [])
             if teams_sp_list:
-                teams_sp_id = teams_sp_list[0]["id"]
+                teams_sp_obj = teams_sp_list[0]
+                teams_sp_id = teams_sp_obj["id"]
+                teams_sp_has_role = any(
+                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE
+                    for r in teams_sp_obj.get("appRoles", [])
+                )
         except M365Error:
             pass  # non-fatal – will skip Teams grant
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
-        teams_needed = teams_sp_id is not None and teams_sp_id not in manage_as_app_resource_ids
+        teams_needed = (
+            teams_sp_id is not None
+            and teams_sp_has_role
+            and teams_sp_id not in manage_as_app_resource_ids
+        )
 
         granted: list[str] = []
 
@@ -3548,35 +3636,46 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         # deterministically.
         "Accept": "text/csv",
     }
-    async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
-        response = await client.get(csv_report_url, headers=headers)
-        if response.status_code not in (302, 303, 307, 308):
-            log_error(
-                "Mailbox usage CSV export request failed",
-                url=csv_report_url,
-                status=response.status_code,
-                body=response.text,
-            )
-            raise M365Error(
-                f"Microsoft Graph request failed ({response.status_code})",
-                http_status=response.status_code,
-            )
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            response = await client.get(csv_report_url, headers=headers)
+            if response.status_code not in (302, 303, 307, 308):
+                log_error(
+                    "Mailbox usage CSV export request failed",
+                    url=csv_report_url,
+                    status=response.status_code,
+                    body=response.text,
+                )
+                raise M365Error(
+                    f"Microsoft Graph request failed ({response.status_code})",
+                    http_status=response.status_code,
+                )
 
-        download_url = str(response.headers.get("Location") or "").strip()
-        if not download_url:
-            raise M365Error("Mailbox usage CSV export missing download URL")
+            download_url = str(response.headers.get("Location") or "").strip()
+            if not download_url:
+                raise M365Error("Mailbox usage CSV export missing download URL")
 
-        csv_response = await client.get(download_url)
-        if csv_response.status_code != 200:
-            log_error(
-                "Mailbox usage CSV download failed",
-                status=csv_response.status_code,
-                body=csv_response.text,
-            )
-            raise M365Error(
-                f"Microsoft Graph request failed ({csv_response.status_code})",
-                http_status=csv_response.status_code,
-            )
+            csv_response = await client.get(download_url)
+            if csv_response.status_code != 200:
+                log_error(
+                    "Mailbox usage CSV download failed",
+                    status=csv_response.status_code,
+                    body=csv_response.text,
+                )
+                raise M365Error(
+                    f"Microsoft Graph request failed ({csv_response.status_code})",
+                    http_status=csv_response.status_code,
+                )
+    except M365Error:
+        raise
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Mailbox usage report request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Mailbox usage report network error ({type(exc).__name__})"
+        ) from exc
 
     csv_text = csv_response.text
     # Graph report downloads can be UTF-16 encoded without an explicit
