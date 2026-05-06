@@ -111,6 +111,13 @@ _PROVISION_APP_ROLES: list[str] = [
     "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
     # SharePoint Online tenant settings (required for SPO best-practice checks)
     "a8ead177-1889-4546-9387-f25e658e2a79",  # SharePointTenantSettings.Read.All
+    # MFA registration details report and per-user MFA state checks:
+    # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
+    # - GET /beta/users/{id}/authentication/requirements
+    "38d9df27-64da-44fd-b7c5-a6fbac20248f",  # UserAuthenticationMethod.Read.All
+    # Microsoft Forms tenant settings (required for bp_internal_phishing_forms check):
+    # - GET /beta/admin/forms/settings
+    "434d7c66-07c6-4b1f-ab21-417cf2cdaaca",  # OrgSettings-Forms.Read.All
 ]
 
 # OAuth scopes requested during the admin-consent provisioning flow
