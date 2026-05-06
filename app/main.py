@@ -6103,35 +6103,39 @@ async def repair_m365_permissions(request: Request):
 
     try:
         outcome = await m365_service.repair_enterprise_app_permissions(company_id)
-    except m365_service.M365Error as exc:
-        err_msg = str(exc)
-        # If no delegated token is available redirect to the connect flow so the
+    except m365_service.M365NoDelegatedTokenError:
+        # No delegated token available – redirect to the connect flow so the
         # admin can re-authorise; the callback will automatically grant missing
         # permissions and then return to the diagnostics page.
-        if "delegated admin token" in err_msg.lower() or "no delegated" in err_msg.lower():
-            credentials = await m365_service.get_credentials(company_id)
-            if credentials:
-                state = oauth_state_serializer.dumps({
-                    "company_id": company_id,
-                    "user_id": user.get("id"),
-                    "return_to": "diagnostics",
-                })
-                params = {
-                    "client_id": credentials["client_id"],
-                    "response_type": "code",
-                    "redirect_uri": _build_m365_redirect_uri(request),
-                    "response_mode": "query",
-                    "scope": m365_service.CONNECT_SCOPE,
-                    "state": state,
-                    "prompt": "consent",
-                }
-                authorize_url = (
-                    f"https://login.microsoftonline.com/{credentials['tenant_id']}"
-                    f"/oauth2/v2.0/authorize?{urlencode(params)}"
-                )
-                return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
+        credentials = await m365_service.get_credentials(company_id)
+        if credentials:
+            state = oauth_state_serializer.dumps({
+                "company_id": company_id,
+                "user_id": user.get("id"),
+                "flow": "connect",
+                "return_to": "diagnostics",
+            })
+            params = {
+                "client_id": credentials["client_id"],
+                "response_type": "code",
+                "redirect_uri": _build_m365_redirect_uri(request),
+                "response_mode": "query",
+                "scope": m365_service.CONNECT_SCOPE,
+                "state": state,
+                "prompt": "consent",
+            }
+            authorize_url = (
+                f"https://login.microsoftonline.com/{credentials['tenant_id']}"
+                f"/oauth2/v2.0/authorize?{urlencode(params)}"
+            )
+            return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
         return RedirectResponse(
-            url=f"/m365/diagnostics?error={quote(err_msg)}",
+            url="/m365/diagnostics?error=No+credentials+configured",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365/diagnostics?error={quote(str(exc))}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
