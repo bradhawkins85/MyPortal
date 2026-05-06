@@ -412,9 +412,9 @@
         document.getElementById('modal-service-active').checked = !!service.is_active;
 
         // Company selection
-        var companyIds = service.company_ids || [];
+        var companyIdSet = new Set((service.company_ids || []).map(function (id) { return parseInt(id, 10); }));
         Array.from(companiesSelect.options).forEach(function (opt) {
-          opt.selected = companyIds.indexOf(parseInt(opt.value, 10)) !== -1;
+          opt.selected = companyIdSet.has(parseInt(opt.value, 10));
         });
 
         // AI lookup fields
@@ -468,7 +468,8 @@
       modal.hidden = false;
       modal.setAttribute('aria-hidden', 'false');
       document.addEventListener('keydown', handleKeydown);
-      var first = modal.querySelector('input:not([type="hidden"]), select, textarea, button');
+      var focusableInputSelector = 'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])';
+      var first = modal.querySelector(focusableInputSelector) || modal.querySelector('button:not([disabled])');
       if (first) { first.focus(); }
     }
 
