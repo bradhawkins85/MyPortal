@@ -64,6 +64,10 @@ _TEAMS_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
 # to succeed when called via the Exchange Online InvokeCommand REST endpoint.
 _TEAMS_ADMIN_ROLE_TEMPLATE_ID = "69091246-20e8-4a56-aa4d-066075b2a7a8"
 
+# Microsoft Graph application permission required for SharePoint Online best-practice checks.
+# Grants access to GET /admin/sharepoint/settings via the Graph API.
+_SHAREPOINT_TENANT_SETTINGS_ROLE = "a8ead177-1889-4546-9387-f25e658e2a79"
+
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 PACKAGE_MAILBOX_RE = re.compile(
     r"^package_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -110,7 +114,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
     "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
     # SharePoint Online tenant settings (required for SPO best-practice checks)
-    "a8ead177-1889-4546-9387-f25e658e2a79",  # SharePointTenantSettings.Read.All
+    _SHAREPOINT_TENANT_SETTINGS_ROLE,  # SharePointTenantSettings.Read.All
     # MFA registration details report and per-user MFA state checks:
     # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
     # - GET /beta/users/{id}/authentication/requirements
@@ -130,9 +134,10 @@ PROVISION_SCOPE = (
 # Delegated scopes requested during the "Authorize portal access" (connect) flow.
 # The connect callback calls try_grant_missing_permissions() which needs
 # AppRoleAssignment.ReadWrite.All to add any newly-required application permissions
-# (e.g. MailboxSettings.Read), Directory.Read.All to look up service principals,
-# and RoleManagement.ReadWrite.Directory to assign the Exchange Administrator
-# directory role required for Exchange Online PowerShell access.
+# (e.g. SharePointTenantSettings.Read.All for SPO best-practice checks),
+# Directory.Read.All to look up service principals (including the Teams SP for
+# Teams.ManageAsApp grants), and RoleManagement.ReadWrite.Directory to assign the
+# Exchange Administrator and Teams Service Administrator directory roles.
 # Using explicit scopes instead of ``/.default`` ensures the admin grants these
 # delegated permissions even if they are not statically configured on the enterprise
 # app registration (Microsoft Entra ID dynamic consent).
