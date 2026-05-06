@@ -11,12 +11,13 @@
 
 {% block header_actions %}
   {{ page_header_actions([
+    {"label": "Add service", "variant": "primary", "type": "button", "attrs": {"data-service-modal-open": "add", "aria-haspopup": "dialog", "aria-controls": "service-modal"}},
     {"label": "View dashboard", "type": "link", "href": "/service-status"}
   ]) }}
 {% endblock %}
 
 {% block content %}
-<div class="admin-grid admin-grid--columns service-status-admin">
+<div class="admin-grid service-status-admin">
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
@@ -59,7 +60,38 @@
             {% set status_meta = service_status_lookup.get(service.status) %}
             {% set status_label = status_meta.label if status_meta else service.status|title %}
             {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
-            <tr>
+            {% set ai_last_checked = '' %}
+            {% if service.ai_lookup_last_checked_at %}
+              {% if service.ai_lookup_last_checked_at.__class__.__name__ == 'datetime' %}
+                {% set ai_last_checked = service.ai_lookup_last_checked_at.strftime('%d %b %Y %H:%M') %}
+              {% else %}
+                {% set ai_last_checked = service.ai_lookup_last_checked_at | string %}
+              {% endif %}
+            {% endif %}
+            {% set service_payload = {
+              "id": service.id,
+              "name": service.name,
+              "description": service.description or "",
+              "status": service.status,
+              "status_message": service.status_message or "",
+              "display_order": service.display_order,
+              "is_active": service.is_active,
+              "company_ids": service.company_ids,
+              "tags": (service.tags | join(", ")) if service.tags else "",
+              "ai_lookup_enabled": service.ai_lookup_enabled,
+              "ai_lookup_url": service.ai_lookup_url or "",
+              "ai_lookup_prompt": service.ai_lookup_prompt or "",
+              "ai_lookup_model_override": service.ai_lookup_model_override or "",
+              "ai_lookup_frequency_operational": service.ai_lookup_frequency_operational,
+              "ai_lookup_frequency_degraded": service.ai_lookup_frequency_degraded,
+              "ai_lookup_frequency_partial_outage": service.ai_lookup_frequency_partial_outage,
+              "ai_lookup_frequency_outage": service.ai_lookup_frequency_outage,
+              "ai_lookup_frequency_maintenance": service.ai_lookup_frequency_maintenance,
+              "ai_lookup_last_checked_at": ai_last_checked,
+              "ai_lookup_last_status": service.ai_lookup_last_status or "",
+              "ai_lookup_last_message": service.ai_lookup_last_message or ""
+            } %}
+            <tr data-service='{{ service_payload | tojson | e }}'>
               <td data-label="Service" data-column-key="service">
                 <div class="service-status-admin__name">{{ service.name }}</div>
                 {% if service.description %}
@@ -89,7 +121,13 @@
               </td>
               <td class="table__actions" data-column-key="actions">
                 <div class="action-menu">
-                  <a class="button button--ghost button--small" href="/admin/service-status?serviceId={{ service.id }}">Edit</a>
+                  <button
+                    type="button"
+                    class="button button--ghost button--small"
+                    data-service-modal-open="edit"
+                    aria-haspopup="dialog"
+                    aria-controls="service-modal"
+                  >Edit</button>
                   <form action="/admin/service-status/{{ service.id }}/delete" method="post" class="inline-form" data-confirm="Delete this service?">
                     {% include "partials/csrf.html" %}
                     <button type="submit" class="button button--ghost button--danger button--small">Delete</button>
@@ -106,81 +144,123 @@
       </table>
     </div>
   </section>
+</div>
 
-  <section class="card card--panel">
-    <header class="card__header card__header--stacked">
-      <div>
-        <h2 class="card__title">{{ 'Update service' if service_status_editing else 'Add service' }}</h2>
-        <p class="card__subtitle">{{ 'Modify the selected service entry.' if service_status_editing else 'Define a new tile for the status dashboard.' }}</p>
-      </div>
-    </header>
-    <div class="card__body card__body--stacked">
-      <form
-        id="edit-service-form"
-        action="{{ '/admin/service-status/' ~ service_status_editing.id if service_status_editing else '/admin/service-status' }}"
-        method="post"
-        class="form"
-      >
+{# Secondary forms for edit-only actions (action URLs set dynamically by JS) #}
+<form id="refresh-tags-form" action="/admin/service-status/0/refresh-tags" method="post" class="inline-form">
+  {% include "partials/csrf.html" %}
+</form>
+<form id="check-now-form" action="/admin/service-status/0/check-now" method="post" class="inline-form">
+  {% include "partials/csrf.html" %}
+</form>
+
+{# Auto-open data for serviceId redirects (e.g. after tag refresh / check-now errors) #}
+{% if service_status_editing %}
+  <script type="application/json" id="service-autoopen-data">{{ {
+    "id": service_status_editing.id,
+    "name": service_status_editing.name,
+    "description": service_status_editing.description or "",
+    "status": service_status_editing.status,
+    "status_message": service_status_editing.status_message or "",
+    "display_order": service_status_editing.display_order,
+    "is_active": service_status_editing.is_active,
+    "company_ids": service_status_editing.company_ids,
+    "tags": (service_status_editing.tags | join(", ")) if service_status_editing.tags else "",
+    "ai_lookup_enabled": service_status_editing.ai_lookup_enabled,
+    "ai_lookup_url": service_status_editing.ai_lookup_url or "",
+    "ai_lookup_prompt": service_status_editing.ai_lookup_prompt or "",
+    "ai_lookup_model_override": service_status_editing.ai_lookup_model_override or "",
+    "ai_lookup_frequency_operational": service_status_editing.ai_lookup_frequency_operational,
+    "ai_lookup_frequency_degraded": service_status_editing.ai_lookup_frequency_degraded,
+    "ai_lookup_frequency_partial_outage": service_status_editing.ai_lookup_frequency_partial_outage,
+    "ai_lookup_frequency_outage": service_status_editing.ai_lookup_frequency_outage,
+    "ai_lookup_frequency_maintenance": service_status_editing.ai_lookup_frequency_maintenance,
+    "ai_lookup_last_checked_at": "",
+    "ai_lookup_last_status": service_status_editing.ai_lookup_last_status or "",
+    "ai_lookup_last_message": service_status_editing.ai_lookup_last_message or ""
+  } | tojson }}</script>
+{% endif %}
+
+{# Service modal — used for both Add and Edit #}
+<div
+  class="modal"
+  id="service-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="service-modal-title"
+  aria-hidden="true"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="service-modal-title">Add service</h2>
+    <div class="modal__body">
+      <form id="service-form" action="/admin/service-status" method="post" class="form">
         {% include "partials/csrf.html" %}
         <div class="form-field">
-          <label class="form-label" for="service-name">Service name</label>
+          <label class="form-label" for="modal-service-name">Service name</label>
           <input
-            id="service-name"
+            id="modal-service-name"
             name="name"
             class="form-input"
-            value="{{ service_status_editing.name if service_status_editing else '' }}"
             required
             maxlength="200"
           />
         </div>
         <div class="form-field">
-          <label class="form-label" for="service-description">Description</label>
+          <label class="form-label" for="modal-service-description">Description</label>
           <textarea
-            id="service-description"
+            id="modal-service-description"
             name="description"
             class="form-input form-input--textarea"
             rows="3"
-          >{{ service_status_editing.description if service_status_editing else '' }}</textarea>
+          ></textarea>
         </div>
         <div class="form-field">
-          <label class="form-label" for="service-status">Status</label>
-          <select id="service-status" name="status" class="form-input">
-            {% set selected_status = service_status_editing.status if service_status_editing else service_status_default %}
+          <label class="form-label" for="modal-service-status">Status</label>
+          <select id="modal-service-status" name="status" class="form-input">
             {% for definition in service_status_definitions %}
-              <option value="{{ definition.value }}" {% if definition.value == selected_status %}selected{% endif %}>{{ definition.label }}</option>
+              <option value="{{ definition.value }}" {% if definition.value == service_status_default %}selected{% endif %}>{{ definition.label }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="form-field">
-          <label class="form-label" for="service-status-message">Status message</label>
+          <label class="form-label" for="modal-service-status-message">Status message</label>
           <textarea
-            id="service-status-message"
+            id="modal-service-status-message"
             name="status_message"
             class="form-input form-input--textarea"
             rows="2"
-          >{{ service_status_editing.status_message if service_status_editing else '' }}</textarea>
+          ></textarea>
           <p class="form-help">Optional short note displayed on the dashboard.</p>
         </div>
         <div class="form-field">
-          <label class="form-label" for="service-tags">Tags</label>
+          <label class="form-label" for="modal-service-tags">Tags</label>
           <input
-            id="service-tags"
+            id="modal-service-tags"
             name="tags"
             class="form-input"
-            value="{% if service_status_editing and service_status_editing.tags %}{{ service_status_editing.tags|join(', ') }}{% endif %}"
             placeholder="monitoring, cloud, infrastructure"
           />
           <p class="form-help">Comma-separated tags. Auto-generated by AI when creating new services.</p>
-          {% if service_status_editing %}
-            <button type="submit" form="refresh-tags-form" class="button button--ghost button--small" style="margin-top: 0.5rem;">🔄 Refresh Tags with AI</button>
-          {% endif %}
+          <button
+            type="submit"
+            form="refresh-tags-form"
+            class="button button--ghost button--small"
+            id="modal-refresh-tags-btn"
+            style="margin-top: 0.5rem;"
+            hidden
+          >🔄 Refresh Tags with AI</button>
         </div>
         <div class="form-field">
-          <label class="form-label" for="service-companies">Visible to companies</label>
-          <select id="service-companies" name="companyIds" class="form-input" multiple size="6">
+          <label class="form-label" for="modal-service-companies">Visible to companies</label>
+          <select id="modal-service-companies" name="companyIds" class="form-input" multiple size="6">
             {% if company_options %}
               {% for company in company_options %}
-                <option value="{{ company.id }}" {% if service_status_editing and company.id in service_status_editing.company_ids %}selected{% endif %}>{{ company.name }}</option>
+                <option value="{{ company.id }}">{{ company.name }}</option>
               {% endfor %}
             {% else %}
               <option value="" disabled>No companies available</option>
@@ -190,211 +270,266 @@
         </div>
         <div class="form-grid">
           <div class="form-field">
-            <label class="form-label" for="service-order">Display order</label>
+            <label class="form-label" for="modal-service-order">Display order</label>
             <input
-              id="service-order"
+              id="modal-service-order"
               name="display_order"
               type="number"
               inputmode="numeric"
               class="form-input"
-              value="{{ service_status_editing.display_order if service_status_editing else 0 }}"
+              value="0"
             />
           </div>
           <div class="form-field form-field--checkbox">
             <label class="form-checkbox">
-              <input type="checkbox" name="is_active" {% if service_status_editing is none or service_status_editing.is_active %}checked{% endif %} />
+              <input type="checkbox" id="modal-service-active" name="is_active" checked />
               <span>Active</span>
             </label>
           </div>
         </div>
-        <div class="form-actions">
-          <button type="submit" class="button button--primary">{{ 'Save changes' if service_status_editing else 'Create service' }}</button>
-          {% if service_status_editing %}
-            <a class="button button--ghost" href="/admin/service-status">Cancel</a>
-          {% endif %}
-        </div>
-      </form>
 
-      <details class="form-section-details" {% if service_status_editing and service_status_editing.ai_lookup_enabled %}open{% endif %}>
-        <summary class="form-section-details__summary">AI Lookup</summary>
-        <form
-          id="ai-lookup-form"
-          action="{{ '/admin/service-status/' ~ service_status_editing.id if service_status_editing else '/admin/service-status' }}"
-          method="post"
-          class="form"
-        >
-          {% include "partials/csrf.html" %}
-          {# Re-post the base fields so the whole record is preserved on submit #}
-          <input type="hidden" name="name" value="{{ service_status_editing.name if service_status_editing else '' }}" />
-          <input type="hidden" name="description" value="{{ service_status_editing.description if service_status_editing else '' }}" />
-          <input type="hidden" name="status" value="{{ service_status_editing.status if service_status_editing else service_status_default }}" />
-          <input type="hidden" name="status_message" value="{{ service_status_editing.status_message if service_status_editing else '' }}" />
-          <input type="hidden" name="tags" value="{% if service_status_editing and service_status_editing.tags %}{{ service_status_editing.tags|join(', ') }}{% endif %}" />
-          <input type="hidden" name="display_order" value="{{ service_status_editing.display_order if service_status_editing else 0 }}" />
-          {% if service_status_editing is none or service_status_editing.is_active %}
-            <input type="hidden" name="is_active" value="on" />
-          {% endif %}
-          {% if service_status_editing %}
-            {% for company_id in service_status_editing.company_ids %}
-              <input type="hidden" name="companyIds" value="{{ company_id }}" />
-            {% endfor %}
-          {% endif %}
-
+        <details class="form-section-details" id="modal-ai-details">
+          <summary class="form-section-details__summary">AI Lookup</summary>
           <div class="form-field form-field--checkbox">
             <label class="form-checkbox">
               <input
                 type="checkbox"
                 name="ai_lookup_enabled"
-                id="ai-lookup-enabled"
-                {% if service_status_editing and service_status_editing.ai_lookup_enabled %}checked{% endif %}
+                id="modal-ai-lookup-enabled"
               />
               <span>Enable AI lookup</span>
             </label>
             <p class="form-help">Periodically fetch a URL and use Ollama to determine service status.</p>
           </div>
-
           <div class="form-field">
-            <label class="form-label" for="ai-lookup-url">Lookup URL</label>
+            <label class="form-label" for="modal-ai-lookup-url">Lookup URL</label>
             <input
-              id="ai-lookup-url"
+              id="modal-ai-lookup-url"
               name="ai_lookup_url"
               class="form-input"
               type="url"
-              value="{{ (service_status_editing.ai_lookup_url or '') if service_status_editing else '' }}"
               placeholder="https://status.example.com/api/status"
             />
             <p class="form-help">URL whose content is passed to the AI model for status analysis.</p>
           </div>
-
           <div class="form-field">
-            <label class="form-label" for="ai-lookup-prompt">AI Prompt</label>
+            <label class="form-label" for="modal-ai-lookup-prompt">AI Prompt</label>
             <textarea
-              id="ai-lookup-prompt"
+              id="modal-ai-lookup-prompt"
               name="ai_lookup_prompt"
               class="form-input form-input--textarea"
               rows="4"
               placeholder="Analyse the following status page content and determine the current operational state of the service."
-            >{{ (service_status_editing.ai_lookup_prompt or '') if service_status_editing else '' }}</textarea>
+            ></textarea>
             <p class="form-help">Instructions sent to the AI model along with the URL content.</p>
           </div>
-
           <div class="form-field">
-            <label class="form-label" for="ai-lookup-model">Model override</label>
+            <label class="form-label" for="modal-ai-lookup-model">Model override</label>
             <input
-              id="ai-lookup-model"
+              id="modal-ai-lookup-model"
               name="ai_lookup_model_override"
               class="form-input"
-              value="{{ (service_status_editing.ai_lookup_model_override or '') if service_status_editing else '' }}"
               placeholder="Leave blank to use the default Ollama model"
             />
             <p class="form-help">Override the default Ollama model for this service.</p>
           </div>
-
           <fieldset class="form-fieldset">
             <legend class="form-fieldset__legend">Lookup frequency (minutes by status)</legend>
             <div class="form-grid form-grid--3">
               <div class="form-field">
-                <label class="form-label" for="ai-freq-operational">Operational</label>
-                <input
-                  id="ai-freq-operational"
-                  name="ai_lookup_frequency_operational"
-                  type="number"
-                  inputmode="numeric"
-                  min="1"
-                  class="form-input"
-                  value="{{ service_status_editing.ai_lookup_frequency_operational if service_status_editing else 60 }}"
-                />
+                <label class="form-label" for="modal-ai-freq-operational">Operational</label>
+                <input id="modal-ai-freq-operational" name="ai_lookup_frequency_operational" type="number" inputmode="numeric" min="1" class="form-input" value="60" />
               </div>
               <div class="form-field">
-                <label class="form-label" for="ai-freq-degraded">Degraded</label>
-                <input
-                  id="ai-freq-degraded"
-                  name="ai_lookup_frequency_degraded"
-                  type="number"
-                  inputmode="numeric"
-                  min="1"
-                  class="form-input"
-                  value="{{ service_status_editing.ai_lookup_frequency_degraded if service_status_editing else 15 }}"
-                />
+                <label class="form-label" for="modal-ai-freq-degraded">Degraded</label>
+                <input id="modal-ai-freq-degraded" name="ai_lookup_frequency_degraded" type="number" inputmode="numeric" min="1" class="form-input" value="15" />
               </div>
               <div class="form-field">
-                <label class="form-label" for="ai-freq-partial">Partial outage</label>
-                <input
-                  id="ai-freq-partial"
-                  name="ai_lookup_frequency_partial_outage"
-                  type="number"
-                  inputmode="numeric"
-                  min="1"
-                  class="form-input"
-                  value="{{ service_status_editing.ai_lookup_frequency_partial_outage if service_status_editing else 10 }}"
-                />
+                <label class="form-label" for="modal-ai-freq-partial">Partial outage</label>
+                <input id="modal-ai-freq-partial" name="ai_lookup_frequency_partial_outage" type="number" inputmode="numeric" min="1" class="form-input" value="10" />
               </div>
               <div class="form-field">
-                <label class="form-label" for="ai-freq-outage">Outage</label>
-                <input
-                  id="ai-freq-outage"
-                  name="ai_lookup_frequency_outage"
-                  type="number"
-                  inputmode="numeric"
-                  min="1"
-                  class="form-input"
-                  value="{{ service_status_editing.ai_lookup_frequency_outage if service_status_editing else 5 }}"
-                />
+                <label class="form-label" for="modal-ai-freq-outage">Outage</label>
+                <input id="modal-ai-freq-outage" name="ai_lookup_frequency_outage" type="number" inputmode="numeric" min="1" class="form-input" value="5" />
               </div>
               <div class="form-field">
-                <label class="form-label" for="ai-freq-maintenance">Maintenance</label>
-                <input
-                  id="ai-freq-maintenance"
-                  name="ai_lookup_frequency_maintenance"
-                  type="number"
-                  inputmode="numeric"
-                  min="1"
-                  class="form-input"
-                  value="{{ service_status_editing.ai_lookup_frequency_maintenance if service_status_editing else 60 }}"
-                />
+                <label class="form-label" for="modal-ai-freq-maintenance">Maintenance</label>
+                <input id="modal-ai-freq-maintenance" name="ai_lookup_frequency_maintenance" type="number" inputmode="numeric" min="1" class="form-input" value="60" />
               </div>
             </div>
           </fieldset>
+          <p class="form-help" id="modal-ai-last-checked" hidden></p>
+        </details>
 
-          {% if service_status_editing and service_status_editing.ai_lookup_last_checked_at %}
-            <div class="form-field">
-              <p class="form-help">
-                Last checked:
-                <strong>{{ service_status_editing.ai_lookup_last_checked_at.strftime('%d %b %Y %H:%M') if service_status_editing.ai_lookup_last_checked_at.__class__.__name__ == 'datetime' else service_status_editing.ai_lookup_last_checked_at }}</strong>
-                {% if service_status_editing.ai_lookup_last_status %}
-                  &mdash; AI status: <strong>{{ service_status_editing.ai_lookup_last_status }}</strong>
-                {% endif %}
-                {% if service_status_editing.ai_lookup_last_message %}
-                  &mdash; {{ service_status_editing.ai_lookup_last_message }}
-                {% endif %}
-              </p>
-            </div>
-          {% endif %}
-
-          <div class="form-actions">
-            <button type="submit" class="button button--primary">{{ 'Save AI lookup settings' if service_status_editing else 'Create service' }}</button>
-            {% if service_status_editing %}
-              <button type="submit" form="check-now-form" class="button button--ghost">Check Now</button>
-              <a class="button button--ghost" href="/admin/service-status">Cancel</a>
-            {% endif %}
-          </div>
-        </form>
-      </details>
-
-      {% if service_status_editing %}
-        <form id="refresh-tags-form" action="/admin/service-status/{{ service_status_editing.id }}/refresh-tags" method="post" class="inline-form">
-          {% include "partials/csrf.html" %}
-        </form>
-        <form id="check-now-form" action="/admin/service-status/{{ service_status_editing.id }}/check-now" method="post" class="inline-form">
-          {% include "partials/csrf.html" %}
-        </form>
-      {% endif %}
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" id="modal-save-btn">Create service</button>
+          <button type="submit" form="check-now-form" class="button button--ghost" id="modal-check-now-btn" hidden>Check Now</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
     </div>
-  </section>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script>
+  (function () {
+    var defaultStatus = {{ service_status_default | tojson }};
+
+    var modal = document.getElementById('service-modal');
+    var form = document.getElementById('service-form');
+    if (!modal || !form) { return; }
+
+    var modalTitle = document.getElementById('service-modal-title');
+    var saveBtn = document.getElementById('modal-save-btn');
+    var refreshTagsBtn = document.getElementById('modal-refresh-tags-btn');
+    var checkNowBtn = document.getElementById('modal-check-now-btn');
+    var refreshTagsForm = document.getElementById('refresh-tags-form');
+    var checkNowForm = document.getElementById('check-now-form');
+    var aiLastChecked = document.getElementById('modal-ai-last-checked');
+    var aiDetails = document.getElementById('modal-ai-details');
+
+    var companiesSelect = document.getElementById('modal-service-companies');
+    var activeTrigger = null;
+
+    function openModal(service) {
+      var isEdit = !!service;
+
+      modalTitle.textContent = isEdit ? 'Update service' : 'Add service';
+      saveBtn.textContent = isEdit ? 'Save changes' : 'Create service';
+      form.action = isEdit ? '/admin/service-status/' + service.id : '/admin/service-status';
+
+      if (isEdit) {
+        document.getElementById('modal-service-name').value = service.name || '';
+        document.getElementById('modal-service-description').value = service.description || '';
+        document.getElementById('modal-service-status').value = service.status || defaultStatus;
+        document.getElementById('modal-service-status-message').value = service.status_message || '';
+        document.getElementById('modal-service-tags').value = service.tags || '';
+        document.getElementById('modal-service-order').value = service.display_order != null ? service.display_order : 0;
+        document.getElementById('modal-service-active').checked = !!service.is_active;
+
+        // Company selection
+        var companyIdSet = new Set((service.company_ids || []).map(function (id) { return parseInt(id, 10); }));
+        Array.from(companiesSelect.options).forEach(function (opt) {
+          opt.selected = companyIdSet.has(parseInt(opt.value, 10));
+        });
+
+        // AI lookup fields
+        document.getElementById('modal-ai-lookup-enabled').checked = !!service.ai_lookup_enabled;
+        document.getElementById('modal-ai-lookup-url').value = service.ai_lookup_url || '';
+        document.getElementById('modal-ai-lookup-prompt').value = service.ai_lookup_prompt || '';
+        document.getElementById('modal-ai-lookup-model').value = service.ai_lookup_model_override || '';
+        document.getElementById('modal-ai-freq-operational').value = service.ai_lookup_frequency_operational != null ? service.ai_lookup_frequency_operational : 60;
+        document.getElementById('modal-ai-freq-degraded').value = service.ai_lookup_frequency_degraded != null ? service.ai_lookup_frequency_degraded : 15;
+        document.getElementById('modal-ai-freq-partial').value = service.ai_lookup_frequency_partial_outage != null ? service.ai_lookup_frequency_partial_outage : 10;
+        document.getElementById('modal-ai-freq-outage').value = service.ai_lookup_frequency_outage != null ? service.ai_lookup_frequency_outage : 5;
+        document.getElementById('modal-ai-freq-maintenance').value = service.ai_lookup_frequency_maintenance != null ? service.ai_lookup_frequency_maintenance : 60;
+
+        if (service.ai_lookup_enabled) {
+          aiDetails.open = true;
+        }
+
+        // AI last checked info
+        if (service.ai_lookup_last_checked_at) {
+          var info = 'Last checked: ' + service.ai_lookup_last_checked_at;
+          if (service.ai_lookup_last_status) { info += ' \u2014 AI status: ' + service.ai_lookup_last_status; }
+          if (service.ai_lookup_last_message) { info += ' \u2014 ' + service.ai_lookup_last_message; }
+          aiLastChecked.textContent = info;
+          aiLastChecked.hidden = false;
+        } else {
+          aiLastChecked.hidden = true;
+        }
+
+        // Secondary form actions
+        if (refreshTagsForm) { refreshTagsForm.action = '/admin/service-status/' + service.id + '/refresh-tags'; }
+        if (checkNowForm) { checkNowForm.action = '/admin/service-status/' + service.id + '/check-now'; }
+        if (refreshTagsBtn) { refreshTagsBtn.hidden = false; }
+        if (checkNowBtn) { checkNowBtn.hidden = false; }
+      } else {
+        form.reset();
+        document.getElementById('modal-service-status').value = defaultStatus;
+        document.getElementById('modal-service-order').value = 0;
+        document.getElementById('modal-service-active').checked = true;
+        document.getElementById('modal-ai-freq-operational').value = 60;
+        document.getElementById('modal-ai-freq-degraded').value = 15;
+        document.getElementById('modal-ai-freq-partial').value = 10;
+        document.getElementById('modal-ai-freq-outage').value = 5;
+        document.getElementById('modal-ai-freq-maintenance').value = 60;
+        Array.from(companiesSelect.options).forEach(function (opt) { opt.selected = false; });
+        if (aiLastChecked) { aiLastChecked.hidden = true; }
+        if (refreshTagsBtn) { refreshTagsBtn.hidden = true; }
+        if (checkNowBtn) { checkNowBtn.hidden = true; }
+        aiDetails.open = false;
+      }
+
+      modal.hidden = false;
+      modal.setAttribute('aria-hidden', 'false');
+      document.addEventListener('keydown', handleKeydown);
+      var focusableInputSelector = 'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])';
+      var first = modal.querySelector(focusableInputSelector) || modal.querySelector('button:not([disabled])');
+      if (first) { first.focus(); }
+    }
+
+    function closeModal() {
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', handleKeydown);
+      if (activeTrigger && typeof activeTrigger.focus === 'function') { activeTrigger.focus(); }
+      activeTrigger = null;
+    }
+
+    function handleKeydown(e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+    }
+
+    // Close on backdrop click
+    modal.addEventListener('click', function (e) { if (e.target === modal) { closeModal(); } });
+
+    // Close buttons inside modal
+    modal.querySelectorAll('[data-modal-close]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) { e.preventDefault(); closeModal(); });
+    });
+
+    // "Add service" trigger (header button)
+    document.querySelectorAll('[data-service-modal-open="add"]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        activeTrigger = btn;
+        openModal(null);
+      });
+    });
+
+    // "Edit" trigger buttons on each table row
+    document.querySelectorAll('[data-service-modal-open="edit"]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        activeTrigger = btn;
+        var row = btn.closest('tr');
+        if (!row || !row.dataset.service) { return; }
+        try {
+          var service = JSON.parse(row.dataset.service);
+          openModal(service);
+        } catch (err) {
+          console.error('Failed to parse service data', err);
+        }
+      });
+    });
+
+    // Auto-open from server-side serviceId redirect (e.g. after tag refresh error)
+    var autoOpenScript = document.getElementById('service-autoopen-data');
+    if (autoOpenScript) {
+      try {
+        var autoService = JSON.parse(autoOpenScript.textContent);
+        if (autoService && autoService.id) {
+          openModal(autoService);
+        }
+      } catch (err) {
+        console.error('Failed to parse auto-open service data', err);
+      }
+    }
+  }());
+  </script>
 {% endblock %}
