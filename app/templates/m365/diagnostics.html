@@ -93,6 +93,7 @@
             <th>Permission</th>
             <th>Role ID</th>
             <th style="width: 8rem;">Status</th>
+            <th style="width: 6rem;"></th>
           </tr>
         </thead>
         <tbody>
@@ -126,6 +127,13 @@
                 <span class="status status--danger">Fail</span>
               {% else %}
                 <span class="status status--neutral">Unknown</span>
+              {% endif %}
+            </td>
+            <td style="width: 6rem; text-align: right;">
+              {% if perm_result.status == "fail" %}
+                <form method="post" action="/m365/diagnostics/repair" style="display:inline;">
+                  <button type="submit" class="btn btn--sm btn--warning" title="Attempt to grant this missing permission">Repair</button>
+                </form>
               {% endif %}
             </td>
           </tr>
