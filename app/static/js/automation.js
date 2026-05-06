@@ -713,6 +713,16 @@
     return `${minute} ${hour} * * *`;
   }
 
+  const COMMAND_DEFAULT_CRONS = {
+    generate_invoice: '1 0 L * *',
+    sync_to_xero: '1 15 L * *',
+    sync_to_xero_auto_send: '1 16 L * *',
+  };
+
+  function defaultCronForCommand(command) {
+    return COMMAND_DEFAULT_CRONS[command] || randomDailyCron();
+  }
+
   function getTaskNameFields() {
     return {
       hidden: query('task-name'),
@@ -882,7 +892,7 @@
       companyField.value = '';
     }
 
-    const cronValue = taskData.cron || (isEditing ? '' : randomDailyCron());
+    const cronValue = taskData.cron || (isEditing ? '' : defaultCronForCommand(commandField.value || commandValue));
     cronField.value = cronValue;
 
     const command = commandValue || '';
