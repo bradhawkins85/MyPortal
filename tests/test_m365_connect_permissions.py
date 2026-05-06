@@ -19,6 +19,7 @@ from app.services.m365 import (
     _TEAMS_MANAGE_AS_APP_ROLE,
     _TEAMS_APP_ID,
     _TEAMS_ADMIN_ROLE_TEMPLATE_ID,
+    _SHAREPOINT_TENANT_SETTINGS_ROLE,
 )
 from tests.conftest import drain_provision_background_tasks
 
@@ -427,12 +428,76 @@ def test_provision_app_roles_includes_group_member_readwrite_all():
     )
 
 
-# ---------------------------------------------------------------------------
-# Import the _GRAPH_APP_ID constant used in mock
-# ---------------------------------------------------------------------------
+def test_provision_app_roles_includes_sharepoint_tenant_settings_read_all():
+    """_PROVISION_APP_ROLES must include SharePointTenantSettings.Read.All for SPO best-practice checks."""
+    assert _SHAREPOINT_TENANT_SETTINGS_ROLE in _PROVISION_APP_ROLES, (
+        "SharePointTenantSettings.Read.All (a8ead177-1889-4546-9387-f25e658e2a79) must be in "
+        "_PROVISION_APP_ROLES to enable SharePoint Online best-practice checks "
+        "(GET /admin/sharepoint/settings)"
+    )
 
-from app.services.m365 import _GRAPH_APP_ID  # noqa: E402
-from app.services.m365 import _EXO_ADMIN_ROLE_TEMPLATE_ID  # noqa: E402
+
+@pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_grants_sharepoint_when_missing():
+    """SharePointTenantSettings.Read.All is granted via the connect flow when missing.
+
+    Regression test: verifies that the 'Authorize portal access' callback correctly
+    grants SharePointTenantSettings.Read.All (a Graph application permission) when
+    it is absent from the existing app role assignments.
+    """
+    # All Graph roles present except SharePointTenantSettings.Read.All
+    present_roles = [r for r in _PROVISION_APP_ROLES if r != _SHAREPOINT_TENANT_SETTINGS_ROLE]
+    # EXO and Teams ManageAsApp already granted so the test focuses purely on the Graph role.
+    exo_assignment = {"appRoleId": _EXO_MANAGE_AS_APP_ROLE, "resourceId": "exo-sp-id"}
+    teams_assignment = {"appRoleId": _TEAMS_MANAGE_AS_APP_ROLE, "resourceId": "teams-sp-id"}
+    all_assignments = (
+        [{"appRoleId": r, "resourceId": "graph-sp-id"} for r in present_roles]
+        + [exo_assignment, teams_assignment]
+    )
+
+    granted: list[dict] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return {"value": all_assignments}
+        if _GRAPH_APP_ID in url:
+            return {"value": [{"id": "graph-sp-id"}]}
+        if _EXO_APP_ID in url:
+            return {"value": [{"id": "exo-sp-id"}]}
+        if _TEAMS_APP_ID in url:
+            return _teams_sp_response()
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
+        return _sp_response("sp-123")
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        granted.append(payload)
+        return {"id": "new-assignment"}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service.try_grant_missing_permissions(
+            company_id=1,
+            access_token="admin-token",
+        )
+
+    assert result is True, "Should return True when SharePointTenantSettings.Read.All was granted"
+    granted_role_ids = {g["appRoleId"] for g in granted}
+    granted_resource_ids = {g.get("resourceId") for g in granted}
+    assert _SHAREPOINT_TENANT_SETTINGS_ROLE in granted_role_ids, (
+        "SharePointTenantSettings.Read.All must be granted when missing"
+    )
+    assert "graph-sp-id" in granted_resource_ids, (
+        "SharePointTenantSettings.Read.All must be assigned to the Microsoft Graph SP"
+    )
+    # Only SharePointTenantSettings.Read.All should have been granted (one missing Graph role)
+    assert len(granted) == 1, (
+        f"Exactly one grant expected (SharePointTenantSettings.Read.All); got {len(granted)}"
+    )
+
 
 
 # ---------------------------------------------------------------------------
