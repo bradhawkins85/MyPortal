@@ -15,6 +15,7 @@ from app.services.m365 import (
     _PROVISION_APP_ROLES,
     M365Error,
     _EXO_MANAGE_AS_APP_ROLE,
+    _EXO_APP_ID,
     _TEAMS_MANAGE_AS_APP_ROLE,
     _TEAMS_APP_ID,
     _TEAMS_ADMIN_ROLE_TEMPLATE_ID,
@@ -422,7 +423,7 @@ def test_provision_app_roles_includes_group_member_readwrite_all():
 # Import the _GRAPH_APP_ID constant used in mock
 # ---------------------------------------------------------------------------
 
-from app.services.m365 import _GRAPH_APP_ID, _EXO_APP_ID  # noqa: E402
+from app.services.m365 import _GRAPH_APP_ID  # noqa: E402
 from app.services.m365 import _EXO_ADMIN_ROLE_TEMPLATE_ID  # noqa: E402
 
 
