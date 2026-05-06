@@ -341,6 +341,9 @@ async def test_graph_get_wraps_timeout_as_m365_error():
     import httpx
 
     mock_client = MagicMock()
+    # httpcore can raise exceptions with an empty message string; httpx maps them
+    # via str(exc) which then produces e.g. ReadTimeout(""). This simulates the
+    # real scenario that caused sync_m365_mailboxes to record error: "".
     mock_client.get = AsyncMock(side_effect=httpx.ReadTimeout("", request=MagicMock()))
     mock_client_ctx = MagicMock()
     mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client)
@@ -360,6 +363,9 @@ async def test_graph_get_wraps_connect_error_as_m365_error():
     import httpx
 
     mock_client = MagicMock()
+    # httpcore can raise exceptions with an empty message string; httpx maps them
+    # via str(exc) which then produces e.g. ConnectError(""). This simulates the
+    # real scenario that caused sync_m365_mailboxes to record error: "".
     mock_client.get = AsyncMock(side_effect=httpx.ConnectError("", request=MagicMock()))
     mock_client_ctx = MagicMock()
     mock_client_ctx.__aenter__ = AsyncMock(return_value=mock_client)
