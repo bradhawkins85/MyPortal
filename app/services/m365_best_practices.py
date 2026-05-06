@@ -750,6 +750,160 @@ async def _check_sharepoint_sign_out_inactive_users(token: str) -> dict[str, Any
                    f"{total_secs // 60} min for SharePoint Online.")
 
 
+# URL for listing organisation-level directory settings (includes password
+# protection and banned-password configuration).
+_ORG_SETTINGS_URL = "https://graph.microsoft.com/v1.0/settings"
+
+# Template ID for the "Password Rule Settings" directory setting template.
+_PASSWORD_RULE_SETTINGS_TEMPLATE_ID = "5cf42378-d67d-4f36-ba46-e8b86229381d"
+
+# Endpoint for listing SharePoint sites (search=* returns all sites).
+_SPO_SITES_URL = (
+    "https://graph.microsoft.com/v1.0/sites"
+    "?search=*&$select=id,displayName,webUrl,sharingCapability&$top=200"
+)
+
+
+async def _check_sharepoint_external_sharing_restricted(token: str) -> dict[str, Any]:
+    """Check that SharePoint site-level sharing is restricted.
+
+    Uses the Graph API SharePoint admin settings to determine the tenant-level
+    sharing capability.  If the tenant is already maximally restrictive
+    (``disabled`` or ``existingExternalUserSharingOnly``) then per-site
+    capabilities cannot exceed that ceiling and the check passes.
+
+    When the tenant allows ``externalUserAndGuestSharing``, we enumerate sites
+    via the Graph API and flag any site whose ``sharingCapability`` is set to
+    the most permissive value.  If the Graph API does not return the
+    ``sharingCapability`` property for individual sites the check falls back to
+    marking the tenant as failing because sites may be configured permissively.
+    """
+    check_id = "bp_sharepoint_external_sharing_restricted"
+    check_name = "SharePoint external sharing is restricted"
+
+    settings = await _get_spo_settings(token)
+    if settings is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN, _SPO_MISSING_PERM_MSG)
+
+    tenant_cap = str(settings.get("sharingCapability") or "").lower()
+    if not tenant_cap:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to read sharingCapability from SharePoint tenant settings.")
+
+    # If the tenant setting is already fully restricted, sites cannot be set
+    # more permissively – the check passes by definition.
+    restrictive = {"disabled", "existingexternalusersharingonly"}
+    if tenant_cap in restrictive:
+        return _result(check_id, check_name, STATUS_PASS,
+                       f"SharePoint tenant sharing capability is '{tenant_cap}'; "
+                       "site-level sharing cannot exceed this ceiling.")
+
+    # Tenant allows external sharing – enumerate sites to check individual caps.
+    sites = await _safe_graph_get_all(token, _SPO_SITES_URL)
+
+    if sites is not None and sites:
+        # Check whether the API returned the sharingCapability property at all.
+        has_prop = any(s.get("sharingCapability") is not None for s in sites)
+        if has_prop:
+            permissive = [
+                s.get("webUrl") or s.get("id", "unknown")
+                for s in sites
+                if str(s.get("sharingCapability") or "").lower()
+                == "externaluserandguestsharing"
+            ]
+            if not permissive:
+                return _result(check_id, check_name, STATUS_PASS,
+                               "No SharePoint sites have 'ExternalUserAndGuestSharing' enabled.")
+            preview = ", ".join(permissive[:5])
+            suffix = f" (and {len(permissive) - 5} more)" if len(permissive) > 5 else ""
+            return _result(check_id, check_name, STATUS_FAIL,
+                           f"The following sites allow unrestricted external sharing: "
+                           f"{preview}{suffix}. "
+                           "Run: Get-SPOSite -Limit All | "
+                           "Where-Object {$_.SharingCapability -eq 'ExternalUserAndGuestSharing'} "
+                           "| Set-SPOSite -SharingCapability ExistingExternalUserSharingOnly")
+
+    # Graph API did not return per-site sharingCapability; fall back to the
+    # tenant-level assessment.  If the tenant allows guest sharing, individual
+    # sites may also be configured permissively.
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"SharePoint tenant sharing capability is '{tenant_cap}'; "
+                   "individual sites may allow unrestricted external sharing. "
+                   "Run: Get-SPOSite -Limit All | Select Url,SharingCapability "
+                   "to verify per-site settings, then restrict any site with "
+                   "'ExternalUserAndGuestSharing' to 'ExistingExternalUserSharingOnly'.")
+
+
+async def _check_onprem_password_protection(token: str) -> dict[str, Any]:
+    """Check that Microsoft Entra Password Protection is configured for on-prem AD.
+
+    Queries the Graph API organisation-level directory settings for the
+    ``Password Rule Settings`` template (templateId
+    ``5cf42378-d67d-4f36-ba46-e8b86229381d``) and verifies:
+
+    * ``EnableBannedPasswordCheckOnPremises`` is ``"true"``
+    * ``BannedPasswordCheckOnPremisesMode`` is ``"Enforced"`` (not ``"Audit"``)
+
+    Note: this checks the *cloud-side configuration* only.  Whether the DC
+    agent software is actually installed and running on-premises cannot be
+    verified remotely via the Graph API.
+    """
+    check_id = "bp_onprem_password_protection"
+    check_name = "Password protection is enabled for on-prem Active Directory"
+
+    data = await _safe_graph_get(token, _ORG_SETTINGS_URL)
+    if data is None:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "Unable to query organisation directory settings from Microsoft Graph.")
+
+    settings_list = data.get("value") or []
+    pw_setting: dict[str, Any] | None = None
+    for entry in settings_list:
+        if isinstance(entry, dict) and (
+            entry.get("templateId") == _PASSWORD_RULE_SETTINGS_TEMPLATE_ID
+            or str(entry.get("displayName") or "").lower() == "password rule settings"
+        ):
+            pw_setting = entry
+            break
+
+    if pw_setting is None:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "No 'Password Rule Settings' directory setting found. "
+                       "Microsoft Entra Password Protection has not been configured for "
+                       "on-premises Active Directory. "
+                       "Install DC agents and configure enforcement via the Entra portal → "
+                       "Protection → Authentication methods → Password protection.")
+
+    values: dict[str, str] = {
+        v["name"]: v.get("value", "")
+        for v in (pw_setting.get("values") or [])
+        if isinstance(v, dict) and v.get("name")
+    }
+
+    enabled_raw = str(values.get("EnableBannedPasswordCheckOnPremises", "false"))
+    mode_raw = str(values.get("BannedPasswordCheckOnPremisesMode", ""))
+
+    issues: list[str] = []
+    if enabled_raw.lower() != "true":
+        issues.append("EnableBannedPasswordCheckOnPremises is not set to true")
+    if mode_raw.lower() != "enforced":
+        issues.append(
+            f"BannedPasswordCheckOnPremisesMode is '{mode_raw or 'not set'}' "
+            "(should be 'Enforced')"
+        )
+
+    if not issues:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Microsoft Entra Password Protection is enabled and set to 'Enforced' "
+                       "mode for on-premises Active Directory.")
+
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Microsoft Entra Password Protection is not fully configured for "
+                   "on-premises Active Directory: " + "; ".join(issues) + ". "
+                   "In the Entra portal → Protection → Authentication methods → "
+                   "Password protection: enable on-prem protection and set Mode to Enforced.")
+
+
 # ---------------------------------------------------------------------------
 # Defender for Office 365 checks (EXO InvokeCommand)
 # ---------------------------------------------------------------------------
@@ -4003,11 +4157,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Get-SPOSite -Limit All | Where-Object {$_.SharingCapability -eq 'ExternalUserAndGuestSharing'} "
             "| Set-SPOSite -SharingCapability ExistingExternalUserSharingOnly"
         ),
-        "source": _manual_review_factory(
-            "bp_sharepoint_external_sharing_restricted",
-            "SharePoint external sharing is restricted",
-            "Manual verification required. Run: Get-SPOSite -Limit All | Select Url,SharingCapability",
-        ),
+        "source": _check_sharepoint_external_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
@@ -4410,13 +4560,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "methods → Password protection → set 'Mode' to Enforced and "
             "'Enable password protection on Windows Server Active Directory' to Yes."
         ),
-        "source": _manual_review_factory(
-            "bp_onprem_password_protection",
-            "Password protection is enabled for on-prem Active Directory",
-            "Manual verification required. On a domain controller run: "
-            "Get-AzureADPasswordProtectionDCAgent. Mark this check as N/A on "
-            "the company's exclusion list if the tenant is cloud-only.",
-        ),
+        "source": _check_onprem_password_protection,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,

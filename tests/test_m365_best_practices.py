@@ -4126,3 +4126,231 @@ def test_teams_checks_use_exo_source_type():
         assert entry.get("source_type") == "exo", (
             f"{check_id} must have source_type='exo', got {entry.get('source_type')!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# SharePoint external sharing restricted (Graph API)
+# ---------------------------------------------------------------------------
+
+_SPO_SETTINGS_RESTRICTED = {"sharingCapability": "existingExternalUserSharingOnly"}
+_SPO_SETTINGS_PERMISSIVE = {"sharingCapability": "externalUserAndGuestSharing"}
+_SPO_SETTINGS_DISABLED = {"sharingCapability": "disabled"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_external_sharing_restricted_pass_disabled():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_SPO_SETTINGS_DISABLED,
+    ):
+        result = await bp_service._check_sharepoint_external_sharing_restricted("token")
+    assert result["status"] == "pass"
+    assert result["check_id"] == "bp_sharepoint_external_sharing_restricted"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_external_sharing_restricted_pass_existing_users():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_SPO_SETTINGS_RESTRICTED,
+    ):
+        result = await bp_service._check_sharepoint_external_sharing_restricted("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_external_sharing_restricted_fail_no_per_site_data():
+    """When tenant allows external sharing and Graph returns no per-site data, report fail."""
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_SPO_SETTINGS_PERMISSIVE,
+    ), patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        return_value=[{"id": "site1", "webUrl": "https://t.sharepoint.com/sites/s1"}],
+    ):
+        result = await bp_service._check_sharepoint_external_sharing_restricted("token")
+    # No sharingCapability on sites – falls back to tenant-level fail
+    assert result["status"] == "fail"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_external_sharing_restricted_fail_permissive_site():
+    """A site with ExternalUserAndGuestSharing results in fail."""
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_SPO_SETTINGS_PERMISSIVE,
+    ), patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        return_value=[
+            {
+                "id": "site1",
+                "webUrl": "https://t.sharepoint.com/sites/s1",
+                "sharingCapability": "ExternalUserAndGuestSharing",
+            }
+        ],
+    ):
+        result = await bp_service._check_sharepoint_external_sharing_restricted("token")
+    assert result["status"] == "fail"
+    assert "t.sharepoint.com/sites/s1" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_external_sharing_restricted_pass_all_sites_ok():
+    """When all sites are restricted, check passes even if tenant cap is permissive."""
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_SPO_SETTINGS_PERMISSIVE,
+    ), patch(
+        "app.services.m365_best_practices._graph_get_all",
+        new_callable=AsyncMock,
+        return_value=[
+            {
+                "id": "site1",
+                "webUrl": "https://t.sharepoint.com/sites/s1",
+                "sharingCapability": "ExistingExternalUserSharingOnly",
+            }
+        ],
+    ):
+        result = await bp_service._check_sharepoint_external_sharing_restricted("token")
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_sharepoint_external_sharing_restricted_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("forbidden"),
+    ):
+        result = await bp_service._check_sharepoint_external_sharing_restricted("token")
+    assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# On-prem password protection (Graph API directory settings)
+# ---------------------------------------------------------------------------
+
+_PW_RULE_SETTINGS_ENFORCED = {
+    "value": [
+        {
+            "id": "setting-id-1",
+            "displayName": "Password Rule Settings",
+            "templateId": "5cf42378-d67d-4f36-ba46-e8b86229381d",
+            "values": [
+                {"name": "EnableBannedPasswordCheckOnPremises", "value": "true"},
+                {"name": "BannedPasswordCheckOnPremisesMode", "value": "Enforced"},
+            ],
+        }
+    ]
+}
+
+_PW_RULE_SETTINGS_AUDIT = {
+    "value": [
+        {
+            "id": "setting-id-1",
+            "displayName": "Password Rule Settings",
+            "templateId": "5cf42378-d67d-4f36-ba46-e8b86229381d",
+            "values": [
+                {"name": "EnableBannedPasswordCheckOnPremises", "value": "true"},
+                {"name": "BannedPasswordCheckOnPremisesMode", "value": "Audit"},
+            ],
+        }
+    ]
+}
+
+_PW_RULE_SETTINGS_DISABLED = {
+    "value": [
+        {
+            "id": "setting-id-1",
+            "displayName": "Password Rule Settings",
+            "templateId": "5cf42378-d67d-4f36-ba46-e8b86229381d",
+            "values": [
+                {"name": "EnableBannedPasswordCheckOnPremises", "value": "false"},
+                {"name": "BannedPasswordCheckOnPremisesMode", "value": "Enforced"},
+            ],
+        }
+    ]
+}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_onprem_password_protection_pass():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_PW_RULE_SETTINGS_ENFORCED,
+    ):
+        result = await bp_service._check_onprem_password_protection("token")
+    assert result["status"] == "pass"
+    assert result["check_id"] == "bp_onprem_password_protection"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_onprem_password_protection_fail_not_configured():
+    """No Password Rule Settings entry at all → fail."""
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"value": []},
+    ):
+        result = await bp_service._check_onprem_password_protection("token")
+    assert result["status"] == "fail"
+    assert "not been configured" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_onprem_password_protection_fail_audit_mode():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_PW_RULE_SETTINGS_AUDIT,
+    ):
+        result = await bp_service._check_onprem_password_protection("token")
+    assert result["status"] == "fail"
+    assert "Audit" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_onprem_password_protection_fail_disabled():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value=_PW_RULE_SETTINGS_DISABLED,
+    ):
+        result = await bp_service._check_onprem_password_protection("token")
+    assert result["status"] == "fail"
+    assert "EnableBannedPasswordCheckOnPremises" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_onprem_password_protection_unknown_on_error():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("forbidden"),
+    ):
+        result = await bp_service._check_onprem_password_protection("token")
+    assert result["status"] == "unknown"
+
+
+def test_sharepoint_external_sharing_uses_graph_source():
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    entry = catalog.get("bp_sharepoint_external_sharing_restricted")
+    assert entry is not None
+    assert entry.get("source_type") == "graph"
+    assert entry.get("source") is bp_service._check_sharepoint_external_sharing_restricted
+
+
+def test_onprem_password_protection_uses_graph_source():
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    entry = catalog.get("bp_onprem_password_protection")
+    assert entry is not None
+    assert entry.get("source_type") == "graph"
+    assert entry.get("source") is bp_service._check_onprem_password_protection
