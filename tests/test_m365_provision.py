@@ -134,7 +134,7 @@ async def test_provision_app_registration_success():
         "Should POST to /servicePrincipals to create service principal"
     assert sum(1 for u in call_order if "appRoleAssignments" in u) == len(
         m365_service._PROVISION_APP_ROLES
-    ) + 1, "Should grant one role assignment per required role plus Exchange.ManageAsApp"
+    ) + 2, "Should grant one role assignment per required role plus Exchange.ManageAsApp and Teams.ManageAsApp"
     assert any("addPassword" in u for u in call_order), \
         "Should POST to addPassword to create client secret"
 
