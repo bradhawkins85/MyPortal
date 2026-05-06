@@ -162,6 +162,14 @@ AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 # without the premium-only field rather than treating it as a permissions error.
 _NON_PREMIUM_ERROR_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant"
 
+# Microsoft Graph error code returned when the app's service principal is missing
+# a required application permission for the requested field or endpoint.  For example,
+# requesting ``signInActivity`` in a ``$select`` query requires ``AuditLog.Read.All``
+# and returns this code if that permission has not been granted (or has not yet
+# propagated after provisioning).  Callers should detect this and retry without the
+# permission-gated field rather than propagating a hard failure.
+_MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
+
 
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
     """Return ``True`` when ``client_id`` matches the Azure CLI fallback app ID."""
@@ -2462,13 +2470,19 @@ async def get_all_users(
             users.extend(payload.get("value", []))
             url = payload.get("@odata.nextLink")
     except M365Error as exc:
-        if exc.http_status == 403 and exc.graph_error_code == _NON_PREMIUM_ERROR_CODE:
-            # signInActivity requires Azure AD Premium P1/P2.  Retry without it
-            # so that non-premium tenants can still sync users.
+        if exc.http_status == 403 and exc.graph_error_code in (
+            _NON_PREMIUM_ERROR_CODE,
+            _MISSING_PERMISSION_ERROR_CODE,
+        ):
+            # ``signInActivity`` requires both Azure AD Premium P1/P2 and the
+            # ``AuditLog.Read.All`` application permission.  Either condition
+            # (non-premium tenant or missing permission) produces a 403.  Retry
+            # without ``signInActivity`` so that the contacts sync can still
+            # complete without last-sign-in timestamps.
             log_info(
-                "M365 tenant does not have premium licence; "
-                "retrying get_all_users without signInActivity",
+                "M365 signInActivity unavailable; retrying get_all_users without signInActivity",
                 company_id=company_id,
+                error_code=exc.graph_error_code,
             )
             url = (
                 "https://graph.microsoft.com/v1.0/users?"
