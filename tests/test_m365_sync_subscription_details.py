@@ -433,8 +433,13 @@ async def test_sync_uses_auto_renew_enabled_and_commitment_term_fallbacks():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_sync_auto_renew_from_status_enabled():
-    """When autoRenew/autoRenewEnabled are absent, status='Enabled' should set auto_renew=True."""
+async def test_sync_preserves_auto_renew_when_api_omits_field():
+    """When autoRenew/autoRenewEnabled are absent, the existing auto_renew value is preserved.
+
+    A subscription with status='Enabled' but no autoRenew field should NOT have its
+    auto_renew value changed.  A subscription can be active (Enabled) while auto-renew
+    is disabled, so using the status as a proxy for auto-renew is incorrect.
+    """
     m365_skus = [_make_sku("SKU_ST", "sku-id-st")]
     subscriptions = [
         {
@@ -474,4 +479,60 @@ async def test_sync_auto_renew_from_status_enabled():
         await m365_service.sync_company_licenses(1)
 
     assert update_calls, "update_license should have been called"
-    assert update_calls[0]["auto_renew"] is True
+    # auto_renew should be None (unknown) — not inferred from the status field
+    assert update_calls[0]["auto_renew"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_does_not_override_auto_renew_false_with_status_enabled():
+    """An explicitly set auto_renew=False must not be overridden when the API omits autoRenew.
+
+    Regression test for: /licenses showing 'Yes' for services set to not auto-renew.
+    When the M365 subscription is still active (status='Enabled') but no autoRenew field
+    is returned, the previously-stored False must be preserved rather than replaced with True.
+    """
+    m365_skus = [_make_sku("SKU_NO_RENEW", "sku-id-no-renew")]
+    # API response omits autoRenew — subscription is active but auto-renew is off
+    subscriptions = [
+        {
+            "skuId": "sku-id-no-renew",
+            "nextLifecycleDateTime": "2028-12-01T00:00:00Z",
+            "status": "Enabled",
+        }
+    ]
+    update_calls: list[dict[str, Any]] = []
+
+    async def fake_graph_get(token, url):
+        if "subscribedSkus" in url:
+            return {"value": m365_skus}
+        return {"value": []}
+
+    async def capture_update(license_id, **kwargs):
+        update_calls.append(kwargs)
+        return _make_license(license_id, kwargs["platform"])
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="tok")),
+        patch.object(m365_service, "_graph_get", side_effect=fake_graph_get),
+        patch.object(m365_service, "_graph_get_all", AsyncMock(return_value=subscriptions)),
+        patch.object(m365_service.apps_repo, "get_app_by_vendor_sku", AsyncMock(return_value=None)),
+        patch.object(m365_service.sku_friendly_repo, "get_friendly_name", AsyncMock(return_value=None)),
+        patch.object(
+            m365_service.license_repo,
+            "get_license_by_company_and_sku",
+            # Existing license has auto_renew explicitly set to False
+            AsyncMock(return_value=_make_license(1, "SKU_NO_RENEW", auto_renew=False)),
+        ),
+        patch.object(m365_service.license_repo, "update_license", side_effect=capture_update),
+        patch.object(m365_service.license_repo, "record_usage_if_changed", AsyncMock(return_value=False)),
+        patch.object(m365_service, "_sync_staff_assignments", AsyncMock()),
+        patch.object(m365_service.license_repo, "list_company_licenses", AsyncMock(return_value=[])),
+        patch.object(m365_service, "log_info", lambda *a, **kw: None),
+    ):
+        await m365_service.sync_company_licenses(1)
+
+    assert update_calls, "update_license should have been called"
+    # The existing False must be preserved — must NOT be overwritten with True
+    assert update_calls[0]["auto_renew"] is False, (
+        "auto_renew=False should be preserved when API response does not include autoRenew"
+    )
