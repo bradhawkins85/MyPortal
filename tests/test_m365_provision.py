@@ -109,6 +109,8 @@ async def test_provision_app_registration_success():
         return {}
 
     async def mock_graph_get(token: str, url: str) -> dict:
+        if "servicePrincipals" in url and m365_service._TEAMS_APP_ID in url:
+            return {"value": [{"id": "graph-sp-id", "appRoles": [{"id": m365_service._TEAMS_MANAGE_AS_APP_ROLE}]}]}
         if "servicePrincipals" in url:
             return _make_graph_sp_response("graph-sp-id")
         return {}
