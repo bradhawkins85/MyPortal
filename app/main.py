@@ -6040,6 +6040,52 @@ async def verify_m365_permissions(request: Request):
     return JSONResponse(result)
 
 
+@app.get("/m365/diagnostics", response_class=HTMLResponse)
+async def m365_diagnostics_page(request: Request, error: str | None = None, success: str | None = None):
+    """Display the enterprise app permission diagnostics page."""
+    user, _, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+
+    credentials = await m365_service.get_credentials(company_id)
+    last_results = await m365_service.get_last_enterprise_app_permissions(company_id)
+
+    extra = {
+        "title": "Office 365 Diagnostics",
+        "company": company,
+        "has_credentials": bool(credentials),
+        "catalog": m365_service.ENTERPRISE_APP_CATALOG,
+        "results": last_results,
+        "error": error,
+        "success": success,
+        "is_super_admin": True,
+    }
+    return await _render_template("m365/diagnostics.html", request, user, extra=extra)
+
+
+@app.post("/m365/diagnostics/check", response_class=RedirectResponse)
+async def run_m365_diagnostics_check(request: Request):
+    """Run the enterprise app permission check and store results."""
+    user, _, __, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        await m365_service.check_enterprise_app_permissions(company_id)
+    except m365_service.M365Error as exc:
+        return RedirectResponse(
+            url=f"/m365/diagnostics?error={quote(str(exc))}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/m365/diagnostics?success=Permission+check+completed",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @app.post("/m365/credentials", response_class=RedirectResponse)
 async def save_m365_credentials(
     request: Request,

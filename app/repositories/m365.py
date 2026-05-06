@@ -512,3 +512,56 @@ async def update_pkce_client_id(company_id: int, pkce_client_id: str | None) -> 
         """,
         (pkce_client_id, company_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# Enterprise app permission diagnostic results
+# ---------------------------------------------------------------------------
+
+
+async def upsert_permission_check_result(
+    *,
+    company_id: int,
+    app_id: str,
+    app_name: str,
+    role_id: str,
+    role_name: str,
+    status: str,
+    checked_at: datetime,
+) -> None:
+    """Insert or update a single permission check result row."""
+    await db.execute(
+        """
+        INSERT INTO m365_permission_check_results
+            (company_id, app_id, app_name, role_id, role_name, status, checked_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            app_name = VALUES(app_name),
+            role_name = VALUES(role_name),
+            status = VALUES(status),
+            checked_at = VALUES(checked_at)
+        """,
+        (company_id, app_id, app_name, role_id, role_name, status, checked_at),
+    )
+
+
+async def list_permission_check_results(company_id: int) -> list[dict[str, Any]]:
+    """Return all stored permission check results for a company."""
+    rows = await db.fetch_all(
+        """
+        SELECT app_id, app_name, role_id, role_name, status, checked_at
+        FROM m365_permission_check_results
+        WHERE company_id = %s
+        ORDER BY app_id, role_name
+        """,
+        (company_id,),
+    )
+    return [dict(row) for row in rows]
+
+
+async def delete_permission_check_results(company_id: int) -> None:
+    """Remove all stored permission check results for a company."""
+    await db.execute(
+        "DELETE FROM m365_permission_check_results WHERE company_id = %s",
+        (company_id,),
+    )
