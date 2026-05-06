@@ -286,6 +286,11 @@
                 <li class="menu__subitem">
                   <a href="/licenses" {% if current_path.startswith('/licenses') %}aria-current="page"{% endif %}>Licenses</a>
                 </li>
+                {% if is_super_admin %}
+                <li class="menu__subitem">
+                  <a href="/m365/diagnostics" {% if current_path.startswith('/m365/diagnostics') %}aria-current="page"{% endif %}>Diagnostics</a>
+                </li>
+                {% endif %}
               </ul>
             </li>
           {% endif %}
