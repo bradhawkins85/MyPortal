@@ -45,6 +45,11 @@ def _sp_response(sp_id: str = "sp-object-id") -> dict[str, Any]:
     return {"value": [{"id": sp_id}]}
 
 
+def _teams_sp_response(sp_id: str = "teams-sp-id") -> dict[str, Any]:
+    """Teams SP response including the ManageAsApp appRole so role-existence check passes."""
+    return {"value": [{"id": sp_id, "appRoles": [{"id": _TEAMS_MANAGE_AS_APP_ROLE}]}]}
+
+
 def _assignments_response(role_ids: list[str]) -> dict[str, Any]:
     return {"value": [{"appRoleId": rid} for rid in role_ids]}
 
@@ -112,7 +117,7 @@ async def test_try_grant_missing_permissions_noop_when_all_present():
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
-            return {"value": [{"id": "teams-sp-id"}]}
+            return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-assignment"}]}  # both admin roles already assigned
         return _sp_response()
@@ -155,7 +160,7 @@ async def test_try_grant_missing_permissions_grants_exo_and_teams_when_graph_com
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
-            return {"value": [{"id": "teams-sp-id"}]}
+            return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
         # service principal lookup for the company app
@@ -229,7 +234,7 @@ async def test_try_grant_missing_permissions_continues_on_partial_failure():
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
-            return {"value": [{"id": "teams-sp-id"}]}
+            return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
         return _sp_response()
@@ -312,7 +317,10 @@ async def test_provision_app_registration_skips_409_role_assignments():
             return {"value": []}
         if "servicePrincipals" in url and _GRAPH_APP_ID in url:
             return {"value": [{"id": "graph-sp-id"}]}
-        # EXO and Teams SP lookups (both return a valid SP so grant is attempted)
+        if "servicePrincipals" in url and _TEAMS_APP_ID in url:
+            # Include appRoles so the ManageAsApp role-existence check passes
+            return {"value": [{"id": "new-sp-id", "appRoles": [{"id": _TEAMS_MANAGE_AS_APP_ROLE}]}]}
+        # EXO SP lookup returns a valid SP so grant is attempted
         return {"value": [{"id": "new-sp-id"}]}
 
     with (
@@ -353,7 +361,7 @@ async def test_try_grant_missing_permissions_returns_false_when_all_grants_fail(
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
-            return {"value": [{"id": "teams-sp-id"}]}
+            return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": []}  # admin roles not assigned
         return _sp_response()
@@ -528,7 +536,7 @@ async def test_try_grant_missing_permissions_assigns_exchange_admin_role():
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
-            return {"value": [{"id": "teams-sp-id"}]}
+            return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": []}  # both admin roles not yet assigned
         return _sp_response()
@@ -678,7 +686,7 @@ async def test_try_grant_missing_permissions_grants_teams_manage_as_app():
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
-            return {"value": [{"id": "teams-sp-id"}]}
+            return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
         return _sp_response("sp-123")
@@ -724,3 +732,46 @@ def test_teams_admin_role_template_id_constant_defined():
     """_TEAMS_ADMIN_ROLE_TEMPLATE_ID must be defined as the Teams Service Administrator role."""
     from app.services.m365 import _TEAMS_ADMIN_ROLE_TEMPLATE_ID
     assert _TEAMS_ADMIN_ROLE_TEMPLATE_ID == "69091246-20e8-4a56-aa4d-066075b2a7a8"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_skips_teams_when_role_absent_from_sp():
+    """Teams.ManageAsApp is silently skipped when the Teams SP doesn't expose the role.
+
+    Regression test: previously a 400 'Permission being assigned was not found' error
+    was retried up to 10 times and then logged as an error.  Now the code checks
+    appRoles before attempting the grant.
+    """
+    graph_assignments = [{"appRoleId": r, "resourceId": "graph-sp-id"} for r in _PROVISION_APP_ROLES]
+    exo_assignment = {"appRoleId": _EXO_MANAGE_AS_APP_ROLE, "resourceId": "exo-sp-id"}
+    posted: list[dict] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return {"value": graph_assignments + [exo_assignment]}
+        if _EXO_APP_ID in url:
+            return {"value": [{"id": "exo-sp-id"}]}
+        if _TEAMS_APP_ID in url:
+            # Teams SP exists but does NOT expose the ManageAsApp role
+            return {"value": [{"id": "teams-sp-id", "appRoles": []}]}
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
+        return _sp_response("sp-123")
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        posted.append(payload)
+        return {"id": "new-assignment"}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service.try_grant_missing_permissions(
+            company_id=1,
+            access_token="admin-token",
+        )
+
+    assert result is False, "Should return False when no new grants were made"
+    teams_grants = [p for p in posted if p.get("resourceId") == "teams-sp-id"]
+    assert teams_grants == [], "No Teams.ManageAsApp POST expected when role is absent from SP"

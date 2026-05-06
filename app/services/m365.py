@@ -1426,37 +1426,48 @@ async def _grant_provisioned_roles(
             teams_sp_response = await _graph_get(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id",
+                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
             )
             teams_sp_list = teams_sp_response.get("value", [])
             if teams_sp_list:
-                teams_sp_id: str = teams_sp_list[0]["id"]
-                try:
-                    await _post_app_role_assignment_with_retry(
-                        access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
-                        {
-                            "principalId": sp_object_id,
-                            "resourceId": teams_sp_id,
-                            "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
-                        },
-                    )
+                teams_sp_obj = teams_sp_list[0]
+                teams_sp_id: str = teams_sp_obj["id"]
+                teams_app_roles = teams_sp_obj.get("appRoles", [])
+                if not any(
+                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE for r in teams_app_roles
+                ):
                     log_info(
-                        "Granted Teams.ManageAsApp role",
+                        "Teams SP does not expose ManageAsApp role in this tenant; "
+                        "skipping Teams.ManageAsApp role grant",
                         sp_object_id=sp_object_id,
                     )
-                except M365Error as exc:
-                    if exc.http_status == 409:
+                else:
+                    try:
+                        await _post_app_role_assignment_with_retry(
+                            access_token,
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            {
+                                "principalId": sp_object_id,
+                                "resourceId": teams_sp_id,
+                                "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
+                            },
+                        )
                         log_info(
-                            "Teams.ManageAsApp role already assigned, skipping",
+                            "Granted Teams.ManageAsApp role",
                             sp_object_id=sp_object_id,
                         )
-                    else:
-                        log_error(
-                            "Failed to grant Teams.ManageAsApp role; "
-                            "Teams PowerShell cmdlets will not be available",
-                            error=str(exc),
-                        )
+                    except M365Error as exc:
+                        if exc.http_status == 409:
+                            log_info(
+                                "Teams.ManageAsApp role already assigned, skipping",
+                                sp_object_id=sp_object_id,
+                            )
+                        else:
+                            log_error(
+                                "Failed to grant Teams.ManageAsApp role; "
+                                "Teams PowerShell cmdlets will not be available",
+                                error=str(exc),
+                            )
             else:
                 log_info(
                     "Skype and Teams Tenant Admin API service principal not found in tenant; "
@@ -2907,20 +2918,30 @@ async def try_grant_missing_permissions(
         except M365Error:
             pass  # non-fatal – will skip EXO grant
 
+        teams_sp_has_role: bool = False
         try:
             teams_sp_resp = await _graph_get(
                 access_token,
                 "https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id",
+                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
             )
             teams_sp_list = teams_sp_resp.get("value", [])
             if teams_sp_list:
-                teams_sp_id = teams_sp_list[0]["id"]
+                teams_sp_obj = teams_sp_list[0]
+                teams_sp_id = teams_sp_obj["id"]
+                teams_sp_has_role = any(
+                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE
+                    for r in teams_sp_obj.get("appRoles", [])
+                )
         except M365Error:
             pass  # non-fatal – will skip Teams grant
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
-        teams_needed = teams_sp_id is not None and teams_sp_id not in manage_as_app_resource_ids
+        teams_needed = (
+            teams_sp_id is not None
+            and teams_sp_has_role
+            and teams_sp_id not in manage_as_app_resource_ids
+        )
 
         granted: list[str] = []
 
