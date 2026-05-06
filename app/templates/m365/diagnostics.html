@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Office 365 Diagnostics{% endblock %}
+
+{% block title %}Office 365 Diagnostics{% endblock %}
+
+{% block header_actions %}
+  {% if has_credentials %}
+    {{ page_header_actions([
+      {
+        "label": "Check Permissions",
+        "type": "form",
+        "action": "/m365/diagnostics/check",
+        "method": "post",
+        "variant": "primary"
+      }
+    ]) }}
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+  {% if error %}
+  <div class="alert alert--error" role="alert">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if success %}
+  <div class="alert alert--success" role="status">
+    {{ success }}
+  </div>
+  {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title">Enterprise App Permissions</h2>
+        <p class="panel__subtitle">
+          Lists the expected permissions for each Microsoft 365 enterprise app used by this portal.
+          Click <strong>Check Permissions</strong> to verify each permission is granted and see Pass/Fail results.
+        </p>
+      </div>
+    </header>
+    {% if not has_credentials %}
+    <div class="panel__body">
+      <p class="text-muted">
+        Microsoft 365 credentials have not been configured for this company.
+        Configure them on the <a href="/m365">Office 365</a> page before running diagnostics.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ------------------------------------------------------------------ #}
+  {# Render one panel per enterprise app                                 #}
+  {# ------------------------------------------------------------------ #}
+  {% set results_by_app = {} %}
+  {% if results %}
+    {% for app in results %}
+      {% set _ = results_by_app.update({app.app_id: app}) %}
+    {% endfor %}
+  {% endif %}
+
+  {% for app in catalog %}
+    {% set app_result = results_by_app.get(app.app_id) %}
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h3 class="panel__title">{{ app.name }}</h3>
+        <p class="panel__subtitle" style="font-family: var(--font-mono, monospace); font-size: 0.8rem; color: var(--color-muted);">App ID: {{ app.app_id }}</p>
+      </div>
+      {% if app_result %}
+      <div class="panel__header-meta">
+        {% if app_result.all_ok %}
+          <span class="status status--success">All permissions granted</span>
+        {% else %}
+          <span class="status status--danger">Missing permissions</span>
+        {% endif %}
+        {% if app_result.checked_at %}
+          <small class="text-muted" style="margin-left: 0.5rem;">
+            Last checked: <span data-utc="{{ app_result.checked_at.isoformat() if app_result.checked_at else '' }}">{{ app_result.checked_at }}</span>
+          </small>
+        {% endif %}
+      </div>
+      {% endif %}
+    </header>
+    <div class="panel__body" style="padding: 0;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width: 3rem;"></th>
+            <th>Permission</th>
+            <th>Role ID</th>
+            <th style="width: 8rem;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for perm in app.permissions %}
+            {% set perm_result = namespace(status="unknown") %}
+            {% if app_result %}
+              {% for p in app_result.permissions %}
+                {% if p.id == perm.id %}
+                  {% set perm_result.status = p.status %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          <tr>
+            <td style="text-align: center;">
+              {% if perm_result.status == "pass" %}
+                <span title="Pass" style="color: var(--color-success, #16a34a); font-size: 1.25rem;">✓</span>
+              {% elif perm_result.status == "fail" %}
+                <span title="Fail" style="color: var(--color-error, #dc2626); font-size: 1.25rem;">✗</span>
+              {% else %}
+                <span title="Not yet checked" style="color: var(--color-muted, #6b7280); font-size: 1.25rem;">–</span>
+              {% endif %}
+            </td>
+            <td><strong>{{ perm.name }}</strong></td>
+            <td>
+              <code style="font-size: 0.8rem; color: var(--color-muted);">{{ perm.id }}</code>
+            </td>
+            <td>
+              {% if perm_result.status == "pass" %}
+                <span class="status status--success">Pass</span>
+              {% elif perm_result.status == "fail" %}
+                <span class="status status--danger">Fail</span>
+              {% else %}
+                <span class="status status--neutral">Unknown</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endfor %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <h3 class="panel__title">How permissions are verified</h3>
+    </header>
+    <div class="panel__body">
+      <ol class="list list--ordered">
+        <li>The portal acquires an application token using the stored company credentials.</li>
+        <li>It locates the enterprise app's service principal in the Microsoft Entra ID tenant.</li>
+        <li>It retrieves all app role assignments for that service principal and compares them against the expected permissions for each enterprise app.</li>
+        <li>Each permission is reported as <strong>Pass</strong> (granted) or <strong>Fail</strong> (missing).</li>
+      </ol>
+      <p class="text-muted">
+        Missing permissions can be granted by re-running the auto-provision flow on the
+        <a href="/m365">Office 365 Configuration</a> page, or by manually assigning the roles
+        in <a href="https://entra.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft Entra ID</a>.
+      </p>
+    </div>
+  </section>
+{% endblock %}

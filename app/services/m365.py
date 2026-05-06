@@ -162,6 +162,60 @@ AZURE_CLI_CLIENT_ID = "04b07795-8542-4ab8-9e00-81f6b0a2c83a"
 # without the premium-only field rather than treating it as a permissions error.
 _NON_PREMIUM_ERROR_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant"
 
+# Human-readable names for each Graph API application permission role ID.
+# Mirrors the inline comments on _PROVISION_APP_ROLES for structured output.
+_GRAPH_ROLE_NAMES: dict[str, str] = {
+    "df021288-bdef-4463-88db-98f22de89214": "User.Read.All",
+    "741f803b-c850-494e-b5df-cde7c675a1ca": "User.ReadWrite.All",
+    "7ab1d382-f21e-4acd-a863-ba3e13f7da61": "Directory.Read.All",
+    "18a4783c-866b-4cc7-a460-3d5e5662c884": "Application.ReadWrite.OwnedBy",
+    "246dd0d5-5bd0-4def-940b-0421030a5b68": "Policy.Read.All",
+    "fb221be6-99f2-473f-bd32-01c6a0e9ca3b": "Policy.ReadWrite.Authorization",
+    "498476ce-e0fe-48b0-b801-37ba7e2685c6": "Organization.Read.All",
+    "dc377aa6-52d8-4e23-b271-2a7ae04cedf3": "DeviceManagementConfiguration.Read.All",
+    "2f51be20-0bb4-4fed-bf7b-db946066c75e": "DeviceManagementManagedDevices.Read.All",
+    "b0afded3-3588-46d8-8b3d-9842eff778da": "AuditLog.Read.All",
+    "230c1aed-a721-4c5d-9cb4-a90514e508ef": "Reports.Read.All",
+    "40f97065-369a-49f4-947c-6a255697ae91": "MailboxSettings.Read",
+    "ee353f83-55ef-4b78-82da-555bfa2b4b95": "ReportSettings.ReadWrite.All",
+    "e2a3a72e-5f79-4c64-b1b1-878b674786c9": "Mail.ReadWrite",
+    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695": "GroupMember.ReadWrite.All",
+    "dc5007c0-2d7d-4c42-879c-2dab87571379": "IdentityRiskyUser.Read.All",
+    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30": "Application.Read.All",
+    "bf394140-e372-4bf9-a898-299cfc7564e5": "SecurityEvents.Read.All",
+    "e0b77adb-e790-44a3-b0a0-257d06303687": "SecuritySecureScore.Read.All",
+    "a8ead177-1889-4546-9387-f25e658e2a79": "SharePointTenantSettings.Read.All",
+    "38d9df27-64da-44fd-b7c5-a6fbac20248f": "UserAuthenticationMethod.Read.All",
+    "434d7c66-07c6-4b1f-ab21-417cf2cdaaca": "OrgSettings-Forms.Read.All",
+}
+
+# Catalog of enterprise apps and their expected application permissions.
+# Used by the diagnostics page to display Pass/Fail per permission per app.
+ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
+    {
+        "name": "Microsoft Graph",
+        "app_id": _GRAPH_APP_ID,
+        "permissions": [
+            {"id": role_id, "name": _GRAPH_ROLE_NAMES.get(role_id, role_id)}
+            for role_id in _PROVISION_APP_ROLES
+        ],
+    },
+    {
+        "name": "Office 365 Exchange Online",
+        "app_id": _EXO_APP_ID,
+        "permissions": [
+            {"id": _EXO_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
+        ],
+    },
+    {
+        "name": "Skype and Teams Tenant Admin API",
+        "app_id": _TEAMS_APP_ID,
+        "permissions": [
+            {"id": _TEAMS_MANAGE_AS_APP_ROLE, "name": "Teams.ManageAsApp"},
+        ],
+    },
+]
+
 
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
     """Return ``True`` when ``client_id`` matches the Azure CLI fallback app ID."""
@@ -2707,6 +2761,190 @@ async def verify_tenant_permissions(
         "present": present,
         "updated": False,
     }
+
+
+async def check_enterprise_app_permissions(
+    company_id: int,
+) -> list[dict[str, Any]]:
+    """Check permissions for all expected enterprise apps and persist results.
+
+    For each app in :data:`ENTERPRISE_APP_CATALOG`, queries the company's
+    service principal's ``appRoleAssignments`` to determine whether each
+    required permission is granted.
+
+    Results are saved to ``m365_permission_check_results`` (one row per
+    app/role combination) and also returned as a list of app dicts:
+
+    .. code-block:: python
+
+        [
+            {
+                "name": "Microsoft Graph",
+                "app_id": "00000003-...",
+                "permissions": [
+                    {"id": "<role_id>", "name": "User.Read.All", "status": "pass"},
+                    ...
+                ],
+                "all_ok": True,
+            },
+            ...
+        ]
+
+    Raises :class:`M365Error` if credentials are missing or the Graph API
+    call fails.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+
+    tenant_id = creds["tenant_id"]
+    client_id = creds["client_id"]
+    client_secret = creds.get("client_secret") or ""
+
+    access_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
+        refresh_token=None,
+    )
+
+    # Locate the service principal for the company's app registration.
+    sp_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{client_id}'&$select=id",
+    )
+    sp_list = sp_response.get("value", [])
+    if not sp_list:
+        raise M365Error("Service principal not found in tenant")
+    sp_object_id: str = sp_list[0]["id"]
+
+    # Fetch all app role assignments for this service principal.
+    # Each assignment has appRoleId and resourceId (the resource SP object ID).
+    assignments_response = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+    )
+    assignment_list = assignments_response.get("value", [])
+
+    # Build a set of (appRoleId, resourceAppId) tuples for precise matching.
+    # Exchange.ManageAsApp and Teams.ManageAsApp share the same appRoleId GUID
+    # but target different resource service principals, so we must resolve the
+    # resource SP's appId to distinguish them.
+    assigned_pairs: set[tuple[str, str]] = set()
+    resource_id_to_app_id: dict[str, str] = {}
+    for a in assignment_list:
+        role_id = str(a.get("appRoleId") or "")
+        resource_id = str(a.get("resourceId") or "")
+        assigned_pairs.add((role_id, resource_id))
+        resource_id_to_app_id[resource_id] = ""  # placeholder for lookup
+
+    # Resolve resource SP object IDs → appIds for the EXO and Teams resources
+    # (we only need to look up SPs we haven't already resolved).
+    for resource_id in list(resource_id_to_app_id):
+        if not resource_id:
+            continue
+        try:
+            sp_info = await _graph_get(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{resource_id}"
+                "?$select=appId",
+            )
+            resource_id_to_app_id[resource_id] = str(sp_info.get("appId") or "")
+        except M365Error:
+            pass  # leave as empty string; the permission will appear as fail
+
+    # Build a set of (appRoleId, resourceAppId) tuples for quick membership test.
+    assigned_by_app: set[tuple[str, str]] = {
+        (role_id, resource_id_to_app_id.get(resource_id, ""))
+        for role_id, resource_id in assigned_pairs
+    }
+
+    checked_at = datetime.utcnow()
+    result_apps: list[dict[str, Any]] = []
+
+    for app_entry in ENTERPRISE_APP_CATALOG:
+        app_id: str = app_entry["app_id"]
+        app_name: str = app_entry["name"]
+        perm_results: list[dict[str, str]] = []
+        app_all_ok = True
+
+        for perm in app_entry["permissions"]:
+            role_id: str = perm["id"]
+            role_name: str = perm["name"]
+            granted = (role_id, app_id) in assigned_by_app
+            perm_status = "pass" if granted else "fail"
+            if not granted:
+                app_all_ok = False
+
+            perm_results.append({"id": role_id, "name": role_name, "status": perm_status})
+
+            await m365_repo.upsert_permission_check_result(
+                company_id=company_id,
+                app_id=app_id,
+                app_name=app_name,
+                role_id=role_id,
+                role_name=role_name,
+                status=perm_status,
+                checked_at=checked_at,
+            )
+
+        result_apps.append(
+            {
+                "name": app_name,
+                "app_id": app_id,
+                "permissions": perm_results,
+                "all_ok": app_all_ok,
+            }
+        )
+
+    return result_apps
+
+
+async def get_last_enterprise_app_permissions(
+    company_id: int,
+) -> list[dict[str, Any]]:
+    """Return the last stored permission check results for ``company_id``.
+
+    Groups repository rows by app and returns a list in the same shape as
+    :func:`check_enterprise_app_permissions`.  Returns an empty list when no
+    check has been run yet.
+    """
+    rows = await m365_repo.list_permission_check_results(company_id)
+    if not rows:
+        return []
+
+    # Group rows by app_id, preserving the catalog order.
+    by_app: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        app_id = row["app_id"]
+        if app_id not in by_app:
+            by_app[app_id] = {
+                "name": row["app_name"],
+                "app_id": app_id,
+                "permissions": [],
+                "all_ok": True,
+                "checked_at": row.get("checked_at"),
+            }
+        perm_status = row["status"]
+        if perm_status != "pass":
+            by_app[app_id]["all_ok"] = False
+        by_app[app_id]["permissions"].append(
+            {"id": row["role_id"], "name": row["role_name"], "status": perm_status}
+        )
+        # Use the most recent checked_at across all rows for this app.
+        row_checked_at = row.get("checked_at")
+        if row_checked_at and (
+            not by_app[app_id]["checked_at"]
+            or row_checked_at > by_app[app_id]["checked_at"]
+        ):
+            by_app[app_id]["checked_at"] = row_checked_at
+
+    # Return in catalog order where possible, then any extras.
+    catalog_order = [app["app_id"] for app in ENTERPRISE_APP_CATALOG]
+    ordered = [by_app[aid] for aid in catalog_order if aid in by_app]
+    extras = [v for aid, v in by_app.items() if aid not in set(catalog_order)]
+    return ordered + extras
 
 
 async def _ensure_exchange_admin_role(
