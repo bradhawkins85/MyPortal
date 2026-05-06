@@ -2860,7 +2860,7 @@ async def check_enterprise_app_permissions(
         for role_id, resource_id in assigned_pairs
     }
 
-    checked_at = datetime.utcnow()
+    checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
     result_apps: list[dict[str, Any]] = []
 
     for app_entry in ENTERPRISE_APP_CATALOG:
