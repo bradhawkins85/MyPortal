@@ -540,6 +540,16 @@ class M365Error(RuntimeError):
         self.graph_error_code: str | None = graph_error_code
 
 
+class M365NoDelegatedTokenError(M365Error):
+    """Raised when a delegated admin token is required but not available.
+
+    This occurs when :func:`repair_enterprise_app_permissions` is called
+    but no refresh token has been stored (i.e. the admin has not yet
+    completed the 'Authorize portal access' connect flow).  Callers can
+    catch this specific subclass to redirect the user to the connect flow.
+    """
+
+
 def generate_pkce_pair() -> tuple[str, str]:
     """Generate a PKCE ``code_verifier`` / ``code_challenge`` pair.
 
@@ -3054,7 +3064,7 @@ async def repair_enterprise_app_permissions(
 
     access_token = await acquire_delegated_token(company_id)
     if not access_token:
-        raise M365Error(
+        raise M365NoDelegatedTokenError(
             "No delegated admin token is available. "
             "Please use 'Authorize portal access' on the Office 365 page first."
         )

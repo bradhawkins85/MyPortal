@@ -20,7 +20,7 @@ import app.main as main_module
 from app.main import app
 from app.security.session import SessionData, session_manager
 from app.services import m365 as m365_service
-from app.services.m365 import M365Error
+from app.services.m365 import M365Error, M365NoDelegatedTokenError
 from app.main import scheduler_service  # type: ignore[attr-defined]
 
 
@@ -146,14 +146,14 @@ async def test_repair_enterprise_app_permissions_no_credentials():
 
 @pytest.mark.anyio("asyncio")
 async def test_repair_enterprise_app_permissions_no_delegated_token():
-    """repair_enterprise_app_permissions raises M365Error when no delegated token."""
+    """repair_enterprise_app_permissions raises M365NoDelegatedTokenError when no delegated token."""
     fake_creds = {"client_id": "app-id", "tenant_id": "t-123"}
 
     with (
         patch.object(m365_service, "get_credentials", AsyncMock(return_value=fake_creds)),
         patch.object(m365_service, "acquire_delegated_token", AsyncMock(return_value=None)),
     ):
-        with pytest.raises(M365Error, match="delegated admin token"):
+        with pytest.raises(M365NoDelegatedTokenError):
             await m365_service.repair_enterprise_app_permissions(company_id=1)
 
 
@@ -224,7 +224,7 @@ async def test_repair_route_no_token_redirects_to_connect(async_client):
         return user, None, company, 1, None
 
     async def fake_repair(company_id):
-        raise M365Error(
+        raise M365NoDelegatedTokenError(
             "No delegated admin token is available. "
             "Please use 'Authorize portal access' on the Office 365 page first."
         )

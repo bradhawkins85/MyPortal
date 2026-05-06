@@ -132,6 +132,7 @@
             <td style="width: 6rem; text-align: right;">
               {% if perm_result.status == "fail" %}
                 <form method="post" action="/m365/diagnostics/repair" style="display:inline;">
+                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
                   <button type="submit" class="btn btn--sm btn--warning" title="Attempt to grant this missing permission">Repair</button>
                 </form>
               {% endif %}
