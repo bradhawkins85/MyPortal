@@ -11,6 +11,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
+    {"label": "Add backup job", "type": "button", "variant": "primary", "attrs": {"data-backup-job-modal-open": "", "data-backup-job-mode": "create", "aria-haspopup": "dialog", "aria-controls": "backup-job-modal"}},
     {"label": "View report", "type": "link", "href": "/reports/company-overview"},
     {"label": "API docs", "type": "link", "href": "/docs", "attrs": {"target": "_blank", "rel": "noopener"}}
   ]) }}
@@ -96,6 +97,18 @@
                                     else 'danger' if today_status == 'fail'
                                     else 'neutral') %}
             {% set latest_event = job.latest_event %}
+            {% set job_data = {
+              "id": job.id,
+              "company_id": job.company_id,
+              "name": job.name,
+              "description": job.description or "",
+              "is_active": job.is_active,
+              "pass_protection": job.pass_protection if job.pass_protection is defined else false,
+              "alert_no_success_days": job.alert_no_success_days or "",
+              "alert_fail_days": job.alert_fail_days or "",
+              "alert_unknown_days": job.alert_unknown_days or "",
+              "token": job.token
+            } %}
             <tr>
               <td data-label="Company" data-column-key="company">
                 {{ backup_company_lookup.get(job.company_id, 'Company #' ~ job.company_id) }}
@@ -139,7 +152,14 @@
                   </summary>
                   <ul class="header-title-menu__list" role="menu">
                     <li class="header-title-menu__item" role="none">
-                      <a class="header-title-menu__link" role="menuitem" href="/admin/backup-jobs?jobId={{ job.id }}">Edit</a>
+                      <button
+                        type="button"
+                        class="header-title-menu__link"
+                        role="menuitem"
+                        data-backup-job-modal-open
+                        data-backup-job-mode="edit"
+                        data-backup-job='{{ job_data | tojson | e }}'
+                      >Edit</button>
                     </li>
                     <li class="header-title-menu__item" role="none">
                       <button
@@ -219,141 +239,132 @@
   </div>
 </section>
 
-<section class="card card--panel">
-  <header class="card__header card__header--stacked">
-    <div>
-      <h2 class="card__title">{{ 'Update backup job' if backup_editing_job else 'Add backup job' }}</h2>
-      <p class="card__subtitle">{{ 'Modify the selected backup job.' if backup_editing_job else 'Create a new backup job for a company. The unique JobID is generated automatically.' }}</p>
-    </div>
-  </header>
-  <div class="card__body card__body--stacked">
-    <form
-      action="{{ '/admin/backup-jobs/' ~ backup_editing_job.id if backup_editing_job else '/admin/backup-jobs' }}"
-      method="post"
-      class="form"
-    >
-      {% include "partials/csrf.html" %}
-      <div class="form-field">
-        <label class="form-label" for="backup-company">Company</label>
-        <select id="backup-company" name="company_id" class="form-input" required>
-          <option value="">Select a company…</option>
-          {% for company in backup_companies %}
-            <option value="{{ company.id }}" {% if backup_editing_job and backup_editing_job.company_id == company.id %}selected{% endif %}>{{ company.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="backup-name">Job name</label>
-        <input id="backup-name" name="name" class="form-input" required maxlength="200"
-          value="{{ backup_editing_job.name if backup_editing_job else '' }}" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="backup-description">Description</label>
-        <textarea id="backup-description" name="description" class="form-input form-input--textarea" rows="3" maxlength="2000">{{ backup_editing_job.description if backup_editing_job else '' }}</textarea>
-        <p class="form-help">Optional, e.g. <em>Veeam — File server, nightly</em>.</p>
-      </div>
-      <div class="form-field form-field--checkbox">
-        <label class="form-checkbox">
-          <input type="checkbox" name="is_active" {% if backup_editing_job is none or backup_editing_job.is_active %}checked{% endif %} />
-          <span>Active (seed daily Unknown events and accept status reports)</span>
-        </label>
-      </div>
-      <div class="form-field form-field--checkbox">
-        <label class="form-checkbox">
-          <input type="checkbox" name="pass_protection" {% if backup_editing_job and backup_editing_job.pass_protection %}checked{% endif %} />
-          <span>Pass Protection</span>
-        </label>
-        <p class="form-help">
-          When enabled, once a <strong>Pass</strong> status has been recorded for the current day, any subsequent
-          <strong>Warn</strong> or <strong>Fail</strong> report from the API will be ignored — the day's status
-          remains locked to <em>Pass</em>. Useful for backup jobs that run multiple times a day against unreliable
-          storage (e.g. external drives or remote NAS devices): as long as one run succeeds, the day is considered
-          good regardless of later failures.
-        </p>
-      </div>
-      <fieldset class="form-fieldset">
-        <legend class="form-fieldset__legend">Missed backup notifications</legend>
-        <p class="form-help">When any threshold is set, a ticket is automatically created when the condition has been met for that many consecutive days. Leave empty or set to 0 to disable notifications for that status.</p>
+<!-- Backup job add/edit modal -->
+<div
+  class="modal"
+  id="backup-job-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="backup-job-modal-title"
+  data-backup-status-url="{{ backup_status_url | e }}"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="backup-job-modal-title">Add backup job</h2>
+    <div class="modal__body">
+      <form id="backup-job-form" method="post" action="/admin/backup-jobs" class="form">
+        {% include "partials/csrf.html" %}
         <div class="form-field">
-          <label class="form-label" for="backup-alert-no-success">No successful backup (days)</label>
-          <input
-            id="backup-alert-no-success"
-            name="alert_no_success_days"
-            type="number"
-            class="form-input form-input--short"
-            min="1"
-            placeholder="e.g. 2"
-            value="{{ backup_editing_job.alert_no_success_days if backup_editing_job and backup_editing_job.alert_no_success_days else '' }}"
-          />
-          <p class="form-help">Create a ticket when no successful backup has been recorded in this many days.</p>
+          <label class="form-label" for="modal-backup-company">Company</label>
+          <select id="modal-backup-company" name="company_id" class="form-input" required>
+            <option value="">Select a company…</option>
+            {% for company in backup_companies %}
+              <option value="{{ company.id }}">{{ company.name }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-field">
-          <label class="form-label" for="backup-alert-fail">Failed for (days)</label>
-          <input
-            id="backup-alert-fail"
-            name="alert_fail_days"
-            type="number"
-            class="form-input form-input--short"
-            min="1"
-            placeholder="e.g. 3"
-            value="{{ backup_editing_job.alert_fail_days if backup_editing_job and backup_editing_job.alert_fail_days else '' }}"
-          />
-          <p class="form-help">Create a ticket when the backup has failed for this many consecutive days.</p>
+          <label class="form-label" for="modal-backup-name">Job name</label>
+          <input id="modal-backup-name" name="name" class="form-input" required maxlength="200" />
         </div>
         <div class="form-field">
-          <label class="form-label" for="backup-alert-unknown">Unknown status for (days)</label>
-          <input
-            id="backup-alert-unknown"
-            name="alert_unknown_days"
-            type="number"
-            class="form-input form-input--short"
-            min="1"
-            placeholder="e.g. 3"
-            value="{{ backup_editing_job.alert_unknown_days if backup_editing_job and backup_editing_job.alert_unknown_days else '' }}"
-          />
-          <p class="form-help">Create a ticket when no status report has been received for this many consecutive days.</p>
+          <label class="form-label" for="modal-backup-description">Description</label>
+          <textarea id="modal-backup-description" name="description" class="form-input form-input--textarea" rows="3" maxlength="2000"></textarea>
+          <p class="form-help">Optional, e.g. <em>Veeam — File server, nightly</em>.</p>
         </div>
-      </fieldset>
-      <div class="form-actions">
-        <button type="submit" class="button button--primary">{{ 'Save changes' if backup_editing_job else 'Create job' }}</button>
-        {% if backup_editing_job %}
-          <a class="button button--ghost" href="/admin/backup-jobs">Cancel</a>
-        {% endif %}
-      </div>
-    </form>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="modal-backup-is-active" name="is_active" checked />
+            <span>Active (seed daily Unknown events and accept status reports)</span>
+          </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="modal-backup-pass-protection" name="pass_protection" />
+            <span>Pass Protection</span>
+          </label>
+          <p class="form-help">
+            When enabled, once a <strong>Pass</strong> status has been recorded for the current day, any subsequent
+            <strong>Warn</strong> or <strong>Fail</strong> report from the API will be ignored — the day's status
+            remains locked to <em>Pass</em>. Useful for backup jobs that run multiple times a day against unreliable
+            storage (e.g. external drives or remote NAS devices): as long as one run succeeds, the day is considered
+            good regardless of later failures.
+          </p>
+        </div>
+        <fieldset class="form-fieldset">
+          <legend class="form-fieldset__legend">Missed backup notifications</legend>
+          <p class="form-help">When any threshold is set, a ticket is automatically created when the condition has been met for that many consecutive days. Leave empty or set to 0 to disable notifications for that status.</p>
+          <div class="form-field">
+            <label class="form-label" for="modal-backup-alert-no-success">No successful backup (days)</label>
+            <input
+              id="modal-backup-alert-no-success"
+              name="alert_no_success_days"
+              type="number"
+              class="form-input form-input--short"
+              min="1"
+              placeholder="e.g. 2"
+            />
+            <p class="form-help">Create a ticket when no successful backup has been recorded in this many days.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="modal-backup-alert-fail">Failed for (days)</label>
+            <input
+              id="modal-backup-alert-fail"
+              name="alert_fail_days"
+              type="number"
+              class="form-input form-input--short"
+              min="1"
+              placeholder="e.g. 3"
+            />
+            <p class="form-help">Create a ticket when the backup has failed for this many consecutive days.</p>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="modal-backup-alert-unknown">Unknown status for (days)</label>
+            <input
+              id="modal-backup-alert-unknown"
+              name="alert_unknown_days"
+              type="number"
+              class="form-input form-input--short"
+              min="1"
+              placeholder="e.g. 3"
+            />
+            <p class="form-help">Create a ticket when no status report has been received for this many consecutive days.</p>
+          </div>
+        </fieldset>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary" id="backup-job-submit-btn">Create job</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
 
-    {% if backup_editing_job %}
-      <div class="card card--panel">
-        <header class="card__header card__header--stacked">
-          <h3 class="card__title">Webhook</h3>
-        </header>
-        <div class="card__body webhook-instructions">
+      <!-- Webhook instructions (shown when editing) -->
+      <div id="backup-job-webhook" hidden>
+        <h3 class="modal__section-title">Webhook</h3>
+        <div class="webhook-instructions">
           <p>Have your backup script <code>POST</code> to:</p>
-          <pre><code>{{ backup_status_url }}</code></pre>
+          <pre><code id="backup-job-webhook-url"></code></pre>
           <p>with this JSON body:</p>
-<pre><code>{
-  "job_id": "{{ backup_editing_job.token }}",
-  "status": "pass",
-  "message": "Optional human readable message"
-}</code></pre>
+          <pre><code id="backup-job-webhook-body"></code></pre>
           <p class="form-help">Accepted <code>status</code> values: <code>pass</code>, <code>fail</code>, <code>warn</code>, <code>unknown</code> (aliases such as <code>ok</code>, <code>error</code>, <code>warning</code> also work).</p>
           <details>
             <summary>PowerShell example</summary>
-<pre><code>$body = @{ job_id = "{{ backup_editing_job.token }}"; status = "pass"; message = "Backup OK" } | ConvertTo-Json
-Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -ContentType "application/json"</code></pre>
+            <pre><code id="backup-job-webhook-ps"></code></pre>
           </details>
           <details>
             <summary>curl example</summary>
-<pre><code>curl -X POST "{{ backup_status_url }}" \
-  -H "Content-Type: application/json" \
-  -d '{"job_id": "{{ backup_editing_job.token }}", "status": "pass", "message": "Backup OK"}'</code></pre>
+            <pre><code id="backup-job-webhook-curl"></code></pre>
           </details>
         </div>
       </div>
-    {% endif %}
+    </div>
   </div>
-</section>
+</div>
 
+<!-- Job token modal -->
 <div class="modal" id="backup-token-modal" role="dialog" aria-modal="true" hidden>
   <div class="modal__content" role="document">
     <button type="button" class="modal__close" data-modal-close>
@@ -376,69 +387,183 @@ Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -Conte
 {{ super() }}
 <script>
 (function () {
-  const modal = document.getElementById('backup-token-modal');
-  const subtitle = document.getElementById('backup-token-modal-subtitle');
-  const valueEl = document.getElementById('backup-token-value');
+  // ── Backup job add/edit modal ──────────────────────────────────────────────
+  const jobModal = document.getElementById('backup-job-modal');
+  const jobForm = document.getElementById('backup-job-form');
+  const jobTitle = document.getElementById('backup-job-modal-title');
+  const jobSubmitBtn = document.getElementById('backup-job-submit-btn');
+  const webhookSection = document.getElementById('backup-job-webhook');
+  const webhookUrlEl = document.getElementById('backup-job-webhook-url');
+  const webhookBodyEl = document.getElementById('backup-job-webhook-body');
+  const webhookPsEl = document.getElementById('backup-job-webhook-ps');
+  const webhookCurlEl = document.getElementById('backup-job-webhook-curl');
+  const backupStatusUrl = jobModal ? jobModal.dataset.backupStatusUrl : '';
+
+  function openJobModal(mode, jobData) {
+    if (!jobModal) return;
+
+    if (mode === 'edit' && jobData) {
+      jobForm.reset();
+      jobTitle.textContent = 'Edit backup job';
+      jobSubmitBtn.textContent = 'Save changes';
+      jobForm.action = `/admin/backup-jobs/${jobData.id}`;
+
+      // Populate fields
+      const companySelect = document.getElementById('modal-backup-company');
+      if (companySelect) companySelect.value = jobData.company_id || '';
+      const nameInput = document.getElementById('modal-backup-name');
+      if (nameInput) nameInput.value = jobData.name || '';
+      const descInput = document.getElementById('modal-backup-description');
+      if (descInput) descInput.value = jobData.description || '';
+      const isActiveChk = document.getElementById('modal-backup-is-active');
+      if (isActiveChk) isActiveChk.checked = !!jobData.is_active;
+      const passProtChk = document.getElementById('modal-backup-pass-protection');
+      if (passProtChk) passProtChk.checked = !!jobData.pass_protection;
+      const noSuccessInput = document.getElementById('modal-backup-alert-no-success');
+      if (noSuccessInput) noSuccessInput.value = jobData.alert_no_success_days || '';
+      const failInput = document.getElementById('modal-backup-alert-fail');
+      if (failInput) failInput.value = jobData.alert_fail_days || '';
+      const unknownInput = document.getElementById('modal-backup-alert-unknown');
+      if (unknownInput) unknownInput.value = jobData.alert_unknown_days || '';
+
+      // Show webhook instructions
+      if (jobData.token) {
+        const token = jobData.token;
+        if (webhookUrlEl) webhookUrlEl.textContent = backupStatusUrl;
+        if (webhookBodyEl) webhookBodyEl.textContent = `{\n  "job_id": "${token}",\n  "status": "pass",\n  "message": "Optional human readable message"\n}`;
+        if (webhookPsEl) webhookPsEl.textContent = `$body = @{ job_id = "${token}"; status = "pass"; message = "Backup OK" } | ConvertTo-Json\nInvoke-RestMethod -Uri "${backupStatusUrl}" -Method Post -Body $body -ContentType "application/json"`;
+        if (webhookCurlEl) webhookCurlEl.textContent = `curl -X POST "${backupStatusUrl}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"job_id": "${token}", "status": "pass", "message": "Backup OK"}'`;
+        if (webhookSection) webhookSection.hidden = false;
+      } else {
+        if (webhookSection) webhookSection.hidden = true;
+      }
+    } else {
+      jobForm.reset();
+      jobTitle.textContent = 'Add backup job';
+      jobSubmitBtn.textContent = 'Create job';
+      jobForm.action = '/admin/backup-jobs';
+      const isActiveChk = document.getElementById('modal-backup-is-active');
+      if (isActiveChk) isActiveChk.checked = true;
+      if (webhookSection) webhookSection.hidden = true;
+    }
+
+    jobModal.hidden = false;
+    // Focus first focusable field
+    const firstField = jobModal.querySelector('select, input:not([type=hidden]), textarea');
+    if (firstField) firstField.focus();
+  }
+
+  function closeJobModal() {
+    if (jobModal) jobModal.hidden = true;
+  }
+
+  // ── Token display modal ────────────────────────────────────────────────────
+  const tokenModal = document.getElementById('backup-token-modal');
+  const tokenSubtitle = document.getElementById('backup-token-modal-subtitle');
+  const tokenValueEl = document.getElementById('backup-token-value');
   const copyBtn = document.getElementById('backup-token-copy-btn');
 
-  function openModal(token, jobName) {
-    subtitle.textContent = jobName ? 'Token for: ' + jobName : 'Current job token';
-    valueEl.textContent = token;
-    modal.hidden = false;
+  function openTokenModal(token, jobName) {
+    if (!tokenModal) return;
+    tokenSubtitle.textContent = jobName ? `Token for: ${jobName}` : 'Current job token';
+    tokenValueEl.textContent = token;
+    tokenModal.hidden = false;
     copyBtn.textContent = 'Copy token';
   }
 
-  function closeModal() {
-    modal.hidden = true;
+  function closeTokenModal() {
+    if (tokenModal) tokenModal.hidden = true;
   }
 
+  // ── Event delegation ───────────────────────────────────────────────────────
   document.addEventListener('click', function (e) {
-    const btn = e.target.closest('[data-backup-token]');
-    if (btn) {
+    // Open add/edit modal
+    const modalOpenBtn = e.target.closest('[data-backup-job-modal-open]');
+    if (modalOpenBtn) {
       e.preventDefault();
-      // Close the dropdown
-      const details = btn.closest('details');
+      const details = modalOpenBtn.closest('details');
       if (details) details.open = false;
-      openModal(btn.dataset.backupToken, btn.dataset.backupJobName || '');
+      const mode = modalOpenBtn.dataset.backupJobMode || 'create';
+      const jobDataRaw = modalOpenBtn.dataset.backupJob;
+      let jobData = null;
+      if (jobDataRaw) {
+        try { jobData = JSON.parse(jobDataRaw); } catch (err) { jobData = null; }
+      }
+      openJobModal(mode, jobData);
       return;
     }
-    if (e.target.closest('[data-modal-close]') || e.target === modal) {
-      closeModal();
+
+    // Open token modal
+    const tokenBtn = e.target.closest('[data-backup-token]');
+    if (tokenBtn) {
+      e.preventDefault();
+      const details = tokenBtn.closest('details');
+      if (details) details.open = false;
+      openTokenModal(tokenBtn.dataset.backupToken, tokenBtn.dataset.backupJobName || '');
+      return;
     }
+
+    // Close any modal
+    if (e.target.closest('[data-modal-close]')) {
+      closeJobModal();
+      closeTokenModal();
+      return;
+    }
+    if (e.target === jobModal) { closeJobModal(); return; }
+    if (e.target === tokenModal) { closeTokenModal(); return; }
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !modal.hidden) closeModal();
-  });
-
-  copyBtn.addEventListener('click', function () {
-    const token = valueEl.textContent;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(token).then(function () {
-        copyBtn.textContent = 'Copied!';
-        setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
-      });
-    } else {
-      // Fallback for browsers without Clipboard API (legacy/restricted contexts).
-      const ta = document.createElement('textarea');
-      ta.value = token;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      copyBtn.textContent = 'Copied!';
-      setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
+    if (e.key === 'Escape') {
+      if (jobModal && !jobModal.hidden) { closeJobModal(); return; }
+      if (tokenModal && !tokenModal.hidden) closeTokenModal();
     }
   });
 
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function () {
+      const token = tokenValueEl.textContent;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(token).then(function () {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
+        });
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = token;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = 'Copy token'; }, 2000);
+      }
+    });
+  }
+
   // Allow row-level action dropdowns to overflow the table wrapper.
   document.querySelectorAll('[data-header-menu]').forEach(function (details) {
-    var wrapper = details.closest('.table-wrapper');
+    const wrapper = details.closest('.table-wrapper');
     if (!wrapper) return;
     details.addEventListener('toggle', function () {
       wrapper.style.overflow = details.open ? 'visible' : '';
     });
   });
+
+  // Auto-open edit modal when ?jobId= is present in the URL (e.g. after token regen).
+  // Find the matching row's data attribute to avoid duplicating the data structure.
+  {% if backup_editing_job %}
+  (function () {
+    const editId = {{ backup_editing_job.id | tojson }};
+    const buttons = document.querySelectorAll('[data-backup-job-modal-open][data-backup-job-mode="edit"]');
+    for (const btn of buttons) {
+      try {
+        const data = JSON.parse(btn.dataset.backupJob || '{}');
+        if (data.id === editId) { openJobModal('edit', data); break; }
+      } catch (err) { /* ignore */ }
+    }
+  })();
+  {% endif %}
 })();
 </script>
 {% endblock %}
@@ -458,5 +583,6 @@ Invoke-RestMethod -Uri "{{ backup_status_url }}" -Method Post -Body $body -Conte
   pre { background: var(--color-bg-muted, #f4f4f5); padding: 0.5rem; border-radius: 4px; overflow-x: auto; }
   .backup-token__value { word-break: break-all; white-space: pre-wrap; color: var(--color-text, #111); }
   .backup-token__actions { margin-top: 0.75rem; }
+  .modal__section-title { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; border-top: 1px solid var(--color-border, #e5e7eb); padding-top: 1rem; }
 </style>
 {% endblock %}
