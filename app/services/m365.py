@@ -3060,7 +3060,7 @@ async def repair_enterprise_app_permissions(
     """
     creds = await get_credentials(company_id)
     if not creds:
-        raise M365Error("No M365 credentials found for company")
+        raise M365Error("No M365 credentials are configured for this company")
 
     access_token = await acquire_delegated_token(company_id)
     if not access_token:

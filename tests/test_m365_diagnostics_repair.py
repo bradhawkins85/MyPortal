@@ -143,7 +143,6 @@ async def test_repair_enterprise_app_permissions_no_credentials():
         with pytest.raises(M365Error, match="No M365 credentials"):
             await m365_service.repair_enterprise_app_permissions(company_id=1)
 
-
 @pytest.mark.anyio("asyncio")
 async def test_repair_enterprise_app_permissions_no_delegated_token():
     """repair_enterprise_app_permissions raises M365NoDelegatedTokenError when no delegated token."""
