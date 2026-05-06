@@ -6043,7 +6043,7 @@ async def verify_m365_permissions(request: Request):
 @app.get("/m365/diagnostics", response_class=HTMLResponse)
 async def m365_diagnostics_page(request: Request, error: str | None = None, success: str | None = None):
     """Display the enterprise app permission diagnostics page."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, _, company, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
     if not user.get("is_super_admin"):
@@ -6068,7 +6068,7 @@ async def m365_diagnostics_page(request: Request, error: str | None = None, succ
 @app.post("/m365/diagnostics/check", response_class=RedirectResponse)
 async def run_m365_diagnostics_check(request: Request):
     """Run the enterprise app permission check and store results."""
-    user, membership, _, company_id, redirect = await _load_license_context(request)
+    user, _, __, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
     if not user.get("is_super_admin"):
