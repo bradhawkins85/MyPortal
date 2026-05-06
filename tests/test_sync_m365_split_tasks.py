@@ -285,6 +285,37 @@ async def test_sync_m365_mailboxes_records_failure_on_exception():
     assert "Mailbox timeout" in data["error"]
 
 
+@pytest.mark.asyncio
+async def test_sync_m365_mailboxes_records_failure_with_empty_exception_message():
+    """sync_m365_mailboxes task includes exception type when exception message is empty."""
+    from app.services.scheduler import SchedulerService
+
+    scheduler = SchedulerService()
+    recorded: list[dict] = []
+
+    async def fake_record(task_id, *, status, started_at, finished_at, duration_ms, details=None):
+        recorded.append({"status": status, "details": details})
+
+    with (
+        patch(
+            "app.services.scheduler.m365_service.sync_mailboxes",
+            # Simulate an exception with empty str() – e.g. httpx network error with no message
+            AsyncMock(side_effect=RuntimeError()),
+        ),
+        patch("app.services.scheduler.scheduled_tasks_repo.record_task_run", side_effect=fake_record),
+        patch("app.services.scheduler.db.acquire_lock") as mock_lock,
+    ):
+        mock_lock.return_value.__aenter__.return_value = True
+        await scheduler._run_task(_make_task("sync_m365_mailboxes"))
+
+    assert recorded[-1]["status"] == "failed"
+    data = json.loads(recorded[-1]["details"])
+    assert data["mailboxes_synced"] == 0
+    # Error should include the exception type name so it is never empty
+    assert data["error"]
+    assert "RuntimeError" in data["error"]
+
+
 # ---------------------------------------------------------------------------
 # COMMANDS_BY_MODULE includes new commands
 # ---------------------------------------------------------------------------

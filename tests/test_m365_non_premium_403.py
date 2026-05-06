@@ -3,6 +3,7 @@
 Covers:
 - _graph_get populates graph_error_code from the response body on error
 - get_all_users retries without signInActivity on Authentication_RequestFromNonPremiumTenantOrB2CTenant 403
+- get_all_users retries without signInActivity on Authentication_MSGraphPermissionMissing 403 (e.g. AuditLog.Read.All missing)
 - get_all_users re-raises non-premium 403 errors with a different error code unchanged
 - get_all_users re-raises 403 with a different graph_error_code unchanged
 - _sync_staff_assignments retries without signInActivity on non-premium 403
@@ -17,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import m365 as m365_service
-from app.services.m365 import M365Error, _NON_PREMIUM_ERROR_CODE, _graph_get
+from app.services.m365 import M365Error, _MISSING_PERMISSION_ERROR_CODE, _NON_PREMIUM_ERROR_CODE, _graph_get
 
 
 @pytest.fixture
@@ -361,3 +362,91 @@ async def test_sync_staff_assignments_non_premium_retry_creates_staff_without_si
     # m365_last_sign_in must be explicitly None since signInActivity was not
     # available in the premium-free retry path
     assert create_calls[0]["m365_last_sign_in"] is None
+
+
+# ---------------------------------------------------------------------------
+# get_all_users – Authentication_MSGraphPermissionMissing fallback
+# (e.g. AuditLog.Read.All missing or not yet propagated after provisioning)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_all_users_retries_without_sign_in_activity_on_missing_permission_403():
+    """get_all_users falls back to the URL without signInActivity when
+    Authentication_MSGraphPermissionMissing is returned.
+
+    This covers the real-world failure:
+        GET /v1.0/users?$select=...signInActivity...
+        → 403 Authentication_MSGraphPermissionMissing (AuditLog.Read.All missing)
+    which previously propagated as a hard error instead of gracefully
+    degrading to a sync without last-sign-in timestamps.
+    """
+    call_count = 0
+    captured_urls: list[str] = []
+
+    async def mock_graph_get(
+        token: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal call_count
+        call_count += 1
+        captured_urls.append(url)
+        if call_count == 1:
+            # First call (with signInActivity) fails with missing-permission 403
+            raise M365Error(
+                "Microsoft Graph request failed (403)",
+                http_status=403,
+                graph_error_code=_MISSING_PERMISSION_ERROR_CODE,
+            )
+        # Retry (without signInActivity) succeeds
+        return {"value": [{"id": "u1", "mail": "user@example.com", "accountEnabled": True}]}
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="fake-token")),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        users = await m365_service.get_all_users(company_id=1)
+
+    assert call_count == 2
+    assert "signInActivity" in captured_urls[0], "First call must include signInActivity"
+    assert "signInActivity" not in captured_urls[1], "Retry must NOT include signInActivity"
+    assert len(users) == 1
+    assert users[0]["mail"] == "user@example.com"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_get_all_users_missing_permission_retry_follows_pagination():
+    """After Authentication_MSGraphPermissionMissing, the retry follows @odata.nextLink pages."""
+    call_count = 0
+
+    async def mock_graph_get(
+        token: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise M365Error(
+                "Microsoft Graph request failed (403)",
+                http_status=403,
+                graph_error_code=_MISSING_PERMISSION_ERROR_CODE,
+            )
+        if call_count == 2:
+            return {
+                "value": [{"id": "u1", "mail": "a@example.com", "accountEnabled": True}],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/users?$skiptoken=page2",
+            }
+        return {"value": [{"id": "u2", "mail": "b@example.com", "accountEnabled": True}]}
+
+    with (
+        patch.object(m365_service, "acquire_access_token", AsyncMock(return_value="fake-token")),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        users = await m365_service.get_all_users(company_id=1)
+
+    assert call_count == 3
+    assert len(users) == 2
