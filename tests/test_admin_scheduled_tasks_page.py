@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import re
 from unittest.mock import AsyncMock
 
 import app.main as main_module
@@ -152,6 +153,14 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     assert "Sync staff" in html
     assert "All companies" in html
     assert "2025-06-01T10:00:00+00:00" in html
+    assert re.search(
+        r'class="header__actions"[\s\S]*aria-controls="scheduled-tasks-bulk-actions-menu"',
+        html,
+    )
+    assert re.search(
+        r'id="scheduled-tasks-bulk-actions-menu"[\s\S]*Manage Tasks',
+        html,
+    )
 
 
 def test_scheduled_tasks_page_empty(super_admin_context, monkeypatch):

@@ -1,12 +1,57 @@
 {% extends "base.html" %}
-{% from "macros/header.html" import page_header_actions %}
-
 {% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
 
 {% block header_actions %}
-  {{ page_header_actions([
-    {"label": "Manage tasks", "type": "link", "variant": "ghost", "href": "/admin/automation"}
-  ]) }}
+  <div class="header-menu" data-header-menu>
+    <button
+      type="button"
+      class="button button--ghost header-menu__button"
+      data-header-menu-toggle
+      aria-label="Bulk actions"
+      aria-haspopup="menu"
+      aria-expanded="false"
+      aria-controls="scheduled-tasks-bulk-actions-menu"
+    >
+      <span>Bulk actions</span>
+      <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+        <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+      </svg>
+    </button>
+    <div
+      id="scheduled-tasks-bulk-actions-menu"
+      class="header-menu__panel"
+      role="menu"
+      data-header-menu-panel
+      hidden
+    >
+      <a class="header-menu__item" role="menuitem" href="/admin/automation">
+        <span>Manage Tasks</span>
+      </a>
+      <button
+        type="button"
+        class="header-menu__item header-menu__item--danger"
+        role="menuitem"
+        id="scheduled-tasks-bulk-delete-btn"
+        form="scheduled-tasks-bulk-delete-form"
+        data-scheduled-tasks-bulk-action="delete"
+        disabled
+      >
+        <span>Delete selected</span>
+        <span id="scheduled-tasks-bulk-count" hidden></span>
+      </button>
+      <button
+        type="button"
+        class="header-menu__item"
+        role="menuitem"
+        id="scheduled-tasks-bulk-rename-btn"
+        form="scheduled-tasks-bulk-rename-form"
+        data-scheduled-tasks-bulk-action="rename"
+        disabled
+      >
+        <span>Rename selected</span>
+      </button>
+    </div>
+  </div>
 {% endblock %}
 
 {% block content %}
@@ -71,53 +116,6 @@
           />
         </div>
         <div class="management__toolbar-actions">
-          <div class="header-menu" data-header-menu>
-            <button
-              type="button"
-              class="button button--ghost header-menu__button"
-              data-header-menu-toggle
-              aria-label="Bulk actions"
-              aria-haspopup="menu"
-              aria-expanded="false"
-              aria-controls="scheduled-tasks-bulk-actions-menu"
-            >
-              <span>Bulk actions</span>
-              <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
-                <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
-              </svg>
-            </button>
-            <div
-              id="scheduled-tasks-bulk-actions-menu"
-              class="header-menu__panel"
-              role="menu"
-              data-header-menu-panel
-              hidden
-            >
-              <button
-                type="button"
-                class="header-menu__item header-menu__item--danger"
-                role="menuitem"
-                id="scheduled-tasks-bulk-delete-btn"
-                form="scheduled-tasks-bulk-delete-form"
-                data-scheduled-tasks-bulk-action="delete"
-                disabled
-              >
-                <span>Delete selected</span>
-                <span id="scheduled-tasks-bulk-count" hidden></span>
-              </button>
-              <button
-                type="button"
-                class="header-menu__item"
-                role="menuitem"
-                id="scheduled-tasks-bulk-rename-btn"
-                form="scheduled-tasks-bulk-rename-form"
-                data-scheduled-tasks-bulk-action="rename"
-                disabled
-              >
-                <span>Rename selected</span>
-              </button>
-            </div>
-          </div>
           <div data-scheduled-task-columns>
             <button
               type="button"
