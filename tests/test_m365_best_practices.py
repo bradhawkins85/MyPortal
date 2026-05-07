@@ -168,7 +168,7 @@ async def test_list_settings_with_catalog_merges_defaults():
 
     catalog = bp_service.list_best_practices()
     assert len(rows) == len(catalog)
-    defaults = {bp["id"]: bool(bp.get("default_enabled", True)) for bp in catalog}
+    defaults = {bp["id"]: bp["default_enabled"] for bp in catalog}
     for entry in rows:
         assert entry["enabled"] is defaults[entry["id"]]
 
