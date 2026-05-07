@@ -5634,6 +5634,7 @@ async def run_m365_best_practices(request: Request):
         return redirect
 
     user_id = user.get("id")
+    reset_count = await m365_best_practices_service.reset_enabled_results_to_unknown(company_id)
 
     def _on_complete(_results: list[dict]) -> None:
         log_info(
@@ -5661,6 +5662,7 @@ async def run_m365_best_practices(request: Request):
         "M365 best practices run queued",
         company_id=company_id,
         user_id=user_id,
+        reset_to_unknown_count=reset_count,
     )
     return RedirectResponse(
         url="/m365/best-practices?success=Best+practice+evaluation+started+in+the+background",
