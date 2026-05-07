@@ -3872,6 +3872,20 @@ async def test_check_anon_dialin_cannot_start_meeting_unknown_on_error():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_check_anon_dialin_cannot_start_meeting_403_includes_permission_hint():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Exchange Online Get-CsTeamsMeetingPolicy failed (403)", http_status=403),
+    ):
+        result = await bp_service._check_anon_dialin_cannot_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+    assert "access denied (403)" in result["details"]
+    assert "Teams.ManageAsApp" in result["details"]
+    assert "Teams Service Administrator" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_check_only_org_bypass_lobby_pass_everyoneincompany():
     policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "EveryoneInCompany"}
     with patch(
