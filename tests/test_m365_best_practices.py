@@ -351,6 +351,68 @@ async def test_run_single_check_raises_when_not_enabled():
             await bp_service.run_single_check(company_id=1, check_id=check_id)
 
 
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_marks_teams_ps_check_as_na():
+    """run_single_check must return STATUS_NOT_APPLICABLE for Teams PS cmdlet checks
+    without acquiring an EXO token or calling the check function."""
+    check_id = "bp_anon_dialin_cannot_start_meeting"
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == check_id)
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "should not run"})
+    bp_entry["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.acquire_delegated_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value={bp_service.CAP_TEAMS},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+            ) as mock_exo,
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            result = await bp_service.run_single_check(company_id=42, check_id=check_id)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert result["status"] == bp_service.STATUS_NOT_APPLICABLE
+    assert "Teams.ManageAsApp" in result["details"]
+    # The check runner and EXO token must NOT have been called
+    fake_source.assert_not_awaited()
+    mock_exo.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # get_last_results
 # ---------------------------------------------------------------------------
@@ -1586,6 +1648,60 @@ async def test_run_best_practices_na_does_not_trigger_auto_remediation():
     async def fake_remediate(*, company_id: int, check_id: str) -> dict:
         remediated.append(check_id)
         return {"success": True, "message": "ok"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_marks_teams_ps_check_as_na():
+    """Checks with requires_teams_manage_as_app=True must be marked N/A without running."""
+    check_id = "bp_anon_dialin_cannot_start_meeting"
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == check_id)
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "should not run"})
+    bp_entry["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value={bp_service.CAP_TEAMS},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=7)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
+    assert "Teams.ManageAsApp" in results[0]["details"]
+    # The check runner must NOT have been called
+    fake_source.assert_not_awaited()
+    # The N/A status must be persisted
+    assert upserts[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
 
 
 # ---------------------------------------------------------------------------
@@ -3872,6 +3988,20 @@ async def test_check_anon_dialin_cannot_start_meeting_unknown_on_error():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_check_anon_dialin_cannot_start_meeting_403_includes_permission_hint():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Exchange Online Get-CsTeamsMeetingPolicy failed (403)", http_status=403),
+    ):
+        result = await bp_service._check_anon_dialin_cannot_start_meeting("exo-token", "tenant-id")
+    assert result["status"] == "unknown"
+    assert "access denied (403)" in result["details"]
+    assert "Teams.ManageAsApp" in result["details"]
+    assert "Teams Service Administrator" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_check_only_org_bypass_lobby_pass_everyoneincompany():
     policy = {**_TEAMS_MEETING_POLICY_PASS, "AutoAdmittedUsers": "EveryoneInCompany"}
     with patch(
@@ -4161,9 +4291,36 @@ def test_teams_checks_use_exo_source_type():
         )
 
 
-# ---------------------------------------------------------------------------
-# SharePoint external sharing restricted (Graph API)
-# ---------------------------------------------------------------------------
+def test_teams_ps_checks_have_requires_teams_manage_as_app_flag():
+    """All known Teams PS cmdlet checks must have requires_teams_manage_as_app=True,
+    and any catalog entry with that flag must also use source_type='exo'."""
+    # Known checks that must carry the flag – this set catches regressions if
+    # the flag is accidentally removed from an existing entry.
+    known_teams_ps_ids = {
+        "bp_anon_dialin_cannot_start_meeting",
+        "bp_only_org_can_bypass_lobby",
+        "bp_invited_users_auto_admitted",
+        "bp_external_participants_no_control",
+        "bp_external_users_cannot_initiate",
+        "bp_teams_external_files_approved_storage",
+        "bp_restrict_anon_users_join_meeting",
+        "bp_restrict_anon_users_start_meeting",
+    }
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    # Verify all known entries carry the flag
+    for check_id in known_teams_ps_ids:
+        entry = catalog.get(check_id)
+        assert entry is not None, f"{check_id} not found in catalog"
+        assert entry.get("requires_teams_manage_as_app") is True, (
+            f"{check_id} must have requires_teams_manage_as_app=True"
+        )
+    # Verify any entry with the flag also uses source_type='exo' (consistency check
+    # that catches newly added Teams PS checks too)
+    for bp in bp_service._BEST_PRACTICES:
+        if bp.get("requires_teams_manage_as_app"):
+            assert bp.get("source_type") == "exo", (
+                f"{bp['id']} has requires_teams_manage_as_app=True but source_type={bp.get('source_type')!r}"
+            )
 
 _SPO_SETTINGS_RESTRICTED = {"sharingCapability": "existingExternalUserSharingOnly"}
 _SPO_SETTINGS_PERMISSIVE = {"sharingCapability": "externalUserAndGuestSharing"}
