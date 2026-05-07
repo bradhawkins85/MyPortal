@@ -12,10 +12,12 @@ import pytest
 
 from app.services import m365 as m365_service
 from app.services.m365 import (
+    _GRAPH_APP_ID,
     _PROVISION_APP_ROLES,
     M365Error,
     _EXO_MANAGE_AS_APP_ROLE,
     _EXO_APP_ID,
+    _EXO_ADMIN_ROLE_TEMPLATE_ID,
     _TEAMS_MANAGE_AS_APP_ROLE,
     _TEAMS_APP_ID,
     _TEAMS_ADMIN_ROLE_TEMPLATE_ID,
@@ -46,6 +48,11 @@ def _sp_response(sp_id: str = "sp-object-id") -> dict[str, Any]:
     return {"value": [{"id": sp_id}]}
 
 
+def _graph_sp_response(sp_id: str = "graph-sp-id") -> dict[str, Any]:
+    """Graph SP response including all _PROVISION_APP_ROLES so availability checks pass."""
+    return {"value": [{"id": sp_id, "appRoles": [{"id": r} for r in _PROVISION_APP_ROLES]}]}
+
+
 def _teams_sp_response(sp_id: str = "teams-sp-id") -> dict[str, Any]:
     """Teams SP response including the ManageAsApp appRole so role-existence check passes."""
     return {"value": [{"id": sp_id, "appRoles": [{"id": _TEAMS_MANAGE_AS_APP_ROLE}]}]}
@@ -73,7 +80,7 @@ async def test_try_grant_missing_permissions_grants_missing_roles():
         if "appRoleAssignments" in url:
             return _assignments_response(present_roles)
         if _GRAPH_APP_ID in url:
-            return {"value": [{"id": "graph-sp-id"}]}
+            return _graph_sp_response()
         # service principal lookup for the company app
         return _sp_response("sp-123")
 
@@ -231,7 +238,7 @@ async def test_try_grant_missing_permissions_continues_on_partial_failure():
         if "appRoleAssignments" in url:
             return _assignments_response(present_roles)
         if _GRAPH_APP_ID in url:
-            return {"value": [{"id": "graph-sp-id"}]}
+            return _graph_sp_response()
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
@@ -317,7 +324,7 @@ async def test_provision_app_registration_skips_409_role_assignments():
         if "filter=displayName" in url:
             return {"value": []}
         if "servicePrincipals" in url and _GRAPH_APP_ID in url:
-            return {"value": [{"id": "graph-sp-id"}]}
+            return _graph_sp_response()
         if "servicePrincipals" in url and _TEAMS_APP_ID in url:
             # Include appRoles so the ManageAsApp role-existence check passes
             return {"value": [{"id": "new-sp-id", "appRoles": [{"id": _TEAMS_MANAGE_AS_APP_ROLE}]}]}
@@ -358,7 +365,7 @@ async def test_try_grant_missing_permissions_returns_false_when_all_grants_fail(
         if "appRoleAssignments" in url:
             return _assignments_response(present_roles)
         if _GRAPH_APP_ID in url:
-            return {"value": [{"id": "graph-sp-id"}]}
+            return _graph_sp_response()
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
@@ -461,7 +468,7 @@ async def test_try_grant_missing_permissions_grants_sharepoint_when_missing():
         if "appRoleAssignments" in url:
             return {"value": all_assignments}
         if _GRAPH_APP_ID in url:
-            return {"value": [{"id": "graph-sp-id"}]}
+            return _graph_sp_response()
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:

@@ -110,6 +110,8 @@
             <td style="text-align: center;">
               {% if perm_result.status == "pass" %}
                 <span title="Pass" style="color: var(--color-success, #16a34a); font-size: 1.25rem;">✓</span>
+              {% elif perm_result.status == "not_supported" %}
+                <span title="Not supported in this tenant" style="color: var(--color-muted, #6b7280); font-size: 1.25rem;">–</span>
               {% elif perm_result.status == "fail" %}
                 <span title="Fail" style="color: var(--color-error, #dc2626); font-size: 1.25rem;">✗</span>
               {% else %}
@@ -123,6 +125,8 @@
             <td>
               {% if perm_result.status == "pass" %}
                 <span class="status status--success">Pass</span>
+              {% elif perm_result.status == "not_supported" %}
+                <span class="status status--neutral" title="This permission is not available in this Microsoft 365 tenant.">Not supported</span>
               {% elif perm_result.status == "fail" %}
                 <span class="status status--danger">Fail</span>
               {% else %}
