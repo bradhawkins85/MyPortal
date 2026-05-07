@@ -248,6 +248,7 @@ async def test_run_best_practices_only_runs_enabled_checks_and_persists():
     assert upserts[0]["status"] == "pass"
     assert upserts[0]["check_name"] == target["name"]
     fake_source.assert_awaited_once_with("fake-token")
+    mock_token.assert_awaited_once_with(42, force_client_credentials=True)
 
 
 @pytest.mark.anyio("asyncio")
@@ -288,6 +289,7 @@ async def test_run_best_practices_handles_check_error_gracefully():
     assert len(results) == 1
     assert results[0]["status"] == "unknown"
     assert "boom" in results[0]["details"]
+    mock_token.assert_awaited_once_with(1, force_client_credentials=True)
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +330,7 @@ async def test_run_single_check_runs_and_persists():
     assert len(upserts) == 1
     assert upserts[0]["company_id"] == 42
     assert upserts[0]["check_id"] == enabled_id
+    mock_token.assert_awaited_once_with(42, force_client_credentials=True)
 
 
 @pytest.mark.anyio("asyncio")
