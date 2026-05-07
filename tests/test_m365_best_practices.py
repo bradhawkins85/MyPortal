@@ -4292,8 +4292,11 @@ def test_teams_checks_use_exo_source_type():
 
 
 def test_teams_ps_checks_have_requires_teams_manage_as_app_flag():
-    """All Teams PS cmdlet checks must have requires_teams_manage_as_app=True."""
-    teams_ps_ids = {
+    """All known Teams PS cmdlet checks must have requires_teams_manage_as_app=True,
+    and any catalog entry with that flag must also use source_type='exo'."""
+    # Known checks that must carry the flag – this set catches regressions if
+    # the flag is accidentally removed from an existing entry.
+    known_teams_ps_ids = {
         "bp_anon_dialin_cannot_start_meeting",
         "bp_only_org_can_bypass_lobby",
         "bp_invited_users_auto_admitted",
@@ -4304,12 +4307,20 @@ def test_teams_ps_checks_have_requires_teams_manage_as_app_flag():
         "bp_restrict_anon_users_start_meeting",
     }
     catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
-    for check_id in teams_ps_ids:
+    # Verify all known entries carry the flag
+    for check_id in known_teams_ps_ids:
         entry = catalog.get(check_id)
         assert entry is not None, f"{check_id} not found in catalog"
         assert entry.get("requires_teams_manage_as_app") is True, (
             f"{check_id} must have requires_teams_manage_as_app=True"
         )
+    # Verify any entry with the flag also uses source_type='exo' (consistency check
+    # that catches newly added Teams PS checks too)
+    for bp in bp_service._BEST_PRACTICES:
+        if bp.get("requires_teams_manage_as_app"):
+            assert bp.get("source_type") == "exo", (
+                f"{bp['id']} has requires_teams_manage_as_app=True but source_type={bp.get('source_type')!r}"
+            )
 
 _SPO_SETTINGS_RESTRICTED = {"sharingCapability": "existingExternalUserSharingOnly"}
 _SPO_SETTINGS_PERMISSIVE = {"sharingCapability": "externalUserAndGuestSharing"}
