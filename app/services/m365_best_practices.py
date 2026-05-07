@@ -988,6 +988,28 @@ async def _check_zap_teams_on(
 # holds the appropriate Teams admin permissions (Teams.ManageAsApp or the
 # Teams Service Administrator RBAC role on the service principal).
 
+_TEAMS_PERMISSION_HINT = (
+    " The service principal requires the Teams.ManageAsApp app role "
+    "and the Teams Service Administrator directory role. Re-run the "
+    "'Authorize portal access' flow to grant the required permissions, "
+    "or assign them manually in Microsoft Entra ID > Roles and "
+    "administrators > Teams Administrator."
+)
+
+
+def _teams_ps_error_detail(exc: M365Error, cmdlet: str) -> str:
+    """Return a user-facing error detail string for a Teams PowerShell cmdlet failure.
+
+    When the error is HTTP 403 (access denied), the message includes a
+    permissions hint so administrators know which roles to grant.
+    """
+    if exc.http_status == 403:
+        return (
+            f"Unable to query {cmdlet}: access denied (403)."
+            + _TEAMS_PERMISSION_HINT
+        )
+    return f"Unable to query {cmdlet}: {exc}"
+
 
 async def _check_anon_dialin_cannot_start_meeting(
     exo_token: str, tenant_id: str
@@ -1001,7 +1023,7 @@ async def _check_anon_dialin_cannot_start_meeting(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1036,7 +1058,7 @@ async def _check_only_org_bypass_lobby(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1063,7 +1085,7 @@ async def _check_invited_users_auto_admitted(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1089,7 +1111,7 @@ async def _check_external_participants_no_control(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1115,7 +1137,7 @@ async def _check_external_users_cannot_initiate(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTenantFederationConfiguration: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTenantFederationConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1152,7 +1174,7 @@ async def _check_teams_external_files_approved_storage(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsClientConfiguration: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsClientConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1188,7 +1210,7 @@ async def _check_restrict_anon_users_join_meeting(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1214,7 +1236,7 @@ async def _check_restrict_anon_users_start_meeting(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
