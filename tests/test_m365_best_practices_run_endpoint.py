@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -57,6 +58,7 @@ async def test_reset_enabled_results_to_unknown_only_targets_enabled_non_exclude
     assert call_kwargs["check_name"] == "Check one"
     assert call_kwargs["status"] == bp_service.STATUS_UNKNOWN
     assert call_kwargs["details"] == "Evaluation in progress."
+    assert isinstance(call_kwargs["run_at"], datetime)
 
 
 def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
