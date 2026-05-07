@@ -235,6 +235,34 @@ def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
     return str(client_id or "").strip() == AZURE_CLI_CLIENT_ID
 
 
+async def _get_sp_app_role_ids(access_token: str, app_id: str) -> tuple[str | None, set[str]]:
+    """Return the object ID and set of appRole IDs for the service principal matching *app_id*.
+
+    Queries Microsoft Graph for the service principal whose ``appId`` equals
+    *app_id* and returns its object ID together with the set of role IDs exposed
+    via its ``appRoles`` list.  Returns ``(None, set())`` when the service
+    principal is not found in the tenant (e.g. the service is not provisioned).
+
+    This is used to filter ``requiredResourceAccess`` and ``appRoleAssignments``
+    so that permission GUIDs that do not exist in the tenant are silently skipped
+    rather than causing admin-consent failures or noisy error logs.
+    """
+    try:
+        resp = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{app_id}'&$select=id,appRoles",
+        )
+        items = resp.get("value", [])
+        if not items:
+            return None, set()
+        sp = items[0]
+        role_ids = {r["id"] for r in sp.get("appRoles", []) if r.get("id")}
+        return sp["id"], role_ids
+    except M365Error:
+        return None, set()
+
+
 def get_pkce_client_id() -> str:
     """Return the PKCE public-client app ID to use for the bootstrap provisioning flow.
 
@@ -1307,13 +1335,19 @@ async def provision_app_registration(
     """Create a per-tenant app registration with required permissions.
 
     Uses a delegated *access_token* obtained via the admin-consent OAuth flow to:
-    1. Create an App Registration in the tenant.
-    2. Create the corresponding Service Principal (Enterprise App).
-    3. Find the Microsoft Graph service principal in the tenant.
+    1. Validate which required Graph/Teams permissions actually exist in this tenant.
+    2. Create an App Registration in the tenant with only the supported permissions.
+    3. Create the corresponding Service Principal (Enterprise App).
     4. Grant admin consent for each required application permission.
     5. Make the service principal an owner of the app registration so it can
        renew its own client secret later (requires Application.ReadWrite.OwnedBy).
     6. Generate and return a client secret for the new app.
+
+    The ``requiredResourceAccess`` manifest is filtered against the resource SPs'
+    actual ``appRoles`` so that permission GUIDs that don't exist in this tenant
+    (e.g. ``SharePointTenantSettings.Read.All`` on tenants whose Graph SP hasn't
+    been updated yet) are never included.  Including an invalid GUID would cause
+    the Azure portal "Grant admin consent" button to fail for the entire app.
 
     Returns a dict with ``client_id``, ``client_secret``, ``app_object_id``,
     ``client_secret_key_id`` and ``client_secret_expires_at``.  The client
@@ -1331,30 +1365,61 @@ async def provision_app_registration(
     #    that re-provisioning always starts from a clean slate.
     await _delete_existing_apps_by_display_name(access_token, display_name)
 
-    # 1. Create the app registration
-    app_payload: dict[str, Any] = {
-        "displayName": display_name,
-        "signInAudience": "AzureADMyOrg",
-        "requiredResourceAccess": [
-            {
-                "resourceAppId": _GRAPH_APP_ID,
-                "resourceAccess": [
-                    {"id": role_id, "type": "Role"} for role_id in _PROVISION_APP_ROLES
-                ],
-            },
-            {
-                "resourceAppId": _EXO_APP_ID,
-                "resourceAccess": [
-                    {"id": _EXO_MANAGE_AS_APP_ROLE, "type": "Role"},
-                ],
-            },
+    # 1. Validate permissions against the tenant's actual resource SP app roles.
+    #    Some permissions (e.g. SharePointTenantSettings.Read.All) are only
+    #    available on tenants where the corresponding service has been updated.
+    #    Including an invalid GUID in requiredResourceAccess causes the Azure
+    #    portal "Grant admin consent" button to fail for the entire app.
+    graph_sp_id, graph_sp_role_ids = await _get_sp_app_role_ids(access_token, _GRAPH_APP_ID)
+    if not graph_sp_id:
+        raise M365Error(
+            "Unable to locate Microsoft Graph service principal in the tenant"
+        )
+
+    _teams_sp_id, teams_sp_role_ids = await _get_sp_app_role_ids(access_token, _TEAMS_APP_ID)
+
+    # Filter Graph roles to only those present in this tenant's Graph SP.
+    valid_graph_roles: list[str] = [r for r in _PROVISION_APP_ROLES if r in graph_sp_role_ids]
+    skipped_graph_roles: list[str] = [r for r in _PROVISION_APP_ROLES if r not in graph_sp_role_ids]
+    if skipped_graph_roles:
+        log_warning(
+            "Some required Graph permissions are not available in this tenant's "
+            "Microsoft Graph service principal and will be omitted from the app manifest. "
+            "They can be granted later when the tenant's Graph SP is updated.",
+            skipped_roles=skipped_graph_roles,
+        )
+
+    teams_role_available = _TEAMS_MANAGE_AS_APP_ROLE in teams_sp_role_ids
+
+    required_resource_access: list[dict[str, Any]] = [
+        {
+            "resourceAppId": _GRAPH_APP_ID,
+            "resourceAccess": [
+                {"id": role_id, "type": "Role"} for role_id in valid_graph_roles
+            ],
+        },
+        {
+            "resourceAppId": _EXO_APP_ID,
+            "resourceAccess": [
+                {"id": _EXO_MANAGE_AS_APP_ROLE, "type": "Role"},
+            ],
+        },
+    ]
+    if teams_role_available and _teams_sp_id:
+        required_resource_access.append(
             {
                 "resourceAppId": _TEAMS_APP_ID,
                 "resourceAccess": [
                     {"id": _TEAMS_MANAGE_AS_APP_ROLE, "type": "Role"},
                 ],
-            },
-        ],
+            }
+        )
+
+    # 2. Create the app registration with only the validated permissions.
+    app_payload: dict[str, Any] = {
+        "displayName": display_name,
+        "signInAudience": "AzureADMyOrg",
+        "requiredResourceAccess": required_resource_access,
     }
     if redirect_uri:
         app_payload["web"] = {"redirectUris": [redirect_uri]}
@@ -1367,7 +1432,7 @@ async def provision_app_registration(
     client_id: str = app_data["appId"]
     log_info("Provisioned M365 app registration", client_id=client_id)
 
-    # 2. Create a service principal (Enterprise App) for the registration
+    # 3. Create a service principal (Enterprise App) for the registration
     sp_data = await _graph_post(
         access_token,
         "https://graph.microsoft.com/v1.0/servicePrincipals",
@@ -1375,19 +1440,6 @@ async def provision_app_registration(
     )
     sp_object_id: str = sp_data["id"]
     log_info("Created M365 service principal", sp_object_id=sp_object_id)
-
-    # 3. Locate the Microsoft Graph service principal in this tenant
-    graph_sp_response = await _graph_get(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals"
-        f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
-    )
-    graph_sp_list = graph_sp_response.get("value", [])
-    if not graph_sp_list:
-        raise M365Error(
-            "Unable to locate Microsoft Graph service principal in the tenant"
-        )
-    graph_sp_id: str = graph_sp_list[0]["id"]
 
     # 4. Create a client secret with a configurable lifetime (default: 730 days / 2 years).
     # This is done *before* the role-assignment step so that the HTTP callback
@@ -1425,7 +1477,13 @@ async def provision_app_registration(
     #    retries.  The grants are best-effort: if they fail the app registration
     #    is still usable and the admin can re-provision to retry.
     asyncio.create_task(
-        _grant_provisioned_roles(access_token, sp_object_id, graph_sp_id, app_object_id),
+        _grant_provisioned_roles(
+            access_token,
+            sp_object_id,
+            graph_sp_id,
+            app_object_id,
+            valid_graph_roles=valid_graph_roles,
+        ),
         name=f"provision_roles_{client_id}",
     )
 
@@ -1443,6 +1501,8 @@ async def _grant_provisioned_roles(
     sp_object_id: str,
     graph_sp_id: str,
     app_object_id: str,
+    *,
+    valid_graph_roles: list[str] | None = None,
 ) -> None:
     """Background task: grant all required role assignments for a newly-provisioned app.
 
@@ -1453,17 +1513,23 @@ async def _grant_provisioned_roles(
     and the admin can re-provision to retry.
 
     Grants in order:
-    1. All ``_PROVISION_APP_ROLES`` application permissions on Microsoft Graph.
+    1. All ``_PROVISION_APP_ROLES`` application permissions on Microsoft Graph
+       (filtered to only those in *valid_graph_roles* when provided, to avoid
+       granting role GUIDs that don't exist in the tenant's Graph SP).
     2. ``Exchange.ManageAsApp`` on Exchange Online (best-effort).
     3. Exchange Administrator directory role (best-effort).
     4. Service-principal as owner of the app registration (enables secret
        self-renewal via ``Application.ReadWrite.OwnedBy``).
     """
+    # Use the pre-validated list when available; otherwise fall back to the
+    # full list (callers that don't provide the filtered list accept the risk
+    # of attempting grants for roles that may not exist in the tenant).
+    roles_to_grant = valid_graph_roles if valid_graph_roles is not None else _PROVISION_APP_ROLES
     try:
         # 1. Grant each required Microsoft Graph application permission.
         # 409 Conflict means the assignment already exists – treat as success.
         # Any other error is logged and skipped so remaining roles still process.
-        for role_id in _PROVISION_APP_ROLES:
+        for role_id in roles_to_grant:
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
@@ -2953,6 +3019,17 @@ async def check_enterprise_app_permissions(
         for role_id, resource_id in assigned_pairs
     }
 
+    # Look up each resource SP's available appRoles so we can distinguish
+    # 'fail' (role exists but not assigned) from 'not_supported' (role GUID not
+    # present in this tenant's resource SP at all, e.g. SharePointTenantSettings
+    # .Read.All on a tenant whose Graph SP hasn't been updated).
+    resource_sp_role_ids: dict[str, set[str]] = {}
+    for app_entry in ENTERPRISE_APP_CATALOG:
+        catalog_app_id: str = app_entry["app_id"]
+        if catalog_app_id not in resource_sp_role_ids:
+            _sp_obj_id, role_id_set = await _get_sp_app_role_ids(access_token, catalog_app_id)
+            resource_sp_role_ids[catalog_app_id] = role_id_set
+
     checked_at = datetime.now(timezone.utc).replace(tzinfo=None)
     result_apps: list[dict[str, Any]] = []
 
@@ -2966,9 +3043,20 @@ async def check_enterprise_app_permissions(
             role_id: str = perm["id"]
             role_name: str = perm["name"]
             granted = (role_id, app_id) in assigned_by_app
-            perm_status = "pass" if granted else "fail"
-            if not granted:
-                app_all_ok = False
+            # Determine whether the role GUID exists at all on the resource SP.
+            # When it doesn't, the permission can never be granted via admin
+            # consent and we mark it 'not_supported' rather than 'fail'.
+            available = role_id in resource_sp_role_ids.get(app_id, set())
+            if granted:
+                perm_status = "pass"
+            elif not available:
+                perm_status = "not_supported"
+            else:
+                perm_status = "fail"
+
+            # Only 'fail' counts against all_ok; 'not_supported' permissions
+            # cannot be granted in this tenant and are not actionable failures.
+            app_all_ok = app_all_ok and perm_status in ("pass", "not_supported")
 
             perm_results.append({"id": role_id, "name": role_name, "status": perm_status})
 
@@ -3020,7 +3108,10 @@ async def get_last_enterprise_app_permissions(
                 "checked_at": row.get("checked_at"),
             }
         perm_status = row["status"]
-        if perm_status != "pass":
+        # 'not_supported' means the permission GUID doesn't exist in this
+        # tenant's resource SP and can never be granted; it does NOT indicate
+        # a configuration problem that the admin needs to fix.
+        if perm_status not in ("pass", "not_supported"):
             by_app[app_id]["all_ok"] = False
         by_app[app_id]["permissions"].append(
             {"id": row["role_id"], "name": row["role_name"], "status": perm_status}
@@ -3250,8 +3341,10 @@ async def try_grant_missing_permissions(
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
         missing: list[str] = sorted(required_roles - assigned_roles)
 
-        # Look up the EXO and Teams service principal object IDs so we can check
-        # whether ManageAsApp has been granted to each one individually.
+        # Look up the Graph, EXO, and Teams service principal object IDs so we
+        # can check whether ManageAsApp has been granted to each one individually.
+        # We also retrieve the Graph SP's appRoles to filter out any required
+        # permissions that don't exist in this tenant.
         exo_sp_id: str | None = None
         teams_sp_id: str | None = None
         try:
@@ -3295,21 +3388,31 @@ async def try_grant_missing_permissions(
 
         # Grant each missing Graph role assignment
         if missing:
-            # Locate the Microsoft Graph service principal in this tenant
-            graph_sp_response = await _graph_get(
-                access_token,
-                "https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_GRAPH_APP_ID}'&$select=id",
+            # Locate the Microsoft Graph service principal in this tenant and
+            # retrieve its appRoles to filter out any permission GUIDs that
+            # don't exist in this tenant (e.g. SharePointTenantSettings.Read.All
+            # on tenants where the Graph SP hasn't been updated to include it).
+            # Attempting to grant a non-existent role would always fail with a
+            # 400 error and produce misleading log entries.
+            graph_sp_id, graph_sp_role_ids = await _get_sp_app_role_ids(
+                access_token, _GRAPH_APP_ID
             )
-            graph_sp_list = graph_sp_response.get("value", [])
-            if not graph_sp_list:
+            if not graph_sp_id:
                 log_info(
                     "try_grant_missing_permissions: Graph SP not found",
                     company_id=company_id,
                 )
             else:
-                graph_sp_id: str = graph_sp_list[0]["id"]
-                for role_id in missing:
+                grantable = [r for r in missing if r in graph_sp_role_ids]
+                not_in_tenant = [r for r in missing if r not in graph_sp_role_ids]
+                if not_in_tenant:
+                    log_info(
+                        "try_grant_missing_permissions: skipping roles not present "
+                        "on the tenant's Microsoft Graph service principal",
+                        company_id=company_id,
+                        skipped_roles=not_in_tenant,
+                    )
+                for role_id in grantable:
                     try:
                         await _graph_post(
                             access_token,
