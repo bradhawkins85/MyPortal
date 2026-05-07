@@ -4908,6 +4908,29 @@ async def get_auto_remediate_check_ids() -> set[str]:
     return auto_remediate
 
 
+async def reset_enabled_results_to_unknown(company_id: int) -> int:
+    """Set all enabled (non-excluded) checks to Unknown for ``company_id``."""
+    enabled = await get_enabled_check_ids()
+    excluded = await bp_repo.get_company_exclusions(company_id)
+    run_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    reset_count = 0
+
+    for bp in _BEST_PRACTICES:
+        check_id = bp["id"]
+        if check_id not in enabled or check_id in excluded:
+            continue
+        await bp_repo.upsert_result(
+            company_id=company_id,
+            check_id=check_id,
+            check_name=bp["name"],
+            status=STATUS_UNKNOWN,
+            details="Evaluation in progress.",
+            run_at=run_at,
+        )
+        reset_count += 1
+    return reset_count
+
+
 async def list_settings_with_catalog(company_id: int | None = None) -> list[dict[str, Any]]:
     """Return the catalog merged with the current global enabled and auto-remediate flags.
 
@@ -5741,6 +5764,7 @@ __all__ = [
     "list_settings_with_catalog",
     "get_enabled_check_ids",
     "get_auto_remediate_check_ids",
+    "reset_enabled_results_to_unknown",
     "set_enabled_checks",
     "save_company_exclusions",
     "run_best_practices",
