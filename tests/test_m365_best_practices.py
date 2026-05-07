@@ -1588,6 +1588,60 @@ async def test_run_best_practices_na_does_not_trigger_auto_remediation():
         return {"success": True, "message": "ok"}
 
 
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_marks_teams_ps_check_as_na():
+    """Checks with requires_teams_manage_as_app=True must be marked N/A without running."""
+    check_id = "bp_anon_dialin_cannot_start_meeting"
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == check_id)
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "should not run"})
+    bp_entry["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value={bp_service.CAP_TEAMS},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            results = await bp_service.run_best_practices(company_id=7)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(results) == 1
+    assert results[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
+    assert "Teams.ManageAsApp" in results[0]["details"]
+    # The check runner must NOT have been called
+    fake_source.assert_not_awaited()
+    # The N/A status must be persisted
+    assert upserts[0]["status"] == bp_service.STATUS_NOT_APPLICABLE
+
+
 # ---------------------------------------------------------------------------
 # Transient-failure retry helpers
 # ---------------------------------------------------------------------------
@@ -4175,9 +4229,25 @@ def test_teams_checks_use_exo_source_type():
         )
 
 
-# ---------------------------------------------------------------------------
-# SharePoint external sharing restricted (Graph API)
-# ---------------------------------------------------------------------------
+def test_teams_ps_checks_have_requires_teams_manage_as_app_flag():
+    """All Teams PS cmdlet checks must have requires_teams_manage_as_app=True."""
+    teams_ps_ids = {
+        "bp_anon_dialin_cannot_start_meeting",
+        "bp_only_org_can_bypass_lobby",
+        "bp_invited_users_auto_admitted",
+        "bp_external_participants_no_control",
+        "bp_external_users_cannot_initiate",
+        "bp_teams_external_files_approved_storage",
+        "bp_restrict_anon_users_join_meeting",
+        "bp_restrict_anon_users_start_meeting",
+    }
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    for check_id in teams_ps_ids:
+        entry = catalog.get(check_id)
+        assert entry is not None, f"{check_id} not found in catalog"
+        assert entry.get("requires_teams_manage_as_app") is True, (
+            f"{check_id} must have requires_teams_manage_as_app=True"
+        )
 
 _SPO_SETTINGS_RESTRICTED = {"sharingCapability": "existingExternalUserSharingOnly"}
 _SPO_SETTINGS_PERMISSIVE = {"sharingCapability": "externalUserAndGuestSharing"}
