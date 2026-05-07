@@ -168,8 +168,22 @@ async def test_list_settings_with_catalog_merges_defaults():
 
     catalog = bp_service.list_best_practices()
     assert len(rows) == len(catalog)
+    defaults = {bp["id"]: bool(bp.get("default_enabled", True)) for bp in catalog}
     for entry in rows:
-        assert entry["enabled"] is True
+        assert entry["enabled"] is defaults[entry["id"]]
+
+
+def test_manual_review_checks_are_disabled_by_default():
+    manual_ids = {
+        "bp_dialin_cannot_bypass_lobby",
+        "bp_restrict_dialin_bypass_lobby",
+        "bp_dlp_policies_enabled",
+        "bp_dlp_policies_teams",
+    }
+    catalog = bp_service.list_best_practices()
+    index = {bp["id"]: bp for bp in catalog}
+    for check_id in manual_ids:
+        assert index[check_id]["default_enabled"] is False
 
 
 # ---------------------------------------------------------------------------
