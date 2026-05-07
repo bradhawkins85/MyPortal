@@ -152,9 +152,9 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     assert "Sync staff" in html
     assert "All companies" in html
     assert "2025-06-01T10:00:00+00:00" in html
-    assert 'class="header__actions" data-header-actions' in html
-    header_html = html.split('class="header__actions" data-header-actions', maxsplit=1)[1]
-    header_html = header_html.split("</header>", maxsplit=1)[0]
+    _, separator, header_html = html.partition('class="header__actions" data-header-actions')
+    assert separator
+    header_html, _, _ = header_html.partition("</header>")
     assert 'aria-controls="scheduled-tasks-bulk-actions-menu"' in header_html
     assert 'id="scheduled-tasks-bulk-actions-menu"' in header_html
     assert ">Manage Tasks<" in header_html
