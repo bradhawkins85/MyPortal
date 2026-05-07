@@ -13,8 +13,12 @@
 -- given engine.
 
 -- Step 1: Create replacement table with the updated CHECK constraint.
+-- Use INTEGER PRIMARY KEY without AUTO_INCREMENT/AUTOINCREMENT; the migration
+-- runner transforms AUTO_INCREMENT → AUTOINCREMENT for SQLite, but omitting it
+-- is simpler and portable: both MySQL and SQLite assign sequential IDs to
+-- INTEGER PRIMARY KEY columns when no value is supplied.
 CREATE TABLE IF NOT EXISTS m365_permission_check_results_v2 (
-    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    id INTEGER PRIMARY KEY,
     company_id INT NOT NULL,
     app_id VARCHAR(100) NOT NULL,
     app_name VARCHAR(255) NOT NULL,

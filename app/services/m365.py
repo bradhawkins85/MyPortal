@@ -3053,7 +3053,10 @@ async def check_enterprise_app_permissions(
                 perm_status = "not_supported"
             else:
                 perm_status = "fail"
-                app_all_ok = False
+
+            # Only 'fail' counts against all_ok; 'not_supported' permissions
+            # cannot be granted in this tenant and are not actionable failures.
+            app_all_ok = app_all_ok and perm_status in ("pass", "not_supported")
 
             perm_results.append({"id": role_id, "name": role_name, "status": perm_status})
 
