@@ -4833,7 +4833,8 @@ for _bp in _BEST_PRACTICES:
 # Checks implemented via manual-review runners have no automation support in
 # MyPortal yet; keep them disabled by default across all companies.
 for _bp in _BEST_PRACTICES:
-    source_name = getattr(_bp.get("source"), "__name__", "")
+    source = _bp.get("source")
+    source_name = getattr(source, "__name__", "")
     if isinstance(source_name, str) and source_name.endswith("_manual"):
         _bp["default_enabled"] = False
 
