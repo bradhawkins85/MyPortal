@@ -993,7 +993,7 @@ _TEAMS_PERMISSION_HINT = (
     "and the Teams Service Administrator directory role. Re-run the "
     "'Authorize portal access' flow to grant the required permissions, "
     "or assign them manually in Microsoft Entra ID > Roles and "
-    "administrators > Teams Administrator."
+    "administrators > Teams Service Administrator."
 )
 
 # Checks that call Teams PowerShell cmdlets via the Exchange Online InvokeCommand
