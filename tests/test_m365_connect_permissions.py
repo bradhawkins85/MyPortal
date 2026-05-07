@@ -507,7 +507,7 @@ async def test_try_grant_missing_permissions_grants_sharepoint_when_missing():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_check_enterprise_app_permissions_marks_sharepoint_as_fail_not_not_supported():
+async def test_check_enterprise_app_permissions_marks_sharepoint_as_fail_when_missing():
     """Diagnostics should treat missing SharePointTenantSettings.Read.All as actionable fail."""
     with (
         patch.object(m365_service, "get_credentials", AsyncMock(return_value={
