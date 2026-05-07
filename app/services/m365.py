@@ -3047,6 +3047,12 @@ async def check_enterprise_app_permissions(
             # When it doesn't, the permission can never be granted via admin
             # consent and we mark it 'not_supported' rather than 'fail'.
             available = role_id in resource_sp_role_ids.get(app_id, set())
+            # SharePointTenantSettings.Read.All is now expected to be available
+            # and required for diagnostics/remediation flows. If a tenant lookup
+            # does not surface the role GUID, treat it as a missing permission
+            # so diagnostics show an actionable failure.
+            if app_id == _GRAPH_APP_ID and role_id == _SHAREPOINT_TENANT_SETTINGS_ROLE:
+                available = True
             if granted:
                 perm_status = "pass"
             elif not available:

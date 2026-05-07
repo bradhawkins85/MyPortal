@@ -506,6 +506,43 @@ async def test_try_grant_missing_permissions_grants_sharepoint_when_missing():
     )
 
 
+@pytest.mark.anyio("asyncio")
+async def test_check_enterprise_app_permissions_marks_sharepoint_as_fail_when_missing():
+    """Diagnostics should treat missing SharePointTenantSettings.Read.All as actionable fail."""
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value={
+            "tenant_id": "tenant-123",
+            "client_id": "app-client-id",
+            "client_secret": "secret",
+        })),
+        patch.object(m365_service, "_exchange_token", AsyncMock(return_value=("access-token", None, None))),
+        patch.object(
+            m365_service,
+            "_graph_get",
+            AsyncMock(side_effect=[
+                {"value": [{"id": "sp-object-id"}]},  # company SP lookup
+                {"value": []},  # appRoleAssignments (none assigned)
+            ]),
+        ),
+        patch.object(
+            m365_service,
+            "_get_sp_app_role_ids",
+            AsyncMock(return_value=("graph-sp-id", set())),  # role lookup does not include SPO role
+        ),
+        patch.object(m365_service.m365_repo, "upsert_permission_check_result", AsyncMock()),
+        patch.object(
+            m365_service,
+            "ENTERPRISE_APP_CATALOG",
+            [{"name": "Microsoft Graph", "app_id": _GRAPH_APP_ID, "permissions": [
+                {"id": _SHAREPOINT_TENANT_SETTINGS_ROLE, "name": "SharePointTenantSettings.Read.All"},
+            ]}],
+        ),
+    ):
+        result = await m365_service.check_enterprise_app_permissions(company_id=1)
+
+    assert result[0]["permissions"][0]["status"] == "fail"
+
+
 
 # ---------------------------------------------------------------------------
 # Tests for _ensure_exchange_admin_role
