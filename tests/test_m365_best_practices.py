@@ -351,6 +351,68 @@ async def test_run_single_check_raises_when_not_enabled():
             await bp_service.run_single_check(company_id=1, check_id=check_id)
 
 
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_marks_teams_ps_check_as_na():
+    """run_single_check must return STATUS_NOT_APPLICABLE for Teams PS cmdlet checks
+    without acquiring an EXO token or calling the check function."""
+    check_id = "bp_anon_dialin_cannot_start_meeting"
+    bp_entry = next(b for b in bp_service._BEST_PRACTICES if b["id"] == check_id)
+    real_source = bp_entry["source"]
+    fake_source = AsyncMock(return_value={"status": "pass", "details": "should not run"})
+    bp_entry["source"] = fake_source
+
+    upserts: list[dict] = []
+
+    async def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.acquire_delegated_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value={bp_service.CAP_TEAMS},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+            ) as mock_exo,
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=fake_upsert,
+            ),
+        ):
+            result = await bp_service.run_single_check(company_id=42, check_id=check_id)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert result["status"] == bp_service.STATUS_NOT_APPLICABLE
+    assert "Teams.ManageAsApp" in result["details"]
+    # The check runner and EXO token must NOT have been called
+    fake_source.assert_not_awaited()
+    mock_exo.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # get_last_results
 # ---------------------------------------------------------------------------
