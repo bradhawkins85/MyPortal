@@ -988,6 +988,42 @@ async def _check_zap_teams_on(
 # holds the appropriate Teams admin permissions (Teams.ManageAsApp or the
 # Teams Service Administrator RBAC role on the service principal).
 
+_TEAMS_PERMISSION_HINT = (
+    " The service principal requires the Teams.ManageAsApp app role "
+    "and the Teams Service Administrator directory role. Re-run the "
+    "'Authorize portal access' flow to grant the required permissions, "
+    "or assign them manually in Microsoft Entra ID > Roles and "
+    "administrators > Teams Service Administrator."
+)
+
+# Checks that call Teams PowerShell cmdlets via the Exchange Online InvokeCommand
+# endpoint (Get-CsTeamsMeetingPolicy, Get-CsTenantFederationConfiguration,
+# Get-CsTeamsClientConfiguration) are marked with ``"requires_teams_manage_as_app": True``
+# in the catalog.  The ``Teams.ManageAsApp`` application role cannot be programmatically
+# assigned to an app registration, so these checks are permanently not applicable.
+_TEAMS_PS_NOT_APPLICABLE_DETAILS = (
+    "Not applicable – this check calls a Teams PowerShell cmdlet via the "
+    "Exchange Online InvokeCommand endpoint, which requires the "
+    "Teams.ManageAsApp application role. This role cannot be programmatically "
+    "assigned to an app registration and must be granted manually by a Global "
+    "Administrator in Microsoft Entra ID. Until then, this check cannot be "
+    "evaluated automatically."
+)
+
+
+def _teams_ps_error_detail(exc: M365Error, cmdlet: str) -> str:
+    """Return a user-facing error detail string for a Teams PowerShell cmdlet failure.
+
+    When the error is HTTP 403 (access denied), the message includes a
+    permissions hint so administrators know which roles to grant.
+    """
+    if exc.http_status == 403:
+        return (
+            f"Unable to query {cmdlet}: access denied (403)."
+            + _TEAMS_PERMISSION_HINT
+        )
+    return f"Unable to query {cmdlet}: {exc}"
+
 
 async def _check_anon_dialin_cannot_start_meeting(
     exo_token: str, tenant_id: str
@@ -1001,7 +1037,7 @@ async def _check_anon_dialin_cannot_start_meeting(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1036,7 +1072,7 @@ async def _check_only_org_bypass_lobby(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1063,7 +1099,7 @@ async def _check_invited_users_auto_admitted(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1089,7 +1125,7 @@ async def _check_external_participants_no_control(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1115,7 +1151,7 @@ async def _check_external_users_cannot_initiate(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTenantFederationConfiguration: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTenantFederationConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1152,7 +1188,7 @@ async def _check_teams_external_files_approved_storage(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsClientConfiguration: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsClientConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1188,7 +1224,7 @@ async def _check_restrict_anon_users_join_meeting(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -1214,7 +1250,7 @@ async def _check_restrict_anon_users_start_meeting(
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-CsTeamsMeetingPolicy: {exc}")
+                       _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -4273,6 +4309,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_only_org_can_bypass_lobby",
@@ -4287,6 +4324,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_invited_users_auto_admitted",
@@ -4302,6 +4340,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_dialin_cannot_bypass_lobby",
@@ -4358,6 +4397,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_external_users_cannot_initiate",
@@ -4375,6 +4415,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_teams_external_files_approved_storage",
@@ -4393,6 +4434,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_restrict_anon_users_join_meeting",
@@ -4411,6 +4453,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_restrict_anon_users_start_meeting",
@@ -4430,6 +4473,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "requires_teams_manage_as_app": True,
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
@@ -5295,6 +5339,11 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 f"license(s) which the tenant does not have: "
                 f"{_format_missing_licenses(missing)}."
             )
+        elif bp.get("requires_teams_manage_as_app"):
+            # Teams PowerShell cmdlet checks require Teams.ManageAsApp which
+            # cannot be programmatically assigned to an app registration.
+            status = STATUS_NOT_APPLICABLE
+            details = _TEAMS_PS_NOT_APPLICABLE_DETAILS
         elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
             # CIS batch check – run the group runner once and cache results
             if cis_group not in cis_group_cache:
@@ -5447,6 +5496,9 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
             f"license(s) which the tenant does not have: "
             f"{_format_missing_licenses(missing)}."
         )
+    elif bp.get("requires_teams_manage_as_app"):
+        status = STATUS_NOT_APPLICABLE
+        details = _TEAMS_PS_NOT_APPLICABLE_DETAILS
     elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
         batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
         if batch_runner:
