@@ -5203,7 +5203,12 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     acquired once lazily.  CIS Intune checks (``cis_group`` set) are run via
     their batch runner once per group and results cached for the run.
     """
-    graph_token = await acquire_access_token(company_id)
+    # Best-practice Graph checks are designed around application permissions.
+    # Always use an app-only token to avoid reusing a cached delegated token
+    # that may not carry equivalent privileges (e.g. AuditLog.Read.All).
+    graph_token = await acquire_access_token(
+        company_id, force_client_credentials=True
+    )
 
     # Self-heal: re-apply any missing app role assignments using the stored
     # delegated token from the "Authorise portal access" connect flow.  This
@@ -5405,7 +5410,12 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
     if check_id not in enabled:
         raise ValueError(f"Best-practice check '{check_id}' is not enabled")
 
-    graph_token = await acquire_access_token(company_id)
+    # Keep single-check runs consistent with full runs: execute checks with an
+    # app-only token so permission-sensitive checks don't depend on delegated
+    # token scopes cached from interactive auth flows.
+    graph_token = await acquire_access_token(
+        company_id, force_client_credentials=True
+    )
 
     # Self-heal: re-apply any missing app role assignments (mirrors run_best_practices).
     try:
