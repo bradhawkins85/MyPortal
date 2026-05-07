@@ -175,9 +175,10 @@ async def test_run_best_practices_self_heals_missing_permissions() -> None:
     ):
         results = await bp_service.run_best_practices(company_id=1)
 
-    # Initial token acquisition + one forced refresh after granting new roles.
+    # Initial acquisition is already app-only; a second app-only refresh occurs
+    # after granting new roles.
     assert len(acquire_calls) == 2
-    assert acquire_calls[0]["force"] is False
+    assert acquire_calls[0]["force"] is True
     assert acquire_calls[1]["force"] is True
     # No checks enabled, so results is empty – we are only asserting the
     # self-heal control flow here.
@@ -224,7 +225,7 @@ async def test_run_best_practices_no_refresh_when_nothing_granted() -> None:
         await bp_service.run_best_practices(company_id=1)
 
     assert len(acquire_calls) == 1
-    assert acquire_calls[0]["force"] is False
+    assert acquire_calls[0]["force"] is True
 
 
 @pytest.mark.anyio("asyncio")
@@ -323,4 +324,3 @@ async def test_check_monitor_secure_score_unknown_on_403() -> None:
 
     assert result["status"] == STATUS_UNKNOWN
     assert "SecuritySecureScore.Read.All" in result["details"]
-
