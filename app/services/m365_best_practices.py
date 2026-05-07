@@ -4830,6 +4830,14 @@ for _bp in _BEST_PRACTICES:
     if _bp.get("cis_group", "").startswith("intune_") and "requires_licenses" not in _bp:
         _bp["requires_licenses"] = [CAP_INTUNE]
 
+# Checks implemented via manual-review runners have no automation support in
+# MyPortal yet; keep them disabled by default across all companies.
+for _bp in _BEST_PRACTICES:
+    source = _bp.get("source")
+    source_name = getattr(source, "__name__", "")
+    if isinstance(source_name, str) and source_name.endswith("_manual"):
+        _bp["default_enabled"] = False
+
 # Mapping from cis_group name to the batch runner function from cis_benchmark.py
 _CIS_GROUP_RUNNERS: dict[str, Callable[..., Any]] = {
     "intune_windows": run_intune_windows_benchmarks,
