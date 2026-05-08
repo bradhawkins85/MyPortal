@@ -103,17 +103,28 @@ def rewrite_links_for_tracking(html_body: str, tracking_id: str) -> str:
 
 
 def _click_token_serializer() -> URLSafeSerializer:
+    """Build the serializer used for signed click redirect tokens.
+
+    Uses the application secret key and the ``email-tracking-click`` salt to
+    namespace tokens for this specific email tracking feature.
+    """
     settings = get_settings()
     return URLSafeSerializer(settings.secret_key, salt="email-tracking-click")
 
 
 def build_click_token(*, tracking_id: str, destination_url: str) -> str:
+    """Create a signed click token containing tracking ID and destination URL."""
     serializer = _click_token_serializer()
     payload = {"tid": tracking_id, "url": destination_url}
     return serializer.dumps(payload)
 
 
 def resolve_click_destination(*, tracking_id: str, token: str) -> str | None:
+    """Return destination URL from a valid signed click token.
+
+    The token must be correctly signed and bound to the supplied tracking ID.
+    Returns ``None`` when signature validation fails or the payload is invalid.
+    """
     serializer = _click_token_serializer()
     try:
         payload = serializer.loads(token)
