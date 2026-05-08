@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
@@ -27,6 +28,23 @@ router = APIRouter(prefix="/api/email-tracking", tags=["Email Tracking"])
 TRACKING_PIXEL = base64.b64decode(
     "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 )
+
+
+def _sanitize_redirect_url(raw_url: str) -> str | None:
+    """Return a safe absolute HTTP(S) redirect URL, or None when invalid."""
+    candidate = raw_url.strip()
+    if not candidate:
+        return None
+    if any(char in candidate for char in ("\r", "\n")):
+        return None
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    return candidate
 
 
 @router.get("/pixel/{tracking_id}.gif", include_in_schema=False)
@@ -116,6 +134,10 @@ async def tracking_click(
     Returns:
         Redirect response to the original URL
     """
+    destination_url = _sanitize_redirect_url(url)
+    if destination_url is None:
+        raise HTTPException(status_code=400, detail="Invalid redirect URL")
+
     # Extract request metadata
     user_agent = request.headers.get("user-agent")
     referrer = request.headers.get("referer") or request.headers.get("referrer")
@@ -135,7 +157,7 @@ async def tracking_click(
         await email_tracking.record_tracking_event(
             tracking_id=tid,
             event_type='click',
-            event_url=url,
+            event_url=destination_url,
             user_agent=user_agent,
             ip_address=ip_address,
             referrer=referrer,
@@ -145,7 +167,7 @@ async def tracking_click(
         await email_tracking.send_event_to_plausible(
             event_type='click',
             tracking_id=tid,
-            event_url=url,
+            event_url=destination_url,
             user_agent=user_agent,
             ip_address=ip_address,
         )
@@ -154,12 +176,12 @@ async def tracking_click(
         logger.error(
             "Failed to record click tracking event",
             tracking_id=tid,
-            url=url,
+            url=destination_url,
             error=str(exc),
         )
     
     # Redirect to the original URL
-    return RedirectResponse(url=url, status_code=302)
+    return RedirectResponse(url=destination_url, status_code=302)
 
 
 @router.get("/status/{tracking_id}")
