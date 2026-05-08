@@ -216,6 +216,34 @@ def test_mcp_disallowed_model_rejected(client):
         assert "not allowed" in response["error"].lower()
 
 
+def test_mcp_unsupported_configured_model_rejected(client):
+    """Configured models must still be part of the built-in MCP allowlist."""
+    with patch("app.mcp_server.settings") as mock_settings:
+        mock_settings.mcp_enabled = True
+        mock_settings.mcp_token = TEST_MCP_TOKEN
+        mock_settings.mcp_allowed_models = "users,sqlite_master"
+        mock_settings.mcp_readonly = True
+        mock_settings.mcp_rate_limit = 60
+
+        with client.websocket_connect(
+            "/mcp/ws",
+            headers={"X-MCP-Token": TEST_MCP_TOKEN}
+        ) as websocket:
+            websocket.send_json(
+                {
+                    "id": "test-6b",
+                    "action": "list",
+                    "model": "sqlite_master",
+                    "params": {},
+                }
+            )
+
+            response = websocket.receive_json()
+            assert response["id"] == "test-6b"
+            assert response["status"] == "error"
+            assert "not allowed" in response["error"].lower()
+
+
 def test_mcp_rate_limiting_enforced(client):
     """Test that rate limiting is enforced per connection."""
     # Set a very low rate limit for this test
@@ -391,6 +419,27 @@ def test_mcp_get_without_id_param_fails(client):
         assert "id" in response["error"].lower()
 
 
+def test_mcp_negative_pagination_rejected(client):
+    """Negative pagination inputs must be rejected instead of coerced."""
+    with client.websocket_connect(
+        "/mcp/ws",
+        headers={"X-MCP-Token": TEST_MCP_TOKEN}
+    ) as websocket:
+        websocket.send_json(
+            {
+                "id": "test-negative-pagination",
+                "action": "list",
+                "model": "users",
+                "params": {"limit": -1, "offset": -5},
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["id"] == "test-negative-pagination"
+        assert response["status"] == "error"
+        assert "non-negative" in response["error"].lower()
+
+
 @pytest.mark.parametrize("malicious_field", [
     "id; DROP TABLE users; --",
     "status OR 1=1 --",
@@ -450,3 +499,26 @@ def test_mcp_valid_filter_field_allowed(mock_fetch_all, client):
         assert response["id"] == "test-valid-field"
         assert response["status"] == "ok"
         assert "data" in response
+
+
+def test_mcp_disallowed_but_well_formed_filter_field_blocked(client):
+    """Well-formed fields not on the model allowlist must be rejected."""
+    with client.websocket_connect(
+        "/mcp/ws",
+        headers={"X-MCP-Token": TEST_MCP_TOKEN}
+    ) as websocket:
+        websocket.send_json(
+            {
+                "id": "test-disallowed-field",
+                "action": "list",
+                "model": "users",
+                "params": {
+                    "filters": {"password_hash": "fake_hash"}
+                },
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["id"] == "test-disallowed-field"
+        assert response["status"] == "error"
+        assert "not allowed" in response["error"].lower()
