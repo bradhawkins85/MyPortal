@@ -118,7 +118,7 @@ async def tracking_pixel(
 @router.get("/click", include_in_schema=False)
 async def tracking_click(
     tid: Annotated[str, Query(description="Tracking ID")],
-    url: Annotated[str, Query(description="Destination URL")],
+    token: Annotated[str, Query(description="Signed destination token")],
     request: Request,
 ) -> RedirectResponse:
     """Record link click event and redirect to destination URL.
@@ -128,13 +128,17 @@ async def tracking_click(
     
     Args:
         tid: Unique tracking ID from the email
-        url: Original destination URL to redirect to
+        token: Signed token containing original destination URL
         request: FastAPI request object
         
     Returns:
         Redirect response to the original URL
     """
-    destination_url = _sanitize_redirect_url(url)
+    destination_url_raw = email_tracking.resolve_click_destination(tracking_id=tid, token=token)
+    if destination_url_raw is None:
+        raise HTTPException(status_code=400, detail="Invalid redirect token")
+
+    destination_url = _sanitize_redirect_url(destination_url_raw)
     if destination_url is None:
         raise HTTPException(status_code=400, detail="Invalid redirect URL")
 

@@ -70,8 +70,9 @@ def test_rewrite_links_for_tracking(mock_portal_url):
     # HTTP links should be rewritten
     assert "/api/email-tracking/click?" in result
     assert "tid=test-tracking-id-789" in result
-    assert "url=https%3A%2F%2Fexample.com%2Fpage1" in result
-    assert "url=https%3A%2F%2Fexample.com%2Fpage2" in result
+    assert "token=" in result
+    assert "url=https%3A%2F%2Fexample.com%2Fpage1" not in result
+    assert "url=https%3A%2F%2Fexample.com%2Fpage2" not in result
     # Mailto links should not be rewritten
     assert 'href="mailto:test@example.com"' in result
 
@@ -90,7 +91,7 @@ def test_rewrite_links_preserves_tracking_pixel(mock_portal_url):
     assert 'href="https://example.com/api/email-tracking/pixel/abc123.gif"' in result
     # Other link should be rewritten
     assert "/api/email-tracking/click?" in result
-    assert "url=https%3A%2F%2Fother.com%2Fpage" in result
+    assert "token=" in result
 
 
 def test_rewrite_links_no_links(mock_portal_url):
@@ -102,6 +103,30 @@ def test_rewrite_links_no_links(mock_portal_url):
     
     # Should return unchanged
     assert result == html_body
+
+
+def test_click_token_round_trip():
+    token = email_tracking.build_click_token(
+        tracking_id="test-tracking-id",
+        destination_url="https://example.com/page",
+    )
+    destination = email_tracking.resolve_click_destination(
+        tracking_id="test-tracking-id",
+        token=token,
+    )
+    assert destination == "https://example.com/page"
+
+
+def test_click_token_rejects_mismatched_tracking_id():
+    token = email_tracking.build_click_token(
+        tracking_id="test-tracking-id",
+        destination_url="https://example.com/page",
+    )
+    destination = email_tracking.resolve_click_destination(
+        tracking_id="other-tracking-id",
+        token=token,
+    )
+    assert destination is None
 
 
 def test_insert_tracking_pixel_without_portal_url(monkeypatch):
@@ -299,7 +324,7 @@ def test_email_tracking_with_full_html_document(mock_portal_url):
     result = email_tracking.rewrite_links_for_tracking(html_body, tracking_id)
     assert "/api/email-tracking/click?" in result
     assert "tid=test-full-doc-789" in result
-    assert "url=https%3A%2F%2Fexample.com%2Fpage" in result
+    assert "token=" in result
 
 
 @pytest.mark.asyncio
