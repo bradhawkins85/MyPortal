@@ -236,10 +236,13 @@ async def _handle_list_action(
         filters: Dict of field=value equality filters
     """
     try:
-        limit = max(0, min(int(params.get("limit", 50)), 100))
-        offset = max(0, int(params.get("offset", 0)))
+        limit = int(params.get("limit", 50))
+        offset = int(params.get("offset", 0))
     except (TypeError, ValueError) as exc:
         raise ValueError("Pagination parameters must be integers") from exc
+    if limit < 0 or offset < 0:
+        raise ValueError("Pagination parameters must be non-negative")
+    limit = min(limit, 100)
 
     filters = params.get("filters", {})
     if filters is None:

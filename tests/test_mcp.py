@@ -419,6 +419,27 @@ def test_mcp_get_without_id_param_fails(client):
         assert "id" in response["error"].lower()
 
 
+def test_mcp_negative_pagination_rejected(client):
+    """Negative pagination inputs must be rejected instead of coerced."""
+    with client.websocket_connect(
+        "/mcp/ws",
+        headers={"X-MCP-Token": TEST_MCP_TOKEN}
+    ) as websocket:
+        websocket.send_json(
+            {
+                "id": "test-negative-pagination",
+                "action": "list",
+                "model": "users",
+                "params": {"limit": -1, "offset": -5},
+            }
+        )
+
+        response = websocket.receive_json()
+        assert response["id"] == "test-negative-pagination"
+        assert response["status"] == "error"
+        assert "non-negative" in response["error"].lower()
+
+
 @pytest.mark.parametrize("malicious_field", [
     "id; DROP TABLE users; --",
     "status OR 1=1 --",
