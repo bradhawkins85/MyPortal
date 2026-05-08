@@ -73,11 +73,61 @@ SENSITIVE_FIELDS = {
 }
 
 
+_MCP_MODEL_SELECTS: dict[str, str] = {
+    "users": "SELECT * FROM users",
+    "tickets": "SELECT * FROM tickets",
+    "change_log": "SELECT * FROM change_log",
+}
+
+_MCP_MODEL_GET_BY_ID: dict[str, str] = {
+    model: f"{select_sql} WHERE id = %s"
+    for model, select_sql in _MCP_MODEL_SELECTS.items()
+}
+
+_MCP_ALLOWED_FILTERS: dict[str, dict[str, str]] = {
+    "users": {
+        "id": "id",
+        "email": "email",
+        "company_id": "company_id",
+        "status": "status",
+        "role_id": "role_id",
+        "is_active": "is_active",
+    },
+    "tickets": {
+        "id": "id",
+        "company_id": "company_id",
+        "status": "status",
+        "priority": "priority",
+        "assigned_to": "assigned_to",
+        "requester_email": "requester_email",
+        "ticket_number": "ticket_number",
+    },
+    "change_log": {
+        "id": "id",
+        "guid": "guid",
+        "change_type": "change_type",
+        "occurred_at": "occurred_at",
+    },
+}
+
+
 def _get_allowed_models() -> set[str]:
-    """Parse the comma-separated list of allowed models from settings."""
+    """Parse the configured list and intersect it with the supported MCP models."""
     if not settings.mcp_allowed_models:
-        return {"users", "tickets", "change_log"}
-    return {m.strip().lower() for m in settings.mcp_allowed_models.split(",") if m.strip()}
+        return set(_MCP_MODEL_SELECTS)
+
+    requested_models = {
+        model.strip().lower()
+        for model in settings.mcp_allowed_models.split(",")
+        if model.strip()
+    }
+    unsupported_models = requested_models - set(_MCP_MODEL_SELECTS)
+    if unsupported_models:
+        logger.warning(
+            "Ignoring unsupported MCP models from configuration: {}",
+            ", ".join(sorted(unsupported_models)),
+        )
+    return requested_models & set(_MCP_MODEL_SELECTS)
 
 
 def _filter_sensitive_fields(record: dict[str, Any]) -> dict[str, Any]:
@@ -88,6 +138,30 @@ def _filter_sensitive_fields(record: dict[str, Any]) -> dict[str, Any]:
 def _filter_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Filter sensitive fields from a list of records."""
     return [_filter_sensitive_fields(record) for record in records]
+
+
+def _get_model_select_sql(model: str) -> str:
+    """Return the static SELECT query for a supported MCP model."""
+    try:
+        return _MCP_MODEL_SELECTS[model]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported model: {model}") from exc
+
+
+def _get_model_get_sql(model: str) -> str:
+    """Return the static SELECT-by-id query for a supported MCP model."""
+    try:
+        return _MCP_MODEL_GET_BY_ID[model]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported model: {model}") from exc
+
+
+def _get_allowed_filter_columns(model: str) -> dict[str, str]:
+    """Return the static allowlist of filterable columns for a model."""
+    try:
+        return _MCP_ALLOWED_FILTERS[model]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported model: {model}") from exc
 
 
 class RateLimiter:
@@ -161,9 +235,20 @@ async def _handle_list_action(
         offset: Offset for pagination (default 0)
         filters: Dict of field=value equality filters
     """
-    limit = min(int(params.get("limit", 50)), 100)
-    offset = int(params.get("offset", 0))
+    try:
+        limit = max(0, min(int(params.get("limit", 50)), 100))
+        offset = max(0, int(params.get("offset", 0)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Pagination parameters must be integers") from exc
+
     filters = params.get("filters", {})
+    if filters is None:
+        filters = {}
+    if not isinstance(filters, dict):
+        raise ValueError("Filters must be an object of field/value pairs")
+
+    select_sql = _get_model_select_sql(model)
+    allowed_filter_columns = _get_allowed_filter_columns(model)
 
     # Build SQL query
     where_clauses = []
@@ -173,15 +258,18 @@ async def _handle_list_action(
         # Validate field name to prevent SQL injection
         if not _is_valid_identifier(field):
             raise ValueError(f"Invalid filter field name: {field}")
+        column_name = allowed_filter_columns.get(field)
+        if column_name is None:
+            raise ValueError(f"Filter field '{field}' is not allowed for model '{model}'")
         # Simple equality filter only for security
-        where_clauses.append(f"{field} = %s")
+        where_clauses.append(f"{column_name} = %s")
         where_params.append(value)
 
     where_sql = ""
     if where_clauses:
         where_sql = " WHERE " + " AND ".join(where_clauses)
 
-    sql = f"SELECT * FROM {model}{where_sql} LIMIT %s OFFSET %s"
+    sql = f"{select_sql}{where_sql} LIMIT %s OFFSET %s"
     where_params.extend([limit, offset])
 
     try:
@@ -211,7 +299,7 @@ async def _handle_get_action(
     if not record_id:
         raise ValueError("Missing required parameter: id")
 
-    sql = f"SELECT * FROM {model} WHERE id = %s"
+    sql = _get_model_get_sql(model)
     try:
         record = await db.fetch_one(sql, (record_id,))
         if not record:
