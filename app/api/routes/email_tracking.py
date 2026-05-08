@@ -31,7 +31,15 @@ TRACKING_PIXEL = base64.b64decode(
 
 
 def _sanitize_redirect_url(raw_url: str) -> str | None:
-    """Return a safe absolute HTTP(S) redirect URL, or None when invalid."""
+    """Return a safe absolute HTTP(S) redirect URL, or None when invalid.
+
+    Security checks:
+    - trims whitespace and rejects empty values
+    - rejects CR/LF characters to prevent header injection
+    - requires an explicit http/https scheme
+    - requires a network location (absolute URL only)
+    - rejects URLs containing embedded credentials
+    """
     candidate = raw_url.strip()
     if not candidate:
         return None
