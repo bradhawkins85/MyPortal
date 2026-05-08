@@ -23,7 +23,8 @@ MCP_ENABLED=false
 # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
 MCP_TOKEN=your-secret-token-here
 
-# Comma-separated list of allowed models (default: users,tickets,change_log)
+# Comma-separated list of supported models to expose (default: users,tickets,change_log)
+# Unsupported values are ignored.
 MCP_ALLOWED_MODELS=users,tickets,change_log
 
 # Enforce read-only operations (default: true)
@@ -237,7 +238,7 @@ Any write operations (create, update, delete) are rejected with an error.
 
 ### 4. Model Whitelist
 
-Only models explicitly listed in `MCP_ALLOWED_MODELS` can be accessed. Requests for other models are rejected.
+Only supported models explicitly listed in `MCP_ALLOWED_MODELS` can be accessed. Requests for other models are rejected, and unsupported configuration entries are ignored.
 
 Default allowed models:
 - `users`
@@ -438,7 +439,7 @@ ERROR: MCP list query failed for model users: ...
    - Keep `MCP_READONLY=true` unless writes are absolutely necessary
 
 3. **Model Access**
-   - Only include models in `MCP_ALLOWED_MODELS` that are safe to expose
+   - Only include supported models in `MCP_ALLOWED_MODELS` that are safe to expose
    - Avoid models containing highly sensitive data
    - Review model schemas to ensure sensitive fields are properly filtered
 
@@ -700,4 +701,3 @@ and a human-readable `message` explaining how to enable it.
 |---|---|---|
 | `MCP_LOG_TOOLS_ENABLED` | `true` | Enable/disable all log-review MCP tools |
 | `MCP_LOG_MAX_LINES` | `500` | Hard cap on lines returned by `get_application_logs` |
-
