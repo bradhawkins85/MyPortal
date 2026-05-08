@@ -580,31 +580,35 @@
     let descriptionSunEditor = null;
 
     function sanitizeDescriptionHtml(value) {
-      let current = String(value || '');
-      let previous;
-        previous = current;
-      do {
-        previous = current;
+      const html = String(value || '');
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
 
-        const withoutBlockedTags = previous.replace(
-          /<\s*\/?\s*(script|iframe|object|embed|link|meta|base|form)\b[^>]*>/gi,
+      doc.querySelectorAll('script, iframe, object, embed, link, meta, base, form').forEach((element) => {
+        element.remove();
+      });
 
-        );
+      doc.querySelectorAll('*').forEach((element) => {
+        Array.from(element.attributes).forEach((attribute) => {
+          const name = attribute.name.toLowerCase();
+          const rawValue = String(attribute.value || '');
+          const normalizedValue = rawValue.trim().toLowerCase();
 
-        current = withoutBlockedTags
-          .replace(/\son[a-z]+\s*=\s*(["']).*?\1/gi, '')
-          .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
-          .replace(
-            /\s(href|src)\s*=\s*(["'])\s*(javascript:|data:|vbscript:).*?\2/gi,
-            ''
-          )
-          .replace(
-            /\s(href|src)\s*=\s*(javascript:|data:|vbscript:)[^\s>]*/gi,
-            ''
-          );
-      } while (current !== previous);
+          if (name.startsWith('on')) {
+            element.removeAttribute(attribute.name);
+            return;
+          }
 
-      return current;
+          if (
+            (name === 'href' || name === 'src') &&
+            /^(javascript:|data:|vbscript:)/i.test(normalizedValue)
+          ) {
+            element.removeAttribute(attribute.name);
+          }
+        });
+      });
+
+      return doc.body.innerHTML;
     }
 
     function getOrCreateDescriptionEditor() {
