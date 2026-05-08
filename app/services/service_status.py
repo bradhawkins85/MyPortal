@@ -590,8 +590,8 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
     # Validate URL to prevent SSRF
     try:
         _validate_lookup_url(lookup_url)
-    except ValueError as exc:
-        return {"service_id": service_id, "error": f"Invalid lookup URL: {exc}", "changed": False}
+    except ValueError:
+        return {"service_id": service_id, "error": "Invalid lookup URL", "changed": False}
 
     # Fetch the URL content
     try:
@@ -603,8 +603,8 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
             response = await client.get(lookup_url)
         response.raise_for_status()
         url_content = _sanitize_url_content(response.text)
-    except Exception as exc:
-        return {"service_id": service_id, "error": f"URL fetch failed: {exc}", "changed": False}
+    except Exception:
+        return {"service_id": service_id, "error": "URL fetch failed", "changed": False}
 
     # Build the full prompt
     full_prompt = (
@@ -627,9 +627,9 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
         module_result = await modules_service.trigger_module(
             "ollama", ollama_payload, background=False
         )
-    except ValueError as exc:
+    except ValueError:
         # trigger_module raises ValueError when the module is not configured at all
-        return {"service_id": service_id, "error": f"Ollama module not configured: {exc}", "changed": False}
+        return {"service_id": service_id, "error": "Ollama module not configured", "changed": False}
 
     module_status = str(module_result.get("status") or "")
     if module_status == "skipped":
