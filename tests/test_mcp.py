@@ -513,7 +513,7 @@ def test_mcp_disallowed_but_well_formed_filter_field_blocked(client):
                 "action": "list",
                 "model": "users",
                 "params": {
-                    "filters": {"password_hash": "secret"}
+                    "filters": {"password_hash": "fake_hash"}
                 },
             }
         )
