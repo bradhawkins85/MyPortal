@@ -116,7 +116,23 @@ systemctl enable --now myportal.service
 Systemd will apply database migrations each time the service starts,
 thanks to the startup hook in `app/main.py`.
 
-## 6. Monitor and maintain the service
+## 6. Add an nginx frontend on port 80
+
+MyPortal ships with a ready-to-use nginx frontend config that listens on
+port 80 and proxies requests to Uvicorn on `127.0.0.1:8000`.
+
+```bash
+cp /opt/myportal/deploy/nginx/myportal.conf /etc/nginx/sites-available/myportal.conf
+ln -s /etc/nginx/sites-available/myportal.conf /etc/nginx/sites-enabled/myportal.conf
+nginx -t
+systemctl reload nginx
+```
+
+`server_name _;` is a catch-all host. Replace it in
+`/etc/nginx/sites-available/myportal.conf` with your actual hostname (for
+example, `server_name myportal.example.com;`).
+
+## 7. Monitor and maintain the service
 
 Check the service status and logs with:
 
@@ -152,12 +168,13 @@ If the service fails to start, `systemctl status` will show the most
 recent errors. Systemd automatically restarts the process after five
 seconds; adjust `RestartSec` as needed for your environment.
 
-## 7. Optional hardening
+## 8. Optional hardening
 
 - Place the application behind a reverse proxy (for example nginx) that
-  terminates TLS and sets secure headers.
-- Configure a dedicated firewall rule to limit inbound traffic to port
-  8000 (or whichever port you expose via the reverse proxy).
+  terminates TLS and sets secure headers (see step 6 for the baseline
+  frontend config).
+- Configure firewall rules so only nginx ports (typically 80/443) are
+  internet-facing; keep Uvicorn on localhost-only port 8000.
 - Define `FAIL2BAN_LOG_PATH` in `/etc/myportal.env` and install the bundled
   Fail2ban filter/jail to automatically ban brute force login attempts.
 - Use `tmpfiles.d` to rotate Loguru output if you configure file-based

@@ -400,6 +400,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 The application emits structured logs via Loguru and applies database migrations on boot, ensuring zero-touch deployments. Supervisor, systemd, Docker, or any process manager can be used based on your infrastructure standards.
 
 For a hardened systemd configuration that runs MyPortal as a managed Linux service, see [docs/systemd-service.md](docs/systemd-service.md). The guide covers creating a dedicated service account, isolating environment variables, configuring auto-restarts, and verifying the unit status.
+For an nginx frontend that listens on port 80 and proxies to the app, use
+[`deploy/nginx/myportal.conf`](deploy/nginx/myportal.conf).
 
 ## Updating from GitHub
 
