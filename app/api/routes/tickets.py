@@ -776,6 +776,22 @@ async def add_reply(
         reply_payload["time_summary"] = time_summary
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
 
+    # Push the reply's time entry to Solidtime if the module is enabled and
+    # the reply has tracked minutes. Runs as a background task so the API
+    # response is not blocked on the upstream call.
+    reply_id_int = reply.get("id")
+    if isinstance(reply_id_int, int) and reply_id_int > 0:
+        try:
+            from app.services import solidtime as solidtime_service
+
+            solidtime_service.schedule_reply_sync(reply_id_int)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "Solidtime reply sync scheduling failed for reply {}: {}",
+                reply_id_int,
+                exc,
+            )
+
     # Push public replies on Trello-linked tickets back to the Trello card as comments
     if not reply.get("is_internal") and ticket_payload.get("module_slug") == "trello":
         card_id = str(ticket_payload.get("external_reference") or "").strip()
@@ -896,6 +912,18 @@ async def update_reply_time_entry(
         actor_type="technician",
         actor=current_user,
     )
+
+    # Push the updated time entry to Solidtime if the module is enabled.
+    try:
+        from app.services import solidtime as solidtime_service
+
+        solidtime_service.schedule_reply_sync(int(reply_id))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.debug(
+            "Solidtime reply update sync scheduling failed for reply {}: {}",
+            reply_id,
+            exc,
+        )
 
     ticket_payload = TicketResponse(**ticket)
     return TicketReplyResponse(ticket=ticket_payload, reply=TicketReply(**reply_payload))

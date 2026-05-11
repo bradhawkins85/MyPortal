@@ -91,6 +91,7 @@ from app.api.routes import (
     roles,
     service_status as service_status_api,
     smtp2go_webhooks,
+    solidtime as solidtime_api,
     staff as staff_api,
     subscriptions as subscriptions_api,
     tag_exclusions,
@@ -1088,6 +1089,7 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(xero.router)
 app.include_router(trello_api.router)
+app.include_router(solidtime_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
@@ -19455,6 +19457,27 @@ async def _render_ticket_detail(
                 )
                 hudu_company_url = f"{hudu_base_url}/companies/{company['hudu_id']}"
 
+    # Resolve Solidtime project link / timer URL for the top-right action menu.
+    solidtime_links: dict[str, Any] = {
+        "enabled": False,
+        "project_url": "",
+        "timer_url": "",
+        "project_id": "",
+        "organization_id": "",
+        "last_synced_at": None,
+        "sync_status": "",
+    }
+    try:
+        from app.services import solidtime as _solidtime_service
+
+        solidtime_links = await _solidtime_service.get_ticket_links(int(ticket_id))
+    except Exception as _exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to resolve Solidtime ticket links",
+            ticket_id=ticket_id,
+            error=str(_exc),
+        )
+
     ordered_replies = list(reversed(replies))
 
     # Per-recipient delivery counts so the delivery-status badge in the admin
@@ -19802,6 +19825,7 @@ async def _render_ticket_detail(
         "tacticalrmm_base_url": tactical_base_url,
         "hudu_base_url": hudu_base_url,
         "hudu_company_url": hudu_company_url,
+        "solidtime_links": solidtime_links,
         "can_delete_ticket": bool(user.get("is_super_admin")),
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,
