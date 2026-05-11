@@ -263,6 +263,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        # Reconcile Solidtime state every 5 minutes. The reconciler is a
+        # no-op when the integration module is disabled or unconfigured.
+        if not self._scheduler.get_job("solidtime-reconcile"):
+            self._scheduler.add_job(
+                self._run_solidtime_reconcile,
+                "interval",
+                minutes=5,
+                id="solidtime-reconcile",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
 
     async def _run_webhook_monitor(self) -> None:
         """Run webhook monitoring with distributed lock to prevent duplicate execution."""
@@ -406,6 +418,30 @@ class SchedulerService:
                 log_info("Backup alert check completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Backup alert check failed", error=str(exc))
+
+    async def _run_solidtime_reconcile(self) -> None:
+        """Pull Solidtime project / time entry updates with a distributed lock."""
+        async with db.acquire_lock("solidtime_reconcile", timeout=5) as lock_acquired:
+            if not lock_acquired:
+                log_info(
+                    "Solidtime reconcile already running on another worker, skipping"
+                )
+                return
+            from app.services import solidtime as solidtime_service
+
+            try:
+                if not await solidtime_service.is_module_enabled():
+                    return
+                result = await solidtime_service.reconcile_once()
+                log_info(
+                    "Solidtime reconcile completed",
+                    status=result.get("status"),
+                    projects_pulled=result.get("projects_pulled"),
+                    time_entries_pulled=result.get("time_entries_pulled"),
+                    errors=result.get("errors"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Solidtime reconcile failed", error=str(exc))
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:

@@ -768,6 +768,27 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "settings": {},
         "enabled": True,  # Enabled by default so it appears as a trigger action when the module is configured
     },
+    {
+        "slug": "solidtime",
+        "name": "Solidtime",
+        "description": "Sync tickets to Solidtime as projects and ticket time entries (replies with billable minutes) as Solidtime time entries.",
+        "icon": "⏱️",
+        "settings": {
+            "base_url": "",
+            "api_token": "",
+            "organization_id": "",
+            "default_client_id": "",
+            "sync_tickets_to_projects": True,
+            "sync_projects_to_tickets": False,
+            "sync_time_entries_to_solidtime": True,
+            "sync_time_entries_from_solidtime": True,
+            "only_billable_to_solidtime": False,
+            "labour_type_to_task": False,
+            "webhook_secret": "",
+            "rate_limit_per_minute": 120,
+            "manage_url": "/admin/modules/solidtime",
+        },
+    },
 ]
 
 
@@ -1214,6 +1235,58 @@ def _coerce_settings(
                 "api_key": api_key,
             }
         )
+    elif slug == "solidtime":
+        overrides = payload or {}
+
+        def _preserve_secret(field: str) -> str:
+            override = overrides.get(field)
+            if override is None:
+                return str(merged.get(field) or "").strip()
+            candidate = str(override or "").strip()
+            if (
+                not candidate
+                and existing_settings
+                and existing_settings.get(field)
+            ):
+                return str(existing_settings.get(field) or "").strip()
+            return candidate
+
+        api_token = _preserve_secret("api_token")
+        webhook_secret = _preserve_secret("webhook_secret")
+        rate_limit = (
+            _coerce_int(merged.get("rate_limit_per_minute"), minimum=1, maximum=600)
+            or 120
+        )
+        merged.update(
+            {
+                "base_url": str(merged.get("base_url", "")).strip().rstrip("/"),
+                "api_token": api_token,
+                "organization_id": str(merged.get("organization_id", "")).strip(),
+                "default_client_id": str(merged.get("default_client_id", "")).strip(),
+                "sync_tickets_to_projects": _ensure_bool(
+                    merged.get("sync_tickets_to_projects"), True
+                ),
+                "sync_projects_to_tickets": _ensure_bool(
+                    merged.get("sync_projects_to_tickets"), False
+                ),
+                "sync_time_entries_to_solidtime": _ensure_bool(
+                    merged.get("sync_time_entries_to_solidtime"), True
+                ),
+                "sync_time_entries_from_solidtime": _ensure_bool(
+                    merged.get("sync_time_entries_from_solidtime"), True
+                ),
+                "only_billable_to_solidtime": _ensure_bool(
+                    merged.get("only_billable_to_solidtime"), False
+                ),
+                "labour_type_to_task": _ensure_bool(
+                    merged.get("labour_type_to_task"), False
+                ),
+                "webhook_secret": webhook_secret,
+                "rate_limit_per_minute": rate_limit,
+                "manage_url": str(merged.get("manage_url") or "").strip()
+                or "/admin/modules/solidtime",
+            }
+        )
     return merged
 
 
@@ -1234,6 +1307,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
         "hudu": ("api_key",),
+        "solidtime": ("api_token", "webhook_secret"),
     }
     targets = fields_to_redact.get(slug)
     if not targets:
@@ -1325,6 +1399,7 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "m365-admin",     # M365 Admin - configuration only, not an action module
     "hudu",           # Hudu - documentation/password management, not a trigger action module
     "huntress",       # Huntress - report data ingester, not a trigger action module
+    "solidtime",      # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }
 
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {

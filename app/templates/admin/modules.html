@@ -612,6 +612,63 @@
               <div class="form-field">
                 <p class="form-help">Link companies to Huntress organisations from <strong>Admin → Companies → Edit</strong>. The daily <code>huntress-daily-sync</code> job pulls EDR / ITDR / SAT / SIEM / SOC stats for each linked company.</p>
               </div>
+            {% elif module.slug == 'solidtime' %}
+              <div class="form-field">
+                <label class="form-label" for="solidtime-base-url">Base URL</label>
+                <input id="solidtime-base-url" name="settings.base_url" class="form-input" value="{{ settings.base_url or '' }}" placeholder="https://app.solidtime.io" />
+                <p class="form-help">Enter the base URL of your Solidtime instance, without a trailing slash. The integration appends <code>/api/v1</code> automatically.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="solidtime-api-token">API token</label>
+                <input id="solidtime-api-token" name="settings.api_token" class="form-input" type="password" autocomplete="off" placeholder="Enter a new API token" />
+                <p class="form-help">Personal access token from <strong>Profile → API tokens</strong> inside Solidtime. Tokens are stored securely; leave blank to keep the existing value.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="solidtime-organization-id">Organisation ID</label>
+                <input id="solidtime-organization-id" name="settings.organization_id" class="form-input" value="{{ settings.organization_id or '' }}" placeholder="Solidtime organisation UUID" />
+                <p class="form-help">UUID of the Solidtime organisation that mirrors your tickets. Use <strong>Test connection</strong> below to list the organisations available to the configured token.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="solidtime-default-client-id">Default client ID (optional)</label>
+                <input id="solidtime-default-client-id" name="settings.default_client_id" class="form-input" value="{{ settings.default_client_id or '' }}" placeholder="Fallback Solidtime client UUID" />
+                <p class="form-help">Used when a MyPortal company has no Solidtime client mapped yet. Leave blank to create a Solidtime client per company on first sync.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="solidtime-rate-limit">Rate limit (requests per minute)</label>
+                <input id="solidtime-rate-limit" name="settings.rate_limit_per_minute" class="form-input" type="number" min="1" max="600" value="{{ settings.rate_limit_per_minute or 120 }}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label">Sync direction</label>
+                <label style="display:flex; gap:0.5rem; align-items:center;">
+                  <input type="checkbox" name="settings.sync_tickets_to_projects" value="true" {% if settings.sync_tickets_to_projects %}checked{% endif %} />
+                  Push MyPortal tickets to Solidtime as projects
+                </label>
+                <label style="display:flex; gap:0.5rem; align-items:center;">
+                  <input type="checkbox" name="settings.sync_time_entries_to_solidtime" value="true" {% if settings.sync_time_entries_to_solidtime %}checked{% endif %} />
+                  Push ticket reply time entries to Solidtime
+                </label>
+                <label style="display:flex; gap:0.5rem; align-items:center;">
+                  <input type="checkbox" name="settings.only_billable_to_solidtime" value="true" {% if settings.only_billable_to_solidtime %}checked{% endif %} />
+                  Only push <em>billable</em> time entries
+                </label>
+                <label style="display:flex; gap:0.5rem; align-items:center;">
+                  <input type="checkbox" name="settings.labour_type_to_task" value="true" {% if settings.labour_type_to_task %}checked{% endif %} />
+                  Map MyPortal labour types to Solidtime tasks
+                </label>
+                <label style="display:flex; gap:0.5rem; align-items:center;">
+                  <input type="checkbox" name="settings.sync_projects_to_tickets" value="true" {% if settings.sync_projects_to_tickets %}checked{% endif %} />
+                  Pull new Solidtime projects into MyPortal as tickets
+                </label>
+                <label style="display:flex; gap:0.5rem; align-items:center;">
+                  <input type="checkbox" name="settings.sync_time_entries_from_solidtime" value="true" {% if settings.sync_time_entries_from_solidtime %}checked{% endif %} />
+                  Pull Solidtime time entries back to MyPortal ticket replies
+                </label>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="solidtime-webhook-secret">Webhook secret (optional)</label>
+                <input id="solidtime-webhook-secret" name="settings.webhook_secret" class="form-input" type="password" autocomplete="off" placeholder="Enter a new webhook secret" />
+                <p class="form-help">Used to verify HMAC-SHA256 signatures on inbound webhook requests sent to <code>/api/v1/solidtime/webhook</code>. Leave blank to keep the existing value or to disable webhook ingestion (the polling reconciler still runs every 5 minutes).</p>
+              </div>
             {% elif module.slug == 'trello' %}
               <div class="form-field">
                 <p class="form-help">API credentials (API key and token) are now configured per company. Visit <strong>Admin → Companies → Edit</strong> for each company to enter its Trello board ID, API key, and token.</p>

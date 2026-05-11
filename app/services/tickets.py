@@ -641,6 +641,28 @@ async def emit_ticket_updated_event(
         trigger_automations=trigger_automations,
     )
 
+    # Mirror ticket changes (subject/status/company) into the linked
+    # Solidtime project. The sync helper is a no-op when the module is
+    # disabled, so this remains safe in test/dev environments.
+    ticket_id_value: int | None = None
+    if isinstance(ticket, Mapping):
+        candidate = ticket.get("id")
+        if isinstance(candidate, int):
+            ticket_id_value = candidate
+    elif isinstance(ticket, int):
+        ticket_id_value = ticket
+    if ticket_id_value is not None and ticket_id_value > 0:
+        try:
+            from app.services import solidtime as solidtime_service
+
+            solidtime_service.schedule_ticket_sync(ticket_id_value)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to schedule Solidtime ticket sync on update",
+                ticket_id=ticket_id_value,
+                error=str(exc),
+            )
+
 
 async def emit_ticket_details_updated_event(
     ticket: Mapping[str, Any] | int,
@@ -1239,6 +1261,21 @@ async def create_ticket(
                 error=str(exc),
             )
     await broadcast_ticket_event(action="created", ticket_id=enriched_ticket.get("id"))
+
+    # Push to Solidtime as a project (no-op if module disabled).
+    enriched_id = enriched_ticket.get("id")
+    if isinstance(enriched_id, int) and enriched_id > 0:
+        try:
+            from app.services import solidtime as solidtime_service
+
+            solidtime_service.schedule_ticket_sync(enriched_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to schedule Solidtime ticket sync",
+                ticket_id=enriched_id,
+                error=str(exc),
+            )
+
     return enriched_ticket
 
 
