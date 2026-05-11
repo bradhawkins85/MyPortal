@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+from itsdangerous import BadSignature, URLSafeSerializer
 from loguru import logger
 
 from app.core.config import get_settings
@@ -89,15 +90,55 @@ def rewrite_links_for_tracking(html_body: str, tracking_id: str) -> str:
             return match.group(0)
         
         # Create tracking redirect URL
+        token = build_click_token(tracking_id=tracking_id, destination_url=original_url)
         params = urlencode({
             'tid': tracking_id,
-            'url': original_url
+            'token': token,
         })
         tracking_url = f"{portal_url}/api/email-tracking/click?{params}"
         
         return f'href={quote}{tracking_url}{quote}'
     
     return href_pattern.sub(replace_link, html_body)
+
+
+def _click_token_serializer() -> URLSafeSerializer:
+    """Build the serializer used for signed click redirect tokens.
+
+    Uses the application secret key and the ``email-tracking-click`` salt to
+    namespace tokens for this specific email tracking feature.
+    """
+    settings = get_settings()
+    return URLSafeSerializer(settings.secret_key, salt="email-tracking-click")
+
+
+def build_click_token(*, tracking_id: str, destination_url: str) -> str:
+    """Create a signed click token containing tracking ID and destination URL."""
+    serializer = _click_token_serializer()
+    payload = {"tid": tracking_id, "url": destination_url}
+    return serializer.dumps(payload)
+
+
+def resolve_click_destination(*, tracking_id: str, token: str) -> str | None:
+    """Return destination URL from a valid signed click token.
+
+    The token must be correctly signed and bound to the supplied tracking ID.
+    Returns ``None`` when signature validation fails or the payload is invalid.
+    """
+    serializer = _click_token_serializer()
+    try:
+        payload = serializer.loads(token)
+    except BadSignature:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    token_tracking_id = payload.get("tid")
+    token_url = payload.get("url")
+    if token_tracking_id != tracking_id:
+        return None
+    if not isinstance(token_url, str):
+        return None
+    return token_url
 
 
 async def record_email_sent(
