@@ -128,8 +128,9 @@ nginx -t
 systemctl reload nginx
 ```
 
-If your host serves multiple domains, replace `server_name _;` in
-`/etc/nginx/sites-available/myportal.conf` with your actual hostname.
+`server_name _;` is a catch-all host. Replace it in
+`/etc/nginx/sites-available/myportal.conf` with your actual hostname (for
+example, `server_name myportal.example.com;`).
 
 ## 7. Monitor and maintain the service
 
