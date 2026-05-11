@@ -39,6 +39,7 @@ There are no default login credentials; the first visit will prompt you to regis
 - ChatGPT MCP module providing secure ticket triage tools and automations to OpenAI ChatGPT via the Model Context Protocol
 - Syncro ticket importer with super admin UI controls, rate limiting, and REST API access for bulk migrations
 - Syncro company importer to synchronise the customer directory with rate-limited Syncro API requests
+- Solidtime integration to mirror tickets to Solidtime projects, sync ticket reply time entries to Solidtime time entries, and surface a one-click Solidtime timer link on each ticket; see [docs/solidtime.md](docs/solidtime.md)
 - Realtime refresh channel via `/ws/refresh` with a super-admin broadcast API at `/api/system/refresh`
 
 ## Change Log Management
