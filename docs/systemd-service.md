@@ -170,9 +170,10 @@ seconds; adjust `RestartSec` as needed for your environment.
 ## 8. Optional hardening
 
 - Place the application behind a reverse proxy (for example nginx) that
-  terminates TLS and sets secure headers.
-- Configure a dedicated firewall rule to limit inbound traffic to port
-  8000 (or whichever port you expose via the reverse proxy).
+  terminates TLS and sets secure headers (see step 6 for the baseline
+  frontend config).
+- Configure firewall rules so only nginx ports (typically 80/443) are
+  internet-facing; keep Uvicorn on localhost-only port 8000.
 - Define `FAIL2BAN_LOG_PATH` in `/etc/myportal.env` and install the bundled
   Fail2ban filter/jail to automatically ban brute force login attempts.
 - Use `tmpfiles.d` to rotate Loguru output if you configure file-based
