@@ -28,13 +28,13 @@ import asyncio
 import hashlib
 import hmac
 import json
-import re
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+import bleach
 import httpx
 from loguru import logger
 from redis.asyncio import Redis
@@ -719,13 +719,21 @@ def ticket_to_project_payload(
     return body
 
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-
 def _first_line_of_body(body: Any, limit: int = 240) -> str:
+    """Return a short, safe single-line summary of a ticket reply body.
+
+    Reply bodies are user-submitted HTML. To produce a description suitable
+    for a Solidtime time entry, the function:
+
+    * uses :mod:`bleach` to remove all HTML tags (per the project sanitisation
+      convention) so no markup leaks into the upstream system;
+    * normalises non-breaking spaces to regular spaces;
+    * keeps only the first non-empty line; and
+    * truncates the result to ``limit`` characters with an ellipsis.
+    """
     if not body:
         return ""
-    text = _HTML_TAG_RE.sub(" ", str(body))
+    text = bleach.clean(str(body), tags=[], attributes={}, strip=True)
     text = text.replace("\xa0", " ").strip()
     if not text:
         return ""
@@ -1273,11 +1281,7 @@ async def get_ticket_links(ticket_id: int) -> dict[str, Any]:
         result["project_id"] = project_id
         result["last_synced_at"] = project_link.get("last_synced_at")
         result["sync_status"] = str(project_link.get("sync_status") or "")
-        if org_id:
-            result["project_url"] = f"{host_url}/projects/{project_id}"
-            timer_url = f"{host_url}/time?project={project_id}"
-        else:
-            result["project_url"] = f"{host_url}/projects/{project_id}"
-            timer_url = f"{host_url}/time?project={project_id}"
+        result["project_url"] = f"{host_url}/projects/{project_id}"
+        timer_url = f"{host_url}/time?project={project_id}"
     result["timer_url"] = timer_url
     return result

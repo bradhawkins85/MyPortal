@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -222,7 +223,7 @@ async def receive_webhook(request: Request) -> JSONResponse:
 
     try:
         payload = await request.json()
-    except Exception:
+    except (ValueError, json.JSONDecodeError):
         payload = None
 
     await webhook_monitor.log_incoming_webhook(
