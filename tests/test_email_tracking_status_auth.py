@@ -140,13 +140,88 @@ def test_tracking_click_does_not_require_authentication(monkeypatch):
 
     monkeypatch.setattr(email_tracking, "record_tracking_event", fake_record_tracking_event)
     monkeypatch.setattr(email_tracking, "send_event_to_plausible", fake_send_event_to_plausible)
+    token = email_tracking.build_click_token(
+        tracking_id="test-id",
+        destination_url="https://example.com",
+    )
 
     with TestClient(app, follow_redirects=False) as client:
         response = client.get(
             "/api/email-tracking/click",
-            params={"tid": "test-id", "url": "https://example.com"}
+            params={"tid": "test-id", "token": token},
         )
 
     # Should succeed without authentication (redirects to target URL)
     assert response.status_code == 302
     assert response.headers["location"] == "https://example.com"
+
+
+def test_tracking_click_rejects_non_http_redirects(monkeypatch):
+    """Test that click tracking rejects unsafe redirect schemes."""
+    async def fake_record_tracking_event(**kwargs):
+        pass
+
+    async def fake_send_event_to_plausible(**kwargs):
+        pass
+
+    monkeypatch.setattr(email_tracking, "record_tracking_event", fake_record_tracking_event)
+    monkeypatch.setattr(email_tracking, "send_event_to_plausible", fake_send_event_to_plausible)
+    token = email_tracking.build_click_token(
+        tracking_id="test-id",
+        destination_url="javascript:alert(1)",
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get(
+            "/api/email-tracking/click",
+            params={"tid": "test-id", "token": token},
+        )
+
+    assert response.status_code == 400
+    assert "Invalid redirect URL" in response.text
+
+
+def test_tracking_click_rejects_relative_redirects(monkeypatch):
+    """Test that click tracking requires absolute redirect URLs."""
+    async def fake_record_tracking_event(**kwargs):
+        pass
+
+    async def fake_send_event_to_plausible(**kwargs):
+        pass
+
+    monkeypatch.setattr(email_tracking, "record_tracking_event", fake_record_tracking_event)
+    monkeypatch.setattr(email_tracking, "send_event_to_plausible", fake_send_event_to_plausible)
+    token = email_tracking.build_click_token(
+        tracking_id="test-id",
+        destination_url="/internal/path",
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get(
+            "/api/email-tracking/click",
+            params={"tid": "test-id", "token": token},
+        )
+
+    assert response.status_code == 400
+    assert "Invalid redirect URL" in response.text
+
+
+def test_tracking_click_rejects_invalid_redirect_token(monkeypatch):
+    """Test that click tracking rejects invalid signed redirect tokens."""
+    async def fake_record_tracking_event(**kwargs):
+        pass
+
+    async def fake_send_event_to_plausible(**kwargs):
+        pass
+
+    monkeypatch.setattr(email_tracking, "record_tracking_event", fake_record_tracking_event)
+    monkeypatch.setattr(email_tracking, "send_event_to_plausible", fake_send_event_to_plausible)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get(
+            "/api/email-tracking/click",
+            params={"tid": "test-id", "token": "not-a-valid-token"},
+        )
+
+    assert response.status_code == 400
+    assert "Invalid redirect token" in response.text
