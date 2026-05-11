@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/counters.html" import counter_strip %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">Backup Summary</span>
+    <span class="header__title-meta">Today's backup status and the last {{ backup_history.dates | length }} days of history across all jobs.</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Manage jobs", "type": "link", "href": "/admin/backup-jobs"},
+    {"label": "View report", "type": "link", "href": "/reports/company-overview"},
+  ]) }}
+{% endblock %}
+
+{% block content %}
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Today's status</h2>
+      <p class="card__subtitle">Each active job receives an <em>Unknown</em> event automatically each day; the status reported by the backup script overrides it.</p>
+    </div>
+    {% set strip_items = [] %}
+    {% for definition in backup_status_definitions %}
+      {% set _ = strip_items.append({
+        "label": definition.label,
+        "value": backup_jobs_summary.by_status.get(definition.value, 0),
+        "variant": ('success' if definition.value == 'pass'
+                    else 'warning' if definition.value == 'warn'
+                    else 'danger' if definition.value == 'fail'
+                    else 'neutral'),
+      }) %}
+    {% endfor %}
+    {{ counter_strip(strip_items, total=backup_jobs_summary.total, total_label='Jobs') }}
+  </header>
+
+  <div class="card__body">
+    <form method="get" action="/admin/backup-summary" class="table-toolbar">
+      <div class="table-toolbar__field">
+        <label for="filter-company">Company</label>
+        <select id="filter-company" name="company_id" class="form-input" onchange="this.form.submit()">
+          <option value="">All companies</option>
+          {% for company in backup_companies %}
+            <option value="{{ company.id }}" {% if backup_company_filter == company.id %}selected{% endif %}>{{ company.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="table-toolbar__field">
+        <label for="filter-status">Status</label>
+        <select id="filter-status" name="status_filter" class="form-input" onchange="this.form.submit()">
+          <option value="">All statuses</option>
+          {% for definition in backup_status_definitions %}
+            <option value="{{ definition.value }}" {% if backup_status_filter == definition.value %}selected{% endif %}>{{ definition.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="table-toolbar__field">
+        <a class="button button--ghost button--small" href="/admin/backup-summary">Reset filters</a>
+      </div>
+    </form>
+
+    <div class="table-wrapper">
+      <table class="table" id="backup-summary-today-table" data-table data-table-id="backup-summary-today">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="company">Company</th>
+            <th scope="col" data-sort="string" data-column-key="name">Job</th>
+            <th scope="col" data-sort="string" data-column-key="today">Today</th>
+            <th scope="col" data-sort="string" data-column-key="latest">Last reported</th>
+            <th scope="col" data-sort="string" data-column-key="active">Active</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in backup_jobs %}
+            {% set today_status = job.today_status or backup_status_default %}
+            {% set today_variant = ('success' if today_status == 'pass'
+                                    else 'warning' if today_status == 'warn'
+                                    else 'danger' if today_status == 'fail'
+                                    else 'neutral') %}
+            {% set latest_event = job.latest_event %}
+            <tr>
+              <td data-label="Company" data-column-key="company">
+                {{ backup_company_lookup.get(job.company_id, 'Company #' ~ job.company_id) }}
+              </td>
+              <td data-label="Job" data-column-key="name">
+                <div><strong>{{ job.name }}</strong></div>
+                {% if job.description %}
+                  <div class="table__meta">{{ job.description }}</div>
+                {% endif %}
+              </td>
+              <td data-label="Today" data-column-key="today">
+                <span class="status status--{{ today_variant }}">{{ today_status | title }}</span>
+                {% if job.today_event and job.today_event.status_message %}
+                  <div class="table__meta">{{ job.today_event.status_message }}</div>
+                {% endif %}
+              </td>
+              <td data-label="Last reported" data-column-key="latest">
+                {% if latest_event and latest_event.reported_at %}
+                  <span data-utc="{{ latest_event.reported_at.isoformat() if latest_event.reported_at.__class__.__name__ == 'datetime' else latest_event.reported_at }}">{{ latest_event.reported_at }}</span>
+                {% elif latest_event and latest_event.event_date %}
+                  {{ latest_event.event_date }}
+                {% else %}
+                  <span class="text-muted">No reports yet</span>
+                {% endif %}
+              </td>
+              <td data-label="Active" data-column-key="active">
+                {% if job.is_active %}
+                  <span class="status status--success">Active</span>
+                {% else %}
+                  <span class="status status--neutral">Disabled</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="table__empty">No backup jobs match the current filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <h2 class="card__title">Last {{ backup_history.dates | length }} days</h2>
+      <p class="card__subtitle">Cells are colour-coded by reported status.</p>
+    </div>
+  </header>
+  <div class="card__body">
+    {% if backup_history.rows %}
+      <div class="table-wrapper">
+        <table class="table backup-grid">
+          <thead>
+            <tr>
+              <th scope="col">Job</th>
+              {% for day in backup_history.dates %}
+                <th scope="col" class="backup-grid__day">{{ day.strftime('%d %b') }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in backup_history.rows %}
+              <tr>
+                <td>
+                  <div><strong>{{ row.job.name }}</strong></div>
+                  <div class="table__meta">{{ backup_company_lookup.get(row.job.company_id, 'Company #' ~ row.job.company_id) }}</div>
+                </td>
+                {% for cell in row.events %}
+                  <td class="backup-grid__cell backup-grid__cell--{{ cell.variant }}" title="{{ cell.date }} — {{ cell.label }}{% if cell.message %}: {{ cell.message }}{% endif %}">
+                    <span class="status status--{{ cell.variant }} backup-grid__pill">{{ cell.label[0] }}</span>
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted">No backup jobs configured yet.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}
