@@ -12824,10 +12824,6 @@ async def admin_backup_jobs_page(request: Request):
         except (TypeError, ValueError):
             editing_job = None
 
-    history = await backup_jobs_service.build_history_grid(
-        company_id=company_filter, days=14, include_inactive=True
-    )
-
     extra = {
         "title": "Backup history",
         "backup_jobs": jobs,
@@ -12839,10 +12835,58 @@ async def admin_backup_jobs_page(request: Request):
         "backup_company_filter": company_filter,
         "backup_status_filter": status_filter,
         "backup_editing_job": editing_job,
-        "backup_history": history,
         "backup_status_url": _backup_status_webhook_url(request),
     }
     return await _render_template("admin/backup_jobs.html", request, user, extra=extra)
+
+
+@app.head("/admin/backup-summary", response_class=HTMLResponse)
+@app.get("/admin/backup-summary", response_class=HTMLResponse)
+async def admin_backup_summary_page(request: Request):
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    company_filter_raw = (request.query_params.get("company_id") or "").strip()
+    status_filter = (request.query_params.get("status_filter") or "").strip().lower()
+    company_filter: int | None = None
+    if company_filter_raw:
+        try:
+            company_filter = int(company_filter_raw)
+        except ValueError:
+            company_filter = None
+
+    jobs = await backup_jobs_service.list_jobs_with_latest(
+        company_id=company_filter, include_inactive=True
+    )
+    if status_filter and status_filter in backup_jobs_service.KNOWN_STATUSES:
+        jobs = [job for job in jobs if job.get("today_status") == status_filter]
+
+    summary = backup_jobs_service.summarise_jobs(jobs)
+    companies = await company_repo.list_companies()
+    company_lookup = {
+        int(company["id"]): company.get("name")
+        for company in companies
+        if company.get("id") is not None
+    }
+
+    history = await backup_jobs_service.build_history_grid(
+        company_id=company_filter, days=14, include_inactive=True
+    )
+
+    extra = {
+        "title": "Backup Summary",
+        "backup_jobs": jobs,
+        "backup_jobs_summary": summary,
+        "backup_status_definitions": backup_jobs_service.STATUS_DEFINITIONS,
+        "backup_status_default": backup_jobs_service.DEFAULT_STATUS,
+        "backup_companies": companies,
+        "backup_company_lookup": company_lookup,
+        "backup_company_filter": company_filter,
+        "backup_status_filter": status_filter,
+        "backup_history": history,
+    }
+    return await _render_template("admin/backup_summary.html", request, user, extra=extra)
 
 
 def _extract_backup_job_form(form: FormData) -> dict[str, Any]:
