@@ -189,6 +189,22 @@ async def list_project_links_with_errors(limit: int = 100) -> list[LinkRecord]:
     return [normalised for row in rows if (normalised := _normalise(row)) is not None]
 
 
+async def list_unsynced_ticket_ids(limit: int = 50) -> list[int]:
+    """Return IDs of non-closed/resolved tickets with no Solidtime project link or an errored link."""
+    rows = await db.fetch_all(
+        """
+        SELECT t.id FROM tickets t
+        LEFT JOIN solidtime_project_links spl ON t.id = spl.ticket_id
+        WHERE t.status NOT IN ('closed', 'resolved')
+          AND (spl.ticket_id IS NULL OR spl.sync_status = 'error')
+        ORDER BY t.updated_at DESC
+        LIMIT %s
+        """,
+        (int(limit),),
+    )
+    return [int(row["id"]) for row in rows if row and row.get("id") is not None]
+
+
 # ---------------------------------------------------------------------------
 # Time entry links
 # ---------------------------------------------------------------------------
