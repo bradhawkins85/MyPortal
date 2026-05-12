@@ -562,6 +562,7 @@ async def test_reconcile_once_updates_linked_reply_billable_status(
                 "base_url": "https://app.solidtime.io",
                 "api_token": "tok",
                 "organization_id": "org-uuid",
+                "sync_tickets_to_projects": False,
                 "sync_time_entries_from_solidtime": True,
             },
         }
@@ -646,6 +647,7 @@ async def test_reconcile_once_imports_new_time_entry_with_billable_status(
                 "base_url": "https://app.solidtime.io",
                 "api_token": "tok",
                 "organization_id": "org-uuid",
+                "sync_tickets_to_projects": False,
                 "sync_time_entries_from_solidtime": True,
             },
         }
@@ -835,3 +837,127 @@ async def test_trigger_module_solidtime_not_in_trigger_actions(monkeypatch):
     result_slugs = {m["slug"] for m in result}
     assert "solidtime" not in result_slugs
     assert "smtp" in result_slugs
+
+
+# ---------------------------------------------------------------------------
+# Outbound ticket push in reconcile_once
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_reconcile_once_pushes_unsynced_open_tickets(reset_solidtime_caches):
+    """reconcile_once should push open tickets that have no Solidtime project link."""
+
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_tickets_to_projects": True,
+                "sync_time_entries_from_solidtime": False,
+                "sync_projects_to_tickets": False,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    async def fake_list_unsynced_ticket_ids(limit=50):
+        return [101, 102]
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "list_unsynced_ticket_ids", fake_list_unsynced_ticket_ids
+    )
+
+    synced_ids: list[int] = []
+
+    async def fake_sync_ticket_to_project(ticket_id):
+        synced_ids.append(ticket_id)
+        return {"ticket_id": ticket_id, "solidtime_project_id": f"p-{ticket_id}"}
+
+    reset_solidtime_caches.setattr(
+        solidtime, "sync_ticket_to_project", fake_sync_ticket_to_project
+    )
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "ok"
+    assert summary["tickets_pushed"] == 2
+    assert synced_ids == [101, 102]
+
+
+@pytest.mark.anyio
+async def test_reconcile_once_records_error_on_ticket_push_failure(reset_solidtime_caches):
+    """reconcile_once should record errors when ticket push fails."""
+
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_tickets_to_projects": True,
+                "sync_time_entries_from_solidtime": False,
+                "sync_projects_to_tickets": False,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    async def fake_list_unsynced_ticket_ids(limit=50):
+        return [55]
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "list_unsynced_ticket_ids", fake_list_unsynced_ticket_ids
+    )
+
+    async def fake_sync_ticket_to_project(ticket_id):
+        raise solidtime.SolidtimeAPIError("API down")
+
+    reset_solidtime_caches.setattr(
+        solidtime, "sync_ticket_to_project", fake_sync_ticket_to_project
+    )
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "error"
+    assert summary["errors"] == 1
+    assert summary["tickets_pushed"] == 0
+
+
+@pytest.mark.anyio
+async def test_reconcile_once_skips_ticket_push_when_disabled(reset_solidtime_caches):
+    """reconcile_once should not push tickets when sync_tickets_to_projects is False."""
+
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_tickets_to_projects": False,
+                "sync_time_entries_from_solidtime": False,
+                "sync_projects_to_tickets": False,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    called: list[bool] = []
+
+    async def fake_list_unsynced_ticket_ids(limit=50):
+        called.append(True)
+        return [99]
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "list_unsynced_ticket_ids", fake_list_unsynced_ticket_ids
+    )
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "ok"
+    assert summary["tickets_pushed"] == 0
+    assert not called, "list_unsynced_ticket_ids should not be called when sync_tickets_to_projects is False"
+
