@@ -90,6 +90,46 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_tactical_assets_truncates_long_hdd_size(monkeypatch):
+    company_record = {"id": 9, "tacticalrmm_client_id": "client-9"}
+    long_hdd = "DiskModel1234567890 " * 20
+    agents = [{"id": 201}]
+
+    async def fake_get_company(company_id):
+        assert company_id == 9
+        return company_record
+
+    async def fake_fetch_agents(client_id):
+        assert client_id == "client-9"
+        return agents
+
+    def fake_extract(agent):
+        assert agent["id"] == 201
+        return {
+            "name": "Storage-Heavy-Host",
+            "hdd_size": long_hdd,
+            "tactical_asset_id": "agent-201",
+        }
+
+    captured: list[dict[str, object]] = []
+
+    async def fake_upsert_asset(**kwargs):
+        captured.append(kwargs)
+
+    monkeypatch.setattr(asset_importer.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(asset_importer.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(asset_importer.tacticalrmm, "extract_agent_details", fake_extract)
+    monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", fake_upsert_asset)
+
+    processed = await asset_importer.import_tactical_assets_for_company(9)
+
+    assert processed == 1
+    assert len(captured) == 1
+    assert captured[0]["hdd_size"] == long_hdd[:255]
+    assert len(captured[0]["hdd_size"]) == 255
+
+
+@pytest.mark.anyio
 async def test_import_all_tactical_assets_summarises(monkeypatch):
     companies = [
         {"id": 1, "tacticalrmm_client_id": "c1"},
