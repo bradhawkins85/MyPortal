@@ -490,6 +490,231 @@ async def test_sync_ticket_skips_when_module_disabled(reset_solidtime_caches):
     assert await solidtime.sync_ticket_to_project(1) is None
 
 
+@pytest.mark.anyio
+async def test_sync_reply_to_time_entry_deletes_non_billable_remote_entry(
+    reset_solidtime_caches,
+):
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_time_entries_to_solidtime": True,
+                "only_billable_to_solidtime": True,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    async def fake_get_reply_by_id(reply_id):
+        return {
+            "id": reply_id,
+            "ticket_id": 10,
+            "minutes_spent": 25,
+            "is_billable": False,
+        }
+
+    reset_solidtime_caches.setattr(
+        solidtime.tickets_repo, "get_reply_by_id", fake_get_reply_by_id
+    )
+
+    async def fake_get_time_entry_link(reply_id):
+        return {
+            "ticket_reply_id": reply_id,
+            "solidtime_org_id": "org-uuid",
+            "solidtime_time_entry_id": "time-uuid",
+        }
+
+    deletions: list[tuple[str, str]] = []
+    deleted_links: list[int] = []
+
+    async def fake_delete_time_entry(org_id, time_entry_id):
+        deletions.append((org_id, time_entry_id))
+
+    async def fake_delete_time_entry_link(reply_id):
+        deleted_links.append(reply_id)
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "get_time_entry_link", fake_get_time_entry_link
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "delete_time_entry_link", fake_delete_time_entry_link
+    )
+    reset_solidtime_caches.setattr(
+        solidtime, "delete_time_entry", fake_delete_time_entry
+    )
+
+    assert await solidtime.sync_reply_to_time_entry(55) is None
+    assert deletions == [("org-uuid", "time-uuid")]
+    assert deleted_links == [55]
+
+
+@pytest.mark.anyio
+async def test_reconcile_once_updates_linked_reply_billable_status(
+    reset_solidtime_caches,
+):
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_time_entries_from_solidtime": True,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+    
+    async def fake_list_projects(org_id):
+        return []
+
+    async def fake_list_time_entries(org_id):
+        return [
+            {
+                "id": "time-1",
+                "project_id": "project-1",
+                "start": "2026-05-11T10:00:00Z",
+                "end": "2026-05-11T10:30:00Z",
+                "billable": False,
+                "description": "Remote fix",
+            }
+        ]
+
+    reset_solidtime_caches.setattr(solidtime, "list_projects", fake_list_projects)
+    reset_solidtime_caches.setattr(
+        solidtime, "list_time_entries", fake_list_time_entries
+    )
+
+    async def fake_get_time_entry_link_by_remote(org_id, time_entry_id):
+        return {
+            "ticket_reply_id": 77,
+            "solidtime_org_id": org_id,
+            "solidtime_time_entry_id": time_entry_id,
+            "direction": "out",
+            "last_payload_hash": "stale-hash",
+        }
+
+    async def fake_get_reply_by_id(reply_id):
+        return {"id": reply_id, "minutes_spent": 30, "is_billable": True}
+
+    updated: dict[str, object] = {}
+    upserts: list[dict[str, object]] = []
+
+    async def fake_update_reply(reply_id, **kwargs):
+        updated["reply_id"] = reply_id
+        updated["kwargs"] = kwargs
+        return {"id": reply_id, **kwargs}
+
+    async def fake_upsert_time_entry_link(**kwargs):
+        upserts.append(kwargs)
+        return kwargs
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo,
+        "get_time_entry_link_by_remote",
+        fake_get_time_entry_link_by_remote,
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "upsert_time_entry_link", fake_upsert_time_entry_link
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.tickets_repo, "get_reply_by_id", fake_get_reply_by_id
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.tickets_repo, "update_reply", fake_update_reply
+    )
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "ok"
+    assert summary["time_entries_pulled"] == 1
+    assert updated == {"reply_id": 77, "kwargs": {"is_billable": False}}
+    assert upserts and upserts[0]["direction"] == "out"
+
+
+@pytest.mark.anyio
+async def test_reconcile_once_imports_new_time_entry_with_billable_status(
+    reset_solidtime_caches,
+):
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_time_entries_from_solidtime": True,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+    
+    async def fake_list_projects(org_id):
+        return []
+
+    async def fake_list_time_entries(org_id):
+        return [
+            {
+                "id": "time-2",
+                "project_id": "project-2",
+                "start": "2026-05-11T11:00:00Z",
+                "end": "2026-05-11T11:45:00Z",
+                "billable": True,
+                "description": "Imported work",
+            }
+        ]
+
+    reset_solidtime_caches.setattr(solidtime, "list_projects", fake_list_projects)
+    reset_solidtime_caches.setattr(
+        solidtime, "list_time_entries", fake_list_time_entries
+    )
+
+    async def fake_get_time_entry_link_by_remote(org_id, time_entry_id):
+        return None
+
+    async def fake_get_project_link_by_remote(org_id, project_id):
+        return {"ticket_id": 12, "solidtime_project_id": project_id}
+
+    created: dict[str, object] = {}
+    upserts: list[dict[str, object]] = []
+
+    async def fake_create_reply(**kwargs):
+        created.update(kwargs)
+        return {"id": 88, **kwargs}
+
+    async def fake_upsert_time_entry_link(**kwargs):
+        upserts.append(kwargs)
+        return kwargs
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo,
+        "get_time_entry_link_by_remote",
+        fake_get_time_entry_link_by_remote,
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo,
+        "get_project_link_by_remote",
+        fake_get_project_link_by_remote,
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "upsert_time_entry_link", fake_upsert_time_entry_link
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.tickets_repo, "create_reply", fake_create_reply
+    )
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "ok"
+    assert created["ticket_id"] == 12
+    assert created["minutes_spent"] == 45
+    assert created["is_billable"] is True
+    assert upserts and upserts[0]["direction"] == "in"
+
+
 # ---------------------------------------------------------------------------
 # UI helper
 # ---------------------------------------------------------------------------
