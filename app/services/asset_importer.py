@@ -10,11 +10,15 @@ from app.repositories import companies as company_repo
 from app.services import company_id_lookup, syncro, tacticalrmm
 
 
-def _clean_string(value: Any) -> str | None:
+def _clean_string(value: Any, *, max_length: int | None = None) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    return text or None
+    if not text:
+        return None
+    if isinstance(max_length, int) and max_length > 0 and len(text) > max_length:
+        text = text[:max_length]
+    return text
 
 
 async def import_assets_for_company(
@@ -43,7 +47,7 @@ async def import_assets_for_company(
         status = _clean_string(details.get("status"))
         os_name = _clean_string(details.get("os_name"))
         cpu_name = _clean_string(details.get("cpu_name"))
-        hdd_size = _clean_string(details.get("hdd_size"))
+        hdd_size = _clean_string(details.get("hdd_size"), max_length=255)
         last_user = _clean_string(details.get("last_user"))
         motherboard = _clean_string(details.get("motherboard_manufacturer"))
         form_factor = _clean_string(details.get("form_factor"))
@@ -216,7 +220,7 @@ async def import_tactical_assets_for_company(
             os_name=_clean_string(details.get("os_name")),
             cpu_name=_clean_string(details.get("cpu_name")),
             ram_gb=details.get("ram_gb"),
-            hdd_size=_clean_string(details.get("hdd_size")),
+            hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
             last_sync=details.get("last_sync"),
             motherboard_manufacturer=_clean_string(details.get("motherboard_manufacturer")),
             form_factor=_clean_string(details.get("form_factor")),
