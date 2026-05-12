@@ -1084,6 +1084,7 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
                     reply_id=reply_id,
                     error=str(exc),
                 )
+                return None
             await links_repo.delete_time_entry_link(int(reply_id))
         return None
 
@@ -1101,6 +1102,7 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
                     reply_id=reply_id,
                     error=str(exc),
                 )
+                return None
             await links_repo.delete_time_entry_link(int(reply_id))
         return None
 
@@ -1315,7 +1317,7 @@ async def _sync_time_entry_from_solidtime(
         update_kwargs: dict[str, Any] = {}
         if int(reply.get("minutes_spent") or 0) != minutes_spent:
             update_kwargs["minutes_spent"] = minutes_spent
-        if bool(reply.get("is_billable")) != billable:
+        if _coerce_bool(reply.get("is_billable")) != billable:
             update_kwargs["is_billable"] = billable
         if update_kwargs:
             await tickets_repo.update_reply(reply_id, **update_kwargs)
