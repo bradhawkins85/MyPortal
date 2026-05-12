@@ -1372,6 +1372,7 @@ async def reconcile_once() -> dict[str, Any]:
     """
     summary: dict[str, Any] = {
         "status": "skipped",
+        "tickets_pushed": 0,
         "projects_pulled": 0,
         "time_entries_pulled": 0,
         "errors": 0,
@@ -1386,6 +1387,33 @@ async def reconcile_once() -> dict[str, Any]:
         return summary
 
     summary["status"] = "ok"
+
+    # Outbound: push open tickets without a Solidtime project link to Solidtime.
+    if settings.get("sync_tickets_to_projects"):
+        unsynced_ids = await links_repo.list_unsynced_ticket_ids()
+        for ticket_id in unsynced_ids:
+            try:
+                await sync_ticket_to_project(int(ticket_id))
+                summary["tickets_pushed"] += 1
+            except SolidtimeConfigurationError:
+                pass
+            except SolidtimeAPIError as exc:
+                summary["status"] = "error"
+                summary["errors"] += 1
+                log_warning(
+                    "Solidtime ticket push failed during reconcile",
+                    ticket_id=ticket_id,
+                    error=str(exc),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                summary["status"] = "error"
+                summary["errors"] += 1
+                log_warning(
+                    "Solidtime ticket push failed unexpectedly",
+                    ticket_id=ticket_id,
+                    error=str(exc),
+                )
+
     if settings.get("sync_projects_to_tickets") or settings.get(
         "sync_time_entries_from_solidtime"
     ):
