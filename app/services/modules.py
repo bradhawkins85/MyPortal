@@ -1653,6 +1653,7 @@ async def trigger_module(
         "password-pusher": _invoke_password_pusher,
         "hudu": _validate_hudu,
         "trello": _invoke_trello_add_comment,
+        "solidtime": _invoke_solidtime_reconcile,
     }
     handler = handler_map.get(slug)
     if not handler:
@@ -5280,3 +5281,23 @@ async def _invoke_trello_add_comment(
         "card_id": card_id,
         "comment_id": result.get("id"),
     }
+
+
+async def _invoke_solidtime_reconcile(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Run the Solidtime reconciliation loop on demand.
+
+    Triggers the same inbound/outbound reconciliation that the scheduled
+    ``solidtime-reconcile`` job runs every 5 minutes.  Calling
+    ``trigger_module("solidtime", ...)`` is the programmatic equivalent of
+    hitting ``POST /api/v1/solidtime/reconcile``.
+    """
+    if event_future and not event_future.done():
+        event_future.set_result(None)
+
+    from app.services.solidtime import reconcile_once
+    return await reconcile_once()
