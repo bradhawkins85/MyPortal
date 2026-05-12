@@ -775,3 +775,63 @@ def test_migration_uses_create_table_if_not_exists():
     create_count = sql.upper().count("CREATE TABLE")
     if_not_exists_count = sql.upper().count("CREATE TABLE IF NOT EXISTS")
     assert create_count == if_not_exists_count == 4
+
+
+# ---------------------------------------------------------------------------
+# trigger_module integration
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_trigger_module_solidtime_calls_reconcile_once(reset_solidtime_caches, monkeypatch):
+    """trigger_module('solidtime', ...) must not raise 'No handler registered'."""
+    from app.services import modules
+    from app.repositories import integration_modules as module_repo
+
+    async def fake_get_module(slug):
+        if slug == "solidtime":
+            return {
+                "slug": "solidtime",
+                "enabled": True,
+                "settings": {
+                    "base_url": "https://app.solidtime.io",
+                    "api_token": "tok",
+                    "organization_id": "org-uuid",
+                },
+            }
+        return None
+
+    monkeypatch.setattr(module_repo, "get_module", fake_get_module)
+
+    reconciled: list[bool] = []
+
+    async def fake_reconcile_once():
+        reconciled.append(True)
+        return {"status": "ok", "time_entries_pulled": 0, "time_entries_pushed": 0}
+
+    monkeypatch.setattr(solidtime, "reconcile_once", fake_reconcile_once)
+
+    result = await modules.trigger_module("solidtime", {}, background=False)
+
+    assert result is not None
+    assert result.get("status") == "ok"
+    assert reconciled, "reconcile_once should have been called"
+
+
+@pytest.mark.anyio
+async def test_trigger_module_solidtime_not_in_trigger_actions(monkeypatch):
+    """solidtime must be excluded from automation trigger-action module list."""
+    from app.services import modules
+    from app.repositories import integration_modules as module_repo
+
+    async def fake_list_modules():
+        return [
+            {"slug": "solidtime", "name": "Solidtime", "enabled": True, "settings": {}},
+            {"slug": "smtp", "name": "Send Email", "enabled": True, "settings": {}},
+        ]
+
+    monkeypatch.setattr(module_repo, "list_modules", fake_list_modules)
+
+    result = await modules.list_trigger_action_modules()
+    result_slugs = {m["slug"] for m in result}
+    assert "solidtime" not in result_slugs
+    assert "smtp" in result_slugs

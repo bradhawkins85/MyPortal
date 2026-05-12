@@ -735,6 +735,20 @@
             </form>
           {% endif %}
 
+          {% if module.slug == 'solidtime' %}
+            <form action="/api/v1/solidtime/reconcile" method="post" class="form card__form" data-solidtime-sync>
+              {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+              {% endif %}
+              <div class="form-field">
+                <p class="form-help">Run the reconciliation loop immediately — pulls Solidtime time entries into MyPortal and pushes any pending changes back. The scheduled job runs this automatically every 5 minutes.</p>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--secondary" {% if not module.enabled %}disabled{% endif %}>Sync now</button>
+              </div>
+            </form>
+          {% endif %}
+
           {% if module.slug == 'tacticalrmm' %}
             <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="form card__form">
               {% if csrf_token %}
