@@ -961,3 +961,49 @@ async def test_reconcile_once_skips_ticket_push_when_disabled(reset_solidtime_ca
     assert summary["tickets_pushed"] == 0
     assert not called, "list_unsynced_ticket_ids should not be called when sync_tickets_to_projects is False"
 
+
+@pytest.mark.anyio
+async def test_reconcile_once_returns_reason_when_module_disabled(reset_solidtime_caches):
+    """reconcile_once should expose why it skipped so admins can act on it."""
+
+    async def fake_get_module(slug):
+        return {
+            "enabled": False,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "skipped"
+    assert "disabled" in str(summary.get("reason", "")).lower()
+
+
+@pytest.mark.anyio
+async def test_reconcile_once_returns_reason_when_organization_id_missing(
+    reset_solidtime_caches,
+):
+    """reconcile_once should report when the organisation id is unset."""
+
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "",
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    summary = await solidtime.reconcile_once()
+
+    assert summary["status"] == "skipped"
+    assert "organization_id" in str(summary.get("reason", ""))
+

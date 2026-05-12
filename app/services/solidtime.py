@@ -1379,11 +1379,16 @@ async def reconcile_once() -> dict[str, Any]:
     }
     try:
         settings = await _get_effective_settings()
-    except SolidtimeConfigurationError:
+    except SolidtimeConfigurationError as exc:
+        summary["reason"] = str(exc)
+        log_warning("Solidtime reconcile skipped", reason=str(exc))
         return summary
 
     org_id = settings["organization_id"]
     if not org_id:
+        reason = "Solidtime organization_id is not configured"
+        summary["reason"] = reason
+        log_warning("Solidtime reconcile skipped", reason=reason)
         return summary
 
     summary["status"] = "ok"
