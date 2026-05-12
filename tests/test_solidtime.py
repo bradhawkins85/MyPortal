@@ -567,7 +567,7 @@ async def test_reconcile_once_updates_linked_reply_billable_status(
         }
 
     reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
-    
+
     async def fake_list_projects(org_id):
         return []
 
@@ -651,7 +651,7 @@ async def test_reconcile_once_imports_new_time_entry_with_billable_status(
         }
 
     reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
-    
+
     async def fake_list_projects(org_id):
         return []
 
