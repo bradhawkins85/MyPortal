@@ -212,7 +212,7 @@ async def test_monthly_commitment_sets_30_day_term(monkeypatch):
     assert len(captured_lines) == 1
     line = captured_lines[0]
     term_days = (line["term_end"] - line["term_start"]).days
-    # Monthly → 29 days difference (30 - 1 because end = start + 29)
+    # Monthly → term_days = 30, and end = start + (30 - 1) days, so diff = 29
     assert term_days == 29
 
 
@@ -259,7 +259,8 @@ async def test_annual_commitment_sets_365_day_term(monkeypatch):
     assert len(captured_lines) == 1
     line = captured_lines[0]
     term_days = (line["term_end"] - line["term_start"]).days
-    assert term_days == 364  # 365 - 1
+    # Annual → term_days = 365, and end = start + (365 - 1) days, so diff = 364
+    assert term_days == 364
 
 
 @pytest.mark.anyio
@@ -304,6 +305,7 @@ async def test_unknown_product_commitment_defaults_to_annual(monkeypatch):
     assert len(captured_lines) == 1
     line = captured_lines[0]
     term_days = (line["term_end"] - line["term_start"]).days
+    # Annual → term_days = 365, and end = start + (365 - 1) days, so diff = 364
     assert term_days == 364  # annual fallback
 
 
