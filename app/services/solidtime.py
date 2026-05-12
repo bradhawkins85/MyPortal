@@ -766,6 +766,96 @@ def _coerce_aware_utc(value: Any) -> datetime | None:
     return None
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
+def _extract_resource_id(value: Any) -> str | None:
+    if isinstance(value, Mapping):
+        candidate = value.get("id")
+    else:
+        candidate = value
+    text = str(candidate or "").strip()
+    return text or None
+
+
+def _time_entry_description(entry: Mapping[str, Any]) -> str:
+    return (
+        _first_line_of_body(entry.get("description"))
+        or _first_line_of_body(entry.get("note"))
+        or "Imported from Solidtime"
+    )
+
+
+def _time_entry_billable(entry: Mapping[str, Any]) -> bool:
+    if "billable" in entry:
+        return _coerce_bool(entry.get("billable"))
+    if "is_billable" in entry:
+        return _coerce_bool(entry.get("is_billable"))
+    return False
+
+
+def _time_entry_project_id(entry: Mapping[str, Any]) -> str | None:
+    return _extract_resource_id(entry.get("project_id")) or _extract_resource_id(
+        entry.get("project")
+    )
+
+
+def _time_entry_member_id(entry: Mapping[str, Any]) -> str | None:
+    return _extract_resource_id(entry.get("member_id")) or _extract_resource_id(
+        entry.get("member")
+    )
+
+
+def _time_entry_task_id(entry: Mapping[str, Any]) -> str | None:
+    return _extract_resource_id(entry.get("task_id")) or _extract_resource_id(
+        entry.get("task")
+    )
+
+
+def _time_entry_minutes(entry: Mapping[str, Any]) -> int:
+    start_dt = _coerce_aware_utc(entry.get("start"))
+    end_dt = _coerce_aware_utc(entry.get("end"))
+    if not start_dt or not end_dt:
+        return 0
+    seconds = (end_dt - start_dt).total_seconds()
+    if seconds <= 0:
+        return 0
+    return int(seconds // 60)
+
+
+def _time_entry_payload(entry: Mapping[str, Any]) -> dict[str, Any] | None:
+    project_id = _time_entry_project_id(entry)
+    start_dt = _coerce_aware_utc(entry.get("start"))
+    end_dt = _coerce_aware_utc(entry.get("end"))
+    if not project_id or not start_dt or not end_dt or end_dt <= start_dt:
+        return None
+    body: dict[str, Any] = {
+        "project_id": project_id,
+        "start": start_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "end": end_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "billable": _time_entry_billable(entry),
+        "description": _time_entry_description(entry),
+    }
+    member_id = _time_entry_member_id(entry)
+    task_id = _time_entry_task_id(entry)
+    if member_id:
+        body["member_id"] = member_id
+    if task_id:
+        body["task_id"] = task_id
+    return body
+
+
 def reply_to_time_entry_payload(
     reply: Mapping[str, Any],
     ticket: Mapping[str, Any],
@@ -994,10 +1084,26 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
                     reply_id=reply_id,
                     error=str(exc),
                 )
+                return None
             await links_repo.delete_time_entry_link(int(reply_id))
         return None
 
     if settings.get("only_billable_to_solidtime") and not bool(reply.get("is_billable")):
+        existing = await links_repo.get_time_entry_link(int(reply_id))
+        if existing and existing.get("solidtime_time_entry_id"):
+            try:
+                await delete_time_entry(
+                    str(existing["solidtime_org_id"]),
+                    str(existing["solidtime_time_entry_id"]),
+                )
+            except SolidtimeAPIError as exc:  # pragma: no cover - defensive
+                log_warning(
+                    "Failed to delete non-billable Solidtime time entry",
+                    reply_id=reply_id,
+                    error=str(exc),
+                )
+                return None
+            await links_repo.delete_time_entry_link(int(reply_id))
         return None
 
     ticket_id = reply.get("ticket_id")
@@ -1182,6 +1288,78 @@ def verify_webhook_signature(secret: str, body: bytes, signature: str | None) ->
         return False
 
 
+async def _sync_time_entry_from_solidtime(
+    org_id: str, entry: Mapping[str, Any]
+) -> bool:
+    entry_id = str(entry.get("id") or "").strip()
+    if not entry_id:
+        return False
+    payload = _time_entry_payload(entry)
+    if payload is None:
+        return False
+    payload_hash = _hash_payload(payload)
+
+    link = await links_repo.get_time_entry_link_by_remote(org_id, entry_id)
+    if link and link.get("last_payload_hash") == payload_hash:
+        return False
+
+    minutes_spent = _time_entry_minutes(entry)
+    if minutes_spent <= 0:
+        return False
+    billable = _time_entry_billable(entry)
+    end_dt = _coerce_aware_utc(entry.get("end")) or datetime.now(timezone.utc)
+
+    if link and link.get("ticket_reply_id"):
+        reply_id = int(link["ticket_reply_id"])
+        reply = await tickets_repo.get_reply_by_id(reply_id)
+        if not reply:
+            return False
+        update_kwargs: dict[str, Any] = {}
+        if int(reply.get("minutes_spent") or 0) != minutes_spent:
+            update_kwargs["minutes_spent"] = minutes_spent
+        if _coerce_bool(reply.get("is_billable")) != billable:
+            update_kwargs["is_billable"] = billable
+        if update_kwargs:
+            await tickets_repo.update_reply(reply_id, **update_kwargs)
+        await links_repo.upsert_time_entry_link(
+            ticket_reply_id=reply_id,
+            solidtime_org_id=org_id,
+            solidtime_time_entry_id=entry_id,
+            direction=str(link.get("direction") or "in"),
+            payload_hash=payload_hash,
+            sync_status="synced",
+        )
+        return bool(update_kwargs)
+
+    project_id = _time_entry_project_id(entry)
+    if not project_id:
+        return False
+    project_link = await links_repo.get_project_link_by_remote(org_id, project_id)
+    if not project_link or not project_link.get("ticket_id"):
+        return False
+    reply = await tickets_repo.create_reply(
+        ticket_id=int(project_link["ticket_id"]),
+        author_id=None,
+        body=_time_entry_description(entry),
+        is_internal=True,
+        minutes_spent=minutes_spent,
+        is_billable=billable,
+        created_at=end_dt,
+    )
+    reply_id = reply.get("id")
+    if not isinstance(reply_id, int) or reply_id <= 0:
+        return False
+    await links_repo.upsert_time_entry_link(
+        ticket_reply_id=reply_id,
+        solidtime_org_id=org_id,
+        solidtime_time_entry_id=entry_id,
+        direction="in",
+        payload_hash=payload_hash,
+        sync_status="synced",
+    )
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Inbound reconciler (poll-based)
 # ---------------------------------------------------------------------------
@@ -1229,6 +1407,17 @@ async def reconcile_once() -> dict[str, Any]:
             log_warning("Solidtime time entry pull failed", error=str(exc))
             entries = []
         summary["time_entries_pulled"] = len(entries)
+        for entry in entries:
+            try:
+                await _sync_time_entry_from_solidtime(org_id, entry)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                summary["status"] = "error"
+                summary["errors"] += 1
+                log_warning(
+                    "Solidtime time entry reconciliation failed",
+                    entry_id=str(entry.get("id") or ""),
+                    error=str(exc),
+                )
 
     return summary
 
