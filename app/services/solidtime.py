@@ -1393,7 +1393,7 @@ async def reconcile_once() -> dict[str, Any]:
         unsynced_ids = await links_repo.list_unsynced_ticket_ids()
         for ticket_id in unsynced_ids:
             try:
-                await sync_ticket_to_project(int(ticket_id))
+                await sync_ticket_to_project(ticket_id)
                 summary["tickets_pushed"] += 1
             except SolidtimeConfigurationError:
                 pass
