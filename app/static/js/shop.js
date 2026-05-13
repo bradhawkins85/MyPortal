@@ -1,4 +1,6 @@
 (function () {
+  const SHOP_SEARCH_REFOCUS_KEY = 'shop.search.refocus';
+
   function submitOnChange(container) {
     container.querySelectorAll('[data-submit-on-change]').forEach((input) => {
       input.addEventListener('change', () => {
@@ -207,8 +209,39 @@
     searchInput.addEventListener('input', () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
+        try {
+          sessionStorage.setItem(SHOP_SEARCH_REFOCUS_KEY, '1');
+        } catch (_error) {
+        }
         form.submit();
       }, 400);
+    });
+  }
+
+  function restoreShopSearchFocus(container) {
+    const searchInput = container.querySelector('[data-shop-search]');
+    if (!searchInput) {
+      return;
+    }
+
+    let shouldRefocus = false;
+    try {
+      shouldRefocus = sessionStorage.getItem(SHOP_SEARCH_REFOCUS_KEY) === '1';
+      if (shouldRefocus) {
+        sessionStorage.removeItem(SHOP_SEARCH_REFOCUS_KEY);
+      }
+    } catch (_error) {
+      return;
+    }
+
+    if (!shouldRefocus) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      searchInput.focus({ preventScroll: true });
+      const cursorPosition = searchInput.value.length;
+      searchInput.setSelectionRange(cursorPosition, cursorPosition);
     });
   }
 
@@ -217,6 +250,7 @@
     submitOnChange(container);
     bindStockLimitInputs(container);
     bindShopSearch(container);
+    restoreShopSearchFocus(container);
 
 
     const imageModal = document.getElementById('product-image-modal');
