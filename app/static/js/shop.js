@@ -194,10 +194,29 @@
     }
   }
 
+  function bindShopSearch(container) {
+    const searchInput = container.querySelector('[data-shop-search]');
+    if (!searchInput) {
+      return;
+    }
+    const form = searchInput.closest('form');
+    if (!form) {
+      return;
+    }
+    let debounceTimer = null;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        form.submit();
+      }, 400);
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     submitOnChange(container);
     bindStockLimitInputs(container);
+    bindShopSearch(container);
 
 
     const imageModal = document.getElementById('product-image-modal');
