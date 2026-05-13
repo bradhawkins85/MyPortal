@@ -184,7 +184,13 @@ async def sync_reply(
 async def reconcile_now(
     _user: dict = Depends(require_super_admin),
 ) -> dict[str, Any]:
-    return await solidtime_service.reconcile_once()
+    result = await solidtime_service.reconcile_once()
+    if result.get("status") == "skipped" and result.get("reason"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(result["reason"]),
+        )
+    return result
 
 
 @router.post(
