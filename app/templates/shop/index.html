@@ -95,13 +95,26 @@
         <h2 class="card__title">{{ 'Available packages' if show_packages else 'Available products' }}</h2>
       </div>
       <div class="card__controls shop-toolbar">
-        <input
-          type="search"
-          class="form-input card__control"
-          placeholder="{{ 'Filter packages' if show_packages else 'Quick filter products' }}"
-          aria-label="{{ 'Filter packages' if show_packages else 'Filter products' }}"
-          data-table-filter="shop-table"
-        />
+        <form method="get" action="{{ request.url_for('shop_page') }}" class="shop-search-form" role="search">
+          {% if current_category is not none %}
+            <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
+          {% endif %}
+          {% if show_out_of_stock %}
+            <input type="hidden" name="showOutOfStock" value="1" />
+          {% endif %}
+          {% if page_size and page_size != 24 %}
+            <input type="hidden" name="pageSize" value="{{ page_size }}" />
+          {% endif %}
+          <input
+            type="search"
+            name="q"
+            class="form-input card__control"
+            placeholder="{{ 'Search packages' if show_packages else 'Search products' }}"
+            aria-label="{{ 'Search packages' if show_packages else 'Search products' }}"
+            value="{{ search_term or '' }}"
+            data-shop-search
+          />
+        </form>
       </div>
     </header>
     <div class="table-wrapper">
