@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block header_title %}<span class="header__title-text">{{ form_heading }}</span>{% endblock %}
+
+{% block header_actions %}
+<div class="header-actions header-actions--right">
+  <a class="button button--ghost" href="/admin/reporting">Back to reports</a>
+</div>
+{% endblock %}
+
+{% block content %}
+  {% if error_message %}
+    <div class="card card--panel"><p class="form-error">{{ error_message }}</p></div>
+  {% endif %}
+  <section class="card card--panel">
+    <header class="card__header">
+      <h2 class="card__title">{{ form_heading }}</h2>
+      <p class="card__description">Reports are SELECT-only SQL queries. Multiple statements, comments, and write keywords are rejected.</p>
+    </header>
+    <form method="post" action="{{ form_action }}" class="stacked-form">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label required" for="report-name">Name</label>
+        <input class="form-input" id="report-name" name="name" required maxlength="255" value="{{ report.name or '' }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label required" for="report-slug">Slug</label>
+        <input class="form-input" id="report-slug" name="slug" required maxlength="120"
+               pattern="[A-Za-z0-9_-]+" value="{{ report.slug or '' }}" />
+        <p class="form-hint">Letters, digits, underscores, and hyphens only. Used in URLs and exports.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="report-description">Description</label>
+        <textarea class="form-input" id="report-description" name="description" rows="3" maxlength="1000">{{ report.description or '' }}</textarea>
+      </div>
+      <div class="form-field">
+        <label class="form-label required" for="report-sql">SQL query</label>
+        <textarea class="form-input" id="report-sql" name="sql_query" rows="12" required style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">{{ report.sql_query or '' }}</textarea>
+        <p class="form-hint">A single SELECT (or WITH … SELECT) statement. The result is automatically capped at {{ max_rows }} rows.</p>
+      </div>
+
+      <fieldset class="form-fieldset">
+        <legend>Permissions</legend>
+        <p class="form-hint">Super admins always have access. Tick the technicians who should also be able to run this report.</p>
+        {% if eligible_users %}
+          <div class="checkbox-grid">
+            {% for entry in eligible_users %}
+              <label class="checkbox">
+                <input type="checkbox" name="permission_user_ids" value="{{ entry.id }}"
+                       {% if entry.id in granted_user_ids %}checked{% endif %} />
+                <span>{{ entry.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="form-hint">No eligible technician users were found.</p>
+        {% endif %}
+      </fieldset>
+
+      <div class="form-actions">
+        <button type="submit" class="button button--primary">{{ submit_label }}</button>
+        <a class="button button--ghost" href="/admin/reporting">Cancel</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}
