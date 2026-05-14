@@ -356,6 +356,8 @@ async def _ensure_xero_items_exist(
 def _build_payload_without_failed_item_codes(
     payload: Mapping[str, Any],
     failed_codes: Sequence[str],
+    *,
+    payload_key: str = "Invoices",
 ) -> dict[str, Any] | None:
     failed_code_set: set[str] = set()
     for code in failed_codes:
@@ -365,20 +367,20 @@ def _build_payload_without_failed_item_codes(
     if not failed_code_set:
         return None
 
-    invoices = payload.get("Invoices")
-    if not isinstance(invoices, list):
+    documents = payload.get(payload_key)
+    if not isinstance(documents, list):
         return None
 
     updated = False
-    new_invoices: list[Any] = []
-    for invoice in invoices:
-        if not isinstance(invoice, dict):
-            new_invoices.append(invoice)
+    new_documents: list[Any] = []
+    for document in documents:
+        if not isinstance(document, dict):
+            new_documents.append(document)
             continue
 
-        line_items = invoice.get("LineItems")
+        line_items = document.get("LineItems")
         if not isinstance(line_items, list):
-            new_invoices.append(dict(invoice))
+            new_documents.append(dict(document))
             continue
 
         new_line_items: list[Any] = []
@@ -396,15 +398,15 @@ def _build_payload_without_failed_item_codes(
             else:
                 new_line_items.append(dict(line_item))
 
-        new_invoice = dict(invoice)
-        new_invoice["LineItems"] = new_line_items
-        new_invoices.append(new_invoice)
+        new_document = dict(document)
+        new_document["LineItems"] = new_line_items
+        new_documents.append(new_document)
 
     if not updated:
         return None
 
     new_payload = dict(payload)
-    new_payload["Invoices"] = new_invoices
+    new_payload[payload_key] = new_documents
     return new_payload
 
 
@@ -419,6 +421,7 @@ async def _post_xero_invoice_with_product_retry(
     account_code: str,
     tax_type: str | None,
     auto_create_products: bool,
+    payload_key: str = "Invoices",
 ) -> tuple[httpx.Response, dict[str, Any] | None]:
     first_response = await client.post(api_url, json=payload, headers=request_headers)
     if (
@@ -428,7 +431,7 @@ async def _post_xero_invoice_with_product_retry(
     ):
         return first_response, None
 
-    line_items = (payload.get("Invoices") or [{}])[0].get("LineItems") or []
+    line_items = (payload.get(payload_key) or [{}])[0].get("LineItems") or []
     ensure_result = await _ensure_xero_items_exist(
         client=client,
         tenant_id=tenant_id,
@@ -442,6 +445,7 @@ async def _post_xero_invoice_with_product_retry(
         fallback_payload = _build_payload_without_failed_item_codes(
             payload,
             ensure_result.get("failed_codes") or [],
+            payload_key=payload_key,
         )
         if fallback_payload is None:
             return first_response, ensure_result
@@ -2400,14 +2404,14 @@ async def send_quote_to_xero(
         "Status": "DRAFT",
     }
 
-    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
+    api_url = "https://api.xero.com/api.xro/2.0/Quotes"
     request_headers = {
         "Authorization": f"Bearer {access_token}",
         "xero-tenant-id": tenant_id,
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    webhook_payload = {"Invoices": [xero_payload]}
+    webhook_payload = {"Quotes": [xero_payload]}
 
     try:
         event = await webhook_monitor.create_manual_event(
@@ -2432,8 +2436,8 @@ async def send_quote_to_xero(
     response_status: int | None = None
     response_body: str | None = None
     response_headers: dict[str, Any] | None = None
-    xero_invoice_number: str | None = None
-    xero_request_payload = {"Invoices": [xero_payload]}
+    xero_quote_number: str | None = None
+    xero_request_payload = {"Quotes": [xero_payload]}
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -2447,6 +2451,7 @@ async def send_quote_to_xero(
                 account_code=account_code,
                 tax_type=tax_type,
                 auto_create_products=auto_create_products,
+                payload_key="Quotes",
             )
             response_status = response.status_code
             response_body = response.text
@@ -2456,12 +2461,12 @@ async def send_quote_to_xero(
         if success and response_body:
             try:
                 response_data = json.loads(response_body)
-                invoices_list = response_data.get("Invoices", [])
-                if invoices_list:
-                    xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+                quotes_list = response_data.get("Quotes", [])
+                if quotes_list:
+                    xero_quote_number = quotes_list[0].get("QuoteNumber")
             except Exception as parse_exc:
                 logger.warning(
-                    "Failed to parse Xero invoice number from quote response",
+                    "Failed to parse Xero quote number from quote response",
                     error=str(parse_exc),
                 )
 
@@ -2508,7 +2513,8 @@ async def send_quote_to_xero(
                 "status": "succeeded",
                 "quote_number": quote_number,
                 "company_id": company_id,
-                "invoice_number": xero_invoice_number,
+                "xero_quote_number": xero_quote_number,
+                "invoice_number": xero_quote_number,
                 "response_status": response_status,
                 "event_id": event_id,
             }
