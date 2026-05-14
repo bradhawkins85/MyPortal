@@ -130,9 +130,6 @@
                   {% include "partials/csrf.html" %}
                   <button type="submit" class="button button--ghost">Load to Cart</button>
                 </form>
-                {% else %}
-                  <span class="text-muted">Expired</span>
-                {% endif %}
                 {% if current_user and (current_user.is_super_admin or membership.is_admin) %}
                   <button
                     type="button"
@@ -143,6 +140,9 @@
                   >
                     Sync to Xero
                   </button>
+                {% endif %}
+                {% else %}
+                  <span class="text-muted">Expired</span>
                 {% endif %}
               </td>
               {% if current_user and (current_user.is_super_admin or membership.is_admin) %}

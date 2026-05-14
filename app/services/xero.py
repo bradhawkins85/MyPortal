@@ -27,6 +27,7 @@ OrderSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 OrderItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
 QuoteSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
+XERO_ITEM_NAME_MAX_LENGTH = 50
 
 
 class _TemplateValues(dict[str, Any]):
@@ -211,7 +212,7 @@ def _build_xero_item_payload(
     tax_type: str | None,
 ) -> dict[str, Any]:
     description = str(source_line_item.get("Description") or "").strip() or item_code
-    name = description[:50] if description else item_code
+    name = description[:XERO_ITEM_NAME_MAX_LENGTH] if description else item_code
     item_payload: dict[str, Any] = {
         "Code": item_code,
         "Name": name,
@@ -225,6 +226,27 @@ def _build_xero_item_payload(
     if cleaned_tax_type:
         item_payload["SalesDetails"]["TaxType"] = cleaned_tax_type
     return item_payload
+
+
+def _is_duplicate_xero_item_error(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "already exists" in (response.text or "").lower()
+
+    error_number = payload.get("ErrorNumber")
+    messages: list[str] = []
+    top_message = payload.get("Message")
+    if top_message:
+        messages.append(str(top_message))
+    for element in payload.get("Elements") or []:
+        for validation_error in element.get("ValidationErrors") or []:
+            message = validation_error.get("Message")
+            if message:
+                messages.append(str(message))
+    if any("already exists" in message.lower() for message in messages):
+        return True
+    return str(error_number).strip() == "10" and "already exists" in json.dumps(payload).lower()
 
 
 async def _ensure_xero_items_exist(
@@ -296,8 +318,7 @@ async def _ensure_xero_items_exist(
             created += 1
             continue
 
-        response_text = (create_response.text or "").lower()
-        if "already exists" in response_text:
+        if _is_duplicate_xero_item_error(create_response):
             existing += 1
             continue
 
