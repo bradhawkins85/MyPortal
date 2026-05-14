@@ -30,6 +30,12 @@ Xero invoice identifier, marks the invoice as synchronised, and renames the
 local invoice number to match the Xero invoice number. Running the sync again
 only uploads invoices that do not already have a stored Xero invoice ID.
 
+When invoice line items include `ItemCode` values that do not exist in Xero,
+MyPortal can automatically create the missing Xero products and retry the
+invoice submission. This is controlled by the **Automatically create missing
+Xero products from invoice item codes** setting in the Xero module (enabled by
+default).
+
 ### Labour Type Rates
 
 MyPortal automatically fetches billing rates for labour types from Xero, enabling different rates for different types of work:
@@ -69,6 +75,15 @@ and additional placeholders are available for labour-specific information:
 For example, setting the template to `Ticket #{ticket_id} - {ticket_subject} -
 {labour_name}` produces descriptions such as `Ticket #123 - Fix Computer -
 Remote`.
+
+## Quote sync
+
+Quotes can now be synchronised from MyPortal to Xero as draft invoices via:
+
+- `POST /api/quotes/{quote_number}/sync-to-xero?companyId=<id>`
+
+The endpoint uses quote products as Xero line items and applies the same
+missing-product auto-create behavior.
 
 ## Security
 

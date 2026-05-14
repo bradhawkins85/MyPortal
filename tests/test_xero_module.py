@@ -38,6 +38,7 @@ def test_coerce_settings_xero_preserves_secrets():
     assert result["default_hourly_rate"] == "175.00"
     assert result["billable_statuses"] == ["resolved", "closed"]
     assert result["line_item_description_template"] == "Ticket #{ticket_id} - {ticket_subject}"
+    assert result["auto_create_products"] is True
 
 
 def test_coerce_settings_xero_includes_company_name():
