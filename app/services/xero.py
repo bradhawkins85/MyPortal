@@ -5,10 +5,12 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Sequence
+from urllib.parse import quote as _url_quote
 
 import httpx
 from loguru import logger
 
+from app.core.logging import log_warning
 from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import companies as company_repo
@@ -275,22 +277,33 @@ async def _ensure_xero_items_exist(
     failed_codes: list[str] = []
 
     for item_code, source_line_item in item_code_map.items():
-        filter_code = item_code.replace('"', '\\"')
-        params = {"where": f'Code=="{filter_code}"'}
+        # Look up the Xero item directly by Code (which we set to the MyPortal
+        # product SKU). Using the canonical /Items/{IdentifierOrCode} endpoint
+        # avoids `where=Code=="..."` quoting/escaping issues that can yield
+        # unexpected non-200/non-404 responses for codes containing special
+        # characters.
+        encoded_code = _url_quote(item_code, safe="")
+        lookup_url = f"{api_url}/{encoded_code}"
         try:
-            lookup_response = await client.get(api_url, headers=headers, params=params)
+            lookup_response = await client.get(lookup_url, headers=headers)
         except httpx.HTTPError as exc:
-            logger.warning("Failed to lookup Xero item", item_code=item_code, error=str(exc))
+            log_warning(
+                "Failed to lookup Xero item",
+                item_code=item_code,
+                error=str(exc),
+            )
             failed_codes.append(item_code)
             continue
 
         if lookup_response.status_code == 200:
-            data = lookup_response.json()
-            if data.get("Items"):
-                existing += 1
-                continue
-        elif lookup_response.status_code not in {404}:
-            logger.warning(
+            # Xero's /Items/{IdentifierOrCode} returns 200 only when an item
+            # with the given Code (or ID) exists, so a successful response is
+            # itself sufficient evidence of existence regardless of body
+            # shape.
+            existing += 1
+            continue
+        elif lookup_response.status_code != 404:
+            log_warning(
                 "Unexpected response while looking up Xero item",
                 item_code=item_code,
                 status_code=lookup_response.status_code,
@@ -310,7 +323,7 @@ async def _ensure_xero_items_exist(
         try:
             create_response = await client.post(api_url, headers=headers, json=payload)
         except httpx.HTTPError as exc:
-            logger.warning("Failed to create Xero item", item_code=item_code, error=str(exc))
+            log_warning("Failed to create Xero item", item_code=item_code, error=str(exc))
             failed_codes.append(item_code)
             continue
 
@@ -322,7 +335,7 @@ async def _ensure_xero_items_exist(
             existing += 1
             continue
 
-        logger.warning(
+        log_warning(
             "Failed to create Xero item",
             item_code=item_code,
             status_code=create_response.status_code,
