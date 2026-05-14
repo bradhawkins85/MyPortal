@@ -5379,7 +5379,7 @@ async def admin_reporting_create(request: Request):
         )
     existing = await reporting_repo.get_query_by_slug(payload["slug"])
     if existing:
-        encoded = urlencode({"error": f"Slug '{payload['slug']}' is already in use."})
+        encoded = urlencode({"error": "That slug is already in use."})
         return RedirectResponse(
             url=f"/admin/reporting/new?{encoded}",
             status_code=status.HTTP_303_SEE_OTHER,
@@ -5435,7 +5435,7 @@ async def admin_reporting_update(request: Request, report_id: int):
     if payload["slug"] != record.get("slug"):
         clash = await reporting_repo.get_query_by_slug(payload["slug"])
         if clash and int(clash["id"]) != int(report_id):
-            encoded = urlencode({"error": f"Slug '{payload['slug']}' is already in use."})
+            encoded = urlencode({"error": "That slug is already in use."})
             return RedirectResponse(
                 url=f"/admin/reporting/{int(report_id)}/edit?{encoded}",
                 status_code=status.HTTP_303_SEE_OTHER,
