@@ -21958,6 +21958,16 @@ async def _render_modules_dashboard(
     modules = await modules_service.list_modules()
     uptimekuma_webhook_url = str(request.url_for("uptimekuma_receive_alert").replace(scheme="https"))
     trello_webhook_url = str(request.url_for("trello_webhook_receive").replace(scheme="https"))
+    # Build the Xero OAuth redirect/callback URL so it matches what the app
+    # actually sends to Xero during the OAuth flow. Prefer the configured
+    # PORTAL_URL (which already includes the correct https scheme) and fall
+    # back to the incoming request URL forced to https so the value shown to
+    # admins is never http when the app is reverse-proxied behind TLS.
+    xero_callback_url = _build_xero_redirect_uri()
+    if xero_callback_url.startswith("/"):
+        xero_callback_url = str(
+            request.url_for("xero_callback").replace(scheme="https")
+        )
     from app.services import huntress as huntress_service
     huntress_credentials = huntress_service.credentials_status()
     extra = {
@@ -21965,6 +21975,7 @@ async def _render_modules_dashboard(
         "modules": modules,
         "uptimekuma_webhook_url": uptimekuma_webhook_url,
         "trello_webhook_url": trello_webhook_url,
+        "xero_callback_url": xero_callback_url,
         "huntress_credentials": huntress_credentials,
         "success_message": success_message,
         "error_message": error_message,
