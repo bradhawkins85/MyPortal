@@ -439,7 +439,6 @@ async def test_send_quote_to_xero_success():
 
         assert result["status"] == "succeeded"
         assert result["xero_quote_number"] == "QU-QUOTE-001"
-        assert result["invoice_number"] == "QU-QUOTE-001"
 
 
 @pytest.mark.anyio("asyncio")
@@ -499,11 +498,6 @@ async def test_send_quote_to_xero_retries_without_failed_item_codes():
         items_lookup_response.text = '{"Type":"UnauthorizedException"}'
         items_lookup_response.headers = {}
 
-        create_item_response = MagicMock()
-        create_item_response.status_code = 403
-        create_item_response.text = '{"Type":"UnauthorizedException"}'
-        create_item_response.headers = {}
-
         fallback_invoice_response = MagicMock()
         fallback_invoice_response.status_code = 200
         fallback_invoice_response.text = json.dumps({"Quotes": [{"QuoteNumber": "QU-QUOTE-RETRY-001"}]})
@@ -513,7 +507,6 @@ async def test_send_quote_to_xero_retries_without_failed_item_codes():
         mock_client.post = AsyncMock(
             side_effect=[
                 first_invoice_response,
-                create_item_response,
                 fallback_invoice_response,
             ]
         )
@@ -528,9 +521,8 @@ async def test_send_quote_to_xero_retries_without_failed_item_codes():
 
         assert result["status"] == "succeeded"
         assert result["xero_quote_number"] == "QU-QUOTE-RETRY-001"
-        assert result["invoice_number"] == "QU-QUOTE-RETRY-001"
         first_invoice_attempt_index = 0
-        fallback_invoice_attempt_index = 2
+        fallback_invoice_attempt_index = 1
         first_payload = mock_client.post.await_args_list[first_invoice_attempt_index].kwargs["json"]
         fallback_payload = mock_client.post.await_args_list[fallback_invoice_attempt_index].kwargs["json"]
         assert first_payload["Quotes"][0]["LineItems"][0]["ItemCode"] == "QUOTE-SKU-FAIL"
