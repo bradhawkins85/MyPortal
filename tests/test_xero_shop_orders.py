@@ -435,3 +435,95 @@ async def test_send_quote_to_xero_success():
 
         assert result["status"] == "succeeded"
         assert result["invoice_number"] == "INV-QUOTE-001"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_send_quote_to_xero_retries_without_failed_item_codes():
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.build_quote_invoice") as mock_build_invoice, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_success") as mock_record_success, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+                "account_code": "200",
+                "tax_type": "OUTPUT",
+                "line_amount_type": "Exclusive",
+                "auto_create_products": True,
+            },
+        }
+        mock_get_token.return_value = "test-access-token"
+        mock_build_invoice.return_value = {
+            "contact": {"ContactID": "xero-contact-123"},
+            "line_items": [
+                {
+                    "Description": "Quoted Product",
+                    "Quantity": 1,
+                    "UnitAmount": 250.0,
+                    "AccountCode": "200",
+                    "TaxType": "OUTPUT",
+                    "ItemCode": "QUOTE-SKU-FAIL",
+                }
+            ],
+            "line_amount_type": "Exclusive",
+            "reference": "QUO123",
+            "context": {"quote": {"quote_number": "QUO123"}},
+        }
+        mock_get_company.return_value = {
+            "id": 1,
+            "name": "Test Company",
+            "xero_id": "xero-contact-123",
+        }
+        mock_create_event.return_value = {"id": 902}
+
+        first_invoice_response = MagicMock()
+        first_invoice_response.status_code = 400
+        first_invoice_response.text = '{"ErrorNumber":10}'
+        first_invoice_response.headers = {}
+
+        items_lookup_response = MagicMock()
+        items_lookup_response.status_code = 403
+        items_lookup_response.text = '{"Type":"UnauthorizedException"}'
+        items_lookup_response.headers = {}
+
+        create_item_response = MagicMock()
+        create_item_response.status_code = 403
+        create_item_response.text = '{"Type":"UnauthorizedException"}'
+        create_item_response.headers = {}
+
+        fallback_invoice_response = MagicMock()
+        fallback_invoice_response.status_code = 200
+        fallback_invoice_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-QUOTE-RETRY-001"}]})
+        fallback_invoice_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=[
+                first_invoice_response,
+                create_item_response,
+                fallback_invoice_response,
+            ]
+        )
+        mock_client.get = AsyncMock(return_value=items_lookup_response)
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        result = await xero_service.send_quote_to_xero(
+            quote_number="QUO123",
+            company_id=1,
+            user_name="Test User",
+        )
+
+        assert result["status"] == "succeeded"
+        assert result["invoice_number"] == "INV-QUOTE-RETRY-001"
+        first_payload = mock_client.post.await_args_list[0].kwargs["json"]
+        fallback_payload = mock_client.post.await_args_list[2].kwargs["json"]
+        assert first_payload["Invoices"][0]["LineItems"][0]["ItemCode"] == "QUOTE-SKU-FAIL"
+        assert "ItemCode" not in fallback_payload["Invoices"][0]["LineItems"][0]
