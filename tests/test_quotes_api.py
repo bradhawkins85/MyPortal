@@ -283,7 +283,7 @@ async def test_sync_quote_to_xero_endpoint_success(monkeypatch, active_session):
             "status": "succeeded",
             "quote_number": kwargs["quote_number"],
             "company_id": kwargs["company_id"],
-            "invoice_number": "INV-QUOTE-001",
+            "xero_quote_number": "QU-QUOTE-001",
         }
 
     monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company_by_id)
@@ -306,7 +306,7 @@ async def test_sync_quote_to_xero_endpoint_success(monkeypatch, active_session):
             assert response.status_code == 200
             payload = response.json()
             assert payload["status"] == "succeeded"
-            assert payload["invoice_number"] == "INV-QUOTE-001"
+            assert payload["xero_quote_number"] == "QU-QUOTE-001"
     finally:
         app.dependency_overrides.clear()
 
