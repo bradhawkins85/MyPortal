@@ -258,8 +258,8 @@
           method: 'POST',
         }
       );
-      const invoiceNumber = response && response.invoice_number ? ` Invoice: ${response.invoice_number}.` : '';
-      alert(`Quote ${quoteNumber} synced to Xero successfully.${invoiceNumber}`);
+      const quoteRef = response && response.xero_quote_number ? ` Xero Quote: ${response.xero_quote_number}.` : '';
+      alert(`Quote ${quoteNumber} synced to Xero successfully.${quoteRef}`);
       window.location.reload();
     } catch (error) {
       console.error('Failed to sync quote to Xero:', error);

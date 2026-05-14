@@ -2395,7 +2395,6 @@ async def send_quote_to_xero(
         }
 
     xero_payload = {
-        "Type": "ACCREC",
         "Contact": invoice_data["contact"],
         "LineItems": invoice_data["line_items"],
         "LineAmountTypes": invoice_data["line_amount_type"],
