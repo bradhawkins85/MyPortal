@@ -338,6 +338,61 @@ async def _ensure_xero_items_exist(
     }
 
 
+def _build_payload_without_failed_item_codes(
+    payload: Mapping[str, Any],
+    failed_codes: Sequence[str],
+) -> dict[str, Any] | None:
+    failed_code_set: set[str] = set()
+    for code in failed_codes:
+        cleaned_code = str(code).strip()
+        if cleaned_code:
+            failed_code_set.add(cleaned_code)
+    if not failed_code_set:
+        return None
+
+    invoices = payload.get("Invoices")
+    if not isinstance(invoices, list):
+        return None
+
+    updated = False
+    new_invoices: list[Any] = []
+    for invoice in invoices:
+        if not isinstance(invoice, dict):
+            new_invoices.append(invoice)
+            continue
+
+        line_items = invoice.get("LineItems")
+        if not isinstance(line_items, list):
+            new_invoices.append(dict(invoice))
+            continue
+
+        new_line_items: list[Any] = []
+        for line_item in line_items:
+            if not isinstance(line_item, dict):
+                new_line_items.append(line_item)
+                continue
+            raw_item_code = line_item.get("ItemCode")
+            item_code = str(raw_item_code).strip() if raw_item_code is not None else ""
+            if item_code and item_code in failed_code_set:
+                line_item_without_code = dict(line_item)
+                line_item_without_code.pop("ItemCode", None)
+                new_line_items.append(line_item_without_code)
+                updated = True
+            else:
+                new_line_items.append(dict(line_item))
+
+        new_invoice = dict(invoice)
+        new_invoice["LineItems"] = new_line_items
+        new_invoices.append(new_invoice)
+
+    if not updated:
+        return None
+
+    new_payload = dict(payload)
+    new_payload["Invoices"] = new_invoices
+    return new_payload
+
+
 async def _post_xero_invoice_with_product_retry(
     *,
     client: httpx.AsyncClient,
@@ -369,7 +424,14 @@ async def _post_xero_invoice_with_product_retry(
     )
     created_or_existing = int(ensure_result.get("created") or 0) + int(ensure_result.get("existing") or 0)
     if created_or_existing <= 0:
-        return first_response, ensure_result
+        fallback_payload = _build_payload_without_failed_item_codes(
+            payload,
+            ensure_result.get("failed_codes") or [],
+        )
+        if fallback_payload is None:
+            return first_response, ensure_result
+        fallback_response = await client.post(api_url, json=fallback_payload, headers=request_headers)
+        return fallback_response, ensure_result
 
     retry_response = await client.post(api_url, json=payload, headers=request_headers)
     return retry_response, ensure_result
