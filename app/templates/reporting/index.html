@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block header_title %}<span class="header__title-text">Reporting</span>{% endblock %}
+
+{% block header_actions %}
+{% if can_admin_reporting %}
+<div class="header-actions header-actions--right">
+  <a class="button button--ghost" href="/admin/reporting">Manage reports</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  {% if error_message %}
+    <div class="card card--panel">
+      <p class="form-error">{{ error_message }}</p>
+    </div>
+  {% endif %}
+
+  <section class="card card--panel">
+    <header class="card__header">
+      <h2 class="card__title">Run a report</h2>
+      <p class="card__description">Pick a saved report to execute. Results stay on this page and can be exported.</p>
+    </header>
+    <form method="get" action="/reporting" class="card__controls" aria-label="Choose report">
+      <div class="form-field">
+        <label class="form-label" for="reporting-select">Report</label>
+        <select id="reporting-select" name="report" class="form-input" {% if not available_reports %}disabled{% endif %}>
+          <option value="">-- Select a report --</option>
+          {% for report in available_reports %}
+            <option value="{{ report.id }}" {% if selected_report and selected_report.id == report.id %}selected{% endif %}>{{ report.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button button--primary" {% if not available_reports %}disabled{% endif %}>Run report</button>
+      </div>
+    </form>
+    {% if not available_reports %}
+      <p class="form-hint">No reports are available to you yet. Ask a super admin to grant access or to create a report.</p>
+    {% endif %}
+  </section>
+
+  {% if selected_report %}
+    <section class="card card--panel">
+      <header class="card__header card__header--actions">
+        <div>
+          <h2 class="card__title">{{ selected_report.name }}</h2>
+          {% if selected_report.description %}
+            <p class="card__description">{{ selected_report.description }}</p>
+          {% endif %}
+          <p class="form-hint">
+            {{ result.row_count }} row(s){% if result.truncated %} (capped at {{ max_rows }}){% endif %}{% if generated_at_iso %}
+              · Generated <span data-utc="{{ generated_at_iso }}">{{ generated_at_iso }}</span>{% endif %}
+          </p>
+        </div>
+        <div class="header-actions header-actions--right">
+          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=csv">Export CSV</a>
+          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=json">Export JSON</a>
+          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=xml">Export XML</a>
+          <a class="button button--ghost" href="/reporting/{{ selected_report.id }}/export?format=pdf">Export PDF</a>
+        </div>
+      </header>
+      <div class="table-container">
+        <table class="data-table" role="table" aria-label="Report results">
+          <thead>
+            <tr>
+              {% for column in result.columns %}
+                <th scope="col">{{ column }}</th>
+              {% endfor %}
+              {% if not result.columns %}
+                <th scope="col">No columns</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in result.rows %}
+              <tr>
+                {% for column in result.columns %}
+                  {% set value = row.get(column) %}
+                  <td>{% if value is none %}<span class="text-muted">—</span>{% else %}{{ value }}{% endif %}</td>
+                {% endfor %}
+              </tr>
+            {% else %}
+              <tr>
+                <td class="table__empty" colspan="{{ result.columns|length or 1 }}">No rows returned.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

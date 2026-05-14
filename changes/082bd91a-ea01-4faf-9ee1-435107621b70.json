@@ -1,0 +1,7 @@
+{
+  "guid": "082bd91a-ea01-4faf-9ee1-435107621b70",
+  "occurred_at": "2026-05-14T23:30Z",
+  "change_type": "Feature",
+  "summary": "Add new Reporting menu (separate from Reports). Super admins author SELECT-only SQL queries; super admins and helpdesk technicians run them from the Reporting page; results export to CSV/JSON/XML/PDF. New /admin/reporting page lets super admins create/edit/delete queries and grant per-user access. Seeds three sample queries: Unbilled Tickets, Tech Billable vs Non-Billable Time Per Day, and Count of Assets Per Company.",
+  "content_hash": "d9a27dfcf0372a63742d0ecc5b10bc39ecb08fa057b3d239db4bad56a40db19a"
+}
