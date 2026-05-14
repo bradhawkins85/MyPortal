@@ -328,10 +328,14 @@ async def test_send_order_to_xero_creates_missing_xero_items_and_retries():
         first_invoice_response.headers = {}
 
         items_lookup_response = MagicMock()
-        items_lookup_response.status_code = 200
-        items_lookup_response.text = '{"Items":[]}'
+        items_lookup_response.status_code = 404
+        items_lookup_response.text = '{"ErrorNumber":17,"Type":"NoDataException","Message":"Item not found"}'
         items_lookup_response.headers = {}
-        items_lookup_response.json.return_value = {"Items": []}
+        items_lookup_response.json.return_value = {
+            "ErrorNumber": 17,
+            "Type": "NoDataException",
+            "Message": "Item not found",
+        }
 
         create_item_response = MagicMock()
         create_item_response.status_code = 200
