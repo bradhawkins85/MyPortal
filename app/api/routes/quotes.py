@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
@@ -9,6 +11,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as users_repo
 from app.schemas.quotes import QuoteAssignRequest, QuoteDetailResponse, QuoteSummaryResponse, QuoteUpdateRequest
+from app.services import xero as xero_service
 
 router = APIRouter(prefix="/api/quotes", tags=["Quotes"])
 
@@ -149,6 +152,46 @@ async def delete_quote(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
     await shop_repo.delete_quote(quote_number, resolved_company_id)
     return None
+
+
+@router.post("/{quote_number}/sync-to-xero")
+async def sync_quote_to_xero(
+    quote_number: str,
+    company_id: int | None = Query(default=None, alias="companyId"),
+    company_id_alt: int | None = Query(default=None, alias="company_id"),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
+    await _ensure_company(resolved_company_id)
+    summary = await shop_repo.get_quote_summary(quote_number, resolved_company_id)
+    if not summary:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
+    await _ensure_quote_access(current_user, resolved_company_id, summary)
+    if not await _can_assign_quotes(current_user, resolved_company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins and company admins can sync quotes to Xero",
+        )
+
+    first_name = str(current_user.get("first_name") or "").strip()
+    last_name = str(current_user.get("last_name") or "").strip()
+    email = str(current_user.get("email") or "").strip()
+    user_name = f"{first_name} {last_name}".strip() if (first_name or last_name) else (email or None)
+
+    result = await xero_service.send_quote_to_xero(
+        quote_number=quote_number,
+        company_id=resolved_company_id,
+        user_name=user_name,
+    )
+    result_status = str(result.get("status") or "").strip().lower()
+    if result_status in {"failed", "error"}:
+        error_message = str(result.get("error") or result.get("reason") or "Quote sync failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Quote sync to Xero failed: {error_message}",
+        )
+    return result
 
 
 @router.post("/{quote_number}/assign", response_model=QuoteDetailResponse)

@@ -250,6 +250,23 @@
     }
   }
 
+  async function syncQuoteToXero(quoteNumber, companyId) {
+    try {
+      const response = await requestJson(
+        `/api/quotes/${quoteNumber}/sync-to-xero?companyId=${companyId}`,
+        {
+          method: 'POST',
+        }
+      );
+      const invoiceNumber = response && response.invoice_number ? ` Invoice: ${response.invoice_number}.` : '';
+      alert(`Quote ${quoteNumber} synced to Xero successfully.${invoiceNumber}`);
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to sync quote to Xero:', error);
+      alert(`Failed to sync quote ${quoteNumber} to Xero. ${error.message || 'Please try again.'}`);
+    }
+  }
+
   function bindQuoteViewButtons() {
     document.querySelectorAll('[data-quote-view]').forEach((button) => {
       button.addEventListener('click', async (event) => {
@@ -296,6 +313,19 @@
     });
   }
 
+  function bindQuoteSyncButtons() {
+    document.querySelectorAll('[data-quote-sync]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const quoteNumber = button.dataset.quoteNumber;
+        const companyId = button.dataset.companyId;
+        if (!quoteNumber || !companyId) {
+          return;
+        }
+        await syncQuoteToXero(quoteNumber, companyId);
+      });
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('quote-details-modal');
     const assignModal = document.getElementById('quote-assign-modal');
@@ -307,6 +337,7 @@
     bindQuoteViewButtons();
     bindQuoteDeleteButtons();
     bindQuoteAssignButtons();
+    bindQuoteSyncButtons();
 
     // Handle assign form submission
     if (assignForm) {
