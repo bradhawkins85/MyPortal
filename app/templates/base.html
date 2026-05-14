@@ -373,6 +373,16 @@
               <span class="menu__label">Reports</span>
             </a>
           </li>
+          {% if is_super_admin or (is_helpdesk_technician | default(false)) %}
+          <li class="menu__item">
+            <a href="/reporting" {% if current_path.startswith('/reporting') or current_path.startswith('/admin/reporting') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M4 20h16v2H4zm2-3h2v-7H6zm4 0h2V7h-2zm4 0h2v-4h-2zm4 0h2V4h-2z"/></svg>
+              </span>
+              <span class="menu__label">Reporting</span>
+            </a>
+          </li>
+          {% endif %}
           {% if can_view_compliance_checks %}
             <li class="menu__item menu__item--expandable {% if current_path.startswith('/compliance-checks') %}menu__item--expanded{% endif %}" data-menu-key="/compliance-checks">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if current_path.startswith('/compliance-checks') %}true{% else %}false{% endif %}">

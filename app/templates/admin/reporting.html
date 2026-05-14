@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Reporting · Manage reports</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to Reporting", "type": "link", "variant": "ghost", "href": "/reporting"},
+    {"label": "New report", "type": "link", "variant": "primary", "href": "/admin/reporting/new"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+  {% if success_message %}
+    <div class="card card--panel"><p class="form-success">{{ success_message }}</p></div>
+  {% endif %}
+  {% if error_message %}
+    <div class="card card--panel"><p class="form-error">{{ error_message }}</p></div>
+  {% endif %}
+  <section class="card card--panel">
+    <header class="card__header">
+      <h2 class="card__title">Saved reports</h2>
+      <p class="card__description">SELECT-only SQL queries that super admins and granted technicians can run from the Reporting menu.</p>
+    </header>
+    <div class="table-container">
+      <table class="data-table" role="table" aria-label="Saved reports">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Slug</th>
+            <th scope="col">Description</th>
+            <th scope="col">System</th>
+            <th scope="col">Updated</th>
+            <th scope="col" class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for report in reports %}
+            <tr>
+              <td>{{ report.name }}</td>
+              <td><code>{{ report.slug }}</code></td>
+              <td>{{ report.description or '—' }}</td>
+              <td>{% if report.is_system %}Yes{% else %}No{% endif %}</td>
+              <td>
+                {% if report.updated_at_iso %}
+                  <span data-utc="{{ report.updated_at_iso }}">{{ report.updated_at_iso }}</span>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td class="table__actions">
+                <div class="table__action-buttons">
+                  <a class="button button--ghost" href="/reporting?report={{ report.id }}">Run</a>
+                  <a class="button button--ghost" href="/admin/reporting/{{ report.id }}/edit">Edit</a>
+                  <form method="post" action="/admin/reporting/{{ report.id }}/delete" onsubmit="return confirm('Delete report &quot;{{ report.name|e }}&quot;?');" style="display:inline;">
+                    <button type="submit" class="button button--danger">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="table__empty">No reports yet. Click <a href="/admin/reporting/new">New report</a> to add one.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
