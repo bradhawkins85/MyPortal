@@ -309,6 +309,8 @@ async def _ensure_xero_items_exist(
                 status_code=lookup_response.status_code,
                 response_text=lookup_response.text[:500],
             )
+            failed_codes.append(item_code)
+            continue
 
         payload = {
             "Items": [
