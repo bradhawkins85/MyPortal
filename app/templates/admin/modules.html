@@ -371,7 +371,7 @@
             {% elif module.slug == 'xero' %}
               <div class="form-field">
                 <label class="form-label" for="xero-callback-url">Callback URL</label>
-                <input id="xero-callback-url" class="form-input" value="{{ request.url_for('xero_receive_callback') }}" readonly />
+                <input id="xero-callback-url" class="form-input" value="{{ xero_callback_url }}" readonly />
                 <p class="form-help">Provide this URL as the redirect/callback endpoint inside your Xero app configuration.</p>
               </div>
               <div class="form-field">
