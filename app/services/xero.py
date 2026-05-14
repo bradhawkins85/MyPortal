@@ -2514,7 +2514,6 @@ async def send_quote_to_xero(
                 "quote_number": quote_number,
                 "company_id": company_id,
                 "xero_quote_number": xero_quote_number,
-                "invoice_number": xero_quote_number,
                 "response_status": response_status,
                 "event_id": event_id,
             }
