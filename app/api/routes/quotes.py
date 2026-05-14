@@ -99,11 +99,6 @@ async def get_quote(
     if not summary:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
     await _ensure_quote_access(current_user, resolved_company_id, summary)
-    if not await _can_assign_quotes(current_user, resolved_company_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super admins and company admins can sync quotes to Xero",
-        )
     items = await shop_repo.list_quote_items(quote_number, resolved_company_id)
     summary["items"] = items
     return QuoteDetailResponse.model_validate(summary)
@@ -173,6 +168,11 @@ async def sync_quote_to_xero(
     if not summary:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
     await _ensure_quote_access(current_user, resolved_company_id, summary)
+    if not await _can_assign_quotes(current_user, resolved_company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins and company admins can sync quotes to Xero",
+        )
 
     first_name = str(current_user.get("first_name") or "").strip()
     last_name = str(current_user.get("last_name") or "").strip()
@@ -186,9 +186,10 @@ async def sync_quote_to_xero(
     )
     result_status = str(result.get("status") or "").strip().lower()
     if result_status in {"failed", "error"}:
+        error_message = str(result.get("error") or result.get("reason") or "Quote sync failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=result,
+            detail=f"Quote sync to Xero failed: {error_message}",
         )
     return result
 
