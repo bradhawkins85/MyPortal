@@ -296,15 +296,12 @@ async def _ensure_xero_items_exist(
             continue
 
         if lookup_response.status_code == 200:
-            try:
-                data = lookup_response.json()
-            except ValueError:
-                data = {}
-            if data.get("Items"):
-                existing += 1
-                continue
-            # 200 with no Items is unexpected for a path lookup; fall through
-            # to attempt creation just in case.
+            # Xero's /Items/{IdentifierOrCode} returns 200 only when an item
+            # with the given Code (or ID) exists, so a successful response is
+            # itself sufficient evidence of existence regardless of body
+            # shape.
+            existing += 1
+            continue
         elif lookup_response.status_code != 404:
             log_warning(
                 "Unexpected response while looking up Xero item",
