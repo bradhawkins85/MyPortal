@@ -523,7 +523,9 @@ async def test_send_quote_to_xero_retries_without_failed_item_codes():
 
         assert result["status"] == "succeeded"
         assert result["invoice_number"] == "INV-QUOTE-RETRY-001"
-        first_payload = mock_client.post.await_args_list[0].kwargs["json"]
-        fallback_payload = mock_client.post.await_args_list[2].kwargs["json"]
+        first_invoice_attempt_index = 0
+        fallback_invoice_attempt_index = 2
+        first_payload = mock_client.post.await_args_list[first_invoice_attempt_index].kwargs["json"]
+        fallback_payload = mock_client.post.await_args_list[fallback_invoice_attempt_index].kwargs["json"]
         assert first_payload["Invoices"][0]["LineItems"][0]["ItemCode"] == "QUOTE-SKU-FAIL"
         assert "ItemCode" not in fallback_payload["Invoices"][0]["LineItems"][0]

@@ -342,7 +342,11 @@ def _build_payload_without_failed_item_codes(
     payload: Mapping[str, Any],
     failed_codes: Sequence[str],
 ) -> dict[str, Any] | None:
-    failed_code_set = {str(code).strip() for code in failed_codes if str(code).strip()}
+    failed_code_set: set[str] = set()
+    for code in failed_codes:
+        cleaned_code = str(code).strip()
+        if cleaned_code:
+            failed_code_set.add(cleaned_code)
     if not failed_code_set:
         return None
 
@@ -367,7 +371,8 @@ def _build_payload_without_failed_item_codes(
             if not isinstance(line_item, dict):
                 new_line_items.append(line_item)
                 continue
-            item_code = str(line_item.get("ItemCode") or "").strip()
+            raw_item_code = line_item.get("ItemCode")
+            item_code = str(raw_item_code).strip() if raw_item_code is not None else ""
             if item_code and item_code in failed_code_set:
                 line_item_without_code = dict(line_item)
                 line_item_without_code.pop("ItemCode", None)
