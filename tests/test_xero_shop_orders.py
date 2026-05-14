@@ -418,7 +418,7 @@ async def test_send_quote_to_xero_success():
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-QUOTE-001"}]})
+        mock_response.text = json.dumps({"Quotes": [{"QuoteNumber": "QU-QUOTE-001"}]})
         mock_response.headers = {}
 
         mock_client = AsyncMock()
@@ -438,7 +438,8 @@ async def test_send_quote_to_xero_success():
         )
 
         assert result["status"] == "succeeded"
-        assert result["invoice_number"] == "INV-QUOTE-001"
+        assert result["xero_quote_number"] == "QU-QUOTE-001"
+        assert result["invoice_number"] == "QU-QUOTE-001"
 
 
 @pytest.mark.anyio("asyncio")
@@ -505,7 +506,7 @@ async def test_send_quote_to_xero_retries_without_failed_item_codes():
 
         fallback_invoice_response = MagicMock()
         fallback_invoice_response.status_code = 200
-        fallback_invoice_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-QUOTE-RETRY-001"}]})
+        fallback_invoice_response.text = json.dumps({"Quotes": [{"QuoteNumber": "QU-QUOTE-RETRY-001"}]})
         fallback_invoice_response.headers = {}
 
         mock_client = AsyncMock()
@@ -526,10 +527,11 @@ async def test_send_quote_to_xero_retries_without_failed_item_codes():
         )
 
         assert result["status"] == "succeeded"
-        assert result["invoice_number"] == "INV-QUOTE-RETRY-001"
+        assert result["xero_quote_number"] == "QU-QUOTE-RETRY-001"
+        assert result["invoice_number"] == "QU-QUOTE-RETRY-001"
         first_invoice_attempt_index = 0
         fallback_invoice_attempt_index = 2
         first_payload = mock_client.post.await_args_list[first_invoice_attempt_index].kwargs["json"]
         fallback_payload = mock_client.post.await_args_list[fallback_invoice_attempt_index].kwargs["json"]
-        assert first_payload["Invoices"][0]["LineItems"][0]["ItemCode"] == "QUOTE-SKU-FAIL"
-        assert "ItemCode" not in fallback_payload["Invoices"][0]["LineItems"][0]
+        assert first_payload["Quotes"][0]["LineItems"][0]["ItemCode"] == "QUOTE-SKU-FAIL"
+        assert "ItemCode" not in fallback_payload["Quotes"][0]["LineItems"][0]
