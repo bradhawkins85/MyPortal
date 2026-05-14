@@ -440,6 +440,14 @@ async def test_send_quote_to_xero_success():
         assert result["status"] == "succeeded"
         assert result["xero_quote_number"] == "QU-QUOTE-001"
 
+        # Verify the Quotes API was called with the correct payload (no Type field)
+        call_args = mock_client.post.call_args
+        request_payload = call_args[1]["json"]
+        assert "Quotes" in request_payload
+        quote_payload = request_payload["Quotes"][0]
+        assert "Type" not in quote_payload
+        assert "LineItems" in quote_payload
+        assert "Contact" in quote_payload
 
 @pytest.mark.anyio("asyncio")
 async def test_send_quote_to_xero_retries_without_failed_item_codes():
