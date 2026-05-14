@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.core.database import db
@@ -12,6 +13,7 @@ from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
 from app.security.session import SessionData, session_manager
+from app.services import xero as xero_service
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +38,7 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(main_module.settings, "enable_csrf", False)
 
 
 @pytest.fixture
@@ -112,7 +115,7 @@ async def test_list_quotes_endpoint(monkeypatch, active_session):
         return company if company_id == 7 else None
 
     async def fake_get_user_company(user_id, company_id):
-        return {"can_access_quotes": True}
+        return {"can_access_quotes": True, "is_admin": True}
 
     async def fake_list_quote_summaries(company_id):
         return [_make_summary()]
@@ -153,7 +156,7 @@ async def test_get_quote_endpoint(monkeypatch, active_session):
         return company if company_id == 7 else None
 
     async def fake_get_user_company(user_id, company_id):
-        return {"can_access_quotes": True}
+        return {"can_access_quotes": True, "is_admin": True}
 
     async def fake_get_quote_summary(quote_number, company_id):
         if quote_number == "QUO123456789012" and company_id == 7:
@@ -255,5 +258,100 @@ async def test_get_quote_denies_removed_creator_without_membership(monkeypatch, 
         with TestClient(app) as client:
             response = client.get("/api/quotes/QUO123456789012?companyId=7")
             assert response.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_sync_quote_to_xero_endpoint_success(monkeypatch, active_session):
+    company = {"id": 7, "name": "Acme Corp"}
+    quote_summary = _make_summary()
+
+    async def fake_get_company_by_id(company_id):
+        return company if company_id == 7 else None
+
+    async def fake_get_user_company(user_id, company_id):
+        return {"can_access_quotes": True, "is_admin": True}
+
+    async def fake_get_quote_summary(quote_number, company_id):
+        if quote_number == "QUO123456789012" and company_id == 7:
+            return quote_summary
+        return None
+
+    async def fake_send_quote_to_xero(**kwargs):
+        return {
+            "status": "succeeded",
+            "quote_number": kwargs["quote_number"],
+            "company_id": kwargs["company_id"],
+            "invoice_number": "INV-QUOTE-001",
+        }
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(shop_repo, "get_quote_summary", fake_get_quote_summary)
+    monkeypatch.setattr(xero_service, "send_quote_to_xero", fake_send_quote_to_xero)
+
+    def override_database():
+        pass
+
+    def override_current_user():
+        return {"id": 1, "email": "user@example.com", "is_super_admin": False}
+
+    app.dependency_overrides[database_dependencies.require_database] = override_database
+    app.dependency_overrides[auth_dependencies.get_current_user] = override_current_user
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/quotes/QUO123456789012/sync-to-xero?companyId=7")
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["status"] == "succeeded"
+            assert payload["invoice_number"] == "INV-QUOTE-001"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_sync_quote_to_xero_endpoint_returns_502_on_failure(monkeypatch, active_session):
+    company = {"id": 7, "name": "Acme Corp"}
+    quote_summary = _make_summary()
+
+    async def fake_get_company_by_id(company_id):
+        return company if company_id == 7 else None
+
+    async def fake_get_user_company(user_id, company_id):
+        return {"can_access_quotes": True, "is_admin": True}
+
+    async def fake_get_quote_summary(quote_number, company_id):
+        if quote_number == "QUO123456789012" and company_id == 7:
+            return quote_summary
+        return None
+
+    async def fake_send_quote_to_xero(**kwargs):
+        return {
+            "status": "failed",
+            "quote_number": kwargs["quote_number"],
+            "company_id": kwargs["company_id"],
+            "error": "HTTP 400",
+        }
+
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(shop_repo, "get_quote_summary", fake_get_quote_summary)
+    monkeypatch.setattr(xero_service, "send_quote_to_xero", fake_send_quote_to_xero)
+
+    def override_database():
+        pass
+
+    def override_current_user():
+        return {"id": 1, "email": "user@example.com", "is_super_admin": False}
+
+    app.dependency_overrides[database_dependencies.require_database] = override_database
+    app.dependency_overrides[auth_dependencies.get_current_user] = override_current_user
+
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/quotes/QUO123456789012/sync-to-xero?companyId=7")
+            assert response.status_code == 502
     finally:
         app.dependency_overrides.clear()

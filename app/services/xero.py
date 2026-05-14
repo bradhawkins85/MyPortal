@@ -25,6 +25,9 @@ RepliesFetcher = Callable[[int], Awaitable[Sequence[Mapping[str, Any]] | None]]
 CompanyFetcher = Callable[[int], Awaitable[Mapping[str, Any] | None]]
 OrderSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 OrderItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
+QuoteSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
+QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
+XERO_ITEM_NAME_MAX_LENGTH = 50
 
 
 class _TemplateValues(dict[str, Any]):
@@ -186,6 +189,190 @@ def _build_xero_line_items_from_local_invoice(
             line_item["TaxType"] = tax_type
         line_items.append(line_item)
     return line_items
+
+
+def _collect_item_code_line_items(
+    line_items: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    item_code_map: dict[str, Mapping[str, Any]] = {}
+    for line_item in line_items:
+        item_code = str(line_item.get("ItemCode") or "").strip()
+        if not item_code:
+            continue
+        if item_code not in item_code_map:
+            item_code_map[item_code] = line_item
+    return item_code_map
+
+
+def _build_xero_item_payload(
+    *,
+    item_code: str,
+    source_line_item: Mapping[str, Any],
+    account_code: str,
+    tax_type: str | None,
+) -> dict[str, Any]:
+    description = str(source_line_item.get("Description") or "").strip() or item_code
+    name = description[:XERO_ITEM_NAME_MAX_LENGTH] if description else item_code
+    item_payload: dict[str, Any] = {
+        "Code": item_code,
+        "Name": name,
+        "Description": description,
+        "SalesDetails": {
+            "UnitPrice": float(_quantize(_to_decimal(source_line_item.get("UnitAmount")) or Decimal("0"))),
+            "AccountCode": str(account_code or "").strip() or "400",
+        },
+    }
+    cleaned_tax_type = str(tax_type or "").strip()
+    if cleaned_tax_type:
+        item_payload["SalesDetails"]["TaxType"] = cleaned_tax_type
+    return item_payload
+
+
+def _is_duplicate_xero_item_error(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "already exists" in (response.text or "").lower()
+
+    error_number = payload.get("ErrorNumber")
+    messages: list[str] = []
+    top_message = payload.get("Message")
+    if top_message:
+        messages.append(str(top_message))
+    for element in payload.get("Elements") or []:
+        for validation_error in element.get("ValidationErrors") or []:
+            message = validation_error.get("Message")
+            if message:
+                messages.append(str(message))
+    if any("already exists" in message.lower() for message in messages):
+        return True
+    return str(error_number).strip() == "10" and "already exists" in json.dumps(payload).lower()
+
+
+async def _ensure_xero_items_exist(
+    *,
+    client: httpx.AsyncClient,
+    tenant_id: str,
+    access_token: str,
+    line_items: Sequence[Mapping[str, Any]],
+    account_code: str,
+    tax_type: str | None,
+) -> dict[str, Any]:
+    item_code_map = _collect_item_code_line_items(line_items)
+    if not item_code_map:
+        return {"checked": 0, "existing": 0, "created": 0, "failed_codes": []}
+
+    api_url = "https://api.xero.com/api.xro/2.0/Items"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    existing = 0
+    created = 0
+    failed_codes: list[str] = []
+
+    for item_code, source_line_item in item_code_map.items():
+        filter_code = item_code.replace('"', '\\"')
+        params = {"where": f'Code=="{filter_code}"'}
+        try:
+            lookup_response = await client.get(api_url, headers=headers, params=params)
+        except httpx.HTTPError as exc:
+            logger.warning("Failed to lookup Xero item", item_code=item_code, error=str(exc))
+            failed_codes.append(item_code)
+            continue
+
+        if lookup_response.status_code == 200:
+            data = lookup_response.json()
+            if data.get("Items"):
+                existing += 1
+                continue
+        elif lookup_response.status_code not in {404}:
+            logger.warning(
+                "Unexpected response while looking up Xero item",
+                item_code=item_code,
+                status_code=lookup_response.status_code,
+                response_text=lookup_response.text[:500],
+            )
+
+        payload = {
+            "Items": [
+                _build_xero_item_payload(
+                    item_code=item_code,
+                    source_line_item=source_line_item,
+                    account_code=account_code,
+                    tax_type=tax_type,
+                )
+            ]
+        }
+        try:
+            create_response = await client.post(api_url, headers=headers, json=payload)
+        except httpx.HTTPError as exc:
+            logger.warning("Failed to create Xero item", item_code=item_code, error=str(exc))
+            failed_codes.append(item_code)
+            continue
+
+        if 200 <= create_response.status_code < 300:
+            created += 1
+            continue
+
+        if _is_duplicate_xero_item_error(create_response):
+            existing += 1
+            continue
+
+        logger.warning(
+            "Failed to create Xero item",
+            item_code=item_code,
+            status_code=create_response.status_code,
+            response_text=create_response.text[:500],
+        )
+        failed_codes.append(item_code)
+
+    return {
+        "checked": len(item_code_map),
+        "existing": existing,
+        "created": created,
+        "failed_codes": failed_codes,
+    }
+
+
+async def _post_xero_invoice_with_product_retry(
+    *,
+    client: httpx.AsyncClient,
+    api_url: str,
+    payload: dict[str, Any],
+    request_headers: dict[str, str],
+    tenant_id: str,
+    access_token: str,
+    account_code: str,
+    tax_type: str | None,
+    auto_create_products: bool,
+) -> tuple[httpx.Response, dict[str, Any] | None]:
+    first_response = await client.post(api_url, json=payload, headers=request_headers)
+    if (
+        not auto_create_products
+        or first_response.status_code < 400
+        or first_response.status_code >= 500
+    ):
+        return first_response, None
+
+    line_items = (payload.get("Invoices") or [{}])[0].get("LineItems") or []
+    ensure_result = await _ensure_xero_items_exist(
+        client=client,
+        tenant_id=tenant_id,
+        access_token=access_token,
+        line_items=line_items,
+        account_code=account_code,
+        tax_type=tax_type,
+    )
+    created_or_existing = int(ensure_result.get("created") or 0) + int(ensure_result.get("existing") or 0)
+    if created_or_existing <= 0:
+        return first_response, ensure_result
+
+    retry_response = await client.post(api_url, json=payload, headers=request_headers)
+    return retry_response, ensure_result
 
 
 async def _rename_local_invoice_references(
@@ -689,6 +876,94 @@ async def build_order_invoice(
     return invoice
 
 
+async def build_quote_invoice(
+    quote_number: str,
+    company_id: int,
+    *,
+    account_code: str,
+    tax_type: str | None,
+    line_amount_type: str,
+    fetch_summary: QuoteSummaryFetcher,
+    fetch_items: QuoteItemsFetcher,
+    fetch_company: CompanyFetcher,
+    user_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Prepare a Xero invoice payload for a quote."""
+    summary = await fetch_summary(quote_number, company_id)
+    items = await fetch_items(quote_number, company_id) or []
+    if not summary or not items:
+        return None
+
+    company_record = await fetch_company(company_id) or {}
+    contact_payload: dict[str, Any] = {}
+    xero_id = company_record.get("xero_id")
+    if xero_id:
+        contact_payload["ContactID"] = str(xero_id)
+    name = (company_record.get("name") or f"Company #{company_id}").strip()
+    if not contact_payload:
+        contact_payload["Name"] = name
+
+    line_items: list[dict[str, Any]] = []
+    context_items: list[dict[str, Any]] = []
+    for item in items:
+        quantity_decimal = _to_decimal(item.get("quantity")) or Decimal("0")
+        price_decimal = _to_decimal(item.get("price")) or Decimal("0")
+        quantity = float(_quantize(quantity_decimal, "0.01"))
+        unit_amount = float(_quantize(price_decimal, "0.01"))
+        line_item: dict[str, Any] = {
+            "Description": str(item.get("product_name") or "Item").strip(),
+            "Quantity": quantity,
+            "UnitAmount": unit_amount,
+            "AccountCode": str(account_code or "").strip(),
+        }
+        sku = item.get("sku")
+        if sku:
+            line_item["ItemCode"] = str(sku)
+        if tax_type:
+            line_item["TaxType"] = str(tax_type).strip()
+        line_items.append(line_item)
+        context_items.append(
+            {
+                "quantity": quantity,
+                "price": unit_amount,
+                "product_name": item.get("product_name"),
+                "sku": sku,
+            }
+        )
+
+    if user_name:
+        user_info_line = {
+            "Description": f"Quote {quote_number} prepared for {user_name}",
+            "Quantity": 0,
+            "UnitAmount": 0,
+            "AccountCode": str(account_code or "").strip(),
+        }
+        if tax_type:
+            user_info_line["TaxType"] = str(tax_type).strip()
+        line_items.append(user_info_line)
+
+    po_number = summary.get("po_number")
+    reference = str(po_number).strip() if po_number else quote_number
+
+    return {
+        "type": "ACCREC",
+        "contact": contact_payload,
+        "line_items": line_items,
+        "line_amount_type": line_amount_type or "Exclusive",
+        "reference": reference,
+        "context": {
+            "quote": summary,
+            "items": context_items,
+            "company": {
+                "id": company_record.get("id", company_id),
+                "name": name,
+                "xero_id": company_record.get("xero_id"),
+            },
+            "user_name": user_name,
+        },
+    }
+
+
 def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
     """Evaluate a quantity expression, supporting both static numbers and variables.
     
@@ -931,6 +1206,7 @@ async def sync_billable_tickets(
     tenant_id: str,
     access_token: str,
     auto_send: bool = False,
+    auto_create_products: bool = True,
 ) -> dict[str, Any]:
     """Sync billable tickets for a company to Xero.
     
@@ -1127,10 +1403,16 @@ async def sync_billable_tickets(
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                api_url,
-                json=xero_request_payload,
-                headers=request_headers,
+            response, _item_ensure_result = await _post_xero_invoice_with_product_retry(
+                client=client,
+                api_url=api_url,
+                payload=xero_request_payload,
+                request_headers=request_headers,
+                tenant_id=tenant_id,
+                access_token=access_token,
+                account_code=account_code,
+                tax_type=tax_type,
+                auto_create_products=auto_create_products,
             )
             response_status = response.status_code
             response_body = response.text
@@ -1403,6 +1685,11 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     account_code = str(settings.get("account_code", "")).strip() or "400"
     tax_type = str(settings.get("tax_type", "")).strip() or None
     line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
+    auto_create_products_raw = settings.get("auto_create_products", True)
+    if isinstance(auto_create_products_raw, str):
+        auto_create_products = auto_create_products_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        auto_create_products = bool(auto_create_products_raw)
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"
     request_headers = {
         "Authorization": f"Bearer {access_token}",
@@ -1483,10 +1770,16 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    api_url,
-                    json=webhook_payload,
-                    headers=request_headers,
+                response, _item_ensure_result = await _post_xero_invoice_with_product_retry(
+                    client=client,
+                    api_url=api_url,
+                    payload=webhook_payload,
+                    request_headers=request_headers,
+                    tenant_id=tenant_id,
+                    access_token=access_token,
+                    account_code=account_code,
+                    tax_type=tax_type,
+                    auto_create_products=auto_create_products,
                 )
             response_status = response.status_code
             response_body = response.text
@@ -1677,6 +1970,11 @@ async def send_order_to_xero(
     tax_type = str(settings.get("tax_type", "")).strip() or None
     line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
     tenant_id = str(settings.get("tenant_id", "")).strip()
+    auto_create_products_raw = settings.get("auto_create_products", True)
+    if isinstance(auto_create_products_raw, str):
+        auto_create_products = auto_create_products_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        auto_create_products = bool(auto_create_products_raw)
     
     # Get access token
     try:
@@ -1776,10 +2074,16 @@ async def send_order_to_xero(
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                api_url,
-                json=xero_request_payload,
-                headers=request_headers,
+            response, _item_ensure_result = await _post_xero_invoice_with_product_retry(
+                client=client,
+                api_url=api_url,
+                payload=xero_request_payload,
+                request_headers=request_headers,
+                tenant_id=tenant_id,
+                access_token=access_token,
+                account_code=account_code,
+                tax_type=tax_type,
+                auto_create_products=auto_create_products,
             )
             response_status = response.status_code
             response_body = response.text
@@ -1924,6 +2228,274 @@ async def send_order_to_xero(
         return {
             "status": "error",
             "order_number": order_number,
+            "company_id": company_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
+
+
+async def send_quote_to_xero(
+    quote_number: str,
+    company_id: int,
+    user_name: str | None = None,
+) -> dict[str, Any]:
+    """Send a quote to Xero for invoicing."""
+    module = await modules_service.get_module("xero", redact=False)
+    if not module or not module.get("enabled"):
+        return {
+            "status": "skipped",
+            "reason": "Xero module is disabled",
+            "quote_number": quote_number,
+            "company_id": company_id,
+        }
+
+    settings = dict(module.get("settings") or {})
+    required_fields = ["client_id", "client_secret", "refresh_token", "tenant_id"]
+    missing = [field for field in required_fields if not str(settings.get(field) or "").strip()]
+    if missing:
+        return {
+            "status": "skipped",
+            "reason": "Xero module not fully configured",
+            "missing": missing,
+            "quote_number": quote_number,
+            "company_id": company_id,
+        }
+
+    account_code = str(settings.get("account_code", "")).strip() or "200"
+    tax_type = str(settings.get("tax_type", "")).strip() or None
+    line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
+    tenant_id = str(settings.get("tenant_id", "")).strip()
+    auto_create_products_raw = settings.get("auto_create_products", True)
+    if isinstance(auto_create_products_raw, str):
+        auto_create_products = auto_create_products_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        auto_create_products = bool(auto_create_products_raw)
+
+    try:
+        access_token = await modules_service.acquire_xero_access_token()
+    except Exception as exc:
+        logger.error("Failed to acquire Xero access token for quote", error=str(exc))
+        return {
+            "status": "error",
+            "reason": "Failed to acquire access token",
+            "error": str(exc),
+            "quote_number": quote_number,
+            "company_id": company_id,
+        }
+
+    from app.repositories import shop as shop_repo
+
+    invoice_data = await build_quote_invoice(
+        quote_number=quote_number,
+        company_id=company_id,
+        account_code=account_code,
+        tax_type=tax_type,
+        line_amount_type=line_amount_type,
+        fetch_summary=shop_repo.get_quote_summary,
+        fetch_items=shop_repo.list_quote_items,
+        fetch_company=company_repo.get_company_by_id,
+        user_name=user_name,
+    )
+    if not invoice_data:
+        return {
+            "status": "skipped",
+            "reason": "Quote not found or has no items",
+            "quote_number": quote_number,
+            "company_id": company_id,
+        }
+
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        return {
+            "status": "error",
+            "reason": "Company not found",
+            "quote_number": quote_number,
+            "company_id": company_id,
+        }
+
+    xero_payload = {
+        "Type": "ACCREC",
+        "Contact": invoice_data["contact"],
+        "LineItems": invoice_data["line_items"],
+        "LineAmountTypes": invoice_data["line_amount_type"],
+        "Reference": invoice_data["reference"],
+        "Date": date.today().isoformat(),
+        "Status": "DRAFT",
+    }
+
+    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
+    request_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    webhook_payload = {"Invoices": [xero_payload]}
+
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="xero.quote.created",
+            target_url=api_url,
+            payload=webhook_payload,
+            headers=request_headers,
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+    except Exception as exc:
+        logger.error("Failed to create webhook monitor event for quote", error=str(exc))
+        event = None
+
+    event_id: int | None = None
+    if event and event.get("id") is not None:
+        try:
+            event_id = int(event["id"])
+        except (TypeError, ValueError):
+            event_id = None
+
+    response_status: int | None = None
+    response_body: str | None = None
+    response_headers: dict[str, Any] | None = None
+    xero_invoice_number: str | None = None
+    xero_request_payload = {"Invoices": [xero_payload]}
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response, _item_ensure_result = await _post_xero_invoice_with_product_retry(
+                client=client,
+                api_url=api_url,
+                payload=xero_request_payload,
+                request_headers=request_headers,
+                tenant_id=tenant_id,
+                access_token=access_token,
+                account_code=account_code,
+                tax_type=tax_type,
+                auto_create_products=auto_create_products,
+            )
+            response_status = response.status_code
+            response_body = response.text
+            response_headers = dict(response.headers)
+
+        success = 200 <= response_status < 300
+        if success and response_body:
+            try:
+                response_data = json.loads(response_body)
+                invoices_list = response_data.get("Invoices", [])
+                if invoices_list:
+                    xero_invoice_number = invoices_list[0].get("InvoiceNumber")
+            except Exception as parse_exc:
+                logger.warning(
+                    "Failed to parse Xero invoice number from quote response",
+                    error=str(parse_exc),
+                )
+
+        if event_id is not None:
+            if success:
+                try:
+                    await webhook_monitor.record_manual_success(
+                        event_id,
+                        attempt_number=1,
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=xero_request_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook success for quote",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+            else:
+                try:
+                    await webhook_monitor.record_manual_failure(
+                        event_id,
+                        attempt_number=1,
+                        status="failed",
+                        error_message=f"HTTP {response_status}",
+                        response_status=response_status,
+                        response_body=response_body,
+                        request_headers=request_headers,
+                        request_body=xero_request_payload,
+                        response_headers=response_headers,
+                    )
+                except Exception as record_exc:
+                    logger.error(
+                        "Failed to record webhook failure for quote",
+                        event_id=event_id,
+                        error=str(record_exc),
+                    )
+
+        if success:
+            return {
+                "status": "succeeded",
+                "quote_number": quote_number,
+                "company_id": company_id,
+                "invoice_number": xero_invoice_number,
+                "response_status": response_status,
+                "event_id": event_id,
+            }
+        return {
+            "status": "failed",
+            "quote_number": quote_number,
+            "company_id": company_id,
+            "response_status": response_status,
+            "error": f"HTTP {response_status}",
+            "event_id": event_id,
+        }
+
+    except httpx.HTTPError as exc:
+        logger.error("Xero API request failed for quote", quote_number=quote_number, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=response_status,
+                    response_body=response_body,
+                    request_headers=request_headers,
+                    request_body=xero_request_payload,
+                    response_headers=response_headers,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error for quote",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "quote_number": quote_number,
+            "company_id": company_id,
+            "error": str(exc),
+            "event_id": event_id,
+        }
+    except Exception as exc:
+        logger.error("Unexpected error sending quote to Xero", quote_number=quote_number, error=str(exc))
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=None,
+                    response_body=None,
+                    request_headers=request_headers,
+                    request_body=xero_request_payload,
+                    response_headers=None,
+                )
+            except Exception as record_exc:
+                logger.error(
+                    "Failed to record webhook error for quote",
+                    event_id=event_id,
+                    error=str(record_exc),
+                )
+        return {
+            "status": "error",
+            "quote_number": quote_number,
             "company_id": company_id,
             "error": str(exc),
             "event_id": event_id,

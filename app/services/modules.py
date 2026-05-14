@@ -485,6 +485,7 @@ def _default_xero_settings() -> dict[str, Any]:
         "billable_statuses": _normalise_statuses(_clean_env("XERO_BILLABLE_STATUSES")),
         "line_item_description_template": _clean_env("XERO_LINE_ITEM_TEMPLATE")
         or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
+        "auto_create_products": _ensure_bool(os.getenv("XERO_AUTO_CREATE_PRODUCTS"), True),
     }
 
 
@@ -1115,6 +1116,7 @@ def _coerce_settings(
                     merged.get("line_item_description_template", "")
                 ).strip()
                 or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
+                "auto_create_products": _ensure_bool(merged.get("auto_create_products"), True),
             }
         )
     elif slug == "sms-gateway":
