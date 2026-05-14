@@ -430,6 +430,13 @@
                 <input id="xero-description-template" name="settings.line_item_description_template" class="form-input" value="{{ settings.line_item_description_template or '' }}" placeholder="Ticket #{ticket_id} - {ticket_subject}" />
                 <p class="form-help">Available placeholders: {ticket_id}, {ticket_subject}, {ticket_status}, {labour_name}, {labour_code}, {labour_minutes}, {labour_hours}, {labour_suffix}. Default: "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"</p>
               </div>
+              <div class="form-field">
+                <label class="checkbox-label">
+                  <input type="hidden" name="settings.auto_create_products" value="false" />
+                  <input type="checkbox" name="settings.auto_create_products" value="true" {% if settings.auto_create_products is not defined or settings.auto_create_products %}checked{% endif %} />
+                  <span>Automatically create missing Xero products from invoice item codes</span>
+                </label>
+              </div>
             {% elif module.slug == 'sms-gateway' %}
               <div class="form-field">
                 <label class="form-label" for="sms-gateway-url">Gateway URL</label>

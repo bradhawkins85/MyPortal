@@ -1,4 +1,5 @@
 """Tests for sending shop orders to Xero."""
+import json
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -276,3 +277,161 @@ async def test_send_order_to_xero_missing_configuration():
         assert result["status"] == "skipped"
         assert result["reason"] == "Xero module not fully configured"
         assert "missing" in result
+
+
+@pytest.mark.anyio("asyncio")
+async def test_send_order_to_xero_creates_missing_xero_items_and_retries():
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.build_order_invoice") as mock_build_invoice, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_success") as mock_record_success, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+                "account_code": "200",
+                "tax_type": "OUTPUT",
+                "line_amount_type": "Exclusive",
+                "auto_create_products": True,
+            },
+        }
+        mock_get_token.return_value = "test-access-token"
+        mock_build_invoice.return_value = {
+            "contact": {"ContactID": "xero-contact-123"},
+            "line_items": [
+                {
+                    "Description": "Missing Product",
+                    "Quantity": 1,
+                    "UnitAmount": 100.0,
+                    "AccountCode": "200",
+                    "TaxType": "OUTPUT",
+                    "ItemCode": "MISSING-SKU",
+                }
+            ],
+            "line_amount_type": "Exclusive",
+            "reference": "PO-12345",
+            "context": {"order": {"order_number": "ORD123"}},
+        }
+        mock_get_company.return_value = {"id": 1, "name": "Test Company", "xero_id": "xero-contact-123"}
+        mock_create_event.return_value = {"id": 456, "status": "in_progress"}
+
+        first_invoice_response = MagicMock()
+        first_invoice_response.status_code = 400
+        first_invoice_response.text = '{"ErrorNumber":10}'
+        first_invoice_response.headers = {}
+
+        items_lookup_response = MagicMock()
+        items_lookup_response.status_code = 200
+        items_lookup_response.text = '{"Items":[]}'
+        items_lookup_response.headers = {}
+        items_lookup_response.json.return_value = {"Items": []}
+
+        create_item_response = MagicMock()
+        create_item_response.status_code = 200
+        create_item_response.text = '{"Items":[{"Code":"MISSING-SKU"}]}'
+        create_item_response.headers = {}
+
+        second_invoice_response = MagicMock()
+        second_invoice_response.status_code = 200
+        second_invoice_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-RETRY-001"}]})
+        second_invoice_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=[
+                first_invoice_response,
+                create_item_response,
+                second_invoice_response,
+            ]
+        )
+        mock_client.get = AsyncMock(return_value=items_lookup_response)
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        result = await xero_service.send_order_to_xero(
+            order_number="ORD123",
+            company_id=1,
+            user_name="Test User",
+        )
+
+        assert result["status"] == "succeeded"
+        assert result["invoice_number"] == "INV-RETRY-001"
+        assert mock_client.get.await_count == 1
+        assert mock_client.post.await_count == 3
+
+
+@pytest.mark.anyio("asyncio")
+async def test_send_quote_to_xero_success():
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.build_quote_invoice") as mock_build_invoice, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_success") as mock_record_success, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+                "account_code": "200",
+                "tax_type": "OUTPUT",
+                "line_amount_type": "Exclusive",
+            },
+        }
+        mock_get_token.return_value = "test-access-token"
+        mock_build_invoice.return_value = {
+            "contact": {"ContactID": "xero-contact-123"},
+            "line_items": [
+                {
+                    "Description": "Quoted Product",
+                    "Quantity": 1,
+                    "UnitAmount": 250.0,
+                    "AccountCode": "200",
+                    "TaxType": "OUTPUT",
+                    "ItemCode": "QUOTE-SKU-1",
+                }
+            ],
+            "line_amount_type": "Exclusive",
+            "reference": "QUO123",
+            "context": {"quote": {"quote_number": "QUO123"}},
+        }
+        mock_get_company.return_value = {
+            "id": 1,
+            "name": "Test Company",
+            "xero_id": "xero-contact-123",
+        }
+        mock_create_event.return_value = {"id": 901}
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = json.dumps({"Invoices": [{"InvoiceNumber": "INV-QUOTE-001"}]})
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        items_lookup_response = MagicMock()
+        items_lookup_response.status_code = 200
+        items_lookup_response.text = '{"Items":[{"Code":"QUOTE-SKU-1"}]}'
+        items_lookup_response.headers = {}
+        items_lookup_response.json.return_value = {"Items": [{"Code": "QUOTE-SKU-1"}]}
+        mock_client.get.return_value = items_lookup_response
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        result = await xero_service.send_quote_to_xero(
+            quote_number="QUO123",
+            company_id=1,
+            user_name="Test User",
+        )
+
+        assert result["status"] == "succeeded"
+        assert result["invoice_number"] == "INV-QUOTE-001"
