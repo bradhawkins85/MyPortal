@@ -121,6 +121,8 @@ def test_export_html_for_pdf_includes_name_and_rows():
     assert "A description" in html
     assert "&lt;x&gt;" in html
     assert "2025-05-01" in html
+    assert "table-layout:fixed" in html
+    assert "overflow-wrap:anywhere" in html
 
 
 def test_export_html_for_pdf_handles_no_rows():
