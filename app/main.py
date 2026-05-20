@@ -4178,33 +4178,6 @@ async def index(request: Request):
 
 
 @app.head("/service-status", response_class=HTMLResponse)
-@app.get("/service-status", response_class=HTMLResponse)
-async def service_status_dashboard(request: Request):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-    active_company_id = getattr(request.state, "active_company_id", None)
-    try:
-        company_id = int(active_company_id) if active_company_id is not None else None
-    except (TypeError, ValueError):
-        company_id = None
-    services = await service_status_service.list_services_for_company(company_id)
-    summary = service_status_service.summarise_services(services)
-    status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
-    return await _render_template(
-        "service_status/dashboard.html",
-        request,
-        user,
-        extra={
-            "title": "Service status",
-            "service_status_entries": services,
-            "service_status_summary": summary,
-            "service_status_definitions": service_status_service.STATUS_DEFINITIONS,
-            "service_status_lookup": status_lookup,
-        },
-    )
-
-
 @app.get("/assets", response_class=HTMLResponse, tags=["Assets"])
 async def assets_page(request: Request):
     user, _membership, company, company_id, redirect = await _load_asset_context(request)
