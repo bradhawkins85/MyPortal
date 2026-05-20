@@ -3959,6 +3959,18 @@ async def on_startup() -> None:
     if pack_slugs:
         await feature_registry.load_many(pack_slugs)
 
+    # Optional dev-only auto-reload: when ``FEATURE_PACK_WATCH=true`` is
+    # set we start a per-pack ``watchfiles`` watcher so editing any
+    # file under ``app/features/<slug>/`` triggers a debounced reload
+    # of just that pack.  Off by default in production.
+    global _feature_pack_watcher
+    _feature_pack_watcher = None
+    if getattr(settings, "feature_pack_watch", False) and pack_slugs:
+        from app.core.feature_watcher import FeaturePackWatcher
+
+        _feature_pack_watcher = FeaturePackWatcher(feature_registry)
+        await _feature_pack_watcher.start()
+
     global _app_ready
     _app_ready = True
     log_info("Application started", environment=settings.environment)
@@ -3971,6 +3983,8 @@ async def on_shutdown() -> None:
     if settings.matrix_enabled:
         from app.services import matrix_sync
         matrix_sync.stop_sync_loop()
+    if _feature_pack_watcher is not None:
+        await _feature_pack_watcher.stop()
     await feature_registry.unload_all()
     await scheduler_service.stop()
     await db.disconnect()
@@ -9959,271 +9973,6 @@ async def search_by_phone_number(request: Request):
         url=f"/tickets?q={search_param}",
         status_code=status.HTTP_303_SEE_OTHER
     )
-
-
-@app.get("/tickets/new", response_class=HTMLResponse)
-async def portal_tickets_new_redirect(request: Request):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-    return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/tickets", response_class=HTMLResponse)
-async def portal_tickets_page(request: Request):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-
-    params = request.query_params
-    status_filter = (params.get("status") or "").strip() or None
-    search_term = (params.get("q") or "").strip() or None
-    success_message = params.get("success")
-    error_message = params.get("error")
-
-    # If no explicit filters are provided, try to load the default view
-    if not status_filter and not search_term:
-        try:
-            user_id = int(user.get("id"))
-            default_view = await ticket_views_repo.get_default_view(user_id)
-            if default_view:
-                filters = default_view.get("filters") or {}
-                # Apply status filter from default view
-                if filters.get("status"):
-                    status_list = filters["status"]
-                    if isinstance(status_list, list) and status_list:
-                        status_filter = ",".join(str(s) for s in status_list)
-                # Apply search filter from default view
-                if filters.get("search"):
-                    search_term = str(filters["search"])
-        except (TypeError, ValueError, RuntimeError):
-            # If we can't load the default view, just continue without it
-            pass
-
-    return await _render_portal_tickets_page(
-        request,
-        user,
-        status_filter=status_filter,
-        search_term=search_term,
-        success_message=success_message,
-        error_message=error_message,
-    )
-
-
-@app.post("/tickets", response_class=HTMLResponse)
-async def portal_create_ticket(request: Request):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-
-    params = request.query_params
-    status_filter = (params.get("status") or "").strip() or None
-    search_term = (params.get("q") or "").strip() or None
-
-    form = await request.form()
-    subject = str(form.get("subject") or "").strip()
-    description = str(form.get("description") or "").strip()
-    form_values = {"subject": subject, "description": description}
-
-    if not subject:
-        return await _render_portal_tickets_page(
-            request,
-            user,
-            status_filter=status_filter,
-            search_term=search_term,
-            error_message="Provide a subject for your ticket.",
-            form_values=form_values,
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    sanitized_description = sanitize_rich_text(description)
-    description_payload = sanitized_description.html
-
-    try:
-        requester_id = int(user.get("id"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
-
-    company_raw = user.get("company_id")
-    try:
-        company_id = int(company_raw) if company_raw is not None else None
-    except (TypeError, ValueError):
-        company_id = None
-    if company_id is None:
-        return await _render_portal_tickets_page(
-            request,
-            user,
-            status_filter=status_filter,
-            search_term=search_term,
-            error_message="Select a company before creating a ticket.",
-            form_values=form_values,
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    try:
-        status_value = await tickets_service.resolve_status_or_default(None)
-        ticket = await tickets_service.create_ticket(
-            subject=subject,
-            description=description_payload,
-            requester_id=requester_id,
-            company_id=company_id,
-            assigned_user_id=None,
-            priority="normal",
-            status=status_value,
-            category=None,
-            module_slug=None,
-            external_reference=None,
-            trigger_automations=True,
-            initial_reply_author_id=requester_id,
-        )
-        await tickets_repo.add_watcher(ticket["id"], requester_id)
-        
-        # Handle file attachments
-        attachments = form.getlist("attachments")
-        if attachments:
-            for attachment in attachments:
-                if hasattr(attachment, "filename") and attachment.filename:
-                    try:
-                        await attachments_service.save_uploaded_file(
-                            ticket_id=ticket["id"],
-                            file=attachment,
-                            access_level="closed",  # Users can only create closed-access attachments
-                            uploaded_by_user_id=requester_id,
-                        )
-                    except (ValueError, IOError) as attach_error:
-                        log_error(f"Failed to save attachment: {attach_error}")
-                        # Continue processing ticket even if attachment fails
-        
-        try:
-            await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-        except RuntimeError:
-            pass
-        await tickets_service.refresh_ticket_ai_tags(ticket["id"])
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to create portal ticket", error=str(exc))
-        return await _render_portal_tickets_page(
-            request,
-            user,
-            status_filter=status_filter,
-            search_term=search_term,
-            error_message="We couldn't create your ticket right now. Please try again.",
-            form_values=form_values,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    message = quote("Ticket created.")
-    destination = f"/tickets/{ticket['id']}?success={message}"
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/tickets/{ticket_id}", response_class=HTMLResponse)
-async def portal_ticket_detail(request: Request, ticket_id: int):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-
-    params = request.query_params
-    success_message = params.get("success")
-    error_message = params.get("error")
-
-    return await _render_portal_ticket_detail(
-        request,
-        user,
-        ticket_id=ticket_id,
-        success_message=success_message,
-        error_message=error_message,
-    )
-
-
-@app.post("/tickets/{ticket_id}/replies", response_class=HTMLResponse)
-async def portal_ticket_reply(request: Request, ticket_id: int):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return redirect
-
-    try:
-        user_id = int(user.get("id"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
-
-    ticket = await tickets_repo.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-
-    has_helpdesk_access = await _is_helpdesk_technician(user, request)
-    is_super_admin = bool(user.get("is_super_admin"))
-    is_requester = ticket.get("requester_id") == user_id
-    if not (has_helpdesk_access or is_super_admin or is_requester):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-
-    form = await request.form()
-    body = str(form.get("body") or "").strip()
-    sanitized_body = sanitize_rich_text(body)
-    if not sanitized_body.has_rich_content:
-        return await _render_portal_ticket_detail(
-            request,
-            user,
-            ticket_id=ticket_id,
-            reply_error="Reply message cannot be empty.",
-            reply_body=body,
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    try:
-        await tickets_repo.create_reply(
-            ticket_id=ticket_id,
-            author_id=user_id,
-            body=sanitized_body.html,
-            is_internal=False,
-            minutes_spent=None,
-            is_billable=False,
-        )
-        
-        # Handle file attachments
-        from app.services import ticket_attachments as attachments_service
-        attachments = form.getlist("attachments")
-        if attachments:
-            for attachment in attachments:
-                if hasattr(attachment, "filename") and attachment.filename:
-                    try:
-                        await attachments_service.save_uploaded_file(
-                            ticket_id=ticket_id,
-                            file=attachment,
-                            access_level="closed",
-                            uploaded_by_user_id=user_id,
-                        )
-                    except Exception as exc:
-                        log_error("Failed to save attachment", ticket_id=ticket_id, filename=attachment.filename, error=str(exc))
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to create portal ticket reply", ticket_id=ticket_id, error=str(exc))
-        return await _render_portal_ticket_detail(
-            request,
-            user,
-            ticket_id=ticket_id,
-            error_message="We couldn't post your reply. Please try again.",
-            reply_body=body,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError:
-        pass
-    await tickets_service.refresh_ticket_ai_tags(ticket_id)
-    actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type=actor_type,
-        actor=user,
-    )
-    await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
-
-    message = quote("Reply posted.")
-    return RedirectResponse(
-        url=f"/tickets/{ticket_id}?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
-
 
 
 @app.get("/knowledge-base", response_class=HTMLResponse, tags=["Knowledge Base"])
@@ -22564,6 +22313,39 @@ async def admin_modules_page(
     )
 
 
+@app.get("/admin/feature-packs", response_class=HTMLResponse)
+async def admin_feature_packs_page(
+    request: Request,
+    success: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    """Admin UI wrapping the feature pack registry.
+
+    Lists every loaded ``app/features/<slug>/`` pack with its current
+    version, last-loaded timestamp, in-flight request count, last
+    reload duration, and last error.  Each row has a Reload button
+    that POSTs to ``/api/features/{slug}/reload`` (CSRF-protected,
+    super-admin only) — the same API documented in
+    ``docs/feature_packs.md``.
+    """
+
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    packs = sorted(feature_registry.list(), key=lambda p: p["slug"])
+
+    extra = {
+        "title": "Feature packs",
+        "packs": packs,
+        "success_message": _sanitize_message(success),
+        "error_message": _sanitize_message(error),
+    }
+    return await _render_template(
+        "admin/feature_packs.html", request, current_user, extra=extra
+    )
+
+
 @app.post("/admin/modules/{slug}", response_class=HTMLResponse)
 async def admin_update_module(slug: str, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
@@ -23532,6 +23314,11 @@ async def health_check():
 # nginx uses this to decide when a blue/green instance is back online
 # during a rolling deploy (see ``docs/zero_downtime_upgrades.md``).
 _app_ready: bool = False
+
+# Optional dev-only file watcher; started in ``on_startup`` when the
+# ``FEATURE_PACK_WATCH`` setting is true.  Held module-level so the
+# shutdown hook can cancel it.
+_feature_pack_watcher: Any = None
 
 
 @app.get("/healthz")
