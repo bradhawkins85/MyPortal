@@ -54,6 +54,7 @@ clean_pycache_files() {
 }
 
 AUTO_FALLBACK=0
+RESTART_MODE="default"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,9 +62,23 @@ while [[ $# -gt 0 ]]; do
       AUTO_FALLBACK=1
       shift
       ;;
+    --graceful)
+      # Zero-downtime single-server reload: ``systemctl reload`` sends
+      # SIGHUP, which uvicorn workers handle by cycling without
+      # dropping accepted connections.  See docs/zero_downtime_upgrades.md.
+      RESTART_MODE="graceful"
+      shift
+      ;;
+    --rolling)
+      # Two-instance rolling deploy across systemd templated services
+      # (myportal@blue, myportal@green) sharing a single database.  See
+      # docs/zero_downtime_upgrades.md (Track B2).
+      RESTART_MODE="rolling"
+      shift
+      ;;
     --help|-h)
       cat <<'USAGE'
-Usage: upgrade.sh [--auto-fallback]
+Usage: upgrade.sh [--auto-fallback] [--graceful | --rolling]
 
 Fetch and apply the latest application code from the configured Git remote.
 
@@ -71,6 +86,16 @@ Options:
   --auto-fallback  Indicates the script is running as part of an automated
                    recovery path. The script will avoid signalling the
                    external restart helpers so the caller can manage restarts.
+  --graceful       After updating, ask systemd to reload (SIGHUP) the
+                   single MyPortal service so workers cycle without
+                   dropping connections.  Requires uvicorn workers
+                   and the systemd unit shipped in
+                   docs/systemd-service.md (ExecReload= line).
+  --rolling        Roll the upgrade across the two-instance blue/green
+                   deployment described in deploy/nginx/myportal-bluegreen.conf
+                   + deploy/systemd/myportal@.service.  One instance is
+                   drained, upgraded, healthchecked, and brought back
+                   before the other is touched.
 USAGE
       exit 0
       ;;
@@ -379,14 +404,139 @@ install_dependencies() {
 }
 
 run_restart_helper() {
-  local status=0
-  "${SCRIPT_DIR}/restart.sh" || status=$?
-  if [[ "$status" -eq 0 ]]; then
-    echo "Restart helper completed successfully."
-  else
-    echo "Error: restart helper exited with status ${status}." >&2
-    exit "$status"
+  case "$RESTART_MODE" in
+    graceful)
+      run_graceful_reload
+      ;;
+    rolling)
+      run_rolling_restart
+      ;;
+    *)
+      local status=0
+      "${SCRIPT_DIR}/restart.sh" || status=$?
+      if [[ "$status" -eq 0 ]]; then
+        echo "Restart helper completed successfully."
+      else
+        echo "Error: restart helper exited with status ${status}." >&2
+        exit "$status"
+      fi
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Zero-downtime restart helpers (see docs/zero_downtime_upgrades.md).
+# ---------------------------------------------------------------------------
+
+# Resolve the systemd unit name from the environment.  Matches the
+# convention documented in docs/systemd-service.md.
+service_unit_name() {
+  local name="${SYSTEMD_SERVICE_NAME:-myportal}"
+  if [[ "$name" != *.service ]]; then
+    name="${name}.service"
   fi
+  printf '%s' "$name"
+}
+
+# Wait up to ``timeout`` seconds for ``url`` to return HTTP 200.
+wait_for_ready() {
+  local url="$1"
+  local timeout="${2:-60}"
+  local elapsed=0
+  while (( elapsed < timeout )); do
+    if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    ((elapsed++))
+  done
+  echo "Error: ${url} did not become ready within ${timeout}s." >&2
+  return 1
+}
+
+run_graceful_reload() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "Error: --graceful requires systemctl on PATH." >&2
+    exit 1
+  fi
+  local unit
+  unit=$(service_unit_name)
+  echo "Graceful reload: signalling ${unit} (SIGHUP via systemctl reload)..."
+  if ! systemctl reload "$unit"; then
+    echo "Error: systemctl reload ${unit} failed." >&2
+    exit 1
+  fi
+  local probe="${MYPORTAL_READYZ_URL:-http://127.0.0.1:8000/readyz}"
+  echo "Graceful reload: waiting for ${probe} to return 200..."
+  if ! wait_for_ready "$probe" "${MYPORTAL_READY_TIMEOUT:-60}"; then
+    exit 1
+  fi
+  echo "Graceful reload complete."
+}
+
+run_rolling_restart() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "Error: --rolling requires systemctl on PATH." >&2
+    exit 1
+  fi
+  local instances=(${MYPORTAL_ROLLING_INSTANCES:-blue green})
+  local state_file="${MYPORTAL_NGINX_STATE_FILE:-/etc/nginx/myportal-bluegreen.state}"
+  declare -A port_for
+  port_for[blue]="${MYPORTAL_BLUE_PORT:-8001}"
+  port_for[green]="${MYPORTAL_GREEN_PORT:-8002}"
+
+  for instance in "${instances[@]}"; do
+    local unit="myportal@${instance}.service"
+    local port="${port_for[$instance]:-8000}"
+    echo "Rolling deploy: draining ${instance} (port ${port})..."
+    # Mark the instance as drained in the nginx state file (the
+    # blue/green nginx config includes this file inside its upstream
+    # block) and reload nginx so traffic stops going to it.
+    if [[ -w "$state_file" || -w "$(dirname "$state_file")" ]]; then
+      {
+        for other in "${instances[@]}"; do
+          if [[ "$other" == "$instance" ]]; then
+            echo "server 127.0.0.1:${port_for[$other]} down;"
+          else
+            echo "server 127.0.0.1:${port_for[$other]} max_fails=3 fail_timeout=10s;"
+          fi
+        done
+      } > "$state_file"
+      if command -v nginx >/dev/null 2>&1; then
+        nginx -s reload || true
+      fi
+    else
+      echo "Warning: ${state_file} not writable; relying on systemd stop+start to drain." >&2
+    fi
+
+    # Give in-flight requests a brief window to finish before we
+    # restart the worker pool.
+    sleep "${MYPORTAL_DRAIN_SECONDS:-5}"
+
+    echo "Rolling deploy: restarting ${unit}..."
+    if ! systemctl restart "$unit"; then
+      echo "Error: systemctl restart ${unit} failed; aborting rolling deploy with ${instance} drained." >&2
+      exit 1
+    fi
+    if ! wait_for_ready "http://127.0.0.1:${port}/readyz" "${MYPORTAL_READY_TIMEOUT:-60}"; then
+      echo "Error: ${instance} failed readiness check; aborting rolling deploy with ${instance} drained." >&2
+      exit 1
+    fi
+
+    # Re-enable the instance in the upstream and reload nginx.
+    if [[ -w "$state_file" || -w "$(dirname "$state_file")" ]]; then
+      {
+        for other in "${instances[@]}"; do
+          echo "server 127.0.0.1:${port_for[$other]} max_fails=3 fail_timeout=10s;"
+        done
+      } > "$state_file"
+      if command -v nginx >/dev/null 2>&1; then
+        nginx -s reload || true
+      fi
+    fi
+    echo "Rolling deploy: ${instance} back in service."
+  done
+  echo "Rolling deploy complete."
 }
 
 # ---------------------------------------------------------------------------

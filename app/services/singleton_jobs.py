@@ -36,6 +36,11 @@ from app.core.database import db
 
 
 _INSTANCE_ID = f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+# ``_INSTANCE_ID`` is fixed at module import time, so every worker
+# within the same Python process shares it.  This is intentional:
+# uvicorn workers are separate OS processes (different ``os.getpid()``)
+# so each gets its own ID, while module-level state remains stable for
+# the lifetime of one worker.
 
 
 def instance_id() -> str:
