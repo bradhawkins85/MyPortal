@@ -9770,50 +9770,6 @@ async def search_by_phone_number(request: Request):
     )
 
 
-@app.get("/knowledge-base", response_class=HTMLResponse, tags=["Knowledge Base"])
-async def knowledge_base_index(request: Request, article: str | None = Query(None, alias="slug")):
-    if article:
-        target = f"/knowledge-base/articles/{quote(article, safe='')}"
-        return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
-
-    user, _ = await _get_optional_user(request)
-    access_context = await knowledge_base_service.build_access_context(user)
-    include_unpublished = bool(user and user.get("is_super_admin"))
-    articles = await knowledge_base_service.list_articles_for_context(
-        access_context,
-        include_unpublished=include_unpublished,
-    )
-    extra_context = {
-        "title": "Knowledge base",
-        "kb_articles": articles,
-        "kb_is_super_admin": bool(user and user.get("is_super_admin")),
-    }
-    context = await _build_portal_context(request, user, extra=extra_context)
-    return templates.TemplateResponse(context["request"], "knowledge_base/index.html", context)
-
-
-@app.get("/knowledge-base/articles/{slug}", response_class=HTMLResponse, tags=["Knowledge Base"])
-async def knowledge_base_article(request: Request, slug: str):
-    user, _ = await _get_optional_user(request)
-    access_context = await knowledge_base_service.build_access_context(user)
-    include_unpublished = bool(user and user.get("is_super_admin"))
-    article = await knowledge_base_service.get_article_by_slug_for_context(
-        slug,
-        access_context,
-        include_unpublished=include_unpublished,
-        include_permissions=include_unpublished,
-    )
-    if not article:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
-    extra_context = {
-        "title": article.get("title") or "Knowledge base",
-        "kb_article": article,
-        "kb_is_super_admin": bool(user and user.get("is_super_admin")),
-    }
-    context = await _build_portal_context(request, user, extra=extra_context)
-    return templates.TemplateResponse(context["request"], "knowledge_base/article.html", context)
-
-
 @app.get("/myforms", response_class=HTMLResponse)
 async def forms_page(request: Request):
     (
@@ -16322,26 +16278,6 @@ async def admin_call_recordings_page(request: Request):
     )
 
 
-@app.get("/admin/knowledge-base", response_class=HTMLResponse)
-async def admin_knowledge_base_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    access_context = await knowledge_base_service.build_access_context(current_user)
-    articles = await knowledge_base_service.list_articles_for_context(
-        access_context,
-        include_unpublished=True,
-        include_permissions=True,
-    )
-    serialised_articles = jsonable_encoder(articles)
-    extra = {
-        "title": "Knowledge base admin",
-        "kb_articles": serialised_articles,
-    }
-    return await _render_template("admin/knowledge_base.html", request, current_user, extra=extra)
-
-
 async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     users_task = asyncio.create_task(user_repo.list_users())
     companies_task = asyncio.create_task(company_repo.list_companies())
@@ -16389,53 +16325,6 @@ async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[
 
     company_options.sort(key=lambda item: item.get("name", "").lower())
     return user_options, company_options
-
-
-@app.get("/admin/knowledge-base/new", response_class=HTMLResponse)
-async def admin_new_knowledge_base_article_page(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    user_options, company_options = await _prepare_kb_editor_options()
-    extra = {
-        "title": "New knowledge base article",
-        "kb_initial_article": None,
-        "kb_user_options": user_options,
-        "kb_company_options": company_options,
-        "kb_form_mode": "create",
-        "kb_catalogue_payload": [],
-    }
-    return await _render_template("admin/knowledge_base_editor.html", request, current_user, extra=extra)
-
-
-@app.get("/admin/knowledge-base/articles/{slug}", response_class=HTMLResponse)
-async def admin_edit_knowledge_base_article_page(request: Request, slug: str):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-
-    access_context = await knowledge_base_service.build_access_context(current_user)
-    article = await knowledge_base_service.get_article_by_slug_for_context(
-        slug,
-        access_context,
-        include_unpublished=True,
-        include_permissions=True,
-    )
-    if not article:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
-
-    user_options, company_options = await _prepare_kb_editor_options()
-    serialised_article = jsonable_encoder(article)
-    extra = {
-        "title": f"Edit knowledge base article · {article.get('title') or article.get('slug')}",
-        "kb_initial_article": serialised_article,
-        "kb_user_options": user_options,
-        "kb_company_options": company_options,
-        "kb_form_mode": "edit",
-        "kb_catalogue_payload": [{"slug": serialised_article.get("slug")}],
-    }
-    return await _render_template("admin/knowledge_base_editor.html", request, current_user, extra=extra)
 
 
 @app.get("/admin/business-continuity-plans", response_class=HTMLResponse)
