@@ -19,7 +19,7 @@ from .routes import router as notifications_router
 
 PACK = FeaturePack(
     slug="notifications",
-    version="1.0.0",
+    version="1.0.1",
     routers=(notifications_router,),
 )
 
