@@ -229,9 +229,9 @@ crashing the app.
 |------------------|---------------------------|-----------------------------------------------------|
 | `tickets`        | Portal `/tickets/*`       | Public-portal ticket list, create, detail, replies. Admin `/admin/tickets/*` routes still live in `app/main.py` and will move in a follow-up PR. |
 | `service_status` | Portal `/service-status`  | Public-portal service status dashboard. Admin `/admin/service-status*` routes still live in `app/main.py` and will move in a follow-up PR. |
+| `notifications`  | `/notifications*`         | Notifications dashboard and settings pages (`/notifications`, `/notifications/settings`). Notifications API routes continue to be mounted from `app/api/routes/notifications.py`. |
 
 Each follow-up PR migrates one area (kb, backups, automations, m365,
 xero, …) from `app/main.py` into `app/features/<slug>/`. URLs and
 dependency injection are preserved across each move; the only
 externally visible change is that the area becomes reloadable.
-
