@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -23,7 +21,7 @@ def _main():
 @router.get("/knowledge-base", response_class=HTMLResponse)
 async def knowledge_base_index(request: Request, article: str | None = Query(None, alias="slug")):
     if article:
-        target = f"/knowledge-base/articles/{quote(article, safe='')}"
+        target = str(request.url_for("knowledge_base_article", slug=article))
         return RedirectResponse(url=target, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
     main_module = _main()
