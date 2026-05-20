@@ -224,7 +224,7 @@ async def notification_settings_page(request: Request):
     except (TypeError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="User session invalid"
-        ) from None
+        )
 
     stored_preferences = await notification_preferences_repo.list_preferences(user_id)
     is_super_admin = bool(user.get("is_super_admin"))
