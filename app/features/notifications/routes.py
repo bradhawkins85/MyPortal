@@ -7,7 +7,7 @@ import math
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
 from app.core.notifications import DEFAULT_NOTIFICATION_EVENT_TYPES, merge_event_types
@@ -222,7 +222,9 @@ async def notification_settings_page(request: Request):
     try:
         user_id = int(user.get("id"))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=403, detail="User session invalid") from None
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="User session invalid"
+        ) from None
 
     stored_preferences = await notification_preferences_repo.list_preferences(user_id)
     is_super_admin = bool(user.get("is_super_admin"))
