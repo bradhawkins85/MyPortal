@@ -98,6 +98,43 @@ List the currently loaded packs:
 GET /api/features
 ```
 
+### Pack versioning and `system_update`
+
+The `version` field is more than a diagnostic: the `system_update`
+system automation in `app/services/scheduler.py` uses it to decide
+whether a pending GitHub update can be applied without restarting the
+application.
+
+When `system_update` runs and the remote `main` branch is ahead of the
+local checkout, the scheduler diffs the incoming changes. If **every**
+changed file lives under `app/features/<slug>/…` for one or more
+currently-loaded packs **and** each affected pack's `PACK.version`
+literal in the incoming `__init__.py` differs from the running
+version, the scheduler:
+
+1. Fast-forwards the working tree to the new commit
+   (`git merge --ff-only`).
+2. Calls `FeatureRegistry.reload(slug)` for each affected pack,
+   re-importing it from disk with no downtime.
+
+If any of these conditions are not met — changes outside
+`app/features/<slug>/`, a touched pack that is not currently loaded,
+an unchanged version literal, a non-fast-forward history, or a reload
+that raises — the scheduler falls back to the existing full-restart
+flag-file path (`var/state/system_update.flag` ⇒ `scripts/upgrade.sh`).
+
+For this optimisation to apply you must therefore:
+
+* Keep `version` as a **string literal** inside the `PACK = FeaturePack(...)`
+  declaration in `app/features/<slug>/__init__.py` (it is parsed
+  textually from the file at the incoming git ref).
+* Bump `version` on **every** change to the pack, however small. Treat
+  it the same way you would a published library version.
+
+The optimisation is bypassed when a user clicks **Restart now** in the
+admin UI (which calls `run_now`, setting `force_restart=True`), so an
+operator can always demand a full restart.
+
 ## Reload safety contract
 
 The loader guarantees:

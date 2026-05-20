@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from asyncio.subprocess import PIPE
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,22 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
+
+# Directory prefix used to detect changes that are isolated to a single
+# feature pack (see ``app/core/features.py`` and
+# ``docs/feature_packs.md``).  When every file in a ``system_update``
+# diff lives under ``app/features/<slug>/`` and each touched pack has
+# its ``PACK.version`` literal bumped, the update can be applied via
+# the in-process feature-pack reload API instead of restarting the
+# whole application.
+_FEATURE_PACKS_DIR_PREFIX = "app/features/"
+
+# Matches ``version="1.2.3"`` / ``version='1.2.3'`` in a feature pack's
+# ``__init__.py`` ``PACK = FeaturePack(...)`` declaration.  Feature
+# packs that compute ``version`` dynamically are not eligible for
+# hot-reload through ``system_update``; they fall through to the
+# normal full-restart upgrade path.
+_PACK_VERSION_RE = re.compile(r"""version\s*=\s*['"]([^'"]+)['"]""")
 
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
@@ -1037,6 +1054,20 @@ class SchedulerService:
                 )
                 return message
 
+            # Try to apply the update via the in-process feature-pack
+            # reload API when the incoming diff is limited to one or
+            # more feature packs whose ``PACK.version`` has been bumped.
+            # This avoids dropping connections for routine pack-only
+            # updates.  Any failure or ambiguity falls through to the
+            # full-restart flag-file path below.
+            if not force_restart:
+                hot_reload_message = await self._try_feature_pack_hot_reload(
+                    local_head=local_head,
+                    remote_head=remote_head,
+                )
+                if hot_reload_message is not None:
+                    return hot_reload_message
+
             self._ensure_update_flag_directory()
             timestamp = datetime.now(timezone.utc).isoformat()
             flag_payload = (
@@ -1056,6 +1087,204 @@ class SchedulerService:
                 requested_from_ui=force_restart,
             )
             return f"Update scheduled via {_SYSTEM_UPDATE_FLAG_PATH.name}."
+
+    async def _try_feature_pack_hot_reload(
+        self, *, local_head: str, remote_head: str
+    ) -> str | None:
+        """Attempt to apply the pending update via feature-pack hot reload.
+
+        Returns a human-readable success message when every changed file
+        belongs to a currently-loaded feature pack whose ``PACK.version``
+        literal has been bumped in the incoming code, and every affected
+        pack reloads cleanly.  Returns ``None`` to indicate the caller
+        should fall back to the full-restart flag-file path.
+        """
+
+        try:
+            from app.core.features import get_registry
+        except Exception:  # pragma: no cover - defensive
+            return None
+        try:
+            registry = get_registry()
+        except RuntimeError:
+            # Registry not initialised (e.g. tests, very early startup);
+            # fall back to the standard restart path.
+            return None
+
+        fetched_head = await self._fetch_remote_main_ref()
+        if not fetched_head:
+            return None
+
+        changed_files = await self._list_changed_files(local_head, fetched_head)
+        if changed_files is None or not changed_files:
+            return None
+
+        slugs = self._classify_feature_pack_changes(changed_files)
+        if slugs is None:
+            log_info(
+                "System update requires full restart",
+                reason="changes_outside_feature_packs",
+                changed_file_count=len(changed_files),
+            )
+            return None
+
+        loaded_versions: dict[str, str] = {
+            state["slug"]: state["version"] for state in registry.list()
+        }
+        for slug in slugs:
+            if slug not in loaded_versions:
+                log_info(
+                    "Feature pack hot-reload skipped",
+                    reason="pack_not_loaded",
+                    slug=slug,
+                )
+                return None
+
+        incoming_versions: dict[str, str] = {}
+        for slug in sorted(slugs):
+            new_version = await self._read_pack_version_at_ref(slug, fetched_head)
+            if not new_version:
+                log_info(
+                    "Feature pack hot-reload skipped",
+                    reason="missing_incoming_version",
+                    slug=slug,
+                )
+                return None
+            if new_version == loaded_versions[slug]:
+                log_info(
+                    "Feature pack hot-reload skipped",
+                    reason="version_not_bumped",
+                    slug=slug,
+                    current=loaded_versions[slug],
+                    incoming=new_version,
+                )
+                return None
+            incoming_versions[slug] = new_version
+
+        # Fast-forward the working tree so the new pack code is on disk
+        # before we ask the registry to re-import it.  ``--ff-only``
+        # refuses to create a merge commit, matching the upgrade
+        # script's expectation that ``main`` advances linearly.
+        rc, _, stderr = await self._run_git("merge", "--ff-only", fetched_head)
+        if rc != 0:
+            log_error(
+                "Feature pack hot-reload aborted: fast-forward merge failed",
+                error=_truncate_output(stderr),
+            )
+            return None
+
+        reloaded: list[str] = []
+        for slug in sorted(slugs):
+            try:
+                state = await registry.reload(slug)
+            except Exception as exc:
+                log_error(
+                    "Feature pack hot-reload failed; falling back to full restart",
+                    slug=slug,
+                    error=str(exc),
+                )
+                return None
+            if state.last_error:
+                log_error(
+                    "Feature pack hot-reload reported an error; falling back to full restart",
+                    slug=slug,
+                    error=state.last_error,
+                )
+                return None
+            reloaded.append(slug)
+
+        log_info(
+            "Feature pack hot-reload completed",
+            packs=reloaded,
+            local_head=local_head,
+            remote_head=remote_head,
+        )
+        summary = ", ".join(
+            f"{slug}@{incoming_versions[slug]}" for slug in reloaded
+        )
+        return (
+            f"Feature pack(s) reloaded without restart: {summary}."
+        )
+
+    @staticmethod
+    def _classify_feature_pack_changes(changed_files: list[str]) -> set[str] | None:
+        """Return the affected slugs when every file is feature-pack scoped.
+
+        Returns ``None`` if any changed file lives outside
+        ``app/features/<slug>/`` (including files directly in
+        ``app/features/`` itself, such as ``app/features/__init__.py``),
+        because such changes require restarting the host application.
+        """
+
+        slugs: set[str] = set()
+        for raw in changed_files:
+            path = raw.strip()
+            if not path:
+                continue
+            if not path.startswith(_FEATURE_PACKS_DIR_PREFIX):
+                return None
+            rest = path[len(_FEATURE_PACKS_DIR_PREFIX):]
+            parts = rest.split("/", 1)
+            if len(parts) < 2 or not parts[0]:
+                # File sits directly under ``app/features/`` (e.g. the
+                # package ``__init__.py``); not a per-pack file.
+                return None
+            slugs.add(parts[0])
+        return slugs or None
+
+    async def _run_git(self, *args: str) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            stdout=PIPE,
+            stderr=PIPE,
+            cwd=str(_PROJECT_ROOT),
+        )
+        stdout, stderr = await process.communicate()
+        return (
+            int(process.returncode or 0),
+            stdout.decode("utf-8", errors="replace"),
+            stderr.decode("utf-8", errors="replace"),
+        )
+
+    async def _fetch_remote_main_ref(self) -> str | None:
+        rc, _, stderr = await self._run_git("fetch", "origin", "main")
+        if rc != 0:
+            log_error(
+                "Failed to fetch origin/main for feature pack diff",
+                error=_truncate_output(stderr),
+            )
+            return None
+        rc, stdout, stderr = await self._run_git("rev-parse", "FETCH_HEAD")
+        if rc != 0:
+            log_error(
+                "Failed to resolve FETCH_HEAD after fetching origin/main",
+                error=_truncate_output(stderr),
+            )
+            return None
+        ref = stdout.strip()
+        return ref or None
+
+    async def _list_changed_files(self, base: str, head: str) -> list[str] | None:
+        rc, stdout, stderr = await self._run_git(
+            "diff", "--name-only", f"{base}..{head}"
+        )
+        if rc != 0:
+            log_error(
+                "Failed to diff local HEAD against incoming refs",
+                error=_truncate_output(stderr),
+            )
+            return None
+        return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+    async def _read_pack_version_at_ref(self, slug: str, ref: str) -> str | None:
+        rc, stdout, _ = await self._run_git(
+            "show", f"{ref}:{_FEATURE_PACKS_DIR_PREFIX}{slug}/__init__.py"
+        )
+        if rc != 0:
+            return None
+        match = _PACK_VERSION_RE.search(stdout)
+        return match.group(1) if match else None
 
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
