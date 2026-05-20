@@ -146,6 +146,28 @@ class Settings(BaseSettings):
     )
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
+    feature_packs: str = Field(
+        default="tickets",
+        validation_alias="FEATURE_PACKS",
+        description=(
+            "Comma-separated list of feature pack slugs (subpackages of "
+            "``app.features``) to load on startup.  Each pack can be "
+            "hot-reloaded via ``POST /api/features/{slug}/reload``.  "
+            "Defaults to 'tickets' because the public-portal ticket "
+            "routes live in that pack; set to an empty string to "
+            "disable all packs (the routes will then 404)."
+        ),
+    )
+    feature_pack_watch: bool = Field(
+        default=False,
+        validation_alias="FEATURE_PACK_WATCH",
+        description=(
+            "Dev-only: when true, start a ``watchfiles`` watcher per "
+            "loaded feature pack that auto-reloads the pack on file "
+            "changes under ``app/features/<slug>/``. Off in production "
+            "— use the admin UI or the reload API instead."
+        ),
+    )
     enable_auto_refresh: bool = Field(
         default=False, validation_alias="ENABLE_AUTO_REFRESH"
     )
