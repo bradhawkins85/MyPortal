@@ -164,6 +164,19 @@ sudo -u myportal -H /opt/myportal/.venv/bin/pip install -e .
 systemctl restart myportal.service
 ```
 
+For **zero-downtime upgrades**, replace `systemctl restart` with
+`systemctl reload` (which sends `SIGHUP` so Uvicorn workers cycle
+without dropping connections), or use the helper script:
+
+```bash
+sudo -u myportal /opt/myportal/scripts/upgrade.sh --graceful
+```
+
+See [`zero_downtime_upgrades.md`](zero_downtime_upgrades.md) for the
+single-server (`--graceful`) and two-instance (`--rolling`) deploy
+flows, including the `/healthz` and `/readyz` endpoints that nginx
+uses to gate traffic during a reload.
+
 If the service fails to start, `systemctl status` will show the most
 recent errors. Systemd automatically restarts the process after five
 seconds; adjust `RestartSec` as needed for your environment.

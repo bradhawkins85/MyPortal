@@ -1,0 +1,53 @@
+# Templated systemd service for two-instance MyPortal deployments.
+# Used together with deploy/nginx/myportal-bluegreen.conf — see
+# docs/zero_downtime_upgrades.md.
+#
+# Instance names map to ports as:
+#   blue  -> 8001
+#   green -> 8002
+#
+# Install with:
+#   cp deploy/systemd/myportal@.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now myportal@blue.service
+#   systemctl enable --now myportal@green.service
+#
+# Set MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env to override
+# the default port mapping below.  Each instance file should also pin
+# APP_INSTANCE_ID (read by app/services/singleton_jobs.py) so log lines
+# clearly identify which instance fired each job.
+
+[Unit]
+Description=MyPortal customer portal (%i instance)
+After=network-online.target mysql.service redis.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=myportal
+Group=myportal
+WorkingDirectory=/opt/myportal
+EnvironmentFile=/etc/myportal.env
+EnvironmentFile=-/etc/myportal.%i.env
+# Default port mapping: blue=8001, green=8002.  Override by setting
+# MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env.
+Environment=MYPORTAL_INSTANCE_PORT=8000
+Environment=APP_INSTANCE_ID=%i
+ExecStart=/opt/myportal/scripts/start_with_auto_update.sh \
+    /opt/myportal/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port ${MYPORTAL_INSTANCE_PORT} \
+    --workers 2
+# Graceful reload: SIGHUP causes uvicorn to gracefully restart workers
+# without dropping accepted connections.
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/myportal
+
+[Install]
+WantedBy=multi-user.target

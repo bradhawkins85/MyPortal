@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Feature packs{% endblock %}
+
+{% block header_meta %}
+  <span class="muted">Hot-reload self-contained sections of MyPortal without restarting the rest of the app.</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Docs", "type": "link", "href": "/docs", "variant": "ghost"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+  <div class="management management--single" data-layout>
+    <section class="management__content">
+      {% if success_message %}
+        <div class="alert alert--success" role="status">{{ success_message }}</div>
+      {% endif %}
+      {% if error_message %}
+        <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+      {% endif %}
+
+      <section class="card card--panel">
+        {% if not packs %}
+          <p class="empty-state">
+            No feature packs are currently loaded. Configure the
+            <code>FEATURE_PACKS</code> environment variable (see
+            <code>docs/feature_packs.md</code>) and restart the
+            application to register packs.
+          </p>
+        {% else %}
+          <div class="table-wrapper">
+            <table class="table" id="feature-packs-table" data-table data-table-id="feature_packs">
+              <thead>
+                <tr>
+                  <th scope="col" data-sort="string" data-column-key="slug">Pack</th>
+                  <th scope="col" data-sort="string" data-column-key="version">Version</th>
+                  <th scope="col" data-sort="string" data-column-key="loaded_at">Loaded</th>
+                  <th scope="col" data-sort="number" data-column-key="reload_ms" data-mobile-hidden="true">Last reload (ms)</th>
+                  <th scope="col" data-sort="number" data-column-key="in_flight" data-mobile-hidden="true">In flight</th>
+                  <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                  <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for pack in packs %}
+                  <tr data-pack-slug="{{ pack.slug }}">
+                    <td data-label="Pack" data-column-key="slug">
+                      <strong>{{ pack.slug }}</strong>
+                    </td>
+                    <td data-label="Version" data-column-key="version">
+                      <code>{{ pack.version or '—' }}</code>
+                    </td>
+                    <td data-label="Loaded" data-column-key="loaded_at">
+                      {% if pack.loaded_at %}
+                        <span data-utc="{{ pack.loaded_at }}">{{ pack.loaded_at }}</span>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                    <td data-label="Last reload (ms)" data-column-key="reload_ms" data-mobile-hidden="true">
+                      {% if pack.last_reload_duration_ms is not none %}
+                        {{ '%.1f' | format(pack.last_reload_duration_ms) }}
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                    <td data-label="In flight" data-column-key="in_flight" data-mobile-hidden="true">
+                      {{ pack.in_flight }}
+                    </td>
+                    <td data-label="Status" data-column-key="status">
+                      {% if pack.last_error %}
+                        <span class="status status--danger" title="{{ pack.last_error }}">Error</span>
+                      {% else %}
+                        <span class="status status--success">Healthy</span>
+                      {% endif %}
+                    </td>
+                    <td class="table__actions" data-column-key="actions">
+                      <div class="table__action-buttons">
+                        <button
+                          type="button"
+                          class="button button--ghost button--small"
+                          data-feature-pack-reload="{{ pack.slug }}"
+                        >Reload</button>
+                      </div>
+                    </td>
+                  </tr>
+                  {% if pack.last_error %}
+                    <tr class="feature-packs__error-row">
+                      <td colspan="7" data-label="Last error">
+                        <details>
+                          <summary>Last error</summary>
+                          <pre class="code-block">{{ pack.last_error }}</pre>
+                        </details>
+                      </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="card card--panel">
+        <h2>About feature packs</h2>
+        <p>
+          Each pack lives under <code>app/features/&lt;slug&gt;/</code>
+          and exposes a <code>FeaturePack</code> manifest. Reloading
+          imports the pack's modules fresh from disk, atomically swaps
+          its router into the application, and waits for in-flight
+          requests to drain. Other packs and the rest of the app
+          continue serving traffic throughout.
+        </p>
+        <p>
+          Reloads succeed even if your changes are still in editor
+          buffers — they only take effect after the new code is on
+          disk. A failed reload leaves the previous version mounted
+          and surfaces the error here.
+        </p>
+        <p>
+          See <a href="/docs">the API reference</a> for the underlying
+          <code>POST /api/features/{slug}/reload</code> endpoint, or
+          <code>docs/feature_packs.md</code> in the repository for the
+          authoring guide.
+        </p>
+      </section>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      var table = document.getElementById('feature-packs-table');
+      if (!table) {
+        return;
+      }
+      var csrfToken = {{ csrf_token | tojson if csrf_token else 'null' }};
+      table.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-feature-pack-reload]');
+        if (!btn) {
+          return;
+        }
+        event.preventDefault();
+        var slug = btn.getAttribute('data-feature-pack-reload');
+        if (!slug) {
+          return;
+        }
+        if (btn.dataset.busy === '1') {
+          return;
+        }
+        btn.dataset.busy = '1';
+        var originalLabel = btn.textContent;
+        btn.textContent = 'Reloading…';
+        btn.disabled = true;
+        var headers = { 'Accept': 'application/json' };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+        fetch('/api/features/' + encodeURIComponent(slug) + '/reload', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: headers,
+        })
+          .then(function (response) {
+            return response.json().then(function (body) {
+              return { ok: response.ok, body: body };
+            });
+          })
+          .then(function (result) {
+            // Always reload the page so the table reflects the new
+            // version / loaded_at / error state from the server.
+            var query = result.ok ? 'success=Reloaded+' + encodeURIComponent(slug) : 'error=Reload+failed+for+' + encodeURIComponent(slug);
+            window.location.href = '/admin/feature-packs?' + query;
+          })
+          .catch(function () {
+            btn.textContent = originalLabel;
+            btn.disabled = false;
+            delete btn.dataset.busy;
+            window.location.href = '/admin/feature-packs?error=Reload+request+failed';
+          });
+      });
+    })();
+  </script>
+{% endblock %}
