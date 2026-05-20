@@ -4,7 +4,7 @@ This backlog breaks the migration work into **one pull request per feature pack*
 
 ## App function PRs
 
-- [ ] Notifications
+- [x] Notifications
 - [ ] Knowledge Base
 - [ ] Chat
 - [ ] Reports
