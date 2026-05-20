@@ -188,9 +188,10 @@ crashing the app.
 
 ## Migration status
 
-| Pack       | Owner of           | Notes                                               |
-|------------|--------------------|-----------------------------------------------------|
-| `tickets`  | Portal `/tickets/*`| Public-portal ticket list, create, detail, replies. Admin `/admin/tickets/*` routes still live in `app/main.py` and will move in a follow-up PR. |
+| Pack             | Owner of                  | Notes                                               |
+|------------------|---------------------------|-----------------------------------------------------|
+| `tickets`        | Portal `/tickets/*`       | Public-portal ticket list, create, detail, replies. Admin `/admin/tickets/*` routes still live in `app/main.py` and will move in a follow-up PR. |
+| `service_status` | Portal `/service-status`  | Public-portal service status dashboard. Admin `/admin/service-status*` routes still live in `app/main.py` and will move in a follow-up PR. |
 
 Each follow-up PR migrates one area (kb, backups, automations, m365,
 xero, …) from `app/main.py` into `app/features/<slug>/`. URLs and
