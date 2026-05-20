@@ -73,6 +73,40 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 - Use RESTful conventions for API design
 - Implement rate limiting for external API integrations
 
+### Feature Packs
+
+Feature packs live at `app/features/<slug>/__init__.py` and are
+hot-reloadable via `app.core.features.FeatureRegistry` (see
+`docs/feature_packs.md`). The `system_update` system automation uses
+the `PACK.version` literal to decide whether a pending update can be
+applied in-process (no restart, no downtime) or requires a full app
+restart — see `app/services/scheduler.py::_try_feature_pack_hot_reload`.
+
+**Mandatory: bump `PACK.version` on every code change to a feature pack.**
+This applies any time you modify *any* file under `app/features/<slug>/`
+(the `__init__.py`, route modules, services, templates, helpers — all
+of it). Without a version bump the change ships as a full-restart
+upgrade, defeating the hot-reload optimisation.
+
+Rules:
+
+- Increment `PACK.version` in `app/features/<slug>/__init__.py` for
+  every change that touches any file under that pack's directory,
+  even one-line fixes, comment-only edits, or test-only changes that
+  live inside the pack.
+- Use semantic versioning (`MAJOR.MINOR.PATCH`): patch bump for
+  bug fixes and small tweaks, minor bump for new functionality,
+  major bump for breaking changes to the pack's contract.
+- Keep `version` as a **string literal** inside the
+  `PACK = FeaturePack(...)` declaration (e.g. `version="1.2.3"`).
+  Do not compute it dynamically — the scheduler parses the literal
+  textually from the file at the incoming git ref.
+- If a single change touches multiple feature packs, bump the version
+  of every pack that was modified.
+- If a change touches both feature-pack code and non-pack code, still
+  bump the affected pack versions; the full restart will happen
+  anyway, but bumping keeps the per-pack history accurate.
+
 ## UI and Frontend Guidelines
 
 The canonical layout, table, form, and theming rules live in
