@@ -155,3 +155,45 @@ authors can copy. The recommended pattern is:
 3. Add a reload test that calls `reload("your_pack")` and asserts the
    pack still works (the loader does this generically; a per-pack
    smoke test is still cheap insurance).
+
+## Admin UI
+
+Super admins can manage packs from **Admin → Feature Packs**
+(`/admin/feature-packs`). The page lists every loaded pack with its
+current version, last-loaded timestamp, in-flight request count, last
+reload duration, and last error (if any). The **Reload** button on
+each row issues `POST /api/features/{slug}/reload` and reloads the
+page once the API responds so the table reflects the new state.
+
+The page is sourced from `feature_registry.list()` and does not perform
+its own DB queries, so opening it has negligible overhead even when
+many packs are loaded.
+
+## Dev-only auto-reload
+
+Setting `FEATURE_PACK_WATCH=true` starts a per-pack `watchfiles`
+watcher when the application boots. Saving any file under
+`app/features/<slug>/` (other than `__pycache__`, `.pyc`, editor swap
+files, and dot-prefixed files) triggers a debounced reload of just
+that pack — equivalent to clicking **Reload** in the admin UI. The
+debounce window is 500 ms so an IDE "save all" that touches several
+files only fires one reload per pack.
+
+**Leave this off in production.** Production code arrives via
+`scripts/upgrade.sh`, which exercises the explicit reload API or a
+full graceful restart depending on what changed; a watcher would only
+add overhead and surprise. If you forget and `watchfiles` is not
+installed, the watcher logs an error and disables itself rather than
+crashing the app.
+
+## Migration status
+
+| Pack       | Owner of           | Notes                                               |
+|------------|--------------------|-----------------------------------------------------|
+| `tickets`  | Portal `/tickets/*`| Public-portal ticket list, create, detail, replies. Admin `/admin/tickets/*` routes still live in `app/main.py` and will move in a follow-up PR. |
+
+Each follow-up PR migrates one area (kb, backups, automations, m365,
+xero, …) from `app/main.py` into `app/features/<slug>/`. URLs and
+dependency injection are preserved across each move; the only
+externally visible change is that the area becomes reloadable.
+
