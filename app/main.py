@@ -103,11 +103,13 @@ from app.api.routes import (
     uptimekuma,
     xero,
     chat as chat_api,
+    features as features_api,
 )
 from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
+from app.core.features import init_registry
 from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import audit_logs as audit_repo
@@ -638,6 +640,8 @@ if settings.ip_whitelist_enabled and settings.ip_whitelist:
     exempt_paths = [
         "/static",
         "/health",
+        "/healthz",
+        "/readyz",
         "/login",
         "/register",
         "/api/auth/login",
@@ -677,7 +681,7 @@ app.add_middleware(
 # Add request logging middleware
 app.add_middleware(
     RequestLoggingMiddleware,
-    exempt_paths=("/static", "/health", "/manifest.webmanifest", "/service-worker.js", "/api/users/me/preferences"),
+    exempt_paths=("/static", "/health", "/healthz", "/readyz", "/manifest.webmanifest", "/service-worker.js", "/api/users/me/preferences"),
 )
 
 # Configure endpoint-specific rate limits per security requirements
@@ -751,7 +755,7 @@ general_rate_limiter = SimpleRateLimiter(
 app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,
-    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static", "/uploads", "/health"),
+    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static", "/uploads", "/health", "/healthz", "/readyz"),
 )
 
 app.add_middleware(
@@ -787,6 +791,8 @@ app.add_middleware(
         "/static",
         "/api",
         "/health",
+        "/healthz",
+        "/readyz",
         "/manifest.webmanifest",
         "/service-worker.js",
         "/ws",
@@ -1096,6 +1102,12 @@ app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
+app.include_router(features_api.router)
+
+# Initialise the feature pack registry.  Packs are loaded lazily on
+# startup (see ``on_startup`` below).  The registry remains empty until
+# packs are migrated into ``app/features/`` in follow-up PRs.
+feature_registry = init_registry(app)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
@@ -3936,14 +3948,30 @@ async def on_startup() -> None:
         from app.services import matrix_sync
         import asyncio as _asyncio
         _asyncio.create_task(matrix_sync.run_sync_loop())
+
+    # Load feature packs.  Empty by default; populated as areas of the
+    # app are migrated under ``app/features/`` in follow-up PRs.
+    pack_slugs = [
+        slug.strip()
+        for slug in (getattr(settings, "feature_packs", "") or "").split(",")
+        if slug.strip()
+    ]
+    if pack_slugs:
+        await feature_registry.load_many(pack_slugs)
+
+    global _app_ready
+    _app_ready = True
     log_info("Application started", environment=settings.environment)
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    global _app_ready
+    _app_ready = False
     if settings.matrix_enabled:
         from app.services import matrix_sync
         matrix_sync.stop_sync_loop()
+    await feature_registry.unload_all()
     await scheduler_service.stop()
     await db.disconnect()
     log_info("Application shutdown")
@@ -23489,6 +23517,56 @@ async def register_page(request: Request):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Liveness and readiness probes
+# ---------------------------------------------------------------------------
+# ``/healthz`` is the cheap "is the process alive" check that nginx,
+# systemd, and load balancers can poll constantly.  It must succeed even
+# before the database is reachable.
+#
+# ``/readyz`` is the deeper "is this instance ready to serve traffic"
+# check.  It returns 503 until startup has finished, the database is
+# reachable, and every registered feature pack is in a healthy state.
+# nginx uses this to decide when a blue/green instance is back online
+# during a rolling deploy (see ``docs/zero_downtime_upgrades.md``).
+_app_ready: bool = False
+
+
+@app.get("/healthz")
+async def liveness_probe() -> dict[str, str]:
+    """Liveness: the process is running and event loop is responsive."""
+
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readiness_probe() -> JSONResponse:
+    """Readiness: startup has finished, DB is reachable, packs healthy."""
+
+    checks: dict[str, str] = {"startup": "ok" if _app_ready else "pending"}
+    ok = _app_ready
+
+    if _app_ready:
+        try:
+            await db.fetch_one("SELECT 1")
+            checks["database"] = "ok"
+        except Exception as exc:
+            checks["database"] = f"error: {exc.__class__.__name__}"
+            ok = False
+
+    if feature_registry.list() and not feature_registry.all_loaded():
+        checks["feature_packs"] = "degraded"
+        ok = False
+    else:
+        checks["feature_packs"] = "ok"
+
+    status_code = HTTPStatus.OK if ok else HTTPStatus.SERVICE_UNAVAILABLE
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ok" if ok else "not_ready", "checks": checks},
+    )
 
 
 @app.get("/chat", response_class=HTMLResponse)
