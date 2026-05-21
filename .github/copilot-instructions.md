@@ -77,35 +77,34 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 
 Feature packs live at `app/features/<slug>/__init__.py` and are
 hot-reloadable via `app.core.features.FeatureRegistry` (see
-`docs/feature_packs.md`). The `system_update` system automation uses
-the `PACK.version` literal to decide whether a pending update can be
-applied in-process (no restart, no downtime) or requires a full app
-restart — see `app/services/scheduler.py::_try_feature_pack_hot_reload`.
+`docs/wiki/developer/Feature Packs.md`). The `system_update` system
+automation hot-reloads packs in-process (no restart, no downtime)
+whenever an incoming update's diff is fully scoped to one or more
+currently-loaded packs — see
+`app/services/scheduler.py::_try_feature_pack_hot_reload`.
 
-**Mandatory: bump `PACK.version` on every code change to a feature pack.**
-This applies any time you modify *any* file under `app/features/<slug>/`
-(the `__init__.py`, route modules, services, templates, helpers — all
-of it). Without a version bump the change ships as a full-restart
-upgrade, defeating the hot-reload optimisation.
+Hot-reload triggers on the **file diff**, not on the `PACK.version`
+literal. Editing files under `app/features/<slug>/` is enough; the
+scheduler will hot-reload those packs and leave everything else
+running. Bumping `PACK.version` is **encouraged but no longer
+required** — the version is still surfaced in logs and
+`/api/features` for traceability, so update it on meaningful changes,
+but a forgotten bump will no longer downgrade a pack-only update to a
+full restart.
 
 Rules:
 
-- Increment `PACK.version` in `app/features/<slug>/__init__.py` for
-  every change that touches any file under that pack's directory,
-  even one-line fixes, comment-only edits, or test-only changes that
-  live inside the pack.
-- Use semantic versioning (`MAJOR.MINOR.PATCH`): patch bump for
-  bug fixes and small tweaks, minor bump for new functionality,
-  major bump for breaking changes to the pack's contract.
 - Keep `version` as a **string literal** inside the
-  `PACK = FeaturePack(...)` declaration (e.g. `version="1.2.3"`).
-  Do not compute it dynamically — the scheduler parses the literal
-  textually from the file at the incoming git ref.
-- If a single change touches multiple feature packs, bump the version
-  of every pack that was modified.
-- If a change touches both feature-pack code and non-pack code, still
-  bump the affected pack versions; the full restart will happen
-  anyway, but bumping keeps the per-pack history accurate.
+  `PACK = FeaturePack(...)` declaration (e.g. `version="1.2.3"`) so
+  the scheduler and admin UI can read it. Do not compute it
+  dynamically.
+- When you do bump `version`, use semantic versioning
+  (`MAJOR.MINOR.PATCH`): patch for bug fixes and small tweaks, minor
+  for new functionality, major for breaking changes to the pack's
+  contract.
+- If a change touches both feature-pack code and non-pack code, a
+  full restart will be required anyway; bumping the affected pack
+  versions in that case keeps the per-pack history accurate.
 
 ## UI and Frontend Guidelines
 

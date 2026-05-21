@@ -100,17 +100,15 @@ GET /api/features
 
 ### Pack versioning and `system_update`
 
-The `version` field is more than a diagnostic: the `system_update`
-system automation in `app/services/scheduler.py` uses it to decide
-whether a pending GitHub update can be applied without restarting the
-application.
+The `system_update` system automation in `app/services/scheduler.py`
+uses the diff between the local checkout and the incoming `main` to
+decide whether a pending GitHub update can be applied without
+restarting the application.
 
 When `system_update` runs and the remote `main` branch is ahead of the
 local checkout, the scheduler diffs the incoming changes. If **every**
 changed file lives under `app/features/<slug>/…` for one or more
-currently-loaded packs **and** each affected pack's `PACK.version`
-literal in the incoming `__init__.py` differs from the running
-version, the scheduler:
+currently-loaded packs, the scheduler:
 
 1. Fast-forwards the working tree to the new commit
    (`git merge --ff-only`).
@@ -119,17 +117,17 @@ version, the scheduler:
 
 If any of these conditions are not met — changes outside
 `app/features/<slug>/`, a touched pack that is not currently loaded,
-an unchanged version literal, a non-fast-forward history, or a reload
-that raises — the scheduler falls back to the existing full-restart
-flag-file path (`var/state/system_update.flag` ⇒ `scripts/upgrade.sh`).
+the pack's `__init__.py` missing from the incoming ref, a
+non-fast-forward history, or a reload that raises — the scheduler
+falls back to the existing full-restart flag-file path
+(`var/state/system_update.flag` ⇒ `scripts/upgrade.sh`).
 
-For this optimisation to apply you must therefore:
-
-* Keep `version` as a **string literal** inside the `PACK = FeaturePack(...)`
-  declaration in `app/features/<slug>/__init__.py` (it is parsed
-  textually from the file at the incoming git ref).
-* Bump `version` on **every** change to the pack, however small. Treat
-  it the same way you would a published library version.
+The `PACK.version` literal is **not** a gate for hot-reload. It is
+read from the incoming `__init__.py` for diagnostic logging only, so
+forgetting to bump it no longer silently downgrades a pack-only
+update to a full restart. Bumping `version` on meaningful changes is
+still encouraged for traceability in logs and `/api/features`, but it
+is not required for the hot-reload optimisation to apply.
 
 The optimisation is bypassed when a user clicks **Restart now** in the
 admin UI (which calls `run_now`, setting `force_restart=True`), so an
