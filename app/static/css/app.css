@@ -6301,7 +6301,7 @@ dialog.modal:not([open]) {
 }
 
 .help__nav-section-title {
-  color: var(--color-text-muted, #94a3b8);
+  color: var(--color-text-muted);
   font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -6311,7 +6311,7 @@ dialog.modal:not([open]) {
 
 .help__nav-section-title:hover,
 .help__nav-section-title:focus-visible {
-  color: var(--color-text, #e2e8f0);
+  color: var(--color-text);
 }
 
 .help__nav-list,
@@ -6333,9 +6333,9 @@ dialog.modal:not([open]) {
   display: block;
   padding: 0.7rem 0.85rem;
   border-radius: 0.65rem;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.55);
-  color: var(--color-text, #e2e8f0);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-text);
   font-weight: 500;
   text-decoration: none;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -6343,24 +6343,24 @@ dialog.modal:not([open]) {
 
 .help__nav-link:visited,
 .help__article-link:visited {
-  color: var(--color-text, #e2e8f0);
+  color: var(--color-text);
 }
 
 .help__nav-link:hover,
 .help__nav-link:focus-visible,
 .help__article-link:hover,
 .help__article-link:focus-visible {
-  color: var(--color-text-primary, #f8fafc);
-  background: rgba(30, 41, 59, 0.92);
-  border-color: rgba(125, 211, 252, 0.35);
+  color: var(--color-text-primary);
+  background: var(--color-surface-3);
+  border-color: var(--color-info);
   outline: none;
 }
 
 .help__nav-item--active .help__nav-link {
-  color: var(--color-text-primary, #f8fafc);
-  background: rgba(37, 99, 235, 0.32);
-  border-color: rgba(96, 165, 250, 0.72);
-  box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.3);
+  color: var(--color-text-primary);
+  background: var(--color-surface-3);
+  border-color: var(--color-info);
+  box-shadow: inset 0 0 0 2px var(--color-info);
 }
 
 .help__content-stack {
@@ -6384,11 +6384,11 @@ dialog.modal:not([open]) {
 }
 
 .help__article-body a {
-  color: var(--color-info, #7dd3fc);
+  color: var(--color-info);
 }
 
 .help__article-body a:visited {
-  color: var(--color-text, #e2e8f0);
+  color: var(--color-text);
 }
 
 /* Legacy styles for backwards compatibility */

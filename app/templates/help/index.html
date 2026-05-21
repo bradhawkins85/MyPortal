@@ -1,9 +1,14 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block title %}Help{% endblock %}
 
 {% block header_title %}
   <span class="header__title-text">Help</span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([]) }}
 {% endblock %}
 
 {% block content %}
