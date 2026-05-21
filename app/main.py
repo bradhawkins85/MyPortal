@@ -8860,7 +8860,6 @@ async def orders_page(
     return await _render_template("shop/orders.html", request, user, extra=extra)
 
 
-@app.get("/quotes", response_class=HTMLResponse)
 async def quotes_page(
     request: Request,
     status_filter: str | None = Query(None, alias="status"),
@@ -8970,7 +8969,6 @@ async def quotes_page(
     return await _render_template("shop/quotes.html", request, user, extra=extra)
 
 
-@app.post("/quotes/load/{quote_number}", response_class=RedirectResponse, name="load_quote", include_in_schema=False)
 async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectResponse:
     (
         user,
@@ -9373,7 +9371,6 @@ async def place_order(request: Request) -> RedirectResponse:
     )
 
 
-@app.post("/cart/save-as-quote", response_class=RedirectResponse, name="cart_save_quote", include_in_schema=False)
 async def save_as_quote(request: Request) -> RedirectResponse:
     (
         user,
