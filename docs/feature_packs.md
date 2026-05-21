@@ -227,6 +227,7 @@ crashing the app.
 
 | Pack             | Owner of                  | Notes                                               |
 |------------------|---------------------------|-----------------------------------------------------|
+| `issue_tracker`  | `/admin/issues*`          | Admin issue tracker list, create, edit, assignment status/delete actions (`/admin/issues*`). Issue Tracker API routes continue to be mounted from `app/api/routes/issues.py`. |
 | `tickets`        | Portal `/tickets/*`       | Public-portal ticket list, create, detail, replies. Admin `/admin/tickets/*` routes still live in `app/main.py` and will move in a follow-up PR. |
 | `service_status` | Portal `/service-status`  | Public-portal service status dashboard. Admin `/admin/service-status*` routes still live in `app/main.py` and will move in a follow-up PR. |
 | `notifications`  | `/notifications*`         | Notifications dashboard and settings pages (`/notifications`, `/notifications/settings`). Notifications API routes continue to be mounted from `app/api/routes/notifications.py`. |
