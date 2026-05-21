@@ -5292,7 +5292,6 @@ async def admin_reporting_delete(request: Request, report_id: int):
     )
 
 
-@app.get("/invoices", response_class=HTMLResponse)
 async def invoices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_invoice_context(request)
     if redirect:
@@ -5364,8 +5363,6 @@ async def invoices_page(request: Request):
     return await _render_template("invoices/index.html", request, user, extra=extra)
 
 
-@app.head("/invoices/{invoice_id}", response_class=HTMLResponse)
-@app.get("/invoices/{invoice_id}", response_class=HTMLResponse)
 async def invoice_detail_page(request: Request, invoice_id: int):
     user, membership, company, company_id, redirect = await _load_invoice_context(request)
     if redirect:
