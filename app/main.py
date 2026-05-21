@@ -4724,7 +4724,6 @@ def _can_configure_report(user: Mapping[str, Any], membership: Mapping[str, Any]
     return bool(membership and membership.get("is_admin"))
 
 
-@app.get("/reports/company-overview", response_class=HTMLResponse)
 async def company_overview_report_page(request: Request):
     user, membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
@@ -4741,7 +4740,6 @@ async def company_overview_report_page(request: Request):
     return await _render_template("reports/index.html", request, user, extra=extra)
 
 
-@app.get("/reports/company-overview.pdf")
 async def company_overview_report_pdf(request: Request):
     from fastapi.responses import StreamingResponse
 
@@ -4827,7 +4825,6 @@ async def company_overview_report_pdf(request: Request):
     )
 
 
-@app.get("/reports/company-overview/settings", response_class=HTMLResponse)
 async def company_overview_report_settings_page(request: Request):
     user, membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
@@ -4860,7 +4857,6 @@ async def company_overview_report_settings_page(request: Request):
     return await _render_template("reports/settings.html", request, user, extra=extra)
 
 
-@app.post("/reports/company-overview/settings")
 async def company_overview_report_settings_save(request: Request):
     user, membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
@@ -4912,7 +4908,6 @@ async def company_overview_report_settings_save(request: Request):
     )
 
 
-@app.get("/admin/reports/pdf-cover-image", response_class=HTMLResponse)
 async def admin_report_cover_image_page(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -4927,7 +4922,6 @@ async def admin_report_cover_image_page(request: Request):
     return await _render_template("admin/report_cover_image.html", request, user, extra=extra)
 
 
-@app.post("/admin/reports/pdf-cover-image", response_class=HTMLResponse)
 async def admin_report_cover_image_upload(request: Request, image: UploadFile = File(None)):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -4972,7 +4966,6 @@ async def admin_report_cover_image_upload(request: Request, image: UploadFile = 
     )
 
 
-@app.post("/admin/reports/pdf-cover-image/delete", response_class=HTMLResponse)
 async def admin_report_cover_image_delete(request: Request):
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -4998,7 +4991,6 @@ async def admin_report_cover_image_delete(request: Request):
     )
 
 
-@app.get("/admin/reports/pdf-cover-image/preview", response_class=FileResponse, include_in_schema=False)
 async def admin_report_cover_image_preview(request: Request):
     """Serve the current PDF cover image for admin preview (super admin only)."""
     user, redirect = await _require_authenticated_user(request)
