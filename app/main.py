@@ -21469,7 +21469,6 @@ def _parse_automation_form_submission(
     return data, form_state, None, status.HTTP_200_OK
 
 
-@app.get("/admin/automations", response_class=HTMLResponse)
 async def admin_automations_page(
     request: Request,
     status: str | None = Query(default=None),
@@ -21490,7 +21489,6 @@ async def admin_automations_page(
     )
 
 
-@app.get("/admin/automations/create/scheduled", response_class=HTMLResponse)
 async def admin_create_scheduled_automation_page(
     request: Request,
     success: str | None = Query(default=None),
@@ -21508,7 +21506,6 @@ async def admin_create_scheduled_automation_page(
     )
 
 
-@app.get("/admin/automations/create/event", response_class=HTMLResponse)
 async def admin_create_event_automation_page(
     request: Request,
     success: str | None = Query(default=None),
@@ -21526,7 +21523,6 @@ async def admin_create_event_automation_page(
     )
 
 
-@app.post("/admin/automations", response_class=HTMLResponse)
 async def admin_create_automation(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -21569,7 +21565,6 @@ async def admin_create_automation(request: Request):
     )
 
 
-@app.get("/admin/automations/{automation_id}/edit", response_class=HTMLResponse)
 async def admin_edit_automation_page(automation_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -21592,7 +21587,6 @@ async def admin_edit_automation_page(automation_id: int, request: Request):
     )
 
 
-@app.post("/admin/automations/{automation_id}", response_class=HTMLResponse)
 async def admin_update_automation(automation_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -21644,7 +21638,6 @@ async def admin_update_automation(automation_id: int, request: Request):
     )
 
 
-@app.post("/admin/automations/{automation_id}/status", response_class=HTMLResponse)
 async def admin_update_automation_status(automation_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -21669,7 +21662,6 @@ async def admin_update_automation_status(automation_id: int, request: Request):
     )
 
 
-@app.post("/admin/automations/{automation_id}/execute", response_class=HTMLResponse)
 async def admin_execute_automation(automation_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -21685,7 +21677,6 @@ async def admin_execute_automation(automation_id: int, request: Request):
     )
 
 
-@app.post("/admin/automations/{automation_id}/delete", response_class=HTMLResponse)
 async def admin_delete_automation(automation_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
