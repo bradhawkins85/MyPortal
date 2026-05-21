@@ -1,11 +1,9 @@
 """Tickets feature pack.
 
-This pack owns the **public portal** ticket routes (``/tickets`` …) so
-they can be reloaded independently from the rest of the application
-via ``POST /api/features/tickets/reload``.  Admin-side ticket routes
-under ``/admin/tickets`` are still served by ``app/main.py`` and will
-be migrated into this pack in a follow-up PR; URLs and dependency
-injection are preserved across the move.
+This pack owns both **public portal** ticket routes (``/tickets`` …)
+and **admin** ticket routes (``/admin/tickets`` …) so they can be
+reloaded independently from the rest of the application via
+``POST /api/features/tickets/reload``.
 
 The handlers deliberately import a small set of helpers from
 ``app.main`` (notably ``_require_authenticated_user``,
@@ -24,13 +22,14 @@ from __future__ import annotations
 
 from app.core.features import FeaturePack
 
+from .admin_routes import router as admin_router
 from .portal_routes import router as portal_router
 
 
 PACK = FeaturePack(
     slug="tickets",
-    version="1.0.0",
-    routers=(portal_router,),
+    version="1.1.0",
+    routers=(portal_router, admin_router),
 )
 
 
