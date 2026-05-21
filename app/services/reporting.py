@@ -13,6 +13,10 @@ query we:
 * Execute on the same connection pool but never inside a writable
   transaction context; the wrapper above guarantees we only run a single
   read statement.
+* Redact values in any result column whose name contains a sensitive keyword
+  (``password``, ``secret``, ``token``, ``api_key``, ``totp``, ``encrypted``,
+  ``credential``, ``private_key`` …) so that credentials stored in the
+  database are never returned in plain text.
 """
 from __future__ import annotations
 
@@ -30,6 +34,17 @@ from app.core.database import db
 
 
 MAX_RESULT_ROWS = 5000
+
+_REDACTED = "[REDACTED]"
+
+# Column names that match this pattern contain secrets and must never be
+# returned in plain text.  The check is applied after query execution so it
+# covers both bare column names and aliases that still include the sensitive
+# word (e.g. ``user_password_hash``, ``m365_client_secret``, …).
+_SENSITIVE_COLUMN_PATTERN = re.compile(
+    r"(password|passwd|secret|token|api[_\-]?key|totp|otp|credential|private[_\-]?key|encrypted)",
+    re.IGNORECASE,
+)
 
 
 class ReportingQueryError(ValueError):
@@ -226,6 +241,29 @@ def validate_select_query(sql: str) -> str:
     return statement
 
 
+def _redact_sensitive_rows(
+    columns: list[str], rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return *rows* with values in sensitive columns replaced by ``[REDACTED]``.
+
+    A column is considered sensitive when its name (or alias) matches
+    :data:`_SENSITIVE_COLUMN_PATTERN`.  The column names themselves are left
+    intact so callers can still see *which* columns were present.
+    """
+    sensitive: set[str] = {
+        col for col in columns if _SENSITIVE_COLUMN_PATTERN.search(col)
+    }
+    if not sensitive:
+        return rows
+    return [
+        {
+            key: (_REDACTED if key in sensitive else value)
+            for key, value in row.items()
+        }
+        for row in rows
+    ]
+
+
 async def run_query(sql: str, *, max_rows: int = MAX_RESULT_ROWS) -> dict[str, Any]:
     """Validate and execute ``sql``, returning columns and rows.
 
@@ -247,6 +285,7 @@ async def run_query(sql: str, *, max_rows: int = MAX_RESULT_ROWS) -> dict[str, A
         for key in row.keys():
             if key not in columns:
                 columns.append(key)
+    rows = _redact_sensitive_rows(columns, rows)
     return {
         "columns": columns,
         "rows": rows,

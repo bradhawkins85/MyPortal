@@ -21,7 +21,7 @@ from .routes import router as reports_router
 
 PACK = FeaturePack(
     slug="reports",
-    version="1.0.0",
+    version="1.1.0",
     routers=(reports_router,),
 )
 
