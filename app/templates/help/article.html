@@ -21,7 +21,7 @@
 {% block content %}
 <div class="help help--article">
   <div class="help__layout">
-    <nav class="help__sidebar card card--panel" aria-label="Help sections">
+    <nav class="help__sidebar card card--panel" aria-label="Help articles">
       {% for section in help_sections %}
       <div class="help__nav-section">
         <a href="/help#section-{{ section.slug }}" class="help__nav-section-title">{{ section.name }}</a>
@@ -37,7 +37,7 @@
     </nav>
 
     <article class="help__content card card--panel">
-      <div class="help__article-body">
+      <div class="help__article-body rich-text-viewer">
         {{ help_article_html | safe }}
       </div>
     </article>
