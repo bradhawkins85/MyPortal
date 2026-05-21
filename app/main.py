@@ -19848,17 +19848,15 @@ async def admin_create_issue(request: Request):
 
     form = await request.form()
     name = str(form.get("name", "")).strip()
-    description_raw = str(form.get("description", "")).strip()
+    description = str(form.get("description", "")).strip() or None
     initial_status = str(form.get("initialStatus", issues_service.DEFAULT_STATUS)).strip()
 
-    cleaned_name = name
-    cleaned_description = description_raw if description_raw else None
-    if not cleaned_name:
+    if not name:
         url = f"/admin/issues?error={quote('Issue name is required.')}"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
     try:
-        await issues_service.ensure_issue_name_available(cleaned_name)
+        await issues_service.ensure_issue_name_available(name)
     except ValueError as exc:
         url = f"/admin/issues?error={quote(str(exc))}"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
@@ -19866,8 +19864,8 @@ async def admin_create_issue(request: Request):
     user_id = _get_current_user_id(current_user)
     try:
         issue_record = await issues_repo.create_issue(
-            name=cleaned_name,
-            description=cleaned_description,
+            name=name,
+            description=description,
             created_by=user_id,
         )
     except aiomysql.IntegrityError as exc:
@@ -19930,26 +19928,24 @@ async def admin_update_issue(issue_id: int, request: Request):
 
     form = await request.form()
     name = str(form.get("name", "")).strip()
-    description_raw = str(form.get("description", "")).strip()
+    description = str(form.get("description", "")).strip() or None
     new_company_status = str(form.get("newCompanyStatus", issues_service.DEFAULT_STATUS)).strip()
 
-    cleaned_name = name
-    cleaned_description = description_raw if description_raw else None
-    if not cleaned_name:
+    if not name:
         url = f"/admin/issues?issueId={issue_id}&error={quote('Issue name is required.')}"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
 
     updates: dict[str, Any] = {}
-    if cleaned_name != (issue.get("name") or ""):
+    if name != (issue.get("name") or ""):
         try:
-            await issues_service.ensure_issue_name_available(cleaned_name, exclude_issue_id=issue_id)
+            await issues_service.ensure_issue_name_available(name, exclude_issue_id=issue_id)
         except ValueError as exc:
             url = f"/admin/issues?issueId={issue_id}&error={quote(str(exc))}"
             return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
-        updates["name"] = cleaned_name
+        updates["name"] = name
 
-    if cleaned_description != (issue.get("description") or None):
-        updates["description"] = cleaned_description
+    if description != (issue.get("description") or None):
+        updates["description"] = description
 
     if updates:
         updates["updated_by"] = _get_current_user_id(current_user)
