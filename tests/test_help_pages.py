@@ -119,6 +119,7 @@ def patched_dependencies(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False, "site_domain": "", "base_url": ""},
         }
         if extra:
             context.update(extra)
@@ -126,6 +127,11 @@ def patched_dependencies(monkeypatch):
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_user)
     monkeypatch.setattr(main_module, "_build_base_context", fake_build_base_context)
+    main_module.templates.env.globals["plausible_config"] = {
+        "enabled": False,
+        "site_domain": "",
+        "base_url": "",
+    }
 
     yield
 
@@ -146,27 +152,11 @@ def test_help_index_uses_sidebar_navigation_layout(patched_dependencies, monkeyp
 
 
 def test_help_article_marks_active_nav_item_and_uses_rich_text_viewer(patched_dependencies, monkeypatch):
-    sections = _sample_sections()
-    active_article = sections[0]["articles"][0]
-
-    monkeypatch.setattr(help_routes, "list_sections", lambda: sections)
-    monkeypatch.setattr(
-        help_routes,
-        "find_article",
-        lambda section_slug, article_slug: active_article if (section_slug, article_slug) == ("getting-started", "welcome") else None,
-    )
-    monkeypatch.setattr(
-        help_routes,
-        "render_article",
-        lambda article: "<h1>Welcome</h1><p>Read the <a href=\"/help/automation/rules-overview\">full guide</a>.</p>",
-    )
-
     with TestClient(app) as client:
-        response = client.get("/help/getting-started/welcome")
+        response = client.get("/help/getting-started/home")
 
     assert response.status_code == 200
     assert 'class="help__content card card--panel"' in response.text
     assert 'class="help__article-body rich-text-viewer"' in response.text
     assert "help__nav-item--active" in response.text
-    assert "Read the" in response.text
-    assert "full guide" in response.text
+    assert "MyPortal Wiki" in response.text
