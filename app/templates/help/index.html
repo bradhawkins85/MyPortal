@@ -18,7 +18,7 @@
       <nav class="help__sidebar card card--panel" aria-label="Help articles">
         {% for section in help_sections %}
         <div class="help__nav-section">
-          <a href="#section-{{ section.slug }}" class="help__nav-section-title">{{ section.name }}</a>
+          <span class="help__nav-section-title">{{ section.name }}</span>
           <ul class="help__nav-list">
             {% for article in section.articles %}
             <li class="help__nav-item">
@@ -30,22 +30,7 @@
         {% endfor %}
       </nav>
 
-      <div class="help__content-stack">
-        {% for section in help_sections %}
-        <section class="card card--panel help__section" id="section-{{ section.slug }}">
-          <header class="card__header">
-            <h2 class="card__title">{{ section.name }}</h2>
-          </header>
-          <ul class="help__article-list">
-            {% for article in section.articles %}
-            <li class="help__article-item">
-              <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__article-link">{{ article.name }}</a>
-            </li>
-            {% endfor %}
-          </ul>
-        </section>
-        {% endfor %}
-      </div>
+      <div class="help__content help__content--placeholder card card--panel" aria-hidden="true"></div>
     </div>
   {% else %}
     <div class="card card--panel">
