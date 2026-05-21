@@ -12688,8 +12688,6 @@ def _backup_status_webhook_url(request: Request) -> str:
     return f"{base}/api/backup-status"
 
 
-@app.head("/admin/backup-jobs", response_class=HTMLResponse)
-@app.get("/admin/backup-jobs", response_class=HTMLResponse)
 async def admin_backup_jobs_page(request: Request):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -12742,8 +12740,6 @@ async def admin_backup_jobs_page(request: Request):
     return await _render_template("admin/backup_jobs.html", request, user, extra=extra)
 
 
-@app.head("/admin/backup-summary", response_class=HTMLResponse)
-@app.get("/admin/backup-summary", response_class=HTMLResponse)
 async def admin_backup_summary_page(request: Request):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -12820,7 +12816,6 @@ def _extract_backup_job_form(form: FormData) -> dict[str, Any]:
     }
 
 
-@app.post("/admin/backup-jobs", response_class=HTMLResponse)
 async def admin_create_backup_job(request: Request):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -12856,7 +12851,6 @@ async def admin_create_backup_job(request: Request):
     )
 
 
-@app.post("/admin/backup-jobs/{job_id}", response_class=HTMLResponse)
 async def admin_update_backup_job(request: Request, job_id: int):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -12902,7 +12896,6 @@ async def admin_update_backup_job(request: Request, job_id: int):
     )
 
 
-@app.post("/admin/backup-jobs/{job_id}/delete", response_class=HTMLResponse)
 async def admin_delete_backup_job(request: Request, job_id: int):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -12925,7 +12918,6 @@ async def admin_delete_backup_job(request: Request, job_id: int):
     )
 
 
-@app.post("/admin/backup-jobs/{job_id}/regenerate-token", response_class=HTMLResponse)
 async def admin_regenerate_backup_job_token(request: Request, job_id: int):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
