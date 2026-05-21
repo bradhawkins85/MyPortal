@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Sync to Xero (Auto Send)** scheduled task provides automated invoice synchronization with automatic approval and email delivery to customers. This task extends the standard **Sync to Xero** functionality by automatically setting invoices to "AUTHORISED" status (which displays as "Awaiting Payment" in the Xero UI) and instructing Xero to email them to the contact.
+The **Sync to Xero (Auto Send)** scheduled task uploads unsynchronised MyPortal invoices to Xero with automatic approval and email delivery to customers. This task extends the standard **Sync to Xero** functionality by automatically setting invoices to "AUTHORISED" status (which displays as "Awaiting Payment" in the Xero UI) and instructing Xero to email them to the contact.
 
 ## Differences from Standard Sync to Xero
 
@@ -42,18 +42,18 @@ The **Sync to Xero (Auto Send)** scheduled task provides automated invoice synch
 
 When the **Sync to Xero (Auto Send)** task runs:
 
-1. **Collects billable items**: Gathers unbilled time entries from tickets and recurring invoice items
-2. **Creates invoice payload**: Builds the invoice with line items, tax settings, and customer details
+1. **Finds unsynchronised MyPortal invoices**: Only invoices that have not already been uploaded to Xero are selected
+2. **Builds the Xero payload**: Converts each stored MyPortal invoice line into Xero line items using the module defaults
 3. **Sets AUTHORISED status**: Unlike DRAFT invoices, AUTHORISED invoices are immediately ready for payment (displays as "Awaiting Payment" in Xero)
 4. **Enables SentToContact flag**: Instructs Xero to send the invoice via email to the customer contact
-5. **Records billing**: Marks time entries as billed and updates ticket statuses to "Closed"
+5. **Renames the MyPortal invoice**: After Xero accepts the upload, the MyPortal invoice number is updated to the Xero invoice number
 6. **Logs the transaction**: Creates webhook monitor entries for tracking and debugging
 
 ## Invoice Status Lifecycle
 
 ```
-Standard Sync:    [Tickets] → [DRAFT Invoice] → Manual Review → Manual Send → [AUTHORISED]
-Auto Send:        [Tickets] → [AUTHORISED Invoice + Email] → [Customer Receives Invoice]
+Standard Sync:    [MyPortal Invoice] → [DRAFT Invoice in Xero] → Manual Review → Manual Send → [AUTHORISED]
+Auto Send:        [MyPortal Invoice] → [AUTHORISED Invoice + Email in Xero] → [Customer Receives Invoice]
 ```
 
 With auto-send, invoices skip the DRAFT stage and are immediately authorised and emailed, reducing manual intervention.
@@ -63,13 +63,10 @@ With auto-send, invoices skip the DRAFT stage and are immediately authorised and
 The auto-send task uses the same Xero module configuration as standard sync:
 
 - **Xero OAuth credentials**: Client ID, client secret, refresh token, and tenant ID
-- **Billable ticket statuses**: Comma-separated list of ticket statuses to invoice
-- **Default hourly rate**: Rate for billing time entries
+- **MyPortal invoices**: Create the invoice in MyPortal before the sync task runs
 - **Account code**: Xero account code for invoice line items
 - **Tax type**: Tax setting for invoices (e.g., "OUTPUT", "NONE")
 - **Line amount type**: "Exclusive" or "Inclusive" tax handling
-- **Reference prefix**: Text prefix for invoice references
-- **Line item description template**: Template for generating line item text
 
 These settings are configured once in **Admin → Integration Modules → Xero** and apply to both standard and auto-send tasks.
 
@@ -78,9 +75,8 @@ These settings are configured once in **Admin → Integration Modules → Xero**
 1. **Start with standard sync**: Test your Xero integration with standard sync first to verify settings
 2. **Monitor initial runs**: Check webhook monitor logs after enabling auto-send to ensure invoices are created correctly
 3. **Schedule during off-hours**: Run auto-send tasks during periods when customers are unlikely to be working
-4. **Set appropriate statuses**: Only include ticket statuses in "Billable ticket statuses" that indicate completed, reviewed work
-5. **Review time entries regularly**: Ensure team members accurately track time before it's automatically billed
-6. **Use company-specific tasks**: Create separate auto-send tasks for each company with unique billing schedules
+4. **Review invoice drafts first**: Confirm MyPortal invoices look correct before enabling auto-send
+5. **Use company-specific tasks**: Create separate auto-send tasks for each company with unique billing schedules
 
 ## Monitoring and Troubleshooting
 
@@ -110,9 +106,9 @@ These settings are configured once in **Admin → Integration Modules → Xero**
 - Review error logs for API permission issues
 
 **Issue: Duplicate invoices**
-- Auto-send creates separate invoices per execution, same as standard sync
-- Adjust the cron schedule to match your billing frequency
-- Use "Run now" sparingly to avoid unintended duplicate invoices
+- Auto-send only uploads invoices that have not yet been linked to Xero
+- If duplicates appear, check whether a local invoice was recreated in MyPortal after a successful sync
+- Use "Run now" sparingly to avoid uploading newly-created drafts earlier than intended
 
 ## Cron Expression Examples
 
@@ -126,10 +122,10 @@ Remember that all scheduled tasks run in UTC time. Convert your desired local ti
 ## Security Considerations
 
 - Auto-send invoices are immediately viewable by customers via Xero
-- Ensure billable time entries are reviewed before the task runs
+- Ensure MyPortal invoices are reviewed before the task runs
 - Monitor the first few executions to verify accuracy
 - Use webhook monitor logs to audit all invoice synchronization activity
-- Invoices marked as billed cannot be re-billed, preventing duplicate charges
+- Synced invoices are tracked locally to prevent the same MyPortal invoice being uploaded twice
 
 ## API Integration
 
