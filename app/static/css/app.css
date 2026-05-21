@@ -6333,8 +6333,8 @@ dialog.modal:not([open]) {
   display: block;
   padding: 0.7rem 0.85rem;
   border-radius: 0.65rem;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(15, 23, 42, 0.38);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.55);
   color: var(--color-text, #e2e8f0);
   font-weight: 500;
   text-decoration: none;
@@ -6358,9 +6358,9 @@ dialog.modal:not([open]) {
 
 .help__nav-item--active .help__nav-link {
   color: var(--color-text-primary, #f8fafc);
-  background: rgba(37, 99, 235, 0.2);
-  border-color: rgba(96, 165, 250, 0.45);
-  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
+  background: rgba(37, 99, 235, 0.32);
+  border-color: rgba(96, 165, 250, 0.72);
+  box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.3);
 }
 
 .help__content-stack {
