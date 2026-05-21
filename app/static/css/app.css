@@ -6385,7 +6385,19 @@ dialog.modal:not([open]) {
 }
 
 .help__content--placeholder {
-  min-height: 24rem;
+  min-height: 10rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.help__placeholder-message {
+  margin: 0;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  line-height: 1.35;
 }
 
 .help__article-body {
