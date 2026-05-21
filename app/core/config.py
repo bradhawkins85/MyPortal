@@ -147,15 +147,15 @@ class Settings(BaseSettings):
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     feature_packs: str = Field(
-        default="tickets,service_status,notifications,knowledge_base,chat,automations,reports,backups,issue_tracker",
+        default="tickets,service_status,notifications,knowledge_base,chat,automations,reports,backups,issue_tracker,shop",
         validation_alias="FEATURE_PACKS",
         description=(
             "Comma-separated list of feature pack slugs (subpackages of "
             "``app.features``) to load on startup.  Each pack can be "
             "hot-reloaded via ``POST /api/features/{slug}/reload``.  "
-            "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,automations,reports,backups,issue_tracker' "
+            "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,automations,reports,backups,issue_tracker,shop' "
             "because the ticket, service-status, notifications, knowledge-base, "
-            "chat, automations, reports, backups, and issue-tracker routes live in those packs; set to an empty string "
+            "chat, automations, reports, backups, issue-tracker, and shop routes live in those packs; set to an empty string "
             "to disable all packs (those routes will then 404)."
         ),
     )
