@@ -4176,7 +4176,6 @@ async def index(request: Request):
 
 
 @app.head("/service-status", response_class=HTMLResponse)
-@app.get("/assets", response_class=HTMLResponse, tags=["Assets"])
 async def assets_page(request: Request):
     user, _membership, company, company_id, redirect = await _load_asset_context(request)
     if redirect:
@@ -4351,7 +4350,6 @@ async def assets_page(request: Request):
     return await _render_template("assets/index.html", request, user, extra=extra)
 
 
-@app.get("/assets/settings", response_class=HTMLResponse, tags=["Assets"])
 async def assets_settings_page(request: Request):
     user, _membership, _, _, redirect = await _load_asset_context(request)
     if redirect:
@@ -4368,7 +4366,6 @@ async def assets_settings_page(request: Request):
     return await _render_template("assets/settings.html", request, user, extra=extra)
 
 
-@app.delete("/assets/{asset_id}", response_class=JSONResponse, tags=["Assets"])
 async def delete_asset(request: Request, asset_id: int):
     user, _membership, _, company_id, redirect = await _load_asset_context(request)
     if redirect:
