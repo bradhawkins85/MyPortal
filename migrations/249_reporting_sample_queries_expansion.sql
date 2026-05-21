@@ -13,7 +13,7 @@ VALUES
         'tickets-resolution-time-last-30-days',
         'Tickets: Average Resolution Time (Last 30 Days)',
         'Average ticket resolution time in hours for tickets closed in the last 30 days, grouped by company.',
-        'SELECT c.name AS company, COUNT(*) AS tickets_closed, ROUND(AVG(GREATEST(TIMESTAMPDIFF(MINUTE, t.created_at, t.closed_at), 0)) / 60, 2) AS avg_resolution_hours FROM tickets t LEFT JOIN companies c ON c.id = t.company_id WHERE t.closed_at IS NOT NULL AND t.closed_at >= (CURRENT_DATE - INTERVAL 30 DAY) GROUP BY c.id, c.name ORDER BY avg_resolution_hours DESC, c.name ASC',
+        'SELECT COALESCE(c.name, ''(unassigned company)'') AS company, COUNT(*) AS tickets_closed, ROUND(AVG(GREATEST(TIMESTAMPDIFF(MINUTE, t.created_at, t.closed_at), 0)) / 60, 2) AS avg_resolution_hours FROM tickets t LEFT JOIN companies c ON c.id = t.company_id WHERE t.closed_at IS NOT NULL AND t.closed_at >= (CURRENT_DATE - INTERVAL 30 DAY) GROUP BY COALESCE(c.id, 0), COALESCE(c.name, ''(unassigned company)'') ORDER BY avg_resolution_hours DESC, company ASC',
         1
     ),
     (
@@ -27,7 +27,7 @@ VALUES
         'companies-user-and-asset-footprint',
         'Companies: User and Asset Footprint',
         'Per-company counts of active users and registered assets for capacity and onboarding planning.',
-        'SELECT c.id AS company_id, c.name AS company, COUNT(DISTINCT CASE WHEN COALESCE(u.is_active, 1) = 1 THEN u.id END) AS active_user_count, COUNT(DISTINCT a.id) AS asset_count FROM companies c LEFT JOIN users u ON u.company_id = c.id LEFT JOIN assets a ON a.company_id = c.id GROUP BY c.id, c.name ORDER BY c.name ASC',
+        'SELECT c.id AS company_id, c.name AS company, COALESCE(u_counts.active_user_count, 0) AS active_user_count, COALESCE(a_counts.asset_count, 0) AS asset_count FROM companies c LEFT JOIN (SELECT u.company_id, COUNT(*) AS active_user_count FROM users u WHERE COALESCE(u.is_active, 1) = 1 GROUP BY u.company_id) AS u_counts ON u_counts.company_id = c.id LEFT JOIN (SELECT a.company_id, COUNT(*) AS asset_count FROM assets a GROUP BY a.company_id) AS a_counts ON a_counts.company_id = c.id ORDER BY c.name ASC',
         1
     ),
     (
