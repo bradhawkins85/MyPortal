@@ -6264,6 +6264,7 @@ dialog.modal:not([open]) {
 }
 
 .help {
+  --help-sidebar-width: 320px;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -6277,7 +6278,7 @@ dialog.modal:not([open]) {
 
 @media (min-width: 960px) {
   .help__layout {
-    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, var(--help-sidebar-width)) minmax(0, 1fr);
   }
 }
 
