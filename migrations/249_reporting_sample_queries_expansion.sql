@@ -6,7 +6,7 @@ VALUES
         'tickets-open-by-priority',
         'Tickets: Open Backlog by Priority',
         'Open ticket counts grouped by priority so teams can quickly identify urgent backlog trends.',
-        'SELECT t.priority, COUNT(*) AS open_ticket_count FROM tickets t WHERE t.status IN (''open'', ''in_progress'', ''pending'') GROUP BY t.priority ORDER BY open_ticket_count DESC, t.priority ASC',
+        'SELECT COALESCE(t.priority, ''(unspecified)'') AS priority, COUNT(*) AS open_ticket_count FROM tickets t WHERE t.status IN (''open'', ''in_progress'', ''pending'') GROUP BY COALESCE(t.priority, ''(unspecified)'') ORDER BY open_ticket_count DESC, priority ASC',
         1
     ),
     (

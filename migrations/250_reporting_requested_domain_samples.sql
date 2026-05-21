@@ -76,6 +76,6 @@ VALUES
         'invoices-status-and-overdue-by-company',
         'Invoices: Status and Overdue by Company',
         'Invoice totals and overdue counts by company.',
-        'SELECT c.name AS company, COALESCE(i.status, ''(unspecified)'') AS invoice_status, COUNT(*) AS invoice_count, ROUND(SUM(i.amount), 2) AS total_amount, SUM(CASE WHEN i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE THEN 1 ELSE 0 END) AS overdue_count FROM invoices i JOIN companies c ON c.id = i.company_id GROUP BY c.id, c.name, COALESCE(i.status, ''(unspecified)'') ORDER BY overdue_count DESC, total_amount DESC, company ASC',
+        'SELECT c.name AS company, COALESCE(i.status, ''(unspecified)'') AS invoice_status, COUNT(*) AS invoice_count, ROUND(SUM(i.amount), 2) AS total_amount, SUM(CASE WHEN i.due_date IS NOT NULL AND i.due_date < CURRENT_DATE THEN 1 ELSE 0 END) AS overdue_count FROM invoices i JOIN companies c ON c.id = i.company_id GROUP BY c.id, c.name, i.status ORDER BY overdue_count DESC, total_amount DESC, company ASC',
         1
     );
