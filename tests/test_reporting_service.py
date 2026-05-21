@@ -130,3 +130,78 @@ def test_export_html_for_pdf_handles_no_rows():
         "Empty", None, ["a"], [], datetime(2025, 1, 1, 0, 0, 0)
     )
     assert "No rows." in html
+
+
+# ---------------------------------------------------------------------------
+# Sensitive-column redaction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "col_name",
+    [
+        "password_hash",
+        "passwd",
+        "client_secret",
+        "totp_secret",
+        "pending_totp_secret",
+        "access_token",
+        "refresh_token",
+        "invite_token",
+        "auth_token_hash",
+        "xero_api_key",
+        "syncro_api_key",
+        "webhook_api_key",
+        "api-key",
+        "totp",
+        "otp_code",
+        "private_key",
+        "private-key",
+        "password_encrypted",
+        "access_token_encrypted",
+        "credential",
+        "user_credentials",
+    ],
+)
+def test_redact_sensitive_rows_redacts_sensitive_columns(col_name):
+    columns = [col_name, "name"]
+    rows = [{col_name: "supersecret", "name": "Alice"}]
+    result = reporting._redact_sensitive_rows(columns, rows)
+    assert result[0][col_name] == reporting._REDACTED
+    assert result[0]["name"] == "Alice"
+
+
+def test_redact_sensitive_rows_leaves_safe_columns_unchanged():
+    columns = ["id", "email", "created_at"]
+    rows = [{"id": 1, "email": "a@b.com", "created_at": "2025-01-01"}]
+    result = reporting._redact_sensitive_rows(columns, rows)
+    assert result == rows
+
+
+def test_redact_sensitive_rows_handles_empty_rows():
+    assert reporting._redact_sensitive_rows(["password_hash"], []) == []
+
+
+def test_redact_sensitive_rows_returns_same_list_when_no_sensitive_columns():
+    rows = [{"a": 1}, {"a": 2}]
+    result = reporting._redact_sensitive_rows(["a"], rows)
+    # No sensitive column — original list returned unchanged
+    assert result is rows
+
+
+def test_redact_sensitive_rows_case_insensitive():
+    columns = ["PASSWORD_HASH", "Secret_Key"]
+    rows = [{"PASSWORD_HASH": "abc", "Secret_Key": "xyz"}]
+    result = reporting._redact_sensitive_rows(columns, rows)
+    assert result[0]["PASSWORD_HASH"] == reporting._REDACTED
+    assert result[0]["Secret_Key"] == reporting._REDACTED
+
+
+def test_redact_sensitive_rows_redacts_none_values_in_sensitive_columns():
+    """Even NULL values in sensitive columns should be replaced with [REDACTED]."""
+    columns = ["password_hash", "name"]
+    rows = [{"password_hash": None, "name": "Bob"}]
+    result = reporting._redact_sensitive_rows(columns, rows)
+    assert result[0]["password_hash"] == reporting._REDACTED
+    assert result[0]["name"] == "Bob"
+
