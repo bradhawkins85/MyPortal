@@ -41,19 +41,20 @@ _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
 
 # Directory prefix used to detect changes that are isolated to a single
-# feature pack (see ``app/core/features.py`` and
-# ``docs/feature_packs.md``).  When every file in a ``system_update``
-# diff lives under ``app/features/<slug>/`` and each touched pack has
-# its ``PACK.version`` literal bumped, the update can be applied via
-# the in-process feature-pack reload API instead of restarting the
-# whole application.
+# feature pack (see ``app/core/features.py``).  When every file in a
+# ``system_update`` diff lives under ``app/features/<slug>/`` and each
+# touched pack is currently loaded, the update is applied via the
+# in-process feature-pack reload API instead of restarting the whole
+# application.  The ``PACK.version`` literal is read for logging only —
+# it is no longer a gate, so forgetting to bump it does not block
+# hot-reload.
 _FEATURE_PACKS_DIR_PREFIX = "app/features/"
 
 # Matches ``version="1.2.3"`` / ``version='1.2.3'`` in a feature pack's
-# ``__init__.py`` ``PACK = FeaturePack(...)`` declaration.  Feature
-# packs that compute ``version`` dynamically are not eligible for
-# hot-reload through ``system_update``; they fall through to the
-# normal full-restart upgrade path.
+# ``__init__.py`` ``PACK = FeaturePack(...)`` declaration.  Captured
+# for diagnostic logging on hot-reload; packs that compute ``version``
+# dynamically simply get an empty match and fall through to the normal
+# full-restart upgrade path.
 _PACK_VERSION_RE = re.compile(r"""version\s*=\s*['"]([^'"]+)['"]""")
 
 # Mapping of module slug -> set of scheduled task commands that require that module.
@@ -1140,6 +1141,15 @@ class SchedulerService:
                 )
                 return None
 
+        # The ``PACK.version`` literal is no longer used as a gate for
+        # hot-reload — pack-only file diffs are already proof that the
+        # code changed, and requiring a manual version bump in every
+        # edit was unreliable in practice (forgotten bumps silently
+        # fell back to full restarts).  We still read the incoming
+        # version literal for logging, and we still skip hot-reload if
+        # the incoming ``__init__.py`` is missing entirely (which
+        # implies the pack was removed/renamed and a restart is
+        # needed).
         incoming_versions: dict[str, str] = {}
         for slug in sorted(slugs):
             new_version = await self._read_pack_version_at_ref(slug, fetched_head)
@@ -1150,16 +1160,13 @@ class SchedulerService:
                     slug=slug,
                 )
                 return None
+            incoming_versions[slug] = new_version
             if new_version == loaded_versions[slug]:
                 log_info(
-                    "Feature pack hot-reload skipped",
-                    reason="version_not_bumped",
+                    "Feature pack hot-reload proceeding without version bump",
                     slug=slug,
-                    current=loaded_versions[slug],
-                    incoming=new_version,
+                    version=new_version,
                 )
-                return None
-            incoming_versions[slug] = new_version
 
         # Fast-forward the working tree so the new pack code is on disk
         # before we ask the registry to re-import it.  ``--ff-only``
