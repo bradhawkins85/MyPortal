@@ -232,8 +232,9 @@ crashing the app.
 | `notifications`  | `/notifications*`         | Notifications dashboard and settings pages (`/notifications`, `/notifications/settings`). Notifications API routes continue to be mounted from `app/api/routes/notifications.py`. |
 | `knowledge_base` | `/knowledge-base*`, `/admin/knowledge-base*` | Portal article catalogue/detail pages plus admin knowledge-base list/editor pages. Knowledge Base API routes continue to be mounted from `app/api/routes/knowledge_base.py`. |
 | `chat`           | `/chat*`                  | Chat room list (`/chat`) and individual room view (`/chat/{room_id}`). Chat API routes continue to be mounted from `app/api/routes/chat.py`. |
+| `automations`    | `/admin/automations*`     | Admin automations dashboard, create/edit pages, and state/execute/delete actions (`/admin/automations*`). Automations API routes continue to be mounted from `app/api/routes/automations.py`. |
 
-Each follow-up PR migrates one area (kb, backups, automations, m365,
+Each follow-up PR migrates one area (kb, backups, m365,
 xero, …) from `app/main.py` into `app/features/<slug>/`. URLs and
 dependency injection are preserved across each move; the only
 externally visible change is that the area becomes reloadable.
