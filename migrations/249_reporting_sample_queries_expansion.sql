@@ -27,14 +27,14 @@ VALUES
         'companies-user-and-asset-footprint',
         'Companies: User and Asset Footprint',
         'Per-company counts of active users and registered assets for capacity and onboarding planning.',
-        'SELECT c.id AS company_id, c.name AS company, COALESCE(u_counts.active_user_count, 0) AS active_user_count, COALESCE(a_counts.asset_count, 0) AS asset_count FROM companies c LEFT JOIN (SELECT u.company_id, COUNT(*) AS active_user_count FROM users u WHERE COALESCE(u.is_active, 1) = 1 GROUP BY u.company_id) AS u_counts ON u_counts.company_id = c.id LEFT JOIN (SELECT a.company_id, COUNT(*) AS asset_count FROM assets a GROUP BY a.company_id) AS a_counts ON a_counts.company_id = c.id ORDER BY c.name ASC',
+        'SELECT c.id AS company_id, c.name AS company, COALESCE(u_counts.active_user_count, 0) AS active_user_count, COALESCE(a_counts.asset_count, 0) AS asset_count FROM companies c LEFT JOIN (SELECT u.company_id, COUNT(*) AS active_user_count FROM users u WHERE u.is_active = 1 GROUP BY u.company_id) AS u_counts ON u_counts.company_id = c.id LEFT JOIN (SELECT a.company_id, COUNT(*) AS asset_count FROM assets a GROUP BY a.company_id) AS a_counts ON a_counts.company_id = c.id ORDER BY c.name ASC',
         1
     ),
     (
         'users-inactive-by-company',
         'Users: Inactive Accounts by Company',
         'Inactive user accounts grouped by company to support access cleanup and security reviews.',
-        'SELECT c.name AS company, COUNT(*) AS inactive_user_count FROM users u JOIN companies c ON c.id = u.company_id WHERE COALESCE(u.is_active, 1) = 0 GROUP BY c.id, c.name ORDER BY inactive_user_count DESC, c.name ASC',
+        'SELECT COALESCE(c.name, ''(no company)'') AS company, COUNT(*) AS inactive_user_count FROM users u LEFT JOIN companies c ON c.id = u.company_id WHERE u.is_active = 0 GROUP BY COALESCE(c.id, 0), COALESCE(c.name, ''(no company)'') ORDER BY inactive_user_count DESC, company ASC',
         1
     ),
     (
@@ -55,7 +55,7 @@ VALUES
         'licenses-expiring-next-90-days',
         'Licenses: Expiring in Next 90 Days',
         'Licenses with upcoming expiry dates in the next 90 days, including company and seat counts.',
-        'SELECT c.name AS company, l.name AS license_name, l.platform, l.count AS seat_count, l.expiry_date FROM licenses l JOIN companies c ON c.id = l.company_id WHERE l.expiry_date IS NOT NULL AND l.expiry_date >= CURRENT_DATE AND l.expiry_date < (CURRENT_DATE + INTERVAL 90 DAY) ORDER BY l.expiry_date ASC, c.name ASC, l.name ASC',
+        'SELECT COALESCE(c.name, ''(no company)'') AS company, l.name AS license_name, l.platform, l.count AS seat_count, l.expiry_date FROM licenses l LEFT JOIN companies c ON c.id = l.company_id WHERE l.expiry_date IS NOT NULL AND l.expiry_date >= CURRENT_DATE AND l.expiry_date < (CURRENT_DATE + INTERVAL 90 DAY) ORDER BY l.expiry_date ASC, company ASC, l.name ASC',
         1
     ),
     (
