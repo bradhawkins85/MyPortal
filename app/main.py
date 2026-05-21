@@ -4257,7 +4257,6 @@ async def delete_license_sku_mapping(request: Request, sku: str):
     return JSONResponse({"success": True})
 
 
-@app.get("/compliance", response_class=HTMLResponse)
 async def compliance_page(request: Request):
     """Essential 8 compliance tracking page."""
     from app.repositories import essential8 as essential8_repo
@@ -4295,7 +4294,6 @@ async def compliance_page(request: Request):
     return await _render_template("compliance/index.html", request, user, extra=extra)
 
 
-@app.get("/compliance/control/{control_id}", response_class=HTMLResponse)
 async def compliance_control_requirements_page(request: Request, control_id: int):
     """Essential 8 control requirements page."""
     from app.repositories import essential8 as essential8_repo
@@ -4378,7 +4376,6 @@ async def _load_compliance_checks_context(request: Request):
     return user, membership, company, company_id, None
 
 
-@app.get("/compliance-checks", response_class=HTMLResponse)
 async def compliance_checks_page(request: Request):
     """Customer compliance checks list page."""
     from app.repositories import compliance_checks as cc_repo
@@ -4405,7 +4402,6 @@ async def compliance_checks_page(request: Request):
     return await _render_template("compliance_checks/index.html", request, user, extra=extra)
 
 
-@app.get("/compliance-checks/{assignment_id}", response_class=HTMLResponse)
 async def compliance_checks_detail_page(request: Request, assignment_id: int):
     """Compliance check assignment detail page."""
     from app.repositories import compliance_checks as cc_repo
@@ -4435,7 +4431,6 @@ async def compliance_checks_detail_page(request: Request, assignment_id: int):
     return await _render_template("compliance_checks/detail.html", request, user, extra=extra)
 
 
-@app.get("/admin/compliance-checks/library", response_class=HTMLResponse)
 async def compliance_checks_library_page(request: Request):
     """Compliance checks library management page (super admin only)."""
     from app.repositories import compliance_checks as cc_repo
