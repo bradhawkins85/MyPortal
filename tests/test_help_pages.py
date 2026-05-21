@@ -145,6 +145,7 @@ def test_help_index_uses_sidebar_navigation_layout(patched_dependencies, monkeyp
     assert 'class="help__layout"' in response.text
     assert 'class="help__sidebar card card--panel"' in response.text
     assert 'class="help__content help__content--placeholder card card--panel"' in response.text
+    assert "Select an article from the left menu." in response.text
     assert 'class="help__content-stack"' not in response.text
     assert 'class="help__nav-link"' in response.text
     assert "help__article-icon" not in response.text
