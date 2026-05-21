@@ -7,28 +7,46 @@
   <span class="header__title-text">Help</span>
 {% endblock %}
 
+{% block header_actions %}
+  {{ page_header_actions([]) }}
+{% endblock %}
+
 {% block content %}
 <div class="help">
   {% if help_sections %}
-    {% for section in help_sections %}
-    <section class="card card--panel help__section" id="section-{{ section.slug }}">
-      <header class="card__header">
-        <h2 class="card__title">{{ section.name }}</h2>
-      </header>
-      <ul class="help__article-list">
-        {% for article in section.articles %}
-        <li class="help__article-item">
-          <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__article-link">
-            <span class="help__article-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 2l5 5h-5V4zM8 12h8v2H8v-2zm0 4h5v2H8v-2z"/></svg>
-            </span>
-            {{ article.name }}
-          </a>
-        </li>
+    <div class="help__layout">
+      <nav class="help__sidebar card card--panel" aria-label="Help articles">
+        {% for section in help_sections %}
+        <div class="help__nav-section">
+          <a href="#section-{{ section.slug }}" class="help__nav-section-title">{{ section.name }}</a>
+          <ul class="help__nav-list">
+            {% for article in section.articles %}
+            <li class="help__nav-item">
+              <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__nav-link">{{ article.name }}</a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
         {% endfor %}
-      </ul>
-    </section>
-    {% endfor %}
+      </nav>
+
+      <div class="help__content-stack">
+        {% for section in help_sections %}
+        <section class="card card--panel help__section" id="section-{{ section.slug }}">
+          <header class="card__header">
+            <h2 class="card__title">{{ section.name }}</h2>
+          </header>
+          <ul class="help__article-list">
+            {% for article in section.articles %}
+            <li class="help__article-item">
+              <a href="/help/{{ section.slug }}/{{ article.slug }}" class="help__article-link">{{ article.name }}</a>
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endfor %}
+      </div>
+    </div>
   {% else %}
     <div class="card card--panel">
       <div class="empty-state">
