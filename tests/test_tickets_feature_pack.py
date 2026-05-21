@@ -15,6 +15,20 @@ EXPECTED = {
     ("POST", "/tickets"),
     ("GET", "/tickets/{ticket_id}"),
     ("POST", "/tickets/{ticket_id}/replies"),
+    ("GET", "/admin/tickets"),
+    ("GET", "/admin/tickets/syncro-import"),
+    ("GET", "/admin/tickets/{ticket_id}"),
+    ("POST", "/admin/tickets"),
+    ("POST", "/admin/tickets/{ticket_id}/status"),
+    ("POST", "/admin/tickets/statuses"),
+    ("POST", "/admin/tickets/labour-types"),
+    ("POST", "/admin/tickets/{ticket_id}/description"),
+    ("POST", "/admin/tickets/{ticket_id}/description/replace"),
+    ("POST", "/admin/tickets/{ticket_id}/details"),
+    ("POST", "/admin/tickets/{ticket_id}/ai/reprocess"),
+    ("POST", "/admin/tickets/{ticket_id}/delete"),
+    ("POST", "/admin/tickets/bulk-delete"),
+    ("POST", "/admin/tickets/{ticket_id}/replies"),
 }
 
 
@@ -31,7 +45,7 @@ def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
 
 
 def test_tickets_pack_manifest_declares_all_portal_routes():
-    """Manifest should expose exactly the 5 routes that were migrated."""
+    """Manifest should expose all portal and admin routes owned by the pack."""
 
     declared = set()
     for router in PACK.routers:
