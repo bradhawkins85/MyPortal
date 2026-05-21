@@ -6349,14 +6349,14 @@ dialog.modal:not([open]) {
 .help__nav-link:focus-visible,
 .help__article-link:hover,
 .help__article-link:focus-visible {
-  color: #f8fafc;
+  color: var(--color-text-primary, #f8fafc);
   background: rgba(30, 41, 59, 0.92);
   border-color: rgba(125, 211, 252, 0.35);
   outline: none;
 }
 
 .help__nav-item--active .help__nav-link {
-  color: #f8fafc;
+  color: var(--color-text-primary, #f8fafc);
   background: rgba(37, 99, 235, 0.2);
   border-color: rgba(96, 165, 250, 0.45);
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.18);
@@ -6383,11 +6383,11 @@ dialog.modal:not([open]) {
 }
 
 .help__article-body a {
-  color: #7dd3fc;
+  color: var(--color-info, #7dd3fc);
 }
 
 .help__article-body a:visited {
-  color: #bae6fd;
+  color: var(--color-text, #e2e8f0);
 }
 
 /* Legacy styles for backwards compatibility */
