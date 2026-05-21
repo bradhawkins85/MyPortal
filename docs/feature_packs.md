@@ -233,6 +233,7 @@ crashing the app.
 | `knowledge_base` | `/knowledge-base*`, `/admin/knowledge-base*` | Portal article catalogue/detail pages plus admin knowledge-base list/editor pages. Knowledge Base API routes continue to be mounted from `app/api/routes/knowledge_base.py`. |
 | `chat`           | `/chat*`                  | Chat room list (`/chat`) and individual room view (`/chat/{room_id}`). Chat API routes continue to be mounted from `app/api/routes/chat.py`. |
 | `automations`    | `/admin/automations*`     | Admin automations dashboard, create/edit pages, and state/execute/delete actions (`/admin/automations*`). Automations API routes continue to be mounted from `app/api/routes/automations.py`. |
+| `reports`        | `/reports/company-overview*`, `/admin/reports/pdf-cover-image*` | Company overview report pages plus PDF cover-image admin management routes. Reporting query-builder routes (`/reporting*`) remain in `app/main.py` for follow-up migration. |
 
 Each follow-up PR migrates one area (kb, backups, m365,
 xero, …) from `app/main.py` into `app/features/<slug>/`. URLs and
