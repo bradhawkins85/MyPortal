@@ -234,6 +234,7 @@ crashing the app.
 | `chat`           | `/chat*`                  | Chat room list (`/chat`) and individual room view (`/chat/{room_id}`). Chat API routes continue to be mounted from `app/api/routes/chat.py`. |
 | `automations`    | `/admin/automations*`     | Admin automations dashboard, create/edit pages, and state/execute/delete actions (`/admin/automations*`). Automations API routes continue to be mounted from `app/api/routes/automations.py`. |
 | `reports`        | `/reports/company-overview*`, `/admin/reports/pdf-cover-image*` | Company overview report pages plus PDF cover-image admin management routes. Reporting query-builder routes (`/reporting*`) remain in `app/main.py` for follow-up migration. |
+| `backups`        | `/admin/backup-jobs*`, `/admin/backup-summary*` | Admin backup job list/create/edit/delete pages and backup summary dashboard. Backup status webhook API route (`/api/backup-status`) continues to be mounted from `app/api/routes/backup_jobs.py`. |
 
 Each follow-up PR migrates one area (kb, backups, m365,
 xero, …) from `app/main.py` into `app/features/<slug>/`. URLs and

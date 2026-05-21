@@ -6,10 +6,10 @@ This backlog breaks the migration work into **one pull request per feature pack*
 
 - [x] Notifications
 - [x] Knowledge Base
-- [ ] Chat
+- [x] Chat
 - [x] Reports
-- [ ] Backup History
-- [ ] Backup Summary
+- [x] Backup History
+- [x] Backup Summary
 - [ ] Issue Tracker
 - [ ] Shop
 - [ ] Quotes
