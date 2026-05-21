@@ -155,7 +155,7 @@ class Settings(BaseSettings):
             "hot-reloaded via ``POST /api/features/{slug}/reload``.  "
             "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,automations' "
             "because the ticket, service-status, notifications, knowledge-base, "
-            "chat, and automations page routes live in those packs; set to an empty string "
+            "chat, and automations routes live in those packs; set to an empty string "
             "to disable all packs (those routes will then 404)."
         ),
     )
