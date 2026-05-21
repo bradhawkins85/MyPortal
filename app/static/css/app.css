@@ -6291,21 +6291,25 @@ dialog.modal:not([open]) {
 .help__sidebar {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.875rem;
 }
 
 .help__nav-section {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.45rem;
+}
+
+.help__nav-section + .help__nav-section {
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--color-border);
 }
 
 .help__nav-section-title {
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-decoration: none;
   text-transform: uppercase;
 }
 
@@ -6320,7 +6324,7 @@ dialog.modal:not([open]) {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.4rem;
+  gap: 0.3rem;
 }
 
 .help__nav-item,
@@ -6331,11 +6335,12 @@ dialog.modal:not([open]) {
 .help__nav-link,
 .help__article-link {
   display: block;
-  padding: 0.7rem 0.85rem;
+  padding: 0.5rem 0.7rem;
   border-radius: 0.65rem;
   border: 1px solid var(--color-border);
   background: var(--color-surface-2);
   color: var(--color-text);
+  font-size: 0.93rem;
   font-weight: 500;
   text-decoration: none;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -6377,6 +6382,10 @@ dialog.modal:not([open]) {
 
 .help__section .card__header {
   margin-bottom: 0;
+}
+
+.help__content--placeholder {
+  min-height: 24rem;
 }
 
 .help__article-body {
