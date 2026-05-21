@@ -814,12 +814,64 @@ build_tray_app() {
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
   update_version_file
-  install_dependencies
-  build_tray_app
-  if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
-    run_restart_helper
+
+  # Detect whether the pulled diff is fully scoped to one or more
+  # feature packs at ``app/features/<slug>/``.  Pack-only updates can
+  # be hot-reloaded in-process by the running scheduler (see
+  # ``app/services/scheduler.py::_consume_feature_pack_reload_flag``)
+  # so we must not bounce the service for them.  Non-pack changes
+  # (and ``FORCE_RESTART=1``) still go through the normal restart
+  # path because they may touch dependencies, middleware, migrations,
+  # or the FastAPI app object itself.
+  FEATURE_PACK_DIFF_SLUGS=""
+  if [[ "$FORCE_RESTART" != "1" ]]; then
+    changed_files=$(git diff --name-only "$PRE_PULL_HEAD" "$POST_PULL_HEAD" || true)
+    if [[ -n "$changed_files" ]]; then
+      pack_only=1
+      slugs=""
+      while IFS= read -r changed; do
+        [[ -z "$changed" ]] && continue
+        if [[ "$changed" != app/features/* ]]; then
+          pack_only=0
+          break
+        fi
+        rest="${changed#app/features/}"
+        slug="${rest%%/*}"
+        if [[ -z "$slug" || "$rest" == "$slug" ]]; then
+          # File sits directly under app/features/ (e.g. __init__.py
+          # of the package itself) — not pack-scoped.
+          pack_only=0
+          break
+        fi
+        case " $slugs " in
+          *" $slug "*) : ;;
+          *) slugs="${slugs:+$slugs }$slug" ;;
+        esac
+      done <<<"$changed_files"
+      if [[ "$pack_only" -eq 1 && -n "$slugs" ]]; then
+        FEATURE_PACK_DIFF_SLUGS="$slugs"
+      fi
+    fi
+  fi
+
+  if [[ -n "$FEATURE_PACK_DIFF_SLUGS" ]]; then
+    echo "Pulled diff is scoped to feature pack(s): ${FEATURE_PACK_DIFF_SLUGS}."
+    echo "Skipping dependency install and service restart; the running scheduler will hot-reload these packs."
+    mkdir -p "${PROJECT_ROOT}/var/state"
+    {
+      for slug in $FEATURE_PACK_DIFF_SLUGS; do
+        printf '%s\n' "$slug"
+      done
+    } > "${PROJECT_ROOT}/var/state/feature_pack_reload.flag"
+    chmod 640 "${PROJECT_ROOT}/var/state/feature_pack_reload.flag" >/dev/null 2>&1 || true
   else
-    echo "Auto-fallback mode detected; caller will relaunch the service." >&2
+    install_dependencies
+    build_tray_app
+    if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
+      run_restart_helper
+    else
+      echo "Auto-fallback mode detected; caller will relaunch the service." >&2
+    fi
   fi
 elif [[ "$FORCE_RESTART" == "1" ]]; then
   echo "No repository changes detected but FORCE_RESTART=1; reinstalling dependencies and restarting service."
