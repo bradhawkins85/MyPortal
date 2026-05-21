@@ -8012,7 +8012,6 @@ async def xero_callback(
     return RedirectResponse(url="/admin/modules?success=xero+authorized", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/shop", response_class=HTMLResponse)
 async def shop_page(
     request: Request,
     category: str | None = Query(None),
@@ -8205,7 +8204,6 @@ async def shop_page(
     return await _render_template("shop/index.html", request, user, extra=extra)
 
 
-@app.get("/api/shop/products/{product_id}", response_class=JSONResponse)
 async def shop_product_detail_api(request: Request, product_id: int):
     (
         _user,
@@ -8260,7 +8258,6 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
 
 
 
-@app.get("/api/admin/shop/products/search", response_class=JSONResponse)
 async def admin_shop_product_search_api(
     request: Request,
     q: str = Query("", min_length=1),
@@ -8274,7 +8271,6 @@ async def admin_shop_product_search_api(
     return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(results)))
 
 
-@app.get("/api/admin/shop/products/{product_id}/restrictions", response_class=JSONResponse)
 async def admin_shop_product_restrictions_api(request: Request, product_id: int):
     _current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8284,7 +8280,6 @@ async def admin_shop_product_restrictions_api(request: Request, product_id: int)
     return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(restrictions)))
 
 
-@app.get("/api/admin/shop/products/{product_id}", response_class=JSONResponse)
 async def admin_shop_product_detail_api(request: Request, product_id: int):
     _current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8297,7 +8292,6 @@ async def admin_shop_product_detail_api(request: Request, product_id: int):
     return JSONResponse(content=cast(dict[str, Any], _serialise_for_json(product)))
 
 
-@app.get("/api/admin/shop/products/{product_id}/price-history", response_class=JSONResponse)
 async def admin_shop_product_price_history_api(request: Request, product_id: int):
     _current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8315,12 +8309,6 @@ async def admin_shop_product_price_history_api(request: Request, product_id: int
     return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(history)))
 
 
-@app.get(
-    "/shop/packages",
-    response_class=HTMLResponse,
-    summary="View available product packages",
-    tags=["Shop Packages"],
-)
 async def shop_packages_page(
     request: Request,
     cart_error: str | None = None,
@@ -16457,12 +16445,6 @@ async def admin_delete_form(
     return RedirectResponse(url="/admin/forms", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get(
-    "/admin/shop/packages",
-    response_class=HTMLResponse,
-    summary="Manage shop packages",
-    tags=["Shop Packages"],
-)
 async def admin_shop_packages_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
@@ -16483,12 +16465,6 @@ async def admin_shop_packages_page(
     return await _render_template("admin/shop_packages.html", request, current_user, extra=extra)
 
 
-@app.get(
-    "/admin/shop/packages/{package_id}",
-    response_class=HTMLResponse,
-    summary="View shop package detail",
-    tags=["Shop Packages"],
-)
 async def admin_shop_package_detail(request: Request, package_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -16508,12 +16484,6 @@ async def admin_shop_package_detail(request: Request, package_id: int):
     return await _render_template("admin/shop_package_detail.html", request, current_user, extra=extra)
 
 
-@app.post(
-    "/shop/admin/package",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Create a shop package",
-    tags=["Shop Packages"],
-)
 async def admin_create_shop_package(
     request: Request,
     name: str = Form(...),
@@ -16567,12 +16537,6 @@ async def admin_create_shop_package(
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/update",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update a shop package",
-    tags=["Shop Packages"],
-)
 async def admin_update_shop_package(
     request: Request,
     package_id: int,
@@ -16648,12 +16612,6 @@ async def admin_update_shop_package(
     )
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/archive",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Archive or restore a shop package",
-    tags=["Shop Packages"],
-)
 async def admin_archive_shop_package(
     request: Request,
     package_id: int,
@@ -16686,12 +16644,6 @@ async def admin_archive_shop_package(
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/delete",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Delete a shop package",
-    tags=["Shop Packages"],
-)
 async def admin_delete_shop_package(request: Request, package_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -16720,12 +16672,6 @@ async def admin_delete_shop_package(request: Request, package_id: int):
     return RedirectResponse(url="/admin/shop/packages", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/items/add",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Add a product to a shop package",
-    tags=["Shop Packages"],
-)
 async def admin_add_package_item(
     request: Request,
     package_id: int,
@@ -16775,12 +16721,6 @@ async def admin_add_package_item(
     )
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/items/{product_id}/update",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update package item quantity",
-    tags=["Shop Packages"],
-)
 async def admin_update_package_item(
     request: Request,
     package_id: int,
@@ -16825,12 +16765,6 @@ async def admin_update_package_item(
     )
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/items/{product_id}/alternates/add",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Add an alternate product for a package item",
-    tags=["Shop Packages"],
-)
 async def admin_add_package_item_alternate(
     request: Request,
     package_id: int,
@@ -16901,12 +16835,6 @@ async def admin_add_package_item_alternate(
     )
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/items/{product_id}/alternates/{alternate_product_id}/remove",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Remove an alternate product from a package item",
-    tags=["Shop Packages"],
-)
 async def admin_remove_package_item_alternate(
     request: Request,
     package_id: int,
@@ -16949,12 +16877,6 @@ async def admin_remove_package_item_alternate(
     )
 
 
-@app.post(
-    "/shop/admin/package/{package_id}/items/{product_id}/remove",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Remove product from package",
-    tags=["Shop Packages"],
-)
 async def admin_remove_package_item(
     request: Request,
     package_id: int,
@@ -16985,7 +16907,6 @@ async def admin_remove_package_item(
     )
 
 
-@app.get("/admin/shop", response_class=HTMLResponse)
 async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
@@ -17061,7 +16982,6 @@ async def admin_shop_page(
     return await _render_template("admin/shop.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/shop/optional-accessories", response_class=HTMLResponse)
 async def admin_shop_optional_accessories_page(
     request: Request, show: str = "pending"
 ):
@@ -17088,12 +17008,6 @@ async def admin_shop_optional_accessories_page(
     )
 
 
-@app.post(
-    "/admin/shop/optional-accessories/sync",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Sync pending optional accessories from the stock feed",
-    tags=["Shop"],
-)
 async def admin_sync_optional_accessories(request: Request):
     """Re-scan the stock feed and refresh the pending optional accessories table."""
     current_user, redirect = await _require_super_admin_page(request)
@@ -17112,12 +17026,6 @@ async def admin_sync_optional_accessories(request: Request):
     )
 
 
-@app.post(
-    "/admin/shop/optional-accessories/{accessory_id}/import",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Import a pending optional accessory into the shop",
-    tags=["Shop"],
-)
 async def admin_import_optional_accessory(
     request: Request, accessory_id: int
 ):
@@ -17150,12 +17058,6 @@ async def admin_import_optional_accessory(
     )
 
 
-@app.post(
-    "/admin/shop/optional-accessories/{accessory_id}/dismiss",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Dismiss a pending optional accessory",
-    tags=["Shop"],
-)
 async def admin_dismiss_optional_accessory(
     request: Request, accessory_id: int
 ):
@@ -17177,12 +17079,6 @@ async def admin_dismiss_optional_accessory(
     )
 
 
-@app.post(
-    "/admin/shop/optional-accessories/bulk-dismiss",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Bulk dismiss pending optional accessories",
-    tags=["Shop"],
-)
 async def admin_bulk_dismiss_optional_accessories(request: Request):
     """Soft-dismiss multiple pending optional accessories at once."""
     current_user, redirect = await _require_super_admin_page(request)
@@ -17212,12 +17108,6 @@ async def admin_bulk_dismiss_optional_accessories(request: Request):
     )
 
 
-@app.post(
-    "/admin/shop/optional-accessories/{accessory_id}/restore",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Restore a dismissed optional accessory",
-    tags=["Shop"],
-)
 async def admin_restore_optional_accessory(
     request: Request, accessory_id: int
 ):
@@ -17239,7 +17129,6 @@ async def admin_restore_optional_accessory(
     )
 
 
-@app.get("/admin/shop/categories", response_class=HTMLResponse)
 async def admin_shop_categories_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -17254,7 +17143,6 @@ async def admin_shop_categories_page(request: Request):
     return await _render_template("admin/shop_categories.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/shop/products/new", response_class=HTMLResponse)
 async def admin_shop_product_create_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -17282,12 +17170,6 @@ async def admin_shop_product_create_page(request: Request):
     )
 
 
-@app.post(
-    "/shop/admin/category",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Create a shop category",
-    tags=["Shop"],
-)
 async def admin_create_shop_category(
     request: Request,
     name: str = Form(...),
@@ -17335,12 +17217,6 @@ async def admin_create_shop_category(
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/category/{category_id}/delete",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Delete a shop category",
-    tags=["Shop"],
-)
 async def admin_delete_shop_category(request: Request, category_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -17369,12 +17245,6 @@ async def admin_delete_shop_category(request: Request, category_id: int):
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/category/{category_id}/update",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update a shop category",
-    tags=["Shop"],
-)
 async def admin_update_shop_category(
     request: Request,
     category_id: int,
@@ -17473,7 +17343,6 @@ async def admin_update_shop_category(
     return RedirectResponse(url="/admin/shop/categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/admin/shop/subscription-categories", response_class=HTMLResponse)
 async def admin_shop_subscription_categories_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -17488,12 +17357,6 @@ async def admin_shop_subscription_categories_page(request: Request):
     return await _render_template("admin/shop_subscription_categories.html", request, current_user, extra=extra)
 
 
-@app.post(
-    "/shop/admin/subscription-category",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Create a subscription category",
-    tags=["Shop"],
-)
 async def admin_create_subscription_category(
     request: Request,
     name: str = Form(...),
@@ -17533,12 +17396,6 @@ async def admin_create_subscription_category(
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/subscription-category/{category_id}/delete",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Delete a subscription category",
-    tags=["Shop"],
-)
 async def admin_delete_subscription_category(request: Request, category_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -17565,12 +17422,6 @@ async def admin_delete_subscription_category(request: Request, category_id: int)
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/subscription-category/{category_id}/update",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update a subscription category",
-    tags=["Shop"],
-)
 async def admin_update_subscription_category(
     request: Request,
     category_id: int,
@@ -17622,12 +17473,6 @@ async def admin_update_subscription_category(
     return RedirectResponse(url="/admin/shop/subscription-categories", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/product/import",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Import a shop product from the stock feed",
-    tags=["Shop"],
-)
 async def admin_import_shop_product(
     request: Request,
     vendor_sku: str = Form(...),
@@ -17656,12 +17501,6 @@ async def admin_import_shop_product(
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/product",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Create a shop product",
-    tags=["Shop"],
-)
 async def admin_create_shop_product(
     request: Request,
     name: str = Form(...),
@@ -17850,12 +17689,6 @@ async def admin_create_shop_product(
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/product/{product_id}",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update a shop product",
-    tags=["Shop"],
-)
 async def admin_update_shop_product(
     request: Request,
     product_id: int,
@@ -18241,32 +18074,14 @@ async def _handle_shop_product_archive(
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/product/{product_id}/archive",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Archive a shop product",
-    tags=["Shop"],
-)
 async def admin_archive_shop_product(request: Request, product_id: int):
     return await _handle_shop_product_archive(request, product_id, archived=True)
 
 
-@app.post(
-    "/shop/admin/product/{product_id}/unarchive",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Unarchive a shop product",
-    tags=["Shop"],
-)
 async def admin_unarchive_shop_product(request: Request, product_id: int):
     return await _handle_shop_product_archive(request, product_id, archived=False)
 
 
-@app.post(
-    "/shop/admin/product/{product_id}/visibility",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update shop product visibility",
-    tags=["Shop"],
-)
 async def admin_update_shop_product_visibility(
     request: Request,
     product_id: int,
@@ -18314,12 +18129,6 @@ async def admin_update_shop_product_visibility(
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post(
-    "/shop/admin/product/{product_id}/delete",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Delete a shop product",
-    tags=["Shop"],
-)
 async def admin_delete_shop_product(request: Request, product_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
