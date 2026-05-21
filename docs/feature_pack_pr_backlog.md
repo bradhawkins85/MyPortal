@@ -10,7 +10,7 @@ This backlog breaks the migration work into **one pull request per feature pack*
 - [x] Reports
 - [x] Backup History
 - [x] Backup Summary
-- [ ] Issue Tracker
+- [x] Issue Tracker
 - [ ] Shop
 - [ ] Quotes
 - [ ] Invoices
