@@ -16000,7 +16000,6 @@ async def admin_tag_exclusions_page(
     )
 
 
-@app.get("/admin/call-recordings", response_class=HTMLResponse)
 async def admin_call_recordings_page(request: Request):
     """Admin page for viewing call recordings and transcriptions (super admin only)."""
     current_user, redirect = await _require_super_admin_page(request)
