@@ -7,7 +7,7 @@ This backlog breaks the migration work into **one pull request per feature pack*
 - [x] Notifications
 - [x] Knowledge Base
 - [ ] Chat
-- [ ] Reports
+- [x] Reports
 - [ ] Backup History
 - [ ] Backup Summary
 - [ ] Issue Tracker
