@@ -182,9 +182,16 @@ def test_system_update_hot_reloads_feature_pack_when_version_bumped(
     assert any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
 
-def test_system_update_falls_back_to_restart_when_version_not_bumped(
+def test_system_update_hot_reloads_even_when_version_not_bumped(
     monkeypatch, tmp_path: Path
 ):
+    """Pack-only diffs hot-reload even if ``PACK.version`` was not bumped.
+
+    The version literal is diagnostic only — the file diff itself is
+    proof the code changed, so a forgotten version bump must not
+    silently fall back to a full restart.
+    """
+
     scheduler = SchedulerService()
     flag_path = tmp_path / "var" / "state" / "system_update.flag"
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
@@ -201,11 +208,12 @@ def test_system_update_falls_back_to_restart_when_version_not_bumped(
 
     output = asyncio.run(scheduler._run_system_update())
 
-    assert "Update scheduled" in output
-    assert flag_path.exists()
-    assert registry.reloaded == []
-    # Must not have fast-forwarded the working tree.
-    assert not any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
+    assert output is not None
+    assert "Feature pack(s) reloaded without restart" in output
+    assert "tickets@1.0.0" in output
+    assert registry.reloaded == ["tickets"]
+    assert not flag_path.exists()
+    assert any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
 
 def test_system_update_falls_back_to_restart_when_changes_outside_packs(
