@@ -161,6 +161,9 @@ def test_export_html_for_pdf_handles_no_rows():
         "access_token_encrypted",
         "credential",
         "user_credentials",
+        "credentials",
+        "tokens",
+        "passwords",
     ],
 )
 def test_redact_sensitive_rows_redacts_sensitive_columns(col_name):
@@ -186,6 +189,15 @@ def test_redact_sensitive_rows_returns_same_list_when_no_sensitive_columns():
     rows = [{"a": 1}, {"a": 2}]
     result = reporting._redact_sensitive_rows(["a"], rows)
     # No sensitive column — original list returned unchanged
+    assert result is rows
+
+
+def test_redact_sensitive_rows_word_boundary_avoids_false_positives():
+    """Columns like 'secretary_name' must NOT be redacted (contains 'secret' but it
+    is not a standalone word — 'secretary' ends with alphabetic chars after 'secret')."""
+    columns = ["secretary_name", "is_selected", "topic"]
+    rows = [{"secretary_name": "Jane", "is_selected": True, "topic": "budget"}]
+    result = reporting._redact_sensitive_rows(columns, rows)
     assert result is rows
 
 
