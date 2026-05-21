@@ -17,7 +17,7 @@ from .routes import router as help_router
 
 PACK = FeaturePack(
     slug="help",
-    version="1.0.0",
+    version="1.0.1",
     routers=(help_router,),
 )
 
