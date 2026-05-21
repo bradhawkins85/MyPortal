@@ -16079,7 +16079,6 @@ async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[
     return user_options, company_options
 
 
-@app.get("/admin/business-continuity-plans", response_class=HTMLResponse)
 async def admin_business_continuity_plans_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -16102,7 +16101,6 @@ async def admin_business_continuity_plans_page(request: Request):
     return await _render_template("admin/business_continuity_plans.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/business-continuity-plans/new", response_class=HTMLResponse)
 async def admin_new_business_continuity_plan_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -16120,7 +16118,6 @@ async def admin_new_business_continuity_plan_page(request: Request):
     return await _render_template("admin/business_continuity_plan_editor.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/business-continuity-plans/{plan_id}", response_class=HTMLResponse)
 async def admin_edit_business_continuity_plan_page(request: Request, plan_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
