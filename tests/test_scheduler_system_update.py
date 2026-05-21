@@ -335,3 +335,95 @@ def test_classify_feature_pack_changes():
     assert cls(["app/main.py"]) is None
     assert cls(["app/features/tickets/portal_routes.py", "README.md"]) is None
     assert cls([]) is None
+
+
+def test_consume_feature_pack_reload_flag_reloads_and_deletes(monkeypatch, tmp_path: Path):
+    """Listed slugs are reloaded in-process and the flag file is removed."""
+
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "var" / "state" / "feature_pack_reload.flag"
+    flag_path.parent.mkdir(parents=True, exist_ok=True)
+    flag_path.write_text("tickets\nservice_status\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.services.scheduler._FEATURE_PACK_RELOAD_FLAG_PATH", flag_path
+    )
+
+    import app.core.features as features_module
+
+    registry = _FakeRegistry({"tickets": "1.0.0", "service_status": "1.0.0"})
+    monkeypatch.setattr(features_module, "get_registry", lambda: registry)
+
+    asyncio.run(scheduler._consume_feature_pack_reload_flag())
+
+    assert registry.reloaded == ["tickets", "service_status"]
+    assert not flag_path.exists()
+
+
+def test_consume_feature_pack_reload_flag_noop_when_missing(monkeypatch, tmp_path: Path):
+    """Missing flag file is a silent no-op (the common case)."""
+
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "var" / "state" / "feature_pack_reload.flag"
+    monkeypatch.setattr(
+        "app.services.scheduler._FEATURE_PACK_RELOAD_FLAG_PATH", flag_path
+    )
+
+    import app.core.features as features_module
+
+    def _should_not_call():  # pragma: no cover - sanity guard
+        raise AssertionError("registry must not be consulted when no flag")
+
+    monkeypatch.setattr(features_module, "get_registry", _should_not_call)
+
+    # Must not raise.
+    asyncio.run(scheduler._consume_feature_pack_reload_flag())
+    assert not flag_path.exists()
+
+
+def test_consume_feature_pack_reload_flag_keeps_failed_slugs(monkeypatch, tmp_path: Path):
+    """When some slugs fail to reload the flag retains them for retry."""
+
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "var" / "state" / "feature_pack_reload.flag"
+    flag_path.parent.mkdir(parents=True, exist_ok=True)
+    flag_path.write_text("tickets\nbroken\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.services.scheduler._FEATURE_PACK_RELOAD_FLAG_PATH", flag_path
+    )
+
+    import app.core.features as features_module
+
+    registry = _FakeRegistry({"tickets": "1.0.0", "broken": "1.0.0"})
+    registry.reload_should_raise["broken"] = RuntimeError("import boom")
+    monkeypatch.setattr(features_module, "get_registry", lambda: registry)
+
+    asyncio.run(scheduler._consume_feature_pack_reload_flag())
+
+    assert registry.reloaded == ["tickets"]
+    assert flag_path.exists()
+    remaining = [line.strip() for line in flag_path.read_text().splitlines() if line.strip()]
+    assert remaining == ["broken"]
+
+
+def test_consume_feature_pack_reload_flag_skips_unloaded_pack(monkeypatch, tmp_path: Path):
+    """Slugs not currently loaded are recorded as failed (keep retrying)."""
+
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "var" / "state" / "feature_pack_reload.flag"
+    flag_path.parent.mkdir(parents=True, exist_ok=True)
+    flag_path.write_text("brand_new\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.services.scheduler._FEATURE_PACK_RELOAD_FLAG_PATH", flag_path
+    )
+
+    import app.core.features as features_module
+
+    registry = _FakeRegistry({"tickets": "1.0.0"})
+    monkeypatch.setattr(features_module, "get_registry", lambda: registry)
+
+    asyncio.run(scheduler._consume_feature_pack_reload_flag())
+
+    assert registry.reloaded == []
+    assert flag_path.exists()
+    remaining = [line.strip() for line in flag_path.read_text().splitlines() if line.strip()]
+    assert remaining == ["brand_new"]
