@@ -42,7 +42,7 @@ _REDACTED = "[REDACTED]"
 # covers both bare column names and aliases that still include the sensitive
 # word (e.g. ``user_password_hash``, ``m365_client_secret``, …).
 _SENSITIVE_COLUMN_PATTERN = re.compile(
-    r"(password|passwd|secret|token|api[_\-]?key|totp|otp|credential|private[_\-]?key|encrypted)",
+    r"(?<![a-zA-Z])(password[s]?|passwd|secret[s]?|token[s]?|api[_\-]?key[s]?|totp|otp[s]?|credential[s]?|private[_\-]?key[s]?|encrypted)(?![a-zA-Z])",
     re.IGNORECASE,
 )
 
