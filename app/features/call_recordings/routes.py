@@ -16,7 +16,7 @@ def _main():
 
 
 @router.get("/admin/call-recordings", response_class=HTMLResponse)
-async def admin_call_recordings_page(request: Request):
+async def route_admin_call_recordings_page(request: Request):
     return await _main().admin_call_recordings_page(request=request)
 
 
