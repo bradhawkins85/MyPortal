@@ -76,11 +76,9 @@ def mock_startup(monkeypatch):
         yield DummyConnection()
 
     async def fake_connect():
-        db._pool = object()  # type: ignore[attr-defined]
         return None
 
     async def fake_disconnect():
-        db._pool = None  # type: ignore[attr-defined]
         return None
 
     async def fake_run_migrations():
