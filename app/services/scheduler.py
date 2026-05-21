@@ -1343,7 +1343,7 @@ class SchedulerService:
                 )
             except OSError as exc:  # pragma: no cover - defensive
                 log_error(
-                    "Failed to rewrite feature pack reload flag",
+                    "Failed to write remaining slugs to feature pack reload flag",
                     path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
                     error=str(exc),
                 )
