@@ -14152,7 +14152,6 @@ async def import_syncro_tickets(request: Request):
     return JSONResponse(summary.as_dict())
 
 
-@app.get("/admin/api-keys", response_class=HTMLResponse)
 async def admin_api_keys_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -14161,7 +14160,6 @@ async def admin_api_keys_page(request: Request):
     return await _render_api_keys_dashboard(request, current_user, **filters)
 
 
-@app.post("/admin/api-keys", response_class=HTMLResponse)
 async def admin_create_api_key_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -14267,7 +14265,6 @@ async def admin_create_api_key_page(request: Request):
     )
 
 
-@app.post("/admin/api-keys/update", response_class=HTMLResponse)
 async def admin_update_api_key_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -14388,7 +14385,6 @@ async def admin_update_api_key_page(request: Request):
     )
 
 
-@app.post("/admin/api-keys/rotate", response_class=HTMLResponse)
 async def admin_rotate_api_key_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -14547,7 +14543,6 @@ async def admin_rotate_api_key_page(request: Request):
     )
 
 
-@app.post("/admin/api-keys/delete", response_class=HTMLResponse)
 async def admin_delete_api_key_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
