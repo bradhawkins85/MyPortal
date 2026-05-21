@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -48,6 +48,18 @@ def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
+    candidate = (raw or "").strip()
+    if not candidate:
+        return fallback
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return fallback
+    return candidate
 
 
 @router.get("/admin/tickets", response_class=HTMLResponse)
@@ -246,7 +258,7 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     )
     message = quote(f"Ticket {ticket_id} updated.")
     destination = f"/admin/tickets?success={message}"
-    safe_return_url = main_module._sanitize_local_redirect_target(return_url, fallback="")
+    safe_return_url = _safe_local_redirect_target(return_url, fallback="")
     if safe_return_url:
         separator = "&" if "?" in safe_return_url else "?"
         destination = f"{safe_return_url}{separator}success={message}"
@@ -413,9 +425,10 @@ async def admin_update_ticket_description(ticket_id: int, request: Request):
 
     message = quote("Ticket description updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
-    if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
-        separator = "&" if "?" in return_url else "?"
-        destination = f"{return_url}{separator}success={message}"
+    safe_return_url = _safe_local_redirect_target(return_url, fallback="")
+    if safe_return_url.startswith(f"/admin/tickets/{ticket_id}"):
+        separator = "&" if "?" in safe_return_url else "?"
+        destination = f"{safe_return_url}{separator}success={message}"
 
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -710,9 +723,10 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"
-    if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
-        separator = "&" if "?" in return_url else "?"
-        destination = f"{return_url}{separator}success={message}"
+    safe_return_url = _safe_local_redirect_target(return_url, fallback="")
+    if safe_return_url.startswith(f"/admin/tickets/{ticket_id}"):
+        separator = "&" if "?" in safe_return_url else "?"
+        destination = f"{safe_return_url}{separator}success={message}"
 
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -872,7 +886,7 @@ async def admin_bulk_delete_tickets(request: Request):
 
     return_url_raw = form.get("returnUrl")
     return_url = str(return_url_raw) if isinstance(return_url_raw, str) else ""
-    safe_return_url = main_module._sanitize_local_redirect_target(return_url, fallback="")
+    safe_return_url = _safe_local_redirect_target(return_url, fallback="")
     if safe_return_url:
         separator = "&" if "?" in safe_return_url else "?"
         destination = f"{safe_return_url}{separator}success={message}"
