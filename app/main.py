@@ -8121,7 +8121,6 @@ async def shop_packages_page(
     return await _render_template("shop/packages.html", request, user, extra=extra)
 
 
-@app.post("/cart/add", response_class=RedirectResponse, include_in_schema=False)
 async def add_to_cart(request: Request) -> RedirectResponse:
     (
         user,
@@ -8285,7 +8284,6 @@ async def add_to_cart(request: Request) -> RedirectResponse:
     )
 
 
-@app.post("/cart/add-package", response_class=RedirectResponse, include_in_schema=False)
 async def add_package_to_cart(request: Request) -> RedirectResponse:
     (
         user,
@@ -8432,7 +8430,6 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
     )
 
 
-@app.get("/cart", response_class=HTMLResponse, name="cart_page")
 async def view_cart(
     request: Request,
     order_message: str | None = Query(None, alias="orderMessage"),
@@ -8765,7 +8762,6 @@ def _summarise_orders(
     return summary
 
 
-@app.get("/orders", response_class=HTMLResponse)
 async def orders_page(
     request: Request,
     status_filter: str | None = Query(None, alias="status"),
@@ -9028,12 +9024,6 @@ async def load_quote_to_cart(request: Request, quote_number: str) -> RedirectRes
 
 
 
-@app.post(
-    "/cart/update",
-    response_class=RedirectResponse,
-    name="cart_update_items",
-    include_in_schema=False,
-)
 async def update_cart_items(request: Request) -> RedirectResponse:
     (
         user,
@@ -9178,7 +9168,6 @@ async def update_cart_items(request: Request) -> RedirectResponse:
     )
 
 
-@app.post("/cart/remove", response_class=RedirectResponse, name="cart_remove_items", include_in_schema=False)
 async def remove_cart_items(request: Request) -> RedirectResponse:
     (
         user,
@@ -9213,7 +9202,6 @@ async def remove_cart_items(request: Request) -> RedirectResponse:
     return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post("/cart/place-order", response_class=RedirectResponse, name="cart_place_order", include_in_schema=False)
 async def place_order(request: Request) -> RedirectResponse:
     (
         user,
