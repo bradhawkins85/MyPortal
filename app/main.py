@@ -15026,7 +15026,6 @@ async def admin_bulk_rename_scheduled_tasks(request: Request):
     )
 
 
-@app.get("/admin/webhooks", response_class=HTMLResponse)
 async def admin_webhooks(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
