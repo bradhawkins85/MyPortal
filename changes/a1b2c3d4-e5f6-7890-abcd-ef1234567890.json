@@ -1,0 +1,7 @@
+{
+  "guid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "occurred_at": "2026-05-22T05:06Z",
+  "change_type": "Feature",
+  "summary": "Implement call-recordings feature pack: migrate GET /admin/call-recordings to a hot-reloadable FeaturePack so the admin call recordings and transcriptions page can be independently reloaded without a full application restart.",
+  "content_hash": "e4df2cc2f2e216481fdd7effee4f011584beb5fb433d253545e22159c83661c2"
+}
