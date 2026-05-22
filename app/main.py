@@ -14573,7 +14573,6 @@ async def admin_roles(request: Request):
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/message-templates", response_class=HTMLResponse)
 async def admin_message_templates(
     request: Request,
     search: str | None = Query(default=None),
@@ -14629,7 +14628,6 @@ async def admin_message_templates(
     return await _render_template("admin/message_templates.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/message-templates/new", response_class=HTMLResponse)
 async def admin_message_templates_new(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -14654,7 +14652,6 @@ async def admin_message_templates_new(request: Request):
     return await _render_template("admin/message_template_form.html", request, current_user, extra=extra)
 
 
-@app.get("/admin/message-templates/{template_id}/edit", response_class=HTMLResponse)
 async def admin_message_templates_edit(request: Request, template_id: int):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
