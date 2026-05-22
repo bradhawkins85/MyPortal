@@ -12,7 +12,7 @@ from itsdangerous import URLSafeSerializer
 from itsdangerous import BadSignature
 from loguru import logger
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import users as user_repo
 from app.security.session import session_manager
@@ -21,10 +21,10 @@ from app.services import modules as modules_service
 router = APIRouter(prefix="/api/integration-modules/xero", tags=["Xero"])
 oauth_router = APIRouter(prefix="/xero", tags=["Xero OAuth"])
 
-_settings = None
+_settings: Settings | None = None
 
 
-def _get_settings():  # type: ignore[return]
+def _get_settings() -> Settings:
     global _settings
     if _settings is None:
         _settings = get_settings()
@@ -292,14 +292,13 @@ async def xero_callback(
 ):
     """Handle Xero OAuth2 callback and exchange code for tokens."""
     if error:
-        # Sanitize error message to prevent URL redirection attacks
+        # Log the Xero-provided error but do not reflect it into the redirect
+        # URL to avoid URL-redirection vulnerabilities (CodeQL py/url-redirection).
         message = request.query_params.get("error_description", error)
-        safe_message = "".join(
-            c if c.isalnum() or c in " .-_" else "" for c in str(message)[:200]
-        )
-        encoded = urlencode({"error": safe_message or "authorization_error"})
+        log_error("Xero OAuth error", error=error, description=str(message)[:200])
         return RedirectResponse(
-            url=f"/admin/modules?{encoded}", status_code=status.HTTP_303_SEE_OTHER
+            url="/admin/modules?error=xero+authorization+failed",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     if not code or not state:
@@ -385,7 +384,7 @@ async def xero_callback(
     # Calculate token expiry
     expires_at = None
     if isinstance(expires_in, (int, float)):
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
     # Fetch tenant connections to get tenant_id
     tenant_id = None
@@ -401,7 +400,7 @@ async def xero_callback(
         connections_response.raise_for_status()
         connections = connections_response.json()
 
-        if connections and len(connections) > 0:
+        if connections:
             tenant_id = connections[0].get("tenantId")
             if tenant_id:
                 log_info("Discovered Xero tenant_id", tenant_id=tenant_id)
