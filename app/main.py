@@ -68,7 +68,6 @@ from app.api.routes import (
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
     companies,
-    email_tracking,
     essential8 as essential8_api,
     compliance_checks as compliance_checks_api,
     forms as forms_api,
@@ -1055,7 +1054,6 @@ app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
-app.include_router(email_tracking.router)
 app.include_router(smtp2go_webhooks.router)
 app.include_router(essential8_api.router)
 app.include_router(compliance_checks_api.router)
