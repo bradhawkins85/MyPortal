@@ -1,4 +1,4 @@
-"""Cart and orders routes for the ``cart`` feature pack."""
+"""Cart routes for the ``cart`` feature pack."""
 
 from __future__ import annotations
 
@@ -53,9 +53,5 @@ _add(
     name="cart_place_order",
     include_in_schema=False,
 )
-
-# Orders portal route.
-_add("/orders", "orders_page", ["GET"], response_class=HTMLResponse)
-
 
 __all__ = ["router"]
