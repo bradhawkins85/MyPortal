@@ -229,7 +229,6 @@ configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
-xero_oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="xero-oauth")
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
 SHOP_LOW_STOCK_THRESHOLD = 5
@@ -354,17 +353,12 @@ def _opnform_base_url() -> str | None:
 
 def _build_xero_redirect_uri() -> str:
     """Build Xero OAuth redirect URI using PORTAL_URL setting.
-    
-    This ensures the redirect_uri matches what's configured in the Xero OAuth app,
-    preventing 'Invalid redirect_uri' errors when the app is behind a proxy or
-    using a different hostname than the incoming request.
+
+    Delegates to the xero routes module so the logic is defined in one place.
     """
-    if settings.portal_url:
-        base = str(settings.portal_url).rstrip("/")
-        return f"{base}/xero/callback"
-    # Fallback to relative path if PORTAL_URL not set
-    # This maintains backward compatibility but may cause issues
-    return "/xero/callback"
+    from app.api.routes.xero import _build_xero_redirect_uri as _xero_uri
+
+    return _xero_uri()
 
 
 async def _store_pkce_verifier(code_verifier: str) -> str:
@@ -1089,7 +1083,6 @@ app.include_router(system.router)
 app.include_router(uptimekuma.router)
 app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
-app.include_router(xero.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
@@ -7595,184 +7588,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             status_code=status.HTTP_303_SEE_OTHER,
         )
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/xero/connect")
-async def xero_connect(request: Request):
-    """Initiate Xero OAuth2 authorization flow."""
-    session_data = await session_manager.load_session(request)
-    if not session_data:
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
-    
-    # Check if user is super admin
-    user = await user_repo.get_user_by_id(session_data.user_id)
-    if not user or not user.get("is_super_admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only super administrators can configure Xero integration"
-        )
-    
-    credentials = await modules_service.get_xero_credentials()
-    if not credentials:
-        return RedirectResponse(url="/admin/modules", status_code=status.HTTP_303_SEE_OTHER)
-    
-    client_id = credentials.get("client_id", "").strip()
-    if not client_id:
-        return RedirectResponse(url="/admin/modules?error=missing+client+id", status_code=status.HTTP_303_SEE_OTHER)
-    
-    # Generate state token to prevent CSRF
-    state = xero_oauth_state_serializer.dumps({
-        "user_id": session_data.user_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-    
-    # Build authorization URL using PORTAL_URL to ensure it matches Xero app settings
-    redirect_uri = _build_xero_redirect_uri()
-    params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": "offline_access accounting.transactions accounting.contacts",
-        "state": state,
-    }
-    authorize_url = f"https://login.xero.com/identity/connect/authorize?{urlencode(params)}"
-    
-    log_info("Initiating Xero OAuth flow", user_id=session_data.user_id, redirect_uri=redirect_uri)
-    return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-@app.get("/xero/callback", name="xero_callback")
-async def xero_callback(
-    request: Request,
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
-):
-    """Handle Xero OAuth2 callback and exchange code for tokens."""
-    if error:
-        # Sanitize error message to prevent URL redirection attacks
-        message = request.query_params.get("error_description", error)
-        # Only use alphanumeric, spaces, and basic punctuation
-        safe_message = "".join(c if c.isalnum() or c in " .-_" else "" for c in str(message)[:200])
-        encoded = urlencode({"error": safe_message or "authorization_error"})
-        return RedirectResponse(url=f"/admin/modules?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
-    
-    if not code or not state:
-        return RedirectResponse(
-            url="/admin/modules?error=invalid+response",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    
-    # Verify state token
-    try:
-        state_data = xero_oauth_state_serializer.loads(state)
-    except BadSignature:
-        return RedirectResponse(
-            url="/admin/modules?error=invalid+state",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    
-    credentials = await modules_service.get_xero_credentials()
-    if not credentials:
-        return RedirectResponse(
-            url="/admin/modules?error=missing+credentials",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    
-    client_id = credentials.get("client_id", "").strip()
-    client_secret = credentials.get("client_secret", "").strip()
-    
-    if not (client_id and client_secret):
-        return RedirectResponse(
-            url="/admin/modules?error=incomplete+credentials",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    
-    # Exchange authorization code for tokens
-    token_url = "https://identity.xero.com/connect/token"
-    redirect_uri = _build_xero_redirect_uri()
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": redirect_uri,
-    }
-    
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                token_url,
-                data=data,
-                auth=(client_id, client_secret),
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        log_error(
-            "Xero authorization failed",
-            status=exc.response.status_code if exc.response else None,
-            body=exc.response.text if exc.response else None,
-        )
-        return RedirectResponse(
-            url="/admin/modules?error=authorization+failed",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    except Exception as exc:
-        log_error("Xero authorization error", error=str(exc))
-        return RedirectResponse(
-            url="/admin/modules?error=connection+failed",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    
-    payload = response.json()
-    access_token = payload.get("access_token")
-    refresh_token = payload.get("refresh_token")
-    expires_in = payload.get("expires_in")
-    
-    if not (access_token and refresh_token):
-        log_error("Xero token response missing tokens", payload_keys=list(payload.keys()))
-        return RedirectResponse(
-            url="/admin/modules?error=invalid+token+response",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-    
-    # Calculate token expiry
-    expires_at = None
-    if isinstance(expires_in, (int, float)):
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
-    
-    # Fetch tenant connections to get tenant_id
-    tenant_id = None
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            connections_response = await client.get(
-                "https://api.xero.com/connections",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
-            )
-        connections_response.raise_for_status()
-        connections = connections_response.json()
-        
-        # Get the first tenant_id if we have connections
-        if connections and len(connections) > 0:
-            tenant_id = connections[0].get("tenantId")
-            if tenant_id:
-                log_info("Discovered Xero tenant_id", tenant_id=tenant_id)
-    except Exception as exc:
-        # Don't fail the entire flow if we can't fetch connections
-        log_error("Failed to fetch Xero connections", error=str(exc))
-    
-    # Store tokens and tenant_id (tokens will be encrypted by update_xero_tokens)
-    await modules_service.update_xero_tokens(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_expires_at=expires_at,
-        tenant_id=tenant_id,
-    )
-    
-    log_info("Xero OAuth callback processed successfully", user_id=state_data.get("user_id"))
-    return RedirectResponse(url="/admin/modules?success=xero+authorized", status_code=status.HTTP_303_SEE_OTHER)
 
 
 async def shop_page(
