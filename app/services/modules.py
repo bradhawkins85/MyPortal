@@ -658,22 +658,6 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
-        "slug": "create-ticket",
-        "name": "Create Ticket",
-        "description": "Create a new support ticket with customizable details.",
-        "icon": "🎫",
-        "settings": {},
-        "enabled": True,  # Internal action module - no external configuration required
-    },
-    {
-        "slug": "create-task",
-        "name": "Create Task",
-        "description": "Create a new task for a ticket.",
-        "icon": "✓",
-        "settings": {},
-        "enabled": True,  # Internal action module - no external configuration required
-    },
-    {
         "slug": "call-recordings",
         "name": "Call Recordings",
         "description": "Configure the storage location for call recording files. Set the base directory path where recording files should be stored or retrieved, and pick the phone system that produced the recordings so the files can be processed correctly.",
@@ -698,34 +682,10 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
-        "slug": "update-ticket",
-        "name": "Update Ticket",
-        "description": "Update ticket fields such as status, priority, assigned user, category, and requester.",
-        "icon": "✏️",
-        "settings": {},
-        "enabled": True,  # Internal action module - no external configuration required
-    },
-    {
-        "slug": "update-ticket-description",
-        "name": "Update Ticket Description",
-        "description": "Change the description field of an existing ticket.",
-        "icon": "📝",
-        "settings": {},
-        "enabled": True,  # Internal action module - no external configuration required
-    },
-    {
         "slug": "reprocess-ai",
         "name": "Reprocess AI",
         "description": "Re-trigger AI processing to regenerate ticket summary and tags using the Ollama model.",
         "icon": "🔄",
-        "settings": {},
-        "enabled": True,  # Internal action module - no external configuration required
-    },
-    {
-        "slug": "add-ticket-reply",
-        "name": "Add Ticket Reply",
-        "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
-        "icon": "💬",
         "settings": {},
         "enabled": True,  # Internal action module - no external configuration required
     },
@@ -791,6 +751,66 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+_ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
+    {
+        "slug": "create-ticket",
+        "name": "Create Ticket",
+        "description": "Create a new support ticket with customizable details.",
+        "icon": "🎫",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "create-task",
+        "name": "Create Task",
+        "description": "Create a new task for a ticket.",
+        "icon": "✓",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "update-ticket",
+        "name": "Update Ticket",
+        "description": "Update ticket fields such as status, priority, assigned user, category, and requester.",
+        "icon": "✏️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "update-ticket-description",
+        "name": "Update Ticket Description",
+        "description": "Change the description field of an existing ticket.",
+        "icon": "📝",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "add-ticket-reply",
+        "name": "Add Ticket Reply",
+        "description": "Add a reply to an existing ticket. Supports public replies, internal notes, and optional time tracking with billable/non-billable hours.",
+        "icon": "💬",
+        "settings": {},
+        "enabled": True,
+    },
+)
+_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
+    str(module.get("slug") or "").strip() for module in _ALWAYS_ON_TICKET_ACTION_MODULES
+}
+_ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG = {
+    str(module.get("slug") or "").strip(): module for module in _ALWAYS_ON_TICKET_ACTION_MODULES
+}
+
+
+def _is_always_on_ticket_action_module(slug: str) -> bool:
+    return str(slug or "").strip() in _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
+
+
+def _get_always_on_ticket_action_module(slug: str) -> dict[str, Any] | None:
+    key = str(slug or "").strip()
+    module = _ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG.get(key)
+    return dict(module) if module else None
 
 
 def _default_module_setting(slug: str, key: str, fallback: str) -> str:
@@ -1369,7 +1389,11 @@ async def ensure_default_modules() -> None:
 
 async def list_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
-    return [_redact_module_settings(module) for module in modules]
+    return [
+        _redact_module_settings(module)
+        for module in modules
+        if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
+    ]
 
 
 async def get_module_settings(slug: str) -> dict[str, Any] | None:
@@ -1570,14 +1594,18 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     in the trigger actions menu.
     """
     modules = await module_repo.list_modules()
-    actionable_modules: list[dict[str, Any]] = []
+    actionable_by_slug: dict[str, dict[str, Any]] = {}
     for module in modules:
         if module.get("slug") in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get("enabled", False):
             continue
         redacted = _redact_module_settings(module)
         redacted["payload_schema"] = get_action_payload_schema(str(module.get("slug") or ""))
-        actionable_modules.append(redacted)
-    return actionable_modules
+        actionable_by_slug[str(module.get("slug") or "")] = redacted
+    for module in _ALWAYS_ON_TICKET_ACTION_MODULES:
+        internal_module = dict(module)
+        internal_module["payload_schema"] = get_action_payload_schema(str(module.get("slug") or ""))
+        actionable_by_slug[str(module.get("slug") or "")] = internal_module
+    return sorted(actionable_by_slug.values(), key=lambda module: str(module.get("name") or "").lower())
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
@@ -1616,11 +1644,13 @@ async def trigger_module(
     background: bool = True,
     on_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
-    module = await module_repo.get_module(slug)
+    module = _get_always_on_ticket_action_module(slug)
     if not module:
-        raise ValueError(f"Module {slug} is not configured")
-    if not module.get("enabled"):
-        return {"status": "skipped", "reason": "Module disabled", "module": slug}
+        module = await module_repo.get_module(slug)
+        if not module:
+            raise ValueError(f"Module {slug} is not configured")
+        if not module.get("enabled"):
+            return {"status": "skipped", "reason": "Module disabled", "module": slug}
     raw_settings = module.get("settings")
     if isinstance(raw_settings, Mapping):
         settings = _coerce_settings(slug, raw_settings)
