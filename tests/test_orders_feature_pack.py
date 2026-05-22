@@ -1,4 +1,4 @@
-"""Smoke tests for the ``cart`` feature pack."""
+"""Smoke tests for the ``orders`` feature pack."""
 
 from __future__ import annotations
 
@@ -6,16 +6,11 @@ from fastapi import FastAPI
 
 import app.main as main_module
 from app.core.features import init_registry
-from app.features.cart import PACK
+from app.features.orders import PACK
 
 
 EXPECTED = {
-    ("POST", "/cart/add"),
-    ("POST", "/cart/add-package"),
-    ("GET", "/cart"),
-    ("POST", "/cart/update"),
-    ("POST", "/cart/remove"),
-    ("POST", "/cart/place-order"),
+    ("GET", "/orders"),
 }
 
 
@@ -31,19 +26,19 @@ def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
-def test_cart_pack_manifest_declares_all_routes():
+def test_orders_pack_manifest_declares_all_routes():
     declared = set()
     for router in PACK.routers:
         for route in router.routes:
             for method in route.methods or set():
                 declared.add((method, route.path))
 
-    assert PACK.slug == "cart"
+    assert PACK.slug == "orders"
     assert PACK.version
     assert declared == EXPECTED
 
 
-def test_app_main_no_longer_owns_cart_routes():
+def test_app_main_no_longer_owns_order_routes():
     in_main_app = _routes_for(main_module.app)
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
@@ -52,18 +47,18 @@ def test_app_main_no_longer_owns_cart_routes():
         )
 
 
-def test_cart_pack_loads_and_reloads_cleanly():
+def test_orders_pack_loads_and_reloads_cleanly():
     import asyncio
 
     async def _run() -> None:
         test_app = FastAPI()
         registry = init_registry(test_app)
 
-        await registry.load("cart")
+        await registry.load("orders")
         after_load = _routes_for(test_app)
         assert EXPECTED.issubset(after_load)
 
-        await registry.reload("cart")
+        await registry.reload("orders")
         after_reload = _routes_for(test_app)
         assert EXPECTED.issubset(after_reload)
 
