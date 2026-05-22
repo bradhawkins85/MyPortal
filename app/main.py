@@ -90,7 +90,6 @@ from app.api.routes import (
     roles,
     service_status as service_status_api,
     smtp2go_webhooks,
-    solidtime as solidtime_api,
     staff as staff_api,
     subscriptions as subscriptions_api,
     tag_exclusions,
@@ -1093,7 +1092,6 @@ app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(xero.router)
 app.include_router(trello_api.router)
-app.include_router(solidtime_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
