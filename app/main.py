@@ -9609,7 +9609,6 @@ async def legacy_forms_redirect() -> RedirectResponse:
     return RedirectResponse(url="/myforms", status_code=status.HTTP_308_PERMANENT_REDIRECT)
 
 
-@app.get("/staff", response_class=HTMLResponse)
 async def staff_page(
     request: Request,
     enabled: str = "",
@@ -11011,7 +11010,6 @@ async def _extract_workflow_policy_payload(request: Request) -> CompanyWorkflowP
         ) from exc
 
 
-@app.get("/staff/workflows/onboarding", response_class=HTMLResponse)
 async def staff_onboarding_workflow_page(request: Request):
     (
         user,
@@ -11036,7 +11034,6 @@ async def staff_onboarding_workflow_page(request: Request):
     return await _render_template("staff/workflows_onboarding.html", request, user, extra=extra)
 
 
-@app.get("/staff/workflows/onboarding/policy")
 async def staff_onboarding_workflow_policy(request: Request):
     (
         _user,
@@ -11061,7 +11058,6 @@ async def staff_onboarding_workflow_policy(request: Request):
     )
 
 
-@app.post("/staff/workflows/onboarding/policy")
 async def upsert_staff_onboarding_workflow_policy(request: Request):
     (
         user,
@@ -11097,7 +11093,6 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
     return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated)})
 
 
-@app.get("/staff/workflows/offboarding", response_class=HTMLResponse)
 async def staff_offboarding_workflow_page(request: Request):
     (
         user,
@@ -11122,7 +11117,6 @@ async def staff_offboarding_workflow_page(request: Request):
     return await _render_template("staff/workflows_offboarding.html", request, user, extra=extra)
 
 
-@app.get("/staff/workflows/offboarding/policy")
 async def staff_offboarding_workflow_policy(request: Request):
     (
         _user,
@@ -11154,7 +11148,6 @@ async def staff_offboarding_workflow_policy(request: Request):
     )
 
 
-@app.post("/staff/workflows/offboarding/policy")
 async def upsert_staff_offboarding_workflow_policy(request: Request):
     (
         user,
@@ -11204,7 +11197,6 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
     )
 
 
-@app.get("/staff/workflows/{direction}/policies")
 async def list_staff_workflow_policies(direction: str, request: Request):
     (
         _user,
@@ -11233,7 +11225,6 @@ async def list_staff_workflow_policies(direction: str, request: Request):
     )
 
 
-@app.post("/staff/workflows/{direction}/policies")
 async def create_staff_workflow_policy(direction: str, request: Request):
     (
         user,
@@ -11274,7 +11265,6 @@ async def create_staff_workflow_policy(direction: str, request: Request):
     return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)})
 
 
-@app.put("/staff/workflows/{direction}/policies/{policy_id}")
 async def update_staff_workflow_policy(direction: str, policy_id: int, request: Request):
     (
         user,
@@ -11318,7 +11308,6 @@ async def update_staff_workflow_policy(direction: str, policy_id: int, request: 
     return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)})
 
 
-@app.delete("/staff/workflows/{direction}/policies/{policy_id}")
 async def delete_staff_workflow_policy(direction: str, policy_id: int, request: Request):
     (
         user,
@@ -11348,7 +11337,6 @@ async def delete_staff_workflow_policy(direction: str, policy_id: int, request: 
     return JSONResponse({"success": True})
 
 
-@app.get("/staff/workflows/history", response_class=HTMLResponse)
 async def staff_workflow_history_page(request: Request):
     (
         user,
@@ -11375,7 +11363,6 @@ async def staff_workflow_history_page(request: Request):
     return await _render_template("staff/workflow_history.html", request, user, extra=extra)
 
 
-@app.get("/staff/workflows/history/recent")
 async def staff_workflow_history_recent(request: Request):
     (
         user,
@@ -11465,7 +11452,6 @@ async def staff_workflow_history_recent(request: Request):
     return JSONResponse({"executions": items, "total": len(items)})
 
 
-@app.post("/api/staff/workflows/executions/{execution_id}/retry")
 async def retry_workflow_execution(execution_id: int, request: Request):
     (
         user,
@@ -11490,7 +11476,6 @@ async def retry_workflow_execution(execution_id: int, request: Request):
     return JSONResponse(result)
 
 
-@app.post("/staff", response_class=HTMLResponse)
 async def create_staff_member(request: Request):
     (
         user,
@@ -11606,7 +11591,6 @@ async def create_staff_member(request: Request):
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.put("/staff/{staff_id}")
 async def update_staff_member(staff_id: int, request: Request):
     (
         user,
@@ -11737,7 +11721,6 @@ async def update_staff_member(staff_id: int, request: Request):
     return JSONResponse({"success": True, "staff": updated})
 
 
-@app.post("/api/staff/{staff_id}/offboarding/request")
 async def request_staff_offboarding(staff_id: int, request: Request):
     (
         user,
@@ -11924,7 +11907,6 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     return JSONResponse({"success": True, "staff": updated})
 
 
-@app.delete("/staff/{staff_id}")
 async def delete_staff_member(staff_id: int, request: Request):
     (
         user,
@@ -11943,7 +11925,6 @@ async def delete_staff_member(staff_id: int, request: Request):
     return JSONResponse({"success": True})
 
 
-@app.post("/staff/enabled", response_class=HTMLResponse)
 async def set_staff_enabled(request: Request):
     (
         user,
@@ -11973,7 +11954,6 @@ async def set_staff_enabled(request: Request):
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post("/staff/{staff_id}/verify")
 async def verify_staff_member(staff_id: int, request: Request):
     (
         user,
@@ -12038,7 +12018,6 @@ async def verify_staff_member(staff_id: int, request: Request):
     })
 
 
-@app.post("/staff/{staff_id}/invite")
 async def invite_staff_member(staff_id: int, request: Request):
     (
         user,
@@ -12147,7 +12126,6 @@ async def invite_staff_member(staff_id: int, request: Request):
     return JSONResponse({"success": True})
 
 
-@app.post("/api/staff/{staff_id}/m365/reset-password")
 async def m365_reset_staff_password(staff_id: int, request: Request):
     """Reset the Office 365 password for the staff member identified by *staff_id*.
 
@@ -12189,7 +12167,6 @@ async def m365_reset_staff_password(staff_id: int, request: Request):
     return JSONResponse({"success": True, "password": new_password})
 
 
-@app.post("/api/staff/{staff_id}/m365/sign-in")
 async def m365_set_staff_sign_in(staff_id: int, request: Request):
     """Enable or disable Office 365 sign-in for the staff member.
 
