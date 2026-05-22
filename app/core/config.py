@@ -155,7 +155,7 @@ class Settings(BaseSettings):
             "hot-reloaded via ``POST /api/features/{slug}/reload``.  "
             "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,cart,orders,staff,message_templates,plausible,password_pusher' "
             "because the ticket, service-status, notifications, knowledge-base, "
-            "chat, assets, automations, reports, reporting, backups, issue-tracker, webhooks, shop, quotes, invoices, compliance, continuity, help, subscriptions, companies, API keys, call recordings, cart, orders, staff, message templates, Plausible routes, and Password Pusher integration all live in those packs; set to an empty string "
+            "chat, assets, automations, reports, reporting, backups, issue-tracker, webhooks, shop, quotes, invoices, compliance, continuity, help, subscriptions, companies, API keys, call recordings, cart, orders, staff, message templates, Plausible, and Password Pusher integrations all live in those packs; set to an empty string "
             "to disable all packs (those routes will then 404)."
         ),
     )
