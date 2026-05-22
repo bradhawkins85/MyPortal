@@ -95,7 +95,6 @@ from app.api.routes import (
     tag_exclusions,
     tickets as tickets_api,
     tray as tray_api,
-    trello as trello_api,
     users,
     system,
     uptimekuma,
@@ -1091,7 +1090,6 @@ app.include_router(uptimekuma.router)
 app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(xero.router)
-app.include_router(trello_api.router)
 app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
