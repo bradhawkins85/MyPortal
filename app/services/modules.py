@@ -796,19 +796,23 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
     },
 )
 _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
-    str(module.get("slug") or "").strip() for module in _ALWAYS_ON_TICKET_ACTION_MODULES
+    module["slug"] for module in _ALWAYS_ON_TICKET_ACTION_MODULES
 }
 _ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG = {
-    str(module.get("slug") or "").strip(): module for module in _ALWAYS_ON_TICKET_ACTION_MODULES
+    module["slug"]: module for module in _ALWAYS_ON_TICKET_ACTION_MODULES
 }
+
+
+def _normalise_slug(value: str | None) -> str:
+    return str(value or "").strip()
 
 
 def _is_always_on_ticket_action_module(slug: str) -> bool:
-    return str(slug or "").strip() in _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
+    return _normalise_slug(slug) in _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 
 
 def _get_always_on_ticket_action_module(slug: str) -> dict[str, Any] | None:
-    key = str(slug or "").strip()
+    key = _normalise_slug(slug)
     module = _ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG.get(key)
     return dict(module) if module else None
 
@@ -1596,15 +1600,17 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
     actionable_by_slug: dict[str, dict[str, Any]] = {}
     for module in modules:
-        if module.get("slug") in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get("enabled", False):
+        module_slug = _normalise_slug(str(module.get("slug") or ""))
+        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get("enabled", False):
             continue
         redacted = _redact_module_settings(module)
-        redacted["payload_schema"] = get_action_payload_schema(str(module.get("slug") or ""))
-        actionable_by_slug[str(module.get("slug") or "")] = redacted
+        redacted["payload_schema"] = get_action_payload_schema(module_slug)
+        actionable_by_slug[module_slug] = redacted
     for module in _ALWAYS_ON_TICKET_ACTION_MODULES:
+        module_slug = module["slug"]
         internal_module = dict(module)
-        internal_module["payload_schema"] = get_action_payload_schema(str(module.get("slug") or ""))
-        actionable_by_slug[str(module.get("slug") or "")] = internal_module
+        internal_module["payload_schema"] = get_action_payload_schema(module_slug)
+        actionable_by_slug[module_slug] = internal_module
     return sorted(actionable_by_slug.values(), key=lambda module: str(module.get("name") or "").lower())
 
 
