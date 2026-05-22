@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 
@@ -15,12 +15,17 @@ def _main():
     return main_module
 
 
-router.add_api_route(
-    "/orders",
-    _main().orders_page,
-    methods=["GET"],
-    response_class=HTMLResponse,
-)
+@router.get("/orders", response_class=HTMLResponse)
+async def route_orders_page(
+    request: Request,
+    status_filter: str | None = Query(None, alias="status"),
+    shipping_filter: str | None = Query(None, alias="shippingStatus"),
+):
+    return await _main().orders_page(
+        request=request,
+        status_filter=status_filter,
+        shipping_filter=shipping_filter,
+    )
 
 
 __all__ = ["router"]
