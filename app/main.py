@@ -4874,7 +4874,6 @@ async def _resolve_user_can_run_report(
         return False
 
 
-@app.get("/reporting", response_class=HTMLResponse)
 async def reporting_page(
     request: Request,
     report: int | None = Query(default=None),
@@ -4944,7 +4943,6 @@ async def reporting_page(
     return await _render_template("reporting/index.html", request, user, extra=extra)
 
 
-@app.get("/reporting/{report_id}/export")
 async def reporting_export(request: Request, report_id: int, format: str = Query(default="csv")):
     user, is_super_admin, redirect = await _require_reporting_access(request)
     if redirect:
@@ -5032,7 +5030,6 @@ async def reporting_export(request: Request, report_id: int, format: str = Query
     )
 
 
-@app.get("/admin/reporting", response_class=HTMLResponse)
 async def admin_reporting(
     request: Request,
     success: str | None = Query(default=None),
@@ -5056,7 +5053,6 @@ async def admin_reporting(
     return await _render_template("admin/reporting.html", request, user, extra=extra)
 
 
-@app.get("/admin/reporting/new", response_class=HTMLResponse)
 async def admin_reporting_new(request: Request, error: str | None = Query(default=None)):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5076,7 +5072,6 @@ async def admin_reporting_new(request: Request, error: str | None = Query(defaul
     return await _render_template("admin/reporting_form.html", request, user, extra=extra)
 
 
-@app.get("/admin/reporting/{report_id}/edit", response_class=HTMLResponse)
 async def admin_reporting_edit(
     request: Request, report_id: int, error: str | None = Query(default=None)
 ):
@@ -5148,7 +5143,6 @@ def _validate_reporting_input(payload: dict[str, Any]) -> str | None:
     return None
 
 
-@app.post("/admin/reporting", response_class=HTMLResponse)
 async def admin_reporting_create(request: Request):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5197,7 +5191,6 @@ async def admin_reporting_create(request: Request):
     )
 
 
-@app.post("/admin/reporting/{report_id}", response_class=HTMLResponse)
 async def admin_reporting_update(request: Request, report_id: int):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5261,7 +5254,6 @@ async def admin_reporting_update(request: Request, report_id: int):
     )
 
 
-@app.post("/admin/reporting/{report_id}/delete", response_class=HTMLResponse)
 async def admin_reporting_delete(request: Request, report_id: int):
     user, redirect = await _require_super_admin_page(request)
     if redirect:
