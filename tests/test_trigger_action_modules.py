@@ -124,11 +124,11 @@ async def test_list_trigger_action_modules_redacts_settings(monkeypatch):
     # Call the function
     result = await modules.list_trigger_action_modules()
     
-    smtp_module = next((module for module in result if module.get("slug") == "smtp"), None)
-    assert smtp_module is not None
-    assert "settings" in smtp_module
-    assert "payload_schema" in smtp_module
-    assert isinstance(smtp_module["payload_schema"], dict)
+    smtp_module_from_result = next((module for module in result if module.get("slug") == "smtp"), None)
+    assert smtp_module_from_result is not None
+    assert "settings" in smtp_module_from_result
+    assert "payload_schema" in smtp_module_from_result
+    assert isinstance(smtp_module_from_result["payload_schema"], dict)
 
 
 def test_always_on_ticket_action_modules_are_not_default_integration_modules():
