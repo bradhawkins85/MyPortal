@@ -9720,7 +9720,7 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "Disable sign-in & remove access",
         "description": (
             "Disables sign-in and optionally removes licenses/group membership. "
-            "Can also set out-of-office reply and configure email forwarding using "
+            "Can also remove Exchange calendar events, set out-of-office reply, and configure email forwarding using "
             "${vars.offboarding.*} variables from the request."
         ),
     },
@@ -10188,6 +10188,16 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Remove from groups",
                 "type": "checkbox",
                 "default": False,
+            },
+            {
+                "name": "remove_calendar_events",
+                "label": "Cancel future calendar events",
+                "type": "checkbox",
+                "default": False,
+                "description": (
+                    "Runs Exchange Online Remove-CalendarEvents with -CancelOrganizedMeetings "
+                    "for the offboarded user."
+                ),
             },
             {
                 "name": "forwarding_address",

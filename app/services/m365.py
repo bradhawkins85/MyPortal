@@ -4991,6 +4991,34 @@ async def enable_user_archive(company_id: int, upn: str) -> None:
     )
 
 
+async def remove_calendar_events(company_id: int, upn: str) -> None:
+    """Cancel organised meetings for ``upn`` using Exchange Online cmdlets.
+
+    Uses ``Remove-CalendarEvents`` with ``-CancelOrganizedMeetings`` so
+    future meetings owned by the departing user are cancelled as part of
+    offboarding.
+    """
+    normalised = str(upn or "").strip()
+    if not normalised:
+        raise M365Error("A user principal name is required", http_status=400)
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Remove-CalendarEvents",
+        {
+            "Identity": normalised,
+            "CancelOrganizedMeetings": True,
+        },
+    )
+    log_info(
+        "M365 calendar events removed for offboarded user",
+        company_id=company_id,
+        upn=normalised,
+    )
+
+
 async def get_mailbox_permissions(company_id: int, upn: str) -> dict[str, Any]:
     """Return mailbox permission details for a given UPN.
 
