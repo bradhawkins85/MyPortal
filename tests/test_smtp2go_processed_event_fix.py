@@ -7,11 +7,22 @@ The issue was that "processed" events from SMTP2Go were not being handled,
 resulting in "Event processing failed - unknown email ID or message not tracked" errors.
 """
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, feature_registry
+
+
+@pytest.fixture(scope="module", autouse=True)
+def smtp_feature_pack_loaded():
+    """Load the SMTP feature pack for endpoint tests without full app startup."""
+    asyncio.run(feature_registry.load("smtp"))
+    try:
+        yield
+    finally:
+        asyncio.run(feature_registry.unload("smtp"))
 
 
 @pytest.fixture
