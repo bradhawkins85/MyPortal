@@ -129,7 +129,7 @@ async def test_webhook_accepts_single_event_object(client):
 async def test_webhook_signature_verification_can_be_disabled(client):
     """Ensure signature checks can be disabled even when a secret is configured."""
     with patch('app.services.modules.get_module_settings', new_callable=AsyncMock) as mock_settings, \
-         patch('app.api.routes.smtp2go_webhooks.verify_webhook_signature', new_callable=AsyncMock) as mock_verify, \
+         patch('app.features.smtp.routes.verify_webhook_signature', new_callable=AsyncMock) as mock_verify, \
          patch('app.services.smtp2go.process_webhook_event', new_callable=AsyncMock) as mock_process, \
          patch('app.services.webhook_monitor.log_incoming_webhook', new_callable=AsyncMock):
 
