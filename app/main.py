@@ -12910,7 +12910,6 @@ async def admin_update_company(company_id: int, request: Request):
     )
 
 
-@app.get("/api/admin/companies/{company_id}/shop-items", response_class=JSONResponse)
 async def admin_company_shop_items_api(request: Request, company_id: int):
     """Return all non-archived shop products with their hidden status for a company."""
     _current_user, redirect = await _require_super_admin_page(request)
@@ -12925,12 +12924,6 @@ async def admin_company_shop_items_api(request: Request, company_id: int):
     return JSONResponse(content=cast(list[dict[str, Any]], _serialise_for_json(products)))
 
 
-@app.post(
-    "/admin/companies/{company_id}/shop-visibility",
-    status_code=status.HTTP_303_SEE_OTHER,
-    summary="Update shop item visibility for a company",
-    tags=["Shop"],
-)
 async def admin_update_company_shop_visibility(
     request: Request,
     company_id: int,
