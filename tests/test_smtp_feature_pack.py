@@ -87,4 +87,4 @@ def test_smtp_pack_loads_and_reloads_cleanly():
 
         await registry.unload_all()
 
-    asyncio.new_event_loop().run_until_complete(_run())
+    asyncio.run(_run())

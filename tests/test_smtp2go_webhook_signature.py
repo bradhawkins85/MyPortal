@@ -15,13 +15,11 @@ from app.main import app, feature_registry
 @pytest.fixture(scope="module", autouse=True)
 def smtp_feature_pack_loaded():
     """Load the SMTP feature pack for endpoint tests without full app startup."""
-    loop = asyncio.new_event_loop()
+    asyncio.run(feature_registry.load("smtp"))
     try:
-        loop.run_until_complete(feature_registry.load("smtp"))
         yield
-        loop.run_until_complete(feature_registry.unload("smtp"))
     finally:
-        loop.close()
+        asyncio.run(feature_registry.unload("smtp"))
 
 
 @pytest.fixture
