@@ -1943,6 +1943,9 @@ async def _run_offboarding_step(
     remove_calendar_events = bool(
         _step.get("remove_calendar_events", policy_config.get("offboarding_remove_calendar_events", False))
     )
+    disable_mailbox_rules = bool(
+        _step.get("disable_mailbox_rules", policy_config.get("offboarding_disable_mailbox_rules", False))
+    )
     configured_group_ids = [
         str(group_id).strip()
         for group_id in (policy_config.get("offboarding_group_ids") or [])
@@ -1985,6 +1988,7 @@ async def _run_offboarding_step(
     steps_executed: list[str] = []
     removed_license_count = 0
     removed_group_count = 0
+    mailbox_rules_disabled_count = 0
 
     if disable_sign_in:
         await _graph_patch(
@@ -2036,6 +2040,40 @@ async def _run_offboarding_step(
     if remove_calendar_events and user_upn:
         await m365_service.remove_calendar_events(company_id, user_upn)
         steps_executed.append("remove_calendar_events")
+
+    if disable_mailbox_rules:
+        try:
+            mailbox_rules = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailFolders/inbox/messageRules?$select=id,isEnabled",
+            )
+            for rule in mailbox_rules:
+                rule_id = str(rule.get("id") or "").strip()
+                if not rule_id:
+                    continue
+                if not bool(rule.get("isEnabled", True)):
+                    continue
+                try:
+                    await _graph_patch(
+                        access_token,
+                        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/mailFolders/inbox/messageRules/{quote(rule_id, safe='')}",
+                        {"isEnabled": False},
+                    )
+                    mailbox_rules_disabled_count += 1
+                except WorkflowStepError as exc:
+                    if exc.http_status == 404:
+                        continue
+                    raise
+            steps_executed.append("disable_mailbox_rules")
+        except M365Error as exc:
+            if exc.http_status == 404:
+                log_warning(
+                    "Offboarding: messageRules not available (no Exchange Online mailbox)",
+                    user_id=user_id,
+                    user_upn=user_upn,
+                )
+            else:
+                raise
 
     if remove_licenses:
         license_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
@@ -2104,6 +2142,7 @@ async def _run_offboarding_step(
         "steps_executed": steps_executed,
         "licenses_removed": removed_license_count,
         "groups_removed": removed_group_count,
+        "mailbox_rules_disabled": mailbox_rules_disabled_count,
         "out_of_office_set": "set_out_of_office" in steps_executed,
         "email_forwarding_set": "set_email_forwarding" in steps_executed,
         "mailbox_access_requested_for": mailbox_grant_email_list,
