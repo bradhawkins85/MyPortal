@@ -54,6 +54,8 @@ EXPECTED = {
     ("POST", "/shop/admin/product/{product_id}/unarchive"),
     ("POST", "/shop/admin/product/{product_id}/visibility"),
     ("POST", "/shop/admin/product/{product_id}/delete"),
+    ("GET", "/api/admin/companies/{company_id}/shop-items"),
+    ("POST", "/admin/companies/{company_id}/shop-visibility"),
 }
 
 
