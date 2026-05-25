@@ -20923,7 +20923,6 @@ async def admin_m365_mail_disconnect(account_id: int, request: Request):
     )
 
 
-@app.post("/admin/modules/tacticalrmm/push-companies", response_class=HTMLResponse)
 async def admin_push_companies_to_tactical_rmm(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -21014,7 +21013,6 @@ async def admin_push_companies_to_tactical_rmm(request: Request):
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post("/admin/modules/tacticalrmm/pull-companies", response_class=HTMLResponse)
 async def admin_pull_companies_from_tactical_rmm(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
