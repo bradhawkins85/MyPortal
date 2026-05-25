@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any
 from urllib.parse import quote
 
@@ -13,14 +12,24 @@ from app.core.logging import log_error
 from app.repositories import companies as company_repo
 from app.services import imap as imap_service
 
+__all__ = ["router"]
+
 router = APIRouter(tags=["IMAP"])
 
 
-@lru_cache(maxsize=1)
 def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _form_bool(form: Any, key: str) -> bool:
+    value = form.get(key)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "off"}
+    return bool(value)
 
 
 async def _render_imap_dashboard(
@@ -92,9 +101,9 @@ async def admin_create_imap_account(request: Request):
         "folder": form.get("folder", ""),
         "schedule_cron": form.get("scheduleCron", ""),
         "filter_query": form.get("filterQuery"),
-        "process_unread_only": main_module._form_bool(form, "processUnreadOnly"),
-        "mark_as_read": main_module._form_bool(form, "markAsRead"),
-        "active": main_module._form_bool(form, "active"),
+        "process_unread_only": _form_bool(form, "processUnreadOnly"),
+        "mark_as_read": _form_bool(form, "markAsRead"),
+        "active": _form_bool(form, "active"),
     }
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
@@ -104,6 +113,7 @@ async def admin_create_imap_account(request: Request):
             return await _render_imap_dashboard(
                 request,
                 current_user,
+                success_message=None,
                 error_message="Priority must be a whole number.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -115,6 +125,7 @@ async def admin_create_imap_account(request: Request):
             return await _render_imap_dashboard(
                 request,
                 current_user,
+                success_message=None,
                 error_message="Company selection is invalid.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -124,6 +135,7 @@ async def admin_create_imap_account(request: Request):
         return await _render_imap_dashboard(
             request,
             current_user,
+            success_message=None,
             error_message=str(exc),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -132,6 +144,7 @@ async def admin_create_imap_account(request: Request):
         return await _render_imap_dashboard(
             request,
             current_user,
+            success_message=None,
             error_message="Unable to create the IMAP account. Please verify the configuration and try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -167,9 +180,9 @@ async def admin_update_imap_account(account_id: int, request: Request):
         updates["schedule_cron"] = form.get("scheduleCron")
     if "filterQuery" in form:
         updates["filter_query"] = form.get("filterQuery")
-    updates["process_unread_only"] = main_module._form_bool(form, "processUnreadOnly")
-    updates["mark_as_read"] = main_module._form_bool(form, "markAsRead")
-    updates["active"] = main_module._form_bool(form, "active")
+    updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
+    updates["mark_as_read"] = _form_bool(form, "markAsRead")
+    updates["active"] = _form_bool(form, "active")
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
         try:
@@ -179,6 +192,7 @@ async def admin_update_imap_account(account_id: int, request: Request):
                 request,
                 current_user,
                 editing_account_id=account_id,
+                success_message=None,
                 error_message="Priority must be a whole number.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -193,6 +207,7 @@ async def admin_update_imap_account(account_id: int, request: Request):
                 request,
                 current_user,
                 editing_account_id=account_id,
+                success_message=None,
                 error_message="Company selection is invalid.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -203,6 +218,7 @@ async def admin_update_imap_account(account_id: int, request: Request):
             request,
             current_user,
             editing_account_id=account_id,
+            success_message=None,
             error_message=str(exc),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -212,6 +228,7 @@ async def admin_update_imap_account(account_id: int, request: Request):
             request,
             current_user,
             editing_account_id=account_id,
+            success_message=None,
             error_message="Unable to update the IMAP account. Please review the settings and try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -234,6 +251,7 @@ async def admin_clone_imap_account(account_id: int, request: Request):
         return await _render_imap_dashboard(
             request,
             current_user,
+            success_message=None,
             error_message=str(exc),
             status_code=status.HTTP_404_NOT_FOUND,
         )
@@ -241,6 +259,7 @@ async def admin_clone_imap_account(account_id: int, request: Request):
         return await _render_imap_dashboard(
             request,
             current_user,
+            success_message=None,
             error_message=str(exc),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -249,6 +268,7 @@ async def admin_clone_imap_account(account_id: int, request: Request):
         return await _render_imap_dashboard(
             request,
             current_user,
+            success_message=None,
             error_message="Unable to clone the IMAP account at this time.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -274,6 +294,7 @@ async def admin_delete_imap_account(account_id: int, request: Request):
         return await _render_imap_dashboard(
             request,
             current_user,
+            success_message=None,
             error_message="Unable to delete the IMAP account at this time.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -320,4 +341,3 @@ async def admin_sync_imap_account(account_id: int, request: Request):
         url=f"/admin/modules/imap?success={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
-__all__ = ["router"]
