@@ -9720,7 +9720,7 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "name": "Disable sign-in & remove access",
         "description": (
             "Disables sign-in and optionally removes licenses/group membership. "
-            "Can also remove Exchange calendar events, set out-of-office reply, and configure email forwarding using "
+            "Can also cancel future Exchange calendar events, set out-of-office reply, and configure email forwarding using "
             "${vars.offboarding.*} variables from the request."
         ),
     },
