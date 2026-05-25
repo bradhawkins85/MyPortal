@@ -10190,6 +10190,13 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "default": False,
             },
             {
+                "name": "disable_mailbox_rules",
+                "label": "Disable all mailbox rules",
+                "type": "checkbox",
+                "default": False,
+                "description": "Disables every inbox message rule on the offboarded mailbox.",
+            },
+            {
                 "name": "remove_calendar_events",
                 "label": "Cancel future calendar events",
                 "type": "checkbox",
