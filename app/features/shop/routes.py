@@ -225,6 +225,20 @@ _add(
     ["POST"],
     status_code=303,
 )
+_add(
+    "/api/admin/companies/{company_id}/shop-items",
+    "admin_company_shop_items_api",
+    ["GET"],
+    response_class=JSONResponse,
+)
+_add(
+    "/admin/companies/{company_id}/shop-visibility",
+    "admin_update_company_shop_visibility",
+    ["POST"],
+    status_code=303,
+    summary="Update shop item visibility for a company",
+    tags=["Shop"],
+)
 
 
 __all__ = ["router"]
