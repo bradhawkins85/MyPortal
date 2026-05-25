@@ -27,12 +27,12 @@ def _main():
     return main_module
 
 
-def _parse_syncro_rate_limit(value: Any) -> int:
+def _parse_int_in_range(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        return 180
-    return max(1, min(600, parsed))
+        return default
+    return max(minimum, min(maximum, parsed))
 
 
 async def _load_syncro_module() -> dict[str, Any] | None:
@@ -55,8 +55,11 @@ def _describe_syncro_module(module: dict[str, Any] | None) -> dict[str, Any]:
         "base_url": base_url,
         "effective_base_url": effective_base_url,
         "has_api_key": api_key_present or bool(env_api_key),
-        "rate_limit_per_minute": _parse_syncro_rate_limit(
-            settings_payload.get("rate_limit_per_minute")
+        "rate_limit_per_minute": _parse_int_in_range(
+            settings_payload.get("rate_limit_per_minute"),
+            default=180,
+            minimum=1,
+            maximum=600,
         ),
     }
 
