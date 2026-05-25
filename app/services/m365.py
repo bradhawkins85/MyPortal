@@ -4992,7 +4992,7 @@ async def enable_user_archive(company_id: int, upn: str) -> None:
 
 
 async def remove_calendar_events(company_id: int, upn: str) -> None:
-    """Cancel organised meetings for ``upn`` using Exchange Online cmdlets.
+    """Cancel organized meetings for ``upn`` using Exchange Online cmdlets.
 
     Uses ``Remove-CalendarEvents`` with ``-CancelOrganizedMeetings`` so
     future meetings owned by the departing user are cancelled as part of
