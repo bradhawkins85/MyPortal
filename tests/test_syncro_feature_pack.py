@@ -1,33 +1,25 @@
-"""Smoke tests for the ``tickets`` feature pack."""
+"""Smoke tests for the ``syncro`` feature pack."""
 
 from __future__ import annotations
+
+import asyncio
+from pathlib import Path
 
 from fastapi import FastAPI
 
 import app.main as main_module
+from app.core.config import Settings
 from app.core.features import init_registry
-from app.features.tickets import PACK
+from app.features.syncro import PACK
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
-    ("GET", "/tickets/new"),
-    ("GET", "/tickets"),
-    ("POST", "/tickets"),
-    ("GET", "/tickets/{ticket_id}"),
-    ("POST", "/tickets/{ticket_id}/replies"),
-    ("GET", "/admin/tickets"),
-    ("GET", "/admin/tickets/{ticket_id}"),
-    ("POST", "/admin/tickets"),
-    ("POST", "/admin/tickets/{ticket_id}/status"),
-    ("POST", "/admin/tickets/statuses"),
-    ("POST", "/admin/tickets/labour-types"),
-    ("POST", "/admin/tickets/{ticket_id}/description"),
-    ("POST", "/admin/tickets/{ticket_id}/description/replace"),
-    ("POST", "/admin/tickets/{ticket_id}/details"),
-    ("POST", "/admin/tickets/{ticket_id}/ai/reprocess"),
-    ("POST", "/admin/tickets/{ticket_id}/delete"),
-    ("POST", "/admin/tickets/bulk-delete"),
-    ("POST", "/admin/tickets/{ticket_id}/replies"),
+    ("GET", "/admin/tickets/syncro-import"),
+    ("POST", "/admin/syncro/import-contacts"),
+    ("POST", "/admin/syncro/import-companies"),
+    ("POST", "/admin/syncro/import-tickets"),
 }
 
 
@@ -43,25 +35,27 @@ def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
-def test_tickets_pack_manifest_declares_all_portal_routes():
-    """Manifest should expose all portal and admin routes owned by the pack."""
-
+def test_syncro_pack_manifest_declares_all_routes():
     declared = set()
     for router in PACK.routers:
         for route in router.routes:
             for method in route.methods or set():
                 declared.add((method, route.path))
 
-    assert PACK.slug == "tickets"
+    assert PACK.slug == "syncro"
     assert PACK.version
     assert declared == EXPECTED
 
 
-def test_app_main_no_longer_owns_portal_ticket_routes():
-    """The routes must have been removed from ``app/main.py`` so that
-    the pack is the sole owner — otherwise reloading the pack would
-    leave stale handlers behind."""
+def test_syncro_pack_is_enabled_by_default():
+    default_feature_packs = str(Settings.model_fields["feature_packs"].default).split(",")
+    assert "syncro" in default_feature_packs
 
+    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "syncro" in env_example
+
+
+def test_app_main_no_longer_owns_syncro_routes():
     in_main_app = _routes_for(main_module.app)
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
@@ -70,25 +64,19 @@ def test_app_main_no_longer_owns_portal_ticket_routes():
         )
 
 
-def test_tickets_pack_loads_and_reloads_cleanly():
-    """The pack should load via the registry, mount its routes, and
-    survive a hot reload without leaking duplicate routes."""
-
-    import asyncio
-
+def test_syncro_pack_loads_and_reloads_cleanly():
     async def _run() -> None:
         test_app = FastAPI()
         registry = init_registry(test_app)
 
-        await registry.load("tickets")
+        await registry.load("syncro")
         after_load = _routes_for(test_app)
         assert EXPECTED.issubset(after_load)
 
-        await registry.reload("tickets")
+        await registry.reload("syncro")
         after_reload = _routes_for(test_app)
         assert EXPECTED.issubset(after_reload)
 
-        # No duplicate routes after reload.
         counts: dict[tuple[str, str], int] = {}
         for route in test_app.router.routes:
             path = getattr(route, "path", None)
@@ -103,9 +91,3 @@ def test_tickets_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
-
-
-# Pytest needs the tests above to be plain ``def`` functions; we follow
-# the same pattern as ``tests/test_feature_registry.py`` which wraps
-# async logic in ``asyncio.new_event_loop().run_until_complete(...)``
-# to avoid an extra pytest plugin dependency.
