@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -18,6 +19,20 @@ from app.repositories import user_companies as user_company_repo
 router = APIRouter(tags=["Invoices"])
 
 
+_STATUS_CLASS_MAP = {
+    "paid": "status--active",
+    "sent": "status--invited",
+    "pending": "status--invited",
+    "issued": "status--invited",
+    "draft": "status--invited",
+    "overdue": "status--suspended",
+    "past due": "status--suspended",
+    "void": "status--invited",
+    "cancelled": "status--invited",
+}
+
+
+@lru_cache(maxsize=1)
 def _main():
     from app import main as main_module
 
@@ -61,17 +76,6 @@ async def invoices_page(request: Request):
     if redirect:
         return redirect
     records = await invoice_repo.list_company_invoices(company_id)
-    status_class_map = {
-        "paid": "status--active",
-        "sent": "status--invited",
-        "pending": "status--invited",
-        "issued": "status--invited",
-        "draft": "status--invited",
-        "overdue": "status--suspended",
-        "past due": "status--suspended",
-        "void": "status--invited",
-        "cancelled": "status--invited",
-    }
     total_amount = Decimal("0.00")
     paid_count = 0
     today = datetime.now(timezone.utc).date()
@@ -85,7 +89,7 @@ async def invoices_page(request: Request):
         status_slug = status_text_raw.lower()
         if status_slug == "paid":
             paid_count += 1
-        status_class = status_class_map.get(status_slug, "status--invited" if status_slug else "")
+        status_class = _STATUS_CLASS_MAP.get(status_slug, "status--invited" if status_slug else "")
         due_value = record.get("due_date")
         if isinstance(due_value, datetime):
             due_value = due_value.date()
@@ -144,18 +148,7 @@ async def invoice_detail_page(request: Request, invoice_id: int):
     amount_decimal = amount_decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     status_text_raw = (invoice.get("status") or "").strip()
     status_slug = status_text_raw.lower()
-    status_class_map = {
-        "paid": "status--active",
-        "sent": "status--invited",
-        "pending": "status--invited",
-        "issued": "status--invited",
-        "draft": "status--invited",
-        "overdue": "status--suspended",
-        "past due": "status--suspended",
-        "void": "status--invited",
-        "cancelled": "status--invited",
-    }
-    status_class = status_class_map.get(status_slug, "status--invited" if status_slug else "")
+    status_class = _STATUS_CLASS_MAP.get(status_slug, "status--invited" if status_slug else "")
     due_value = invoice.get("due_date")
     if isinstance(due_value, datetime):
         due_value = due_value.date()
