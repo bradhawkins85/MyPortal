@@ -436,6 +436,83 @@ async def test_run_offboarding_step_skips_calendar_event_removal_when_disabled(m
 
 
 @pytest.mark.anyio
+async def test_run_offboarding_step_disables_mailbox_rules_when_enabled(monkeypatch):
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get_all",
+        AsyncMock(
+            return_value=[
+                {"id": "rule-1", "isEnabled": True},
+                {"id": "rule-2", "isEnabled": False},
+                {"id": "rule-3"},
+            ]
+        ),
+    )
+    graph_patch = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows, "_graph_patch", graph_patch)
+
+    result = await workflows._run_offboarding_step(
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        step_config={
+            "disable_sign_in": False,
+            "revoke_licenses": False,
+            "remove_from_groups": False,
+            "disable_mailbox_rules": True,
+        },
+        vars_map={},
+    )
+
+    assert "disable_mailbox_rules" in result["steps_executed"]
+    assert result["mailbox_rules_disabled"] == 2
+    assert graph_patch.await_count == 2
+    patched_urls = [call.args[1] for call in graph_patch.await_args_list]
+    assert patched_urls[0].endswith("/mailFolders/inbox/messageRules/rule-1")
+    assert patched_urls[1].endswith("/mailFolders/inbox/messageRules/rule-3")
+
+
+@pytest.mark.anyio
+async def test_run_offboarding_step_skips_mailbox_rule_disable_when_mailbox_missing(monkeypatch):
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get_all",
+        AsyncMock(side_effect=workflows.M365Error("No mailbox", http_status=404)),
+    )
+    graph_patch = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows, "_graph_patch", graph_patch)
+
+    result = await workflows._run_offboarding_step(
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        step_config={
+            "disable_sign_in": False,
+            "revoke_licenses": False,
+            "remove_from_groups": False,
+            "disable_mailbox_rules": True,
+        },
+        vars_map={},
+    )
+
+    assert "disable_mailbox_rules" not in result["steps_executed"]
+    assert result["mailbox_rules_disabled"] == 0
+    graph_patch.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_execute_policy_step_delete_staff_record(monkeypatch):
     delete_staff = AsyncMock(return_value=None)
     monkeypatch.setattr(workflows.staff_repo, "delete_staff", delete_staff)
