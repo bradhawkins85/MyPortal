@@ -13634,7 +13634,6 @@ async def admin_remove_billing_contact(company_id: int, staff_id: int, request: 
     return JSONResponse({"success": True})
 
 
-@app.post("/admin/syncro/import-contacts")
 async def import_syncro_contacts(request: Request):
     (
         user,
@@ -13662,7 +13661,6 @@ async def import_syncro_contacts(request: Request):
     })
 
 
-@app.post("/admin/syncro/import-companies")
 async def import_syncro_companies(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -13727,7 +13725,6 @@ async def import_syncro_companies(request: Request):
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post("/admin/syncro/import-tickets")
 async def import_syncro_tickets(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
