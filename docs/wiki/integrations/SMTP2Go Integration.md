@@ -31,7 +31,7 @@ November 21, 2025
 - Created SMTP2Go integration module configuration
 
 ### 3. Webhook Endpoint
-**File**: `app/api/routes/smtp2go_webhooks.py`
+**File**: `app/features/smtp/routes.py`
 
 - Created `/api/webhooks/smtp2go/events` endpoint
 - Implemented HMAC-SHA256 signature verification for security
