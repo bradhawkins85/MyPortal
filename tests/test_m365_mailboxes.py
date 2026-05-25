@@ -1905,6 +1905,36 @@ async def test_fetch_exo_archive_mailbox_sizes_short_circuits_on_403():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_remove_calendar_events_invokes_exchange_cmdlet():
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-token", "tenant-1")),
+        ),
+        patch.object(m365_service, "_exo_invoke_command", AsyncMock()) as invoke_mock,
+    ):
+        await m365_service.remove_calendar_events(7, "offboard.user@example.com")
+
+    invoke_mock.assert_awaited_once_with(
+        "exo-token",
+        "tenant-1",
+        "Remove-CalendarEvents",
+        {
+            "Identity": "offboard.user@example.com",
+            "CancelOrganizedMeetings": True,
+        },
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remove_calendar_events_requires_upn():
+    with pytest.raises(M365Error) as exc_info:
+        await m365_service.remove_calendar_events(7, " ")
+    assert exc_info.value.http_status == 400
+
+
+@pytest.mark.anyio("asyncio")
 async def test_sync_mailboxes_overrides_archive_size_from_exchange_online():
     """Archive sizes from Get-MailboxStatistics override the (zero) report values.
 

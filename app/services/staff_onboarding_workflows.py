@@ -1940,6 +1940,9 @@ async def _run_offboarding_step(
     remove_groups = bool(
         _step.get("remove_from_groups", policy_config.get("offboarding_remove_groups", True))
     )
+    remove_calendar_events = bool(
+        _step.get("remove_calendar_events", policy_config.get("offboarding_remove_calendar_events", False))
+    )
     configured_group_ids = [
         str(group_id).strip()
         for group_id in (policy_config.get("offboarding_group_ids") or [])
@@ -2029,6 +2032,10 @@ async def _run_offboarding_step(
                 )
             else:
                 raise
+
+    if remove_calendar_events and user_upn:
+        await m365_service.remove_calendar_events(company_id, user_upn)
+        steps_executed.append("remove_calendar_events")
 
     if remove_licenses:
         license_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
