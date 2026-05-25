@@ -9,6 +9,7 @@ from app.core.database import db
 from app.main import app, scheduler_service
 from app.services import background as background_tasks
 from app.services import change_log as change_log_service
+from app.services import modules as modules_service
 
 
 class DummySummary:
@@ -95,11 +96,11 @@ def super_admin_context(monkeypatch):
     async def fake_require_super_admin_page(request):
         return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
 
-    async def fake_load_syncro_module():
+    async def fake_get_module(_slug: str, redact: bool = False):
         return {"enabled": True}
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin_page)
-    monkeypatch.setattr(main_module, "_load_syncro_module", fake_load_syncro_module)
+    monkeypatch.setattr(modules_service, "get_module", fake_get_module)
 
 
 def test_import_companies_returns_json(monkeypatch):
