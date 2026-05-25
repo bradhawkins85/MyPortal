@@ -13,7 +13,7 @@ from .routes import router as smtp_router
 
 PACK = FeaturePack(
     slug="smtp",
-    version="1.0.0",
+    version="1.0.1",
     routers=(smtp_router,),
 )
 

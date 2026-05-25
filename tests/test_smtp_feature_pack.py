@@ -44,6 +44,15 @@ def test_smtp_pack_manifest_declares_all_routes():
     assert declared == EXPECTED
 
 
+def test_smtp_pack_routes_are_implemented_in_feature_pack():
+    for router in PACK.routers:
+        for route in router.routes:
+            assert route.endpoint.__module__.startswith("app.features.smtp"), (
+                f"Route {route.path} is implemented in {route.endpoint.__module__}; "
+                "smtp feature-pack code should live under app.features.smtp."
+            )
+
+
 def test_smtp_pack_is_enabled_by_default():
     default_feature_packs = str(Settings.model_fields["feature_packs"].default).split(",")
     assert "smtp" in default_feature_packs
