@@ -16,6 +16,7 @@ from app.features.syncro import PACK
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
+    ("GET", "/admin/tickets/syncro-import"),
     ("POST", "/admin/syncro/import-contacts"),
     ("POST", "/admin/syncro/import-companies"),
     ("POST", "/admin/syncro/import-tickets"),

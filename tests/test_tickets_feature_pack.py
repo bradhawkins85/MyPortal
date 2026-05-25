@@ -16,7 +16,6 @@ EXPECTED = {
     ("GET", "/tickets/{ticket_id}"),
     ("POST", "/tickets/{ticket_id}/replies"),
     ("GET", "/admin/tickets"),
-    ("GET", "/admin/tickets/syncro-import"),
     ("GET", "/admin/tickets/{ticket_id}"),
     ("POST", "/admin/tickets"),
     ("POST", "/admin/tickets/{ticket_id}/status"),
