@@ -1,6 +1,7 @@
 """Syncro feature pack.
 
 This pack owns Syncro admin import routes:
+  - GET /admin/tickets/syncro-import
   - POST /admin/syncro/import-contacts
   - POST /admin/syncro/import-companies
   - POST /admin/syncro/import-tickets

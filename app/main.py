@@ -158,7 +158,6 @@ from app.schemas.staff_onboarding_workflows import (
     CompanyWorkflowPolicyUpsertSchema,
     WorkflowConfigSchema,
 )
-from app.schemas.tickets import SyncroTicketImportRequest
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
@@ -195,14 +194,11 @@ from app.services import message_templates as message_templates_service
 from app.services import products as products_service
 from app.services import shop as shop_service
 from app.services import shop_packages as shop_packages_service
-from app.services import staff_importer
 from app.services import staff_access as staff_access_service
 from app.services import staff_field_config as staff_field_config_service
 from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
-from app.services import company_importer
 from app.services import labour_types as labour_types_service
 from app.services import subscription_shop_integration
-from app.services import ticket_importer
 from app.services import tickets as tickets_service
 from app.services import ticket_attachments as attachments_service
 from app.services import template_variables
@@ -1939,36 +1935,6 @@ async def _build_base_context(
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
     return context
-
-
-async def _load_syncro_module() -> dict[str, Any] | None:
-    try:
-        return await modules_service.get_module("syncro", redact=False)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to load Syncro module configuration", error=str(exc))
-        return None
-
-
-def _describe_syncro_module(module: dict[str, Any] | None) -> dict[str, Any]:
-    settings_payload = (module or {}).get("settings") or {}
-    base_url = str(settings_payload.get("base_url") or "").strip()
-    api_key_present = bool(str(settings_payload.get("api_key") or "").strip())
-    env_base_url = str(settings.syncro_webhook_url or "").strip()
-    env_api_key = str(settings.syncro_api_key or "").strip()
-    effective_base_url = (base_url or env_base_url).rstrip("/")
-    rate_limit = _parse_int_in_range(
-        settings_payload.get("rate_limit_per_minute"),
-        default=180,
-        minimum=1,
-        maximum=600,
-    )
-    return {
-        "enabled": bool(module and module.get("enabled")),
-        "base_url": base_url,
-        "effective_base_url": effective_base_url,
-        "has_api_key": api_key_present or bool(env_api_key),
-        "rate_limit_per_minute": rate_limit,
-    }
 
 
 async def _build_public_context(
@@ -13634,130 +13600,6 @@ async def admin_remove_billing_contact(company_id: int, staff_id: int, request: 
     return JSONResponse({"success": True})
 
 
-async def import_syncro_contacts(request: Request):
-    (
-        user,
-        membership,
-        company,
-        staff_permission,
-        company_id,
-        redirect,
-    ) = await _load_staff_context(request, require_super_admin=True)
-    if redirect:
-        return redirect
-    module = await _load_syncro_module()
-    if not module or not module.get("enabled"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Syncro module is disabled")
-    payload = await request.json()
-    syncro_company_id = payload.get("syncroCompanyId") or payload.get("syncro_company_id")
-    if not syncro_company_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="syncroCompanyId required")
-    summary = await staff_importer.import_contacts_for_syncro_id(str(syncro_company_id))
-    return JSONResponse({
-        "success": True,
-        "created": summary.created,
-        "updated": summary.updated,
-        "skipped": summary.skipped,
-    })
-
-
-async def import_syncro_companies(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    module = await _load_syncro_module()
-    if not module or not module.get("enabled"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Syncro module is disabled")
-    log_info(
-        "Syncro company import admin request received",
-        user_id=current_user.get("id"),
-        request_path=str(request.url),
-    )
-    task_id = uuid4().hex
-
-    def _on_success(summary: company_importer.CompanyImportSummary) -> None:
-        summary_data = summary.as_dict()
-        log_info(
-            "Syncro company import background task completed",
-            task_id=task_id,
-            fetched=summary_data.get("fetched", 0),
-            created=summary_data.get("created", 0),
-            updated=summary_data.get("updated", 0),
-            skipped=summary_data.get("skipped", 0),
-        )
-
-    async def _on_error(exc: Exception) -> None:
-        log_error(
-            "Syncro company import background task failed",
-            task_id=task_id,
-            error=str(exc),
-        )
-
-    background_tasks.queue_background_task(
-        lambda: company_importer.import_all_companies(),
-        task_id=task_id,
-        description="syncro-company-import",
-        on_complete=_on_success,
-        on_error=_on_error,
-    )
-
-    log_info(
-        "Syncro company import queued",
-        task_id=task_id,
-        user_id=current_user.get("id"),
-        request_path=str(request.url),
-    )
-
-    if _request_prefers_json(request):
-        return JSONResponse(
-            {
-                "status": "queued",
-                "taskId": task_id,
-                "message": "Syncro company import queued.",
-            },
-            status_code=status.HTTP_202_ACCEPTED,
-        )
-    message = f"Syncro company import queued. Task ID: {task_id[:8]}"
-    redirect_url = str(request.url_for("admin_modules_page"))
-    if message:
-        redirect_url = f"{redirect_url}?{urlencode({'success': message})}"
-    redirect_url = f"{redirect_url}#module-syncro"
-    return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
-
-
-async def import_syncro_tickets(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    module = await _load_syncro_module()
-    if not module or not module.get("enabled"):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Syncro module is disabled")
-    payload = await request.json()
-    try:
-        import_request = SyncroTicketImportRequest.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.errors()) from exc
-    log_info(
-        "Syncro ticket import admin request received",
-        user_id=current_user.get("id"),
-        mode=import_request.mode.value,
-        ticket_id=import_request.ticket_id,
-        start_id=import_request.start_id,
-        end_id=import_request.end_id,
-        request_path=str(request.url),
-    )
-    try:
-        summary = await ticket_importer.import_from_request(
-            mode=import_request.mode.value,
-            ticket_id=import_request.ticket_id,
-            start_id=import_request.start_id,
-            end_id=import_request.end_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return JSONResponse(summary.as_dict())
-
-
 async def admin_api_keys_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -18369,29 +18211,6 @@ async def _render_tickets_dashboard(
         "ticket_refresh_topics": ["tickets"],
     }
     response = await _render_template("admin/tickets.html", request, user, extra=extra)
-    response.status_code = status_code
-    return response
-
-
-async def _render_syncro_ticket_import(
-    request: Request,
-    user: dict[str, Any],
-    *,
-    success_message: str | None = None,
-    error_message: str | None = None,
-    status_code: int = status.HTTP_200_OK,
-) -> HTMLResponse:
-    module = await _load_syncro_module()
-    module_description = _describe_syncro_module(module)
-    if not module_description.get("enabled"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Syncro ticket import is not available")
-    extra = {
-        "title": "Syncro ticket import",
-        "success_message": success_message,
-        "error_message": error_message,
-        "syncro_module": module_description,
-    }
-    response = await _render_template("admin/syncro_ticket_import.html", request, user, extra=extra)
     response.status_code = status_code
     return response
 

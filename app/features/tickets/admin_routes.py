@@ -3,7 +3,6 @@
 Mirrors the routes that used to live in ``app/main.py``:
 
 * ``GET  /admin/tickets``
-* ``GET  /admin/tickets/syncro-import``
 * ``GET  /admin/tickets/{ticket_id}``
 * ``POST /admin/tickets``
 * ``POST /admin/tickets/{ticket_id}/status``
@@ -79,24 +78,6 @@ async def admin_tickets_page(
         success_message=main_module._sanitize_message(success),
         error_message=main_module._sanitize_message(error),
         phone_number=phoneNumber,
-    )
-
-
-@router.get("/admin/tickets/syncro-import", response_class=HTMLResponse)
-async def admin_syncro_ticket_import_page(
-    request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
-):
-    main_module = _main()
-    current_user, redirect = await main_module._require_helpdesk_page(request)
-    if redirect:
-        return redirect
-    return await main_module._render_syncro_ticket_import(
-        request,
-        current_user,
-        success_message=main_module._sanitize_message(success),
-        error_message=main_module._sanitize_message(error),
     )
 
 
