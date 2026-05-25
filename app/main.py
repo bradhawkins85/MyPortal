@@ -89,7 +89,6 @@ from app.api.routes import (
     scheduler as scheduler_api,
     roles,
     service_status as service_status_api,
-    smtp2go_webhooks,
     staff as staff_api,
     subscriptions as subscriptions_api,
     tag_exclusions,
@@ -1040,7 +1039,6 @@ app.include_router(agent.router)
 app.include_router(users.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
-app.include_router(smtp2go_webhooks.router)
 app.include_router(essential8_api.router)
 app.include_router(compliance_checks_api.router)
 app.include_router(licenses_api.router)
