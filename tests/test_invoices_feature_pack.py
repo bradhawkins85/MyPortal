@@ -47,6 +47,9 @@ def test_app_main_no_longer_owns_invoice_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+    assert not hasattr(main_module, "_load_invoice_context")
+    assert not hasattr(main_module, "invoices_page")
+    assert not hasattr(main_module, "invoice_detail_page")
 
 
 def test_invoices_pack_loads_and_reloads_cleanly():
