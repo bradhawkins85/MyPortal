@@ -380,6 +380,62 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
 
 
 @pytest.mark.anyio
+async def test_run_offboarding_step_removes_calendar_events_when_enabled(monkeypatch):
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+    )
+    remove_calendar_events_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(workflows.m365_service, "remove_calendar_events", remove_calendar_events_mock)
+
+    result = await workflows._run_offboarding_step(
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        step_config={
+            "disable_sign_in": False,
+            "revoke_licenses": False,
+            "remove_from_groups": False,
+            "remove_calendar_events": True,
+        },
+        vars_map={},
+    )
+
+    remove_calendar_events_mock.assert_awaited_once_with(9, "offboard.user@example.com")
+    assert "remove_calendar_events" in result["steps_executed"]
+
+
+@pytest.mark.anyio
+async def test_run_offboarding_step_skips_calendar_event_removal_when_disabled(monkeypatch):
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+    )
+    remove_calendar_events_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(workflows.m365_service, "remove_calendar_events", remove_calendar_events_mock)
+
+    result = await workflows._run_offboarding_step(
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        step_config={
+            "disable_sign_in": False,
+            "revoke_licenses": False,
+            "remove_from_groups": False,
+            "remove_calendar_events": False,
+        },
+        vars_map={},
+    )
+
+    remove_calendar_events_mock.assert_not_awaited()
+    assert "remove_calendar_events" not in result["steps_executed"]
+
+
+@pytest.mark.anyio
 async def test_execute_policy_step_delete_staff_record(monkeypatch):
     delete_staff = AsyncMock(return_value=None)
     monkeypatch.setattr(workflows.staff_repo, "delete_staff", delete_staff)
