@@ -207,7 +207,10 @@ def test_get_alert_not_found(monkeypatch):
 
     try:
         with TestClient(app) as client:
-            response = client.get("/api/integration-modules/uptimekuma/alerts/99")
+            response = client.get(
+                "/api/integration-modules/uptimekuma/alerts/99",
+                headers={"Accept": "application/json"},
+            )
     finally:
         app.dependency_overrides.clear()
 
