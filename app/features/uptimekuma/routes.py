@@ -4,7 +4,6 @@ import json
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import ValidationError
 
@@ -245,8 +244,5 @@ async def list_alerts(
 async def get_alert(alert_id: int, current_user: dict = Depends(require_super_admin)) -> UptimeKumaAlertResponse:
     record = await uptimekuma_service.get_alert(alert_id)
     if not record:
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={"detail": "Alert not found"},
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
     return UptimeKumaAlertResponse(**record)
