@@ -7,6 +7,8 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.shop import PACK
+from app.features.shop import handlers as shop_handlers
+from app.features.shop import routes as shop_routes
 
 
 EXPECTED = {
@@ -90,6 +92,14 @@ def test_app_main_no_longer_owns_shop_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_shop_pack_owns_handlers():
+    assert shop_routes.router.routes[0].endpoint == shop_handlers.shop_page
+    assert shop_routes.router.routes[1].endpoint == shop_handlers.shop_packages_page
+    assert shop_routes.router.routes[2].endpoint == shop_handlers.shop_product_detail_api
+    assert shop_routes.router.routes[3].endpoint == shop_handlers.admin_shop_product_search_api
+    assert shop_routes.router.routes[4].endpoint == shop_handlers.admin_shop_product_restrictions_api
 
 
 def test_shop_pack_loads_and_reloads_cleanly():

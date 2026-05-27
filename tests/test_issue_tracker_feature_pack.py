@@ -1,25 +1,22 @@
-"""Smoke tests for the ``tacticalrmm`` feature pack."""
+"""Smoke tests for the ``issue_tracker`` feature pack."""
 
 from __future__ import annotations
-
-import asyncio
-from pathlib import Path
 
 from fastapi import FastAPI
 
 import app.main as main_module
-from app.core.config import Settings
 from app.core.features import init_registry
-from app.features.tacticalrmm import PACK
-from app.features.tacticalrmm import handlers as tacticalrmm_handlers
-from app.features.tacticalrmm import routes as tacticalrmm_routes
+from app.features.issue_tracker import PACK
+from app.features.issue_tracker import handlers as issue_handlers
+from app.features.issue_tracker import routes as issue_routes
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
-    ("POST", "/admin/modules/tacticalrmm/push-companies"),
-    ("POST", "/admin/modules/tacticalrmm/pull-companies"),
+    ("GET", "/admin/issues"),
+    ("POST", "/admin/issues"),
+    ("POST", "/admin/issues/{issue_id}/update"),
+    ("POST", "/admin/issues/{issue_id}/assignments/{assignment_id}/status"),
+    ("POST", "/admin/issues/{issue_id}/assignments/{assignment_id}/delete"),
 }
 
 
@@ -35,27 +32,19 @@ def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
-def test_tacticalrmm_pack_manifest_declares_all_routes():
+def test_issue_tracker_pack_manifest_declares_all_routes():
     declared = set()
     for router in PACK.routers:
         for route in router.routes:
             for method in route.methods or set():
                 declared.add((method, route.path))
 
-    assert PACK.slug == "tacticalrmm"
+    assert PACK.slug == "issue_tracker"
     assert PACK.version
     assert declared == EXPECTED
 
 
-def test_tacticalrmm_pack_is_enabled_by_default():
-    default_feature_packs = str(Settings.model_fields["feature_packs"].default).split(",")
-    assert "tacticalrmm" in default_feature_packs
-
-    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "tacticalrmm" in env_example
-
-
-def test_app_main_no_longer_owns_tacticalrmm_routes():
+def test_app_main_no_longer_owns_issue_tracker_routes():
     in_main_app = _routes_for(main_module.app)
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
@@ -64,27 +53,29 @@ def test_app_main_no_longer_owns_tacticalrmm_routes():
         )
 
 
-def test_tacticalrmm_pack_owns_handlers():
+def test_issue_tracker_pack_owns_handlers():
+    assert issue_routes.router.routes[0].endpoint == issue_handlers.admin_issue_tracker
+    assert issue_routes.router.routes[1].endpoint == issue_handlers.admin_create_issue
+    assert issue_routes.router.routes[2].endpoint == issue_handlers.admin_update_issue
     assert (
-        tacticalrmm_routes.router.routes[0].endpoint
-        == tacticalrmm_handlers.admin_push_companies_to_tactical_rmm
+        issue_routes.router.routes[3].endpoint
+        == issue_handlers.admin_update_issue_assignment_status
     )
-    assert (
-        tacticalrmm_routes.router.routes[1].endpoint
-        == tacticalrmm_handlers.admin_pull_companies_from_tactical_rmm
-    )
+    assert issue_routes.router.routes[4].endpoint == issue_handlers.admin_delete_issue_assignment
 
 
-def test_tacticalrmm_pack_loads_and_reloads_cleanly():
+def test_issue_tracker_pack_loads_and_reloads_cleanly():
+    import asyncio
+
     async def _run() -> None:
         test_app = FastAPI()
         registry = init_registry(test_app)
 
-        await registry.load("tacticalrmm")
+        await registry.load("issue_tracker")
         after_load = _routes_for(test_app)
         assert EXPECTED.issubset(after_load)
 
-        await registry.reload("tacticalrmm")
+        await registry.reload("issue_tracker")
         after_reload = _routes_for(test_app)
         assert EXPECTED.issubset(after_reload)
 

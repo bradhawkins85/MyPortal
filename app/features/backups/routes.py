@@ -2,49 +2,50 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
+from . import handlers
 
 router = APIRouter(tags=["Backups"])
 
 
-def _main():
-    from app import main as main_module
-
-    return main_module
-
-
-@router.head("/admin/backup-jobs", response_class=HTMLResponse)
-@router.get("/admin/backup-jobs", response_class=HTMLResponse)
-async def admin_backup_jobs_page(request: Request):
-    return await _main().admin_backup_jobs_page(request=request)
-
-
-@router.head("/admin/backup-summary", response_class=HTMLResponse)
-@router.get("/admin/backup-summary", response_class=HTMLResponse)
-async def admin_backup_summary_page(request: Request):
-    return await _main().admin_backup_summary_page(request=request)
-
-
-@router.post("/admin/backup-jobs", response_class=HTMLResponse)
-async def admin_create_backup_job(request: Request):
-    return await _main().admin_create_backup_job(request=request)
-
-
-@router.post("/admin/backup-jobs/{job_id}", response_class=HTMLResponse)
-async def admin_update_backup_job(request: Request, job_id: int):
-    return await _main().admin_update_backup_job(request=request, job_id=job_id)
-
-
-@router.post("/admin/backup-jobs/{job_id}/delete", response_class=HTMLResponse)
-async def admin_delete_backup_job(request: Request, job_id: int):
-    return await _main().admin_delete_backup_job(request=request, job_id=job_id)
-
-
-@router.post("/admin/backup-jobs/{job_id}/regenerate-token", response_class=HTMLResponse)
-async def admin_regenerate_backup_job_token(request: Request, job_id: int):
-    return await _main().admin_regenerate_backup_job_token(request=request, job_id=job_id)
+router.add_api_route(
+    "/admin/backup-jobs",
+    handlers.admin_backup_jobs_page,
+    methods=["HEAD", "GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/backup-summary",
+    handlers.admin_backup_summary_page,
+    methods=["HEAD", "GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/backup-jobs",
+    handlers.admin_create_backup_job,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/backup-jobs/{job_id}",
+    handlers.admin_update_backup_job,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/backup-jobs/{job_id}/delete",
+    handlers.admin_delete_backup_job,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/backup-jobs/{job_id}/regenerate-token",
+    handlers.admin_regenerate_backup_job_token,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
 
 
 __all__ = ["router"]
