@@ -10863,25 +10863,6 @@ async def admin_tag_exclusions_page(
     )
 
 
-async def admin_call_recordings_page(request: Request):
-    """Admin page for viewing call recordings and transcriptions (super admin only)."""
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    
-    context = await _build_base_context(
-        request,
-        current_user,
-        extra={
-            "title": "Call Recordings & Transcriptions",
-        },
-    )
-    return templates.TemplateResponse(
-        context["request"],
-        "admin/call_recordings.html",
-        context,
-    )
-
 
 async def _prepare_kb_editor_options() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     users_task = asyncio.create_task(user_repo.list_users())
