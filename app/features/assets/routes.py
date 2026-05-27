@@ -12,6 +12,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.core.logging import log_info
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
+from app.repositories import companies as company_repo
+from app.repositories import user_companies as user_company_repo
 
 
 router = APIRouter(tags=["Assets"])
@@ -60,7 +62,7 @@ async def _load_asset_context(request: Request):
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
 
-    membership = await main_module.user_company_repo.get_user_company(user["id"], company_id)
+    membership = await user_company_repo.get_user_company(user["id"], company_id)
     can_manage_assets = bool(membership and membership.get("can_manage_assets"))
     if not (is_super_admin or can_manage_assets):
         return (
@@ -71,7 +73,7 @@ async def _load_asset_context(request: Request):
             RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
         )
 
-    company = await main_module.company_repo.get_company_by_id(company_id)
+    company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
 
 
