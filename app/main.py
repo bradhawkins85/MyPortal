@@ -2063,26 +2063,6 @@ _MESSAGE_TEMPLATE_CONTENT_TYPES: tuple[tuple[str, str], ...] = (
     ("text/html", "HTML"),
 )
 
-_ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
-    {"key": "name", "label": "Name", "sort": "string", "priority": "essential"},
-    {"key": "type", "label": "Type", "sort": "string"},
-    {"key": "serial_number", "label": "Serial number", "sort": "string"},
-    {"key": "status", "label": "Status", "sort": "string", "priority": "essential"},
-    {"key": "os_name", "label": "OS name", "sort": "string"},
-    {"key": "cpu_name", "label": "CPU", "sort": "string"},
-    {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
-    {"key": "hdd_size", "label": "Storage", "sort": "string"},
-    {"key": "last_sync", "label": "Last sync", "sort": "date", "priority": "essential"},
-    {"key": "motherboard_manufacturer", "label": "Motherboard", "sort": "string"},
-    {"key": "form_factor", "label": "Form factor", "sort": "string"},
-    {"key": "last_user", "label": "Last user", "sort": "string", "priority": "essential"},
-    {"key": "approx_age", "label": "Approx age", "sort": "number"},
-    {"key": "performance_score", "label": "Performance score", "sort": "number"},
-    {"key": "warranty_status", "label": "Warranty status", "sort": "string"},
-    {"key": "warranty_end_date", "label": "Warranty end", "sort": "date"},
-]
-
-
 _PORTAL_STATUS_BADGE_MAP: dict[str, str] = {
     "open": "badge--warning",
     "in_progress": "badge--warning",
@@ -2561,40 +2541,6 @@ async def _load_license_context(
             company_id,
             RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
         )
-    company = await company_repo.get_company_by_id(company_id)
-    return user, membership, company, company_id, None
-
-
-async def _load_asset_context(
-    request: Request,
-):
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return user, None, None, None, redirect
-
-    is_super_admin = bool(user.get("is_super_admin"))
-    company_id_raw = user.get("company_id")
-    if company_id_raw is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No company associated with the current user",
-        )
-    try:
-        company_id = int(company_id_raw)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
-
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
-    can_manage_assets = bool(membership and membership.get("can_manage_assets"))
-    if not (is_super_admin or can_manage_assets):
-        return (
-            user,
-            membership,
-            None,
-            company_id,
-            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
-        )
-
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
 
