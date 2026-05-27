@@ -5853,7 +5853,6 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/admin/companies/{company_id}/m365-provision")
 async def admin_company_m365_provision(
     company_id: int, request: Request, tenant_id: str = Query(...)
 ):
@@ -5998,7 +5997,6 @@ async def m365_discover(request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/admin/companies/{company_id}/m365-discover")
 async def admin_company_m365_discover(company_id: int, request: Request):
     """Sign in as Global Admin to discover the tenant ID for a company."""
     current_user, redirect = await _require_super_admin_page(request)
@@ -7809,7 +7807,6 @@ async def admin_impersonation_start(request: Request):
     )
 
 
-@app.get("/admin/companies", response_class=HTMLResponse)
 async def admin_companies_page(
     request: Request,
     company_id: int | None = Query(default=None),
@@ -7830,7 +7827,6 @@ async def admin_companies_page(
     )
 
 
-@app.get("/admin/companies/{company_id}/edit", response_class=HTMLResponse)
 async def admin_company_edit_page(
     company_id: int,
     request: Request,
@@ -7851,7 +7847,6 @@ async def admin_company_edit_page(
     )
 
 
-@app.post("/admin/companies", response_class=HTMLResponse)
 async def admin_create_company(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7917,7 +7912,6 @@ async def admin_create_company(request: Request):
     )
 
 
-@app.post("/admin/companies/assign", response_class=HTMLResponse)
 async def admin_assign_user_to_company(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8197,7 +8191,6 @@ async def admin_assign_user_to_company(request: Request):
     )
 
 
-@app.post("/admin/companies/{company_id}", response_class=HTMLResponse)
 async def admin_update_company(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8389,7 +8382,6 @@ async def admin_update_company_shop_visibility(
     )
 
 
-@app.post("/admin/companies/{company_id}/staff-fields", response_class=HTMLResponse)
 async def admin_update_company_staff_fields(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8459,7 +8451,6 @@ def _parse_staff_custom_field_condition(
     return parent_name, operator, normalized_condition_value or None
 
 
-@app.post("/admin/companies/{company_id}/staff-custom-fields", response_class=HTMLResponse)
 async def admin_create_company_staff_custom_field(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8503,7 +8494,6 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
     return _company_edit_redirect(company_id=company_id, success="Staff custom field created.")
 
 
-@app.post("/admin/companies/{company_id}/staff-custom-fields/{definition_id}", response_class=HTMLResponse)
 async def admin_update_company_staff_custom_field(
     company_id: int, definition_id: int, request: Request
 ):
@@ -8546,10 +8536,6 @@ async def admin_update_company_staff_custom_field(
     return _company_edit_redirect(company_id=company_id, success="Staff custom field updated.")
 
 
-@app.post(
-    "/admin/companies/{company_id}/staff-custom-fields/{definition_id}/delete",
-    response_class=HTMLResponse,
-)
 async def admin_delete_company_staff_custom_field(
     company_id: int, definition_id: int, request: Request
 ):
@@ -8560,7 +8546,6 @@ async def admin_delete_company_staff_custom_field(
     return _company_edit_redirect(company_id=company_id, success="Staff custom field deleted.")
 
 
-@app.post("/admin/companies/{company_id}/m365-credentials", response_class=HTMLResponse)
 async def admin_save_company_m365_credentials(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8617,7 +8602,6 @@ async def admin_save_company_m365_credentials(company_id: int, request: Request)
     )
 
 
-@app.post("/admin/companies/{company_id}/m365-credentials/delete", response_class=HTMLResponse)
 async def admin_delete_company_m365_credentials(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8658,7 +8642,6 @@ async def _ensure_company_permission(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
 
-@app.post("/admin/companies/users/create", response_class=HTMLResponse)
 async def admin_create_company_user(request: Request):
     current_user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -8733,7 +8716,6 @@ async def admin_create_company_user(request: Request):
     )
 
 
-@app.post("/admin/companies/users/invite", response_class=HTMLResponse)
 async def admin_invite_company_user(request: Request):
     current_user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -8803,7 +8785,6 @@ async def admin_invite_company_user(request: Request):
     )
 
 
-@app.post("/admin/companies/assignment/{company_id}/{user_id}/permission")
 async def admin_update_company_permission(company_id: int, user_id: int, request: Request):
     current_user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -8829,7 +8810,6 @@ async def admin_update_company_permission(company_id: int, user_id: int, request
     return JSONResponse({"success": True})
 
 
-@app.post("/admin/companies/assignment/{company_id}/{user_id}/staff-permission")
 async def admin_update_staff_permission(company_id: int, user_id: int, request: Request):
     current_user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -8854,7 +8834,6 @@ async def admin_update_staff_permission(company_id: int, user_id: int, request: 
     return JSONResponse({"success": True})
 
 
-@app.post("/admin/companies/assignment/{company_id}/{user_id}/role")
 async def admin_update_membership_role(company_id: int, user_id: int, request: Request):
     current_user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -8910,7 +8889,6 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
     )
 
 
-@app.post("/admin/companies/assignment/{company_id}/{staff_id}/pending/remove")
 async def admin_remove_pending_company_assignment(
     company_id: int, staff_id: int, request: Request
 ):
@@ -8944,7 +8922,6 @@ async def admin_remove_pending_company_assignment(
     return JSONResponse({"success": True})
 
 
-@app.post("/admin/companies/assignment/{company_id}/{user_id}/remove")
 async def admin_remove_company_assignment(company_id: int, user_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -8953,7 +8930,6 @@ async def admin_remove_company_assignment(company_id: int, user_id: int, request
     return JSONResponse({"success": True})
 
 
-@app.post("/admin/companies/{company_id}/billing-contacts/add")
 async def admin_add_billing_contact(company_id: int, request: Request):
     """Add a staff member as a billing contact for a company."""
     current_user, redirect = await _require_super_admin_page(request)
@@ -9001,7 +8977,6 @@ async def admin_add_billing_contact(company_id: int, request: Request):
     })
 
 
-@app.post("/admin/companies/{company_id}/billing-contacts/{staff_id}/remove")
 async def admin_remove_billing_contact(company_id: int, staff_id: int, request: Request):
     """Remove a staff member as a billing contact for a company."""
     current_user, redirect = await _require_super_admin_page(request)
@@ -10287,7 +10262,6 @@ async def admin_tray_branding_delete(request: Request):
 # ---------------------------------------------------------------------------
 
 
-@app.get("/admin/companies/{company_id}/tray", response_class=HTMLResponse)
 async def admin_company_tray_settings_page(
     company_id: int,
     request: Request,
@@ -10322,7 +10296,6 @@ async def admin_company_tray_settings_page(
     )
 
 
-@app.post("/admin/companies/{company_id}/tray", response_class=HTMLResponse)
 async def admin_company_tray_settings_save(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -10351,7 +10324,6 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
     )
 
 
-@app.post("/admin/companies/{company_id}/tray/tokens", response_class=HTMLResponse)
 async def admin_company_tray_create_token(company_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -10383,10 +10355,6 @@ async def admin_company_tray_create_token(company_id: int, request: Request):
     )
 
 
-@app.post(
-    "/admin/companies/{company_id}/tray/tokens/{token_id}/revoke",
-    response_class=HTMLResponse,
-)
 async def admin_company_tray_revoke_token(
     company_id: int, token_id: int, request: Request
 ):
