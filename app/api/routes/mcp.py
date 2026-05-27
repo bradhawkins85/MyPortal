@@ -12,10 +12,10 @@ from app.services.mcp.ollama import (
     public_manifest as ollama_public_manifest,
 )
 
-router = APIRouter(prefix="/api/mcp/chatgpt", tags=["ChatGPT MCP"])
+chatgpt_router = APIRouter(prefix="/api/mcp/chatgpt", tags=["ChatGPT MCP"])
 
 
-@router.post("/", response_class=JSONResponse)
+@chatgpt_router.post("/", response_class=JSONResponse)
 async def chatgpt_mcp_endpoint(
     request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
@@ -29,6 +29,10 @@ async def chatgpt_mcp_endpoint(
     except ChatGPTMCPError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return JSONResponse(payload)
+
+
+# Backward-compatible alias for imports that still reference ``router``.
+router = chatgpt_router
 
 
 ollama_router = APIRouter(prefix="/api/mcp/ollama", tags=["Ollama MCP"])
