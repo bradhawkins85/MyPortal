@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
+from app.features.staff.helpers import _load_staff_context
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.services import background as background_tasks
 from app.services import company_importer, modules as modules_service, staff_importer, ticket_importer
@@ -115,7 +116,6 @@ async def admin_syncro_ticket_import_page(
 
 @router.post("/admin/syncro/import-contacts")
 async def route_import_syncro_contacts(request: Request):
-    main_module = _main()
     (
         user,
         membership,
@@ -123,7 +123,7 @@ async def route_import_syncro_contacts(request: Request):
         staff_permission,
         company_id,
         redirect,
-    ) = await main_module._load_staff_context(request, require_super_admin=True)
+    ) = await _load_staff_context(request, require_super_admin=True)
     if redirect:
         return redirect
     module = await _load_syncro_module()

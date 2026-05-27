@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.staff import PACK
+from app.features.staff import handlers as staff_handlers
 
 
 EXPECTED = {
@@ -65,6 +66,67 @@ def test_app_main_no_longer_owns_staff_routes():
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
             f"{method} {path} still mounted directly on app.main; "
+            "feature-pack migration is incomplete."
+        )
+
+
+def test_staff_pack_owns_staff_handlers():
+    for name in (
+        "staff_page",
+        "staff_onboarding_workflow_page",
+        "staff_onboarding_workflow_policy",
+        "upsert_staff_onboarding_workflow_policy",
+        "staff_offboarding_workflow_page",
+        "staff_offboarding_workflow_policy",
+        "upsert_staff_offboarding_workflow_policy",
+        "list_staff_workflow_policies",
+        "create_staff_workflow_policy",
+        "update_staff_workflow_policy",
+        "delete_staff_workflow_policy",
+        "staff_workflow_history_page",
+        "staff_workflow_history_recent",
+        "retry_workflow_execution",
+        "create_staff_member",
+        "update_staff_member",
+        "request_staff_offboarding",
+        "delete_staff_member",
+        "set_staff_enabled",
+        "verify_staff_member",
+        "invite_staff_member",
+        "m365_reset_staff_password",
+        "m365_set_staff_sign_in",
+    ):
+        assert getattr(staff_handlers, name).__module__ == "app.features.staff.handlers"
+
+
+def test_app_main_no_longer_defines_staff_handlers():
+    for name in (
+        "staff_page",
+        "staff_onboarding_workflow_page",
+        "staff_onboarding_workflow_policy",
+        "upsert_staff_onboarding_workflow_policy",
+        "staff_offboarding_workflow_page",
+        "staff_offboarding_workflow_policy",
+        "upsert_staff_offboarding_workflow_policy",
+        "list_staff_workflow_policies",
+        "create_staff_workflow_policy",
+        "update_staff_workflow_policy",
+        "delete_staff_workflow_policy",
+        "staff_workflow_history_page",
+        "staff_workflow_history_recent",
+        "retry_workflow_execution",
+        "create_staff_member",
+        "update_staff_member",
+        "request_staff_offboarding",
+        "delete_staff_member",
+        "set_staff_enabled",
+        "verify_staff_member",
+        "invite_staff_member",
+        "m365_reset_staff_password",
+        "m365_set_staff_sign_in",
+    ):
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
             "feature-pack migration is incomplete."
         )
 
