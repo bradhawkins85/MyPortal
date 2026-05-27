@@ -138,7 +138,6 @@ from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
-from app.repositories import webhook_events as webhook_events_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.repositories import issues as issues_repo
@@ -9768,25 +9767,6 @@ async def admin_bulk_rename_scheduled_tasks(request: Request):
         url=f"{base_url}?{'&'.join(params)}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
-
-
-async def admin_webhooks(request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    events = await webhook_events_repo.list_events(limit=100)
-    prepared_events: list[dict[str, Any]] = []
-    for event in events:
-        serialised_event = _serialise_mapping(event)
-        serialised_event["created_iso"] = _to_iso(event.get("created_at"))
-        serialised_event["updated_iso"] = _to_iso(event.get("updated_at"))
-        serialised_event["next_attempt_iso"] = _to_iso(event.get("next_attempt_at"))
-        prepared_events.append(serialised_event)
-    extra = {
-        "title": "Webhook delivery queue",
-        "events": prepared_events,
-    }
-    return await _render_template("admin/webhooks.html", request, current_user, extra=extra)
 
 
 # ---------------------------------------------------------------------------
