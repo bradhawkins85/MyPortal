@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.orders import PACK
+from app.features.orders import routes as orders_routes
 
 
 EXPECTED = {
@@ -43,6 +44,19 @@ def test_app_main_no_longer_owns_order_routes():
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
             f"{method} {path} still mounted directly on app.main; "
+            "feature-pack migration is incomplete."
+        )
+
+
+def test_orders_pack_owns_orders_endpoint():
+    assert orders_routes.orders_page.__module__ == "app.features.orders.routes"
+    assert orders_routes.route_orders_page.__module__ == "app.features.orders.routes"
+
+
+def test_app_main_no_longer_defines_orders_handlers():
+    for name in ("orders_page", "_normalise_status_badge", "_summarise_orders"):
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
             "feature-pack migration is incomplete."
         )
 

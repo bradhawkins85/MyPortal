@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.config import get_settings
+from app.features.orders import routes as orders_routes
 from app.repositories import cart as cart_repo
 from app.repositories import shop as shop_repo
 from app.repositories import users as user_repo
@@ -87,7 +88,7 @@ async def quotes_page(
         record = dict(quote_record)
         record["status_label"] = label
         record["status_value"] = label.lower()
-        record["status_badge"] = main_module._normalise_status_badge(label)
+        record["status_badge"] = orders_routes._normalise_status_badge(label)
         record["created_at_iso"] = quote_record.get("created_at")
         record["expires_at_iso"] = quote_record.get("expires_at")
         record["is_expired"] = is_expired
@@ -126,7 +127,7 @@ async def quotes_page(
             {"value": value, "label": label} for value, label in status_options
         ],
         "status_filter": status_key,
-        "status_summary": main_module._summarise_orders(
+        "status_summary": orders_routes._summarise_orders(
             filtered_quotes,
             attribute="status_label",
         ),
