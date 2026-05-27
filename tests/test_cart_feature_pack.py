@@ -52,6 +52,21 @@ def test_app_main_no_longer_owns_cart_routes():
         )
 
 
+def test_app_main_no_longer_defines_cart_handlers():
+    for name in (
+        "add_to_cart",
+        "add_package_to_cart",
+        "view_cart",
+        "update_cart_items",
+        "remove_cart_items",
+        "place_order",
+    ):
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
+            "feature-pack migration is incomplete."
+        )
+
+
 def test_cart_pack_loads_and_reloads_cleanly():
     import asyncio
 
