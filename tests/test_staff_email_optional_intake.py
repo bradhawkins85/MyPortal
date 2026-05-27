@@ -6,7 +6,6 @@ import pytest
 
 from app import main
 from app.features.staff import handlers as staff_handlers
-from app.features.staff import helpers as staff_helpers
 
 
 class _DummyRequest:
@@ -17,12 +16,12 @@ class _DummyRequest:
         return self._form_data
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.asyncio
 async def test_create_staff_member_allows_missing_email(monkeypatch):
     request = _DummyRequest({"first_name": "Alex", "last_name": "Rivera"})
 
     monkeypatch.setattr(
-        staff_helpers,
+        staff_handlers,
         "_load_staff_context",
         AsyncMock(
             return_value=(
@@ -60,8 +59,14 @@ async def test_create_staff_member_allows_missing_email(monkeypatch):
         ),
     )
 
-    create_staff_mock = AsyncMock(return_value={"id": 42})
-    monkeypatch.setattr(main.staff_repo, "create_staff", create_staff_mock)
+    create_request_mock = AsyncMock(return_value={"id": 42})
+    monkeypatch.setattr(main.staff_requests_repo, "create_request", create_request_mock)
+    monkeypatch.setattr(
+        main.staff_onboarding_workflow_service,
+        "notify_staff_approval_requested",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(main.audit_service, "log_action", AsyncMock(return_value=None))
     monkeypatch.setattr(
         main.staff_custom_fields_repo,
         "list_field_definitions",
@@ -76,5 +81,5 @@ async def test_create_staff_member_allows_missing_email(monkeypatch):
     response = await staff_handlers.create_staff_member(request)  # type: ignore[arg-type]
 
     assert response.status_code == 303
-    create_staff_mock.assert_awaited_once()
-    assert create_staff_mock.await_args.kwargs["email"] is None
+    create_request_mock.assert_awaited_once()
+    assert create_request_mock.await_args.kwargs["email"] is None
