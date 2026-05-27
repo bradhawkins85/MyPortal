@@ -2,61 +2,60 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter
 from fastapi.responses import FileResponse, HTMLResponse
 
+from . import handlers
 
 router = APIRouter(tags=["Reports"])
 
-
-def _main():
-    from app import main as main_module
-
-    return main_module
-
-
-@router.get("/reports/company-overview", response_class=HTMLResponse)
-async def company_overview_report_page(request: Request):
-    return await _main().company_overview_report_page(request=request)
-
-
-@router.get("/reports/company-overview.pdf")
-async def company_overview_report_pdf(request: Request):
-    return await _main().company_overview_report_pdf(request=request)
-
-
-@router.get("/reports/company-overview/settings", response_class=HTMLResponse)
-async def company_overview_report_settings_page(request: Request):
-    return await _main().company_overview_report_settings_page(request=request)
-
-
-@router.post("/reports/company-overview/settings")
-async def company_overview_report_settings_save(request: Request):
-    return await _main().company_overview_report_settings_save(request=request)
-
-
-@router.get("/admin/reports/pdf-cover-image", response_class=HTMLResponse)
-async def admin_report_cover_image_page(request: Request):
-    return await _main().admin_report_cover_image_page(request=request)
-
-
-@router.post("/admin/reports/pdf-cover-image", response_class=HTMLResponse)
-async def admin_report_cover_image_upload(request: Request, image: UploadFile = File(None)):
-    return await _main().admin_report_cover_image_upload(request=request, image=image)
-
-
-@router.post("/admin/reports/pdf-cover-image/delete", response_class=HTMLResponse)
-async def admin_report_cover_image_delete(request: Request):
-    return await _main().admin_report_cover_image_delete(request=request)
-
-
-@router.get(
+router.add_api_route(
+    "/reports/company-overview",
+    handlers.company_overview_report_page,
+    methods=["GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/reports/company-overview.pdf",
+    handlers.company_overview_report_pdf,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/reports/company-overview/settings",
+    handlers.company_overview_report_settings_page,
+    methods=["GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/reports/company-overview/settings",
+    handlers.company_overview_report_settings_save,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/admin/reports/pdf-cover-image",
+    handlers.admin_report_cover_image_page,
+    methods=["GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/reports/pdf-cover-image",
+    handlers.admin_report_cover_image_upload,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/reports/pdf-cover-image/delete",
+    handlers.admin_report_cover_image_delete,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
     "/admin/reports/pdf-cover-image/preview",
+    handlers.admin_report_cover_image_preview,
+    methods=["GET"],
     response_class=FileResponse,
     include_in_schema=False,
 )
-async def admin_report_cover_image_preview(request: Request):
-    return await _main().admin_report_cover_image_preview(request=request)
 
 
 __all__ = ["router"]

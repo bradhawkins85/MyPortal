@@ -7,6 +7,8 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.reporting import PACK
+from app.features.reporting import handlers as reporting_handlers
+from app.features.reporting import routes as reporting_routes
 
 
 EXPECTED = {
@@ -52,6 +54,17 @@ def test_app_main_no_longer_owns_reporting_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_reporting_pack_owns_handlers():
+    assert reporting_routes.router.routes[0].endpoint == reporting_handlers.reporting_page
+    assert reporting_routes.router.routes[1].endpoint == reporting_handlers.reporting_export
+    assert reporting_routes.router.routes[2].endpoint == reporting_handlers.admin_reporting
+    assert reporting_routes.router.routes[3].endpoint == reporting_handlers.admin_reporting_new
+    assert reporting_routes.router.routes[4].endpoint == reporting_handlers.admin_reporting_edit
+    assert reporting_routes.router.routes[5].endpoint == reporting_handlers.admin_reporting_create
+    assert reporting_routes.router.routes[6].endpoint == reporting_handlers.admin_reporting_update
+    assert reporting_routes.router.routes[7].endpoint == reporting_handlers.admin_reporting_delete
 
 
 def test_reporting_pack_loads_and_reloads_cleanly():
