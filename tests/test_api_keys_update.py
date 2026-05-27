@@ -209,15 +209,24 @@ def test_admin_update_key_renders_success(monkeypatch):
     async def fake_log_action(**_payload):
         return None
 
-    async def fake_render(request, current_user, **kwargs):
-        render_calls.append({"user": current_user, "kwargs": kwargs})
+    async def fake_list_with_usage(**_kwargs):
+        return [updated]
+
+    async def fake_list_audit_logs(*, limit: int = 250):
+        assert limit == 250
+        return []
+
+    async def fake_render_template(template_name, request, current_user, *, extra=None):
+        render_calls.append({"user": current_user, "template_name": template_name, "extra": extra or {}})
         return HTMLResponse("ok")
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin_page)
     monkeypatch.setattr(api_key_repo, "get_api_key_with_usage", fake_get)
     monkeypatch.setattr(api_key_repo, "update_api_key", fake_update)
+    monkeypatch.setattr(api_key_repo, "list_api_keys_with_usage", fake_list_with_usage)
+    monkeypatch.setattr(main_module.audit_repo, "list_audit_logs", fake_list_audit_logs)
     monkeypatch.setattr(audit_service, "log_action", fake_log_action)
-    monkeypatch.setattr(main_module, "_render_api_keys_dashboard", fake_render)
+    monkeypatch.setattr(main_module, "_render_template", fake_render_template)
 
     try:
         with TestClient(app) as client:
@@ -237,6 +246,6 @@ def test_admin_update_key_renders_success(monkeypatch):
 
     assert response.status_code == 200
     assert render_calls
-    render_kwargs = render_calls[0]["kwargs"]
-    assert render_kwargs["status_message"] == "API key changes saved."
-    assert render_kwargs["errors"] is None
+    render_extra = render_calls[0]["extra"]
+    assert render_extra["status_message"] == "API key changes saved."
+    assert render_extra["errors"] == []
