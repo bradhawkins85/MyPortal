@@ -1,6 +1,9 @@
 """Ollama feature pack.
 
-Owns Ollama MCP API routes:
+Owns Ollama MCP API routes and their Copilot-compatible aliases.
+Both endpoint families delegate to the same Ollama-backed MCP handlers.
+
+Routes:
 
 * ``POST /api/mcp/ollama/``
 * ``POST /api/mcp/ollama/rpc``
