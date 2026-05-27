@@ -7,6 +7,8 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.api_keys import PACK
+from app.features.api_keys import handlers as api_key_handlers
+from app.features.api_keys import routes as api_key_routes
 
 
 EXPECTED = {
@@ -47,6 +49,29 @@ def test_app_main_no_longer_owns_api_keys_routes():
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
             f"{method} {path} still mounted directly on app.main; "
+            "feature-pack migration is incomplete."
+        )
+
+
+def test_api_keys_pack_owns_handlers():
+    assert api_key_routes.router.routes[0].endpoint == api_key_handlers.admin_api_keys_page
+    assert api_key_routes.router.routes[1].endpoint == api_key_handlers.admin_create_api_key_page
+    assert api_key_routes.router.routes[2].endpoint == api_key_handlers.admin_update_api_key_page
+    assert api_key_routes.router.routes[3].endpoint == api_key_handlers.admin_rotate_api_key_page
+    assert api_key_routes.router.routes[4].endpoint == api_key_handlers.admin_delete_api_key_page
+
+
+def test_app_main_no_longer_defines_api_key_admin_handlers():
+    for name in (
+        "_render_api_keys_dashboard",
+        "admin_api_keys_page",
+        "admin_create_api_key_page",
+        "admin_update_api_key_page",
+        "admin_rotate_api_key_page",
+        "admin_delete_api_key_page",
+    ):
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
             "feature-pack migration is incomplete."
         )
 
