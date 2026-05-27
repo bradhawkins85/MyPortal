@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.compliance import PACK
+from app.features.compliance import routes as compliance_routes
 
 
 EXPECTED = {
@@ -49,6 +50,32 @@ def test_app_main_no_longer_owns_compliance_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+    for name in (
+        "_load_compliance_context",
+        "_load_compliance_checks_context",
+        "compliance_page",
+        "compliance_control_requirements_page",
+        "compliance_checks_page",
+        "compliance_checks_detail_page",
+        "compliance_checks_library_page",
+    ):
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
+            "feature-pack migration is incomplete."
+        )
+
+
+def test_compliance_pack_owns_compliance_handlers():
+    for name in (
+        "_load_compliance_context",
+        "_load_compliance_checks_context",
+        "compliance_page",
+        "compliance_control_requirements_page",
+        "compliance_checks_page",
+        "compliance_checks_detail_page",
+        "compliance_checks_library_page",
+    ):
+        assert hasattr(compliance_routes, name)
 
 
 def test_compliance_pack_loads_and_reloads_cleanly():
