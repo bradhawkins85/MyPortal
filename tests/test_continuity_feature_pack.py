@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.continuity import PACK
+from app.features.continuity import routes as continuity_routes
 
 
 EXPECTED = {
@@ -14,6 +15,12 @@ EXPECTED = {
     ("GET", "/admin/business-continuity-plans/new"),
     ("GET", "/admin/business-continuity-plans/{plan_id}"),
 }
+
+HANDLER_NAMES = (
+    "admin_business_continuity_plans_page",
+    "admin_new_business_continuity_plan_page",
+    "admin_edit_business_continuity_plan_page",
+)
 
 
 def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
@@ -47,6 +54,16 @@ def test_app_main_no_longer_owns_continuity_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+    for name in HANDLER_NAMES:
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
+            "feature-pack migration is incomplete."
+        )
+
+
+def test_continuity_pack_owns_continuity_handlers():
+    for name in HANDLER_NAMES:
+        assert hasattr(continuity_routes, name)
 
 
 def test_continuity_pack_loads_and_reloads_cleanly():
