@@ -16,8 +16,21 @@ def _main():
 
 
 @router.get("/admin/call-recordings", response_class=HTMLResponse)
-async def route_admin_call_recordings_page(request: Request):
-    return await _main().admin_call_recordings_page(request=request)
+async def admin_call_recordings_page(request: Request):
+    """Admin page for viewing call recordings and transcriptions (super admin only)."""
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    return await main_module._render_template(
+        "admin/call_recordings.html",
+        request,
+        current_user,
+        extra={
+            "title": "Call Recordings & Transcriptions",
+        },
+    )
 
 
 __all__ = ["router"]
