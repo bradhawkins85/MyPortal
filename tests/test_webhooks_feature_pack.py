@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.webhooks import PACK
+from app.features.webhooks import routes as webhooks_routes
 
 
 EXPECTED = {
@@ -51,6 +52,11 @@ def test_app_main_no_longer_owns_webhooks_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_webhooks_pack_owns_handler_logic():
+    assert webhooks_routes.admin_webhooks.__module__ == "app.features.webhooks.routes"
+    assert not hasattr(main_module, "admin_webhooks")
 
 
 def test_webhooks_pack_loads_and_reloads_cleanly():
