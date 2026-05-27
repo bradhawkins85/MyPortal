@@ -2565,45 +2565,6 @@ async def _load_license_context(
     return user, membership, company, company_id, None
 
 
-async def _load_subscription_context(request: Request):
-    """Load context for subscription-related pages.
-    
-    Requires user to have both can_manage_licenses AND can_access_cart permissions.
-    """
-    user, redirect = await _require_authenticated_user(request)
-    if redirect:
-        return user, None, None, None, redirect
-    
-    is_super_admin = bool(user.get("is_super_admin"))
-    company_id_raw = user.get("company_id")
-    if company_id_raw is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No company associated with the current user",
-        )
-    try:
-        company_id = int(company_id_raw)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
-    
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
-    has_license = bool(membership and membership.get("can_manage_licenses"))
-    has_cart = bool(membership and membership.get("can_access_cart"))
-    
-    # Require both licenses and cart permissions (or super admin)
-    if not (is_super_admin or (has_license and has_cart)):
-        return (
-            user,
-            membership,
-            None,
-            company_id,
-            RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
-        )
-    
-    company = await company_repo.get_company_by_id(company_id)
-    return user, membership, company, company_id, None
-
-
 async def _load_asset_context(
     request: Request,
 ):
