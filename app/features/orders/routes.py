@@ -20,7 +20,7 @@ def _main():
     return main_module
 
 
-def _normalise_status_badge(label: str) -> str:
+def normalise_status_badge(label: str) -> str:
     lowered = label.lower()
     if any(token in lowered for token in ("cancel", "decline", "failed")):
         return "badge--danger"
@@ -31,7 +31,7 @@ def _normalise_status_badge(label: str) -> str:
     return "badge--muted"
 
 
-def _summarise_orders(
+def summarise_orders(
     orders: list[dict[str, Any]],
     *,
     attribute: str,
@@ -80,8 +80,8 @@ async def orders_page(
         record["shipping_status_label"] = shipping_label
         record["status_value"] = label.lower()
         record["shipping_status_value"] = shipping_label.lower()
-        record["status_badge"] = _normalise_status_badge(label)
-        record["shipping_badge"] = _normalise_status_badge(shipping_label)
+        record["status_badge"] = normalise_status_badge(label)
+        record["shipping_badge"] = normalise_status_badge(shipping_label)
         record["order_date_iso"] = order.get("order_date")
         record["eta_iso"] = order.get("eta")
         enriched_orders.append(record)
@@ -115,8 +115,8 @@ async def orders_page(
     total_orders = len(enriched_orders)
     visible_orders = len(filtered_orders)
 
-    status_summary = _summarise_orders(filtered_orders, attribute="status_label")
-    shipping_summary = _summarise_orders(filtered_orders, attribute="shipping_status_label")
+    status_summary = summarise_orders(filtered_orders, attribute="status_label")
+    shipping_summary = summarise_orders(filtered_orders, attribute="shipping_status_label")
 
     extra = {
         "title": "Orders",
@@ -151,4 +151,4 @@ async def route_orders_page(
     )
 
 
-__all__ = ["router", "orders_page", "_normalise_status_badge", "_summarise_orders"]
+__all__ = ["router", "orders_page", "normalise_status_badge", "summarise_orders"]

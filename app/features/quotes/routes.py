@@ -88,7 +88,7 @@ async def quotes_page(
         record = dict(quote_record)
         record["status_label"] = label
         record["status_value"] = label.lower()
-        record["status_badge"] = orders_routes._normalise_status_badge(label)
+        record["status_badge"] = orders_routes.normalise_status_badge(label)
         record["created_at_iso"] = quote_record.get("created_at")
         record["expires_at_iso"] = quote_record.get("expires_at")
         record["is_expired"] = is_expired
@@ -127,7 +127,7 @@ async def quotes_page(
             {"value": value, "label": label} for value, label in status_options
         ],
         "status_filter": status_key,
-        "status_summary": orders_routes._summarise_orders(
+        "status_summary": orders_routes.summarise_orders(
             filtered_quotes,
             attribute="status_label",
         ),
