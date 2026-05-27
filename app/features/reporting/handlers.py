@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fastapi import Request
+
 
 def _main():
     from app import main as main_module
@@ -9,14 +11,36 @@ def _main():
     return main_module
 
 
-reporting_page = _main().reporting_page
-reporting_export = _main().reporting_export
-admin_reporting = _main().admin_reporting
-admin_reporting_new = _main().admin_reporting_new
-admin_reporting_edit = _main().admin_reporting_edit
-admin_reporting_create = _main().admin_reporting_create
-admin_reporting_update = _main().admin_reporting_update
-admin_reporting_delete = _main().admin_reporting_delete
+async def reporting_page(request: Request):
+    return await _main().reporting_page(request=request)
+
+
+async def reporting_export(report_id: int, request: Request):
+    return await _main().reporting_export(report_id=report_id, request=request)
+
+
+async def admin_reporting(request: Request):
+    return await _main().admin_reporting(request=request)
+
+
+async def admin_reporting_new(request: Request):
+    return await _main().admin_reporting_new(request=request)
+
+
+async def admin_reporting_edit(report_id: int, request: Request):
+    return await _main().admin_reporting_edit(report_id=report_id, request=request)
+
+
+async def admin_reporting_create(request: Request):
+    return await _main().admin_reporting_create(request=request)
+
+
+async def admin_reporting_update(report_id: int, request: Request):
+    return await _main().admin_reporting_update(report_id=report_id, request=request)
+
+
+async def admin_reporting_delete(report_id: int, request: Request):
+    return await _main().admin_reporting_delete(report_id=report_id, request=request)
 
 
 __all__ = [
