@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.message_templates import PACK
+from app.features.message_templates import routes as message_template_routes
 
 
 EXPECTED = {
@@ -45,6 +46,34 @@ def test_app_main_no_longer_owns_message_templates_routes():
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
             f"{method} {path} still mounted directly on app.main; "
+            "feature-pack migration is incomplete."
+        )
+
+
+def test_message_templates_pack_owns_handlers():
+    assert (
+        message_template_routes.admin_message_templates.__module__
+        == "app.features.message_templates.routes"
+    )
+    assert (
+        message_template_routes.admin_message_templates_new.__module__
+        == "app.features.message_templates.routes"
+    )
+    assert (
+        message_template_routes.admin_message_templates_edit.__module__
+        == "app.features.message_templates.routes"
+    )
+
+
+def test_app_main_no_longer_defines_message_templates_handlers():
+    for name in (
+        "admin_message_templates",
+        "admin_message_templates_new",
+        "admin_message_templates_edit",
+        "_MESSAGE_TEMPLATE_CONTENT_TYPES",
+    ):
+        assert not hasattr(main_module, name), (
+            f"app.main still defines {name}; "
             "feature-pack migration is incomplete."
         )
 
