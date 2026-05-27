@@ -22,6 +22,101 @@ def _main():
     return main_module
 
 
+async def _validate_recommendation_product_ids(
+    raw_ids: Sequence[int | str] | None,
+    *,
+    field_label: str,
+    disallow_product_id: int | None = None,
+) -> list[int]:
+    from app.repositories import shop as shop_repo
+
+    values: list[int] = []
+    for raw in raw_ids or []:
+        if raw in (None, ""):
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid {field_label.lower()} selection submitted",
+            )
+        if value <= 0:
+            continue
+        values.append(value)
+
+    unique_ids = sorted(set(values))
+    if not unique_ids:
+        return []
+
+    candidates = await shop_repo.list_products_by_ids(unique_ids, include_archived=False)
+    found_ids = {int(candidate.get("id") or 0) for candidate in candidates}
+    missing = [str(value) for value in unique_ids if value not in found_ids]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_label} selection is no longer available",
+        )
+
+    validated: list[int] = []
+    for candidate in candidates:
+        candidate_id = int(candidate.get("id") or 0)
+        if disallow_product_id is not None and candidate_id == disallow_product_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_label} products cannot include the item being edited",
+            )
+        if bool(candidate.get("archived")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_label} selection is archived and cannot be used",
+            )
+        validated.append(candidate_id)
+
+    return sorted(validated)
+
+
+async def _resolve_related_product_id_by_sku(sku: str | None) -> int | None:
+    """Look up a related product identifier from a SKU value."""
+
+    from app.repositories import shop as shop_repo
+
+    if sku in (None, ""):
+        return None
+
+    candidate = str(sku).strip()
+    if not candidate:
+        return None
+
+    product = await shop_repo.get_product_by_sku(candidate, include_archived=True)
+    if not product:
+        return None
+
+    try:
+        product_id = int(product.get("id") or 0)
+    except (TypeError, ValueError):
+        return None
+
+    return product_id or None
+
+
+def _normalise_related_product_inputs(raw: Any) -> list[int | str]:
+    """Normalise related product identifiers from mixed FastAPI form inputs."""
+
+    from fastapi.params import Form as FormField
+
+    if isinstance(raw, FormField):
+        raw = raw.default
+
+    if raw in (None, ""):
+        return []
+
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+        return list(raw)
+
+    return [raw]
+
+
 def _strip_internal_shop_product_fields(products: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Remove internal-only product fields before sending customer-facing JSON."""
     hidden_fields = {"buy_price", "vendor_sku"}
@@ -1706,11 +1801,11 @@ async def admin_create_shop_product(
         except (TypeError, InvalidOperation):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be a valid number")
 
-    cross_sell_ids = await _main()._validate_recommendation_product_ids(
+    cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_product_ids,
         field_label="Cross-sell",
     )
-    upsell_ids = await _main()._validate_recommendation_product_ids(
+    upsell_ids = await _validate_recommendation_product_ids(
         upsell_product_ids,
         field_label="Up-sell",
     )
@@ -1993,22 +2088,22 @@ async def admin_update_shop_product(
         else:
             await image.close()
 
-    cross_sell_candidates = _main()._normalise_related_product_inputs(cross_sell_product_ids)
-    resolved_cross_id = await _main()._resolve_related_product_id_by_sku(cross_sell_sku)
+    cross_sell_candidates = _normalise_related_product_inputs(cross_sell_product_ids)
+    resolved_cross_id = await _resolve_related_product_id_by_sku(cross_sell_sku)
     if resolved_cross_id:
         cross_sell_candidates.append(resolved_cross_id)
 
-    cross_sell_ids = await _main()._validate_recommendation_product_ids(
+    cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_candidates,
         field_label="Cross-sell",
         disallow_product_id=product_id,
     )
-    upsell_candidates = _main()._normalise_related_product_inputs(upsell_product_ids)
-    resolved_upsell_id = await _main()._resolve_related_product_id_by_sku(upsell_sku)
+    upsell_candidates = _normalise_related_product_inputs(upsell_product_ids)
+    resolved_upsell_id = await _resolve_related_product_id_by_sku(upsell_sku)
     if resolved_upsell_id:
         upsell_candidates.append(resolved_upsell_id)
 
-    upsell_ids = await _main()._validate_recommendation_product_ids(
+    upsell_ids = await _validate_recommendation_product_ids(
         upsell_candidates,
         field_label="Up-sell",
         disallow_product_id=product_id,

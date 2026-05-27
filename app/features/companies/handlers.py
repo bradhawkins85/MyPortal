@@ -5,18 +5,759 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 
 def _main():
     from app import main as main_module
 
     return main_module
+
+
+_COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
+    {"field": "can_access_shop", "label": "Shop"},
+    {"field": "can_access_cart", "label": "Cart"},
+    {"field": "can_access_orders", "label": "Orders"},
+    {"field": "can_access_quotes", "label": "Quotes"},
+    {"field": "can_access_forms", "label": "Forms"},
+    {"field": "can_manage_assets", "label": "Assets"},
+    {"field": "can_manage_licenses", "label": "Licenses"},
+    {"field": "can_manage_invoices", "label": "Invoices"},
+    {"field": "can_manage_office_groups", "label": "Office groups"},
+    {"field": "can_manage_issues", "label": "Issue tracker"},
+    {"field": "can_order_licenses", "label": "Order licenses"},
+    {"field": "is_admin", "label": "Company admin"},
+]
+
+_STAFF_PERMISSION_OPTIONS: list[dict[str, Any]] = [
+    {"value": 0, "label": "No staff access"},
+    {"value": 1, "label": "Department viewer"},
+    {"value": 2, "label": "Department manager"},
+    {"value": 3, "label": "Full staff manager"},
+]
+
+
+async def _get_company_management_scope(
+    request: Request,
+    user: dict[str, Any],
+    include_archived: bool = False,
+) -> tuple[bool, list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    from app.repositories import companies as company_repo
+    from app.repositories import user_companies as user_company_repo
+
+    is_super_admin = bool(user.get("is_super_admin"))
+    if is_super_admin:
+        companies = await company_repo.list_companies(include_archived=include_archived)
+        companies.sort(key=lambda item: (item.get("name") or "").lower())
+        return True, companies, {}
+
+    memberships = await user_company_repo.list_companies_for_user(user["id"])
+    membership_lookup: dict[int, dict[str, Any]] = {}
+    for record in memberships:
+        raw_company_id = record.get("company_id")
+        try:
+            company_id = int(raw_company_id)
+        except (TypeError, ValueError):
+            continue
+        staff_permission = int(record.get("staff_permission") or 0)
+        if (
+            bool(record.get("is_admin"))
+            or bool(record.get("can_manage_staff"))
+            or staff_permission > 0
+        ):
+            membership_lookup[company_id] = record
+
+    if not membership_lookup:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+
+    companies: list[dict[str, Any]] = []
+    for company_id in sorted(membership_lookup.keys()):
+        company = await company_repo.get_company_by_id(company_id)
+        if company:
+            # Filter archived companies for non-super admins unless explicitly requested
+            if include_archived or not company.get("archived"):
+                companies.append(company)
+
+    if not companies:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+
+    return False, companies, membership_lookup
+
+
+async def _render_companies_dashboard(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    selected_company_id: int | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    temporary_password: str | None = None,
+    invited_email: str | None = None,
+    include_archived: bool = False,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    from app.repositories import roles as role_repo
+    from app.repositories import user_companies as user_company_repo
+
+    is_super_admin, managed_companies, membership_lookup = await _get_company_management_scope(
+        request, user, include_archived=include_archived
+    )
+
+    ordered_company_ids: list[int] = [
+        int(company["id"]) for company in managed_companies if company.get("id") is not None
+    ]
+
+    effective_company_id = selected_company_id
+    if effective_company_id is not None and effective_company_id not in ordered_company_ids:
+        effective_company_id = ordered_company_ids[0] if ordered_company_ids else None
+
+    if effective_company_id is None and not is_super_admin and ordered_company_ids:
+        active_company_raw = getattr(request.state, "active_company_id", None)
+        try:
+            active_company_candidate = int(active_company_raw)
+        except (TypeError, ValueError):
+            active_company_candidate = None
+        if active_company_candidate in ordered_company_ids:
+            effective_company_id = active_company_candidate
+        else:
+            effective_company_id = ordered_company_ids[0]
+
+    if is_super_admin and effective_company_id is None:
+        assignments = await user_company_repo.list_assignments()
+    elif effective_company_id is not None:
+        assignments = await user_company_repo.list_assignments(effective_company_id)
+    else:
+        assignments = []
+
+    role_rows = await role_repo.list_roles()
+    role_options: list[dict[str, Any]] = []
+    for record in role_rows:
+        role_id = record.get("id")
+        name = (record.get("name") or "").strip()
+        if role_id is None or not name:
+            continue
+        role_options.append(
+            {
+                "id": int(role_id),
+                "name": name,
+                "description": (record.get("description") or "").strip(),
+                "is_system": bool(record.get("is_system")),
+            }
+        )
+
+    extra = {
+        "title": "Company administration",
+        "managed_companies": managed_companies,
+        "selected_company_id": effective_company_id,
+        "assignments": assignments,
+        "permission_columns": _COMPANY_PERMISSION_COLUMNS,
+        "staff_permission_options": _STAFF_PERMISSION_OPTIONS,
+        "role_options": role_options,
+        "is_super_admin": is_super_admin,
+        "success_message": success_message,
+        "error_message": error_message,
+        "temporary_password": temporary_password,
+        "invited_email": invited_email,
+        "show_archived": include_archived,
+        "admin_credentials_configured": bool(all(await _main()._get_m365_admin_credentials())),
+    }
+
+    response = await _main()._render_template("admin/companies.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
+
+
+async def _render_company_edit_page(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    company_id: int,
+    form_values: Mapping[str, Any] | None = None,
+    assign_form_values: Mapping[str, Any] | None = None,
+    success_message: str | None = None,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+    show_inactive_tasks: bool = False,
+) -> HTMLResponse:
+    from app.repositories import billing_contacts as billing_contacts_repo
+    from app.repositories import companies as company_repo
+    from app.repositories import pending_staff_access as pending_staff_access_repo
+    from app.repositories import recurring_invoice_items as recurring_items_repo
+    from app.repositories import roles as role_repo
+    from app.repositories import scheduled_tasks as scheduled_tasks_repo
+    from app.repositories import staff as staff_repo
+    from app.repositories import staff_custom_fields as staff_custom_fields_repo
+    from app.repositories import user_companies as user_company_repo
+    from app.services import m365 as m365_service
+    from app.services import modules as modules_service
+    from app.services import staff_field_config as staff_field_config_service
+    from app.services.scheduler import COMMANDS_BY_MODULE
+
+    company_record = await company_repo.get_company_by_id(company_id)
+    if not company_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    is_super_admin, managed_companies, _ = await _get_company_management_scope(request, user)
+
+    assignments: list[dict[str, Any]] = []
+    role_options: list[dict[str, Any]] = []
+    company_user_options: dict[int, list[dict[str, Any]]] = {}
+    if is_super_admin:
+        assignments = await user_company_repo.list_assignments(company_id)
+        for entry in assignments:
+            entry["is_pending"] = False
+            entry["pending_requires_account"] = False
+
+        role_rows = await role_repo.list_roles()
+        role_lookup: dict[int, str] = {}
+        for record in role_rows:
+            role_id = record.get("id")
+            name = (record.get("name") or "").strip()
+            if role_id is None or not name:
+                continue
+            try:
+                role_id_int = int(role_id)
+            except (TypeError, ValueError):
+                continue
+            role_lookup[role_id_int] = name
+            role_options.append(
+                {
+                    "id": role_id_int,
+                    "name": name,
+                    "description": (record.get("description") or "").strip(),
+                    "is_system": bool(record.get("is_system")),
+                }
+            )
+
+        staff_directory: dict[int, list[dict[str, Any]]] = {}
+        pending_assignments_map: dict[int, list[dict[str, Any]]] = {}
+        for managed in managed_companies:
+            raw_id = managed.get("id")
+            try:
+                managed_company_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            staff_rows = await staff_repo.list_staff_with_users(managed_company_id)
+            staff_directory[managed_company_id] = staff_rows
+            pending_assignments = await pending_staff_access_repo.list_assignments_for_company(
+                managed_company_id
+            )
+            pending_assignments_map[managed_company_id] = pending_assignments
+            pending_lookup = {
+                entry.get("staff_id"): entry
+                for entry in pending_assignments
+                if entry.get("staff_id") is not None
+            }
+            options: list[dict[str, Any]] = []
+            for row in staff_rows:
+                staff_id = row.get("staff_id")
+                email = (row.get("email") or "").strip()
+                if staff_id is None or not email:
+                    continue
+                first_name = (row.get("first_name") or "").strip()
+                last_name = (row.get("last_name") or "").strip()
+                name_parts = [part for part in (first_name, last_name) if part]
+                has_name = bool(name_parts)
+                label: str
+                if has_name and email:
+                    label = f"{' '.join(name_parts)} ({email})"
+                elif has_name:
+                    label = " ".join(name_parts)
+                else:
+                    label = email
+                user_id_value = row.get("user_id")
+                has_user = user_id_value is not None
+                option_value: str
+                if has_user:
+                    try:
+                        numeric_user_id = int(user_id_value)
+                    except (TypeError, ValueError):
+                        numeric_user_id = None
+                else:
+                    numeric_user_id = None
+                if numeric_user_id is not None:
+                    option_value = str(numeric_user_id)
+                else:
+                    option_value = f"staff:{int(staff_id)}"
+                if not row.get("enabled", True):
+                    label = f"{label} (inactive)"
+                pending_assignment = pending_lookup.get(int(staff_id))
+                if numeric_user_id is None:
+                    if pending_assignment:
+                        label = f"{label} – access pending sign-up"
+                    else:
+                        label = f"{label} – invite required"
+                options.append(
+                    {
+                        "value": option_value,
+                        "label": label,
+                        "email": email,
+                        "staff_id": int(staff_id),
+                        "user_id": numeric_user_id,
+                        "has_user": numeric_user_id is not None,
+                        "pending_access": bool(pending_assignment),
+                    }
+                )
+            options.sort(key=lambda item: item.get("label", "").lower())
+            company_user_options[managed_company_id] = options
+
+        permission_label_lookup: dict[int, str] = {}
+        for option in _STAFF_PERMISSION_OPTIONS:
+            value = option.get("value")
+            label = option.get("label")
+            if value is None or label is None:
+                continue
+            try:
+                permission_label_lookup[int(value)] = str(label)
+            except (TypeError, ValueError):
+                continue
+
+        pending_entries = pending_assignments_map.get(company_id)
+        if pending_entries is None:
+            pending_entries = await pending_staff_access_repo.list_assignments_for_company(
+                company_id
+            )
+        staff_rows_current = staff_directory.get(company_id)
+        if staff_rows_current is None:
+            staff_rows_current = await staff_repo.list_staff_with_users(company_id)
+        staff_lookup: dict[int, dict[str, Any]] = {}
+        for staff_entry in staff_rows_current:
+            staff_id = staff_entry.get("staff_id")
+            if staff_id is None:
+                continue
+            try:
+                staff_lookup[int(staff_id)] = staff_entry
+            except (TypeError, ValueError):
+                continue
+
+        existing_user_ids: set[int] = set()
+        for assignment in assignments:
+            user_id = assignment.get("user_id")
+            if user_id is None:
+                continue
+            try:
+                existing_user_ids.add(int(user_id))
+            except (TypeError, ValueError):
+                continue
+
+        for pending_entry in pending_entries or []:
+            staff_id_raw = pending_entry.get("staff_id")
+            if staff_id_raw is None:
+                continue
+            try:
+                staff_id_int = int(staff_id_raw)
+            except (TypeError, ValueError):
+                continue
+
+            staff_info = staff_lookup.get(staff_id_int, {})
+            user_id_value: int | None = None
+            if staff_info.get("user_id") is not None:
+                try:
+                    user_id_value = int(staff_info.get("user_id"))
+                except (TypeError, ValueError):
+                    user_id_value = None
+            if user_id_value is not None and user_id_value in existing_user_ids:
+                continue
+
+            email = (staff_info.get("email") or "").strip()
+            if not email:
+                email = f"Staff #{staff_id_int}"
+            first_name = (staff_info.get("first_name") or "").strip()
+            last_name = (staff_info.get("last_name") or "").strip()
+
+            role_id_raw = pending_entry.get("role_id")
+            role_id_value: int | None = None
+            if role_id_raw is not None:
+                try:
+                    role_id_value = int(role_id_raw)
+                except (TypeError, ValueError):
+                    role_id_value = None
+
+            try:
+                staff_permission_value = int(pending_entry.get("staff_permission") or 0)
+            except (TypeError, ValueError):
+                staff_permission_value = 0
+
+            pending_record: dict[str, Any] = {
+                "company_id": pending_entry.get("company_id") or company_id,
+                "user_id": user_id_value,
+                "staff_id": staff_id_int,
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "membership_id": None,
+                "membership_role_id": role_id_value,
+                "membership_role_name": role_lookup.get(role_id_value) if role_id_value is not None else None,
+                "staff_permission": staff_permission_value,
+                "staff_permission_label": permission_label_lookup.get(
+                    staff_permission_value, permission_label_lookup.get(0, "No staff access")
+                ),
+                "can_manage_staff": bool(pending_entry.get("can_manage_staff", False)),
+                "is_pending": True,
+                "pending_requires_account": user_id_value is None,
+            }
+
+            for column in _COMPANY_PERMISSION_COLUMNS:
+                field = column.get("field")
+                if not field:
+                    continue
+                pending_record[field] = bool(pending_entry.get(field, False))
+
+            assignments.append(pending_record)
+
+        assignments.sort(
+            key=lambda item: (
+                (item.get("email") or "").lower(),
+                1 if item.get("is_pending") else 0,
+                item.get("user_id") or 0,
+            )
+        )
+
+    def _string_value(key: str, default: str) -> str:
+        if not form_values or key not in form_values:
+            return default
+        value = form_values.get(key)
+        return str(value) if value is not None else ""
+
+    def _bool_value(key: str, default: bool) -> bool:
+        if not form_values or key not in form_values:
+            return default
+        value = form_values.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    default_email_domains = ", ".join(company_record.get("email_domains") or [])
+    form_data = {
+        "name": _string_value("name", (company_record.get("name") or "").strip()),
+        "syncro_company_id": _string_value(
+            "syncro_company_id", (company_record.get("syncro_company_id") or "").strip()
+        ),
+        "tacticalrmm_client_id": _string_value(
+            "tacticalrmm_client_id",
+            (company_record.get("tacticalrmm_client_id") or "").strip(),
+        ),
+        "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
+        "hudu_id": _string_value("hudu_id", (company_record.get("hudu_id") or "").strip()),
+        "huntress_organization_id": _string_value(
+            "huntress_organization_id",
+            (company_record.get("huntress_organization_id") or "").strip(),
+        ),
+        "email_domains": _string_value("email_domains", default_email_domains),
+        "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
+        "payment_method": _string_value(
+            "payment_method", (company_record.get("payment_method") or "invoice_prepay").strip()
+        ),
+        "require_po": _bool_value("require_po", bool(company_record.get("require_po"))),
+        "offboarding_email_forwarding_enabled": _bool_value(
+            "offboarding_email_forwarding_enabled",
+            bool(int(company_record.get("offboarding_email_forwarding_enabled", 1) or 1)),
+        ),
+        "trello_board_id": _string_value(
+            "trello_board_id", (company_record.get("trello_board_id") or "").strip()
+        ),
+        "trello_api_key": _string_value(
+            "trello_api_key", (company_record.get("trello_api_key") or "").strip()
+        ),
+        "trello_token": _string_value(
+            "trello_token", (company_record.get("trello_token") or "").strip()
+        ),
+    }
+
+    form_email_text = form_data.get("email_domains", "")
+    if form_values and "email_domains" in form_values:
+        preview_domains = [
+            domain.strip()
+            for domain in form_email_text.replace("\n", ",").split(",")
+            if domain.strip()
+        ]
+    else:
+        preview_domains = list(company_record.get("email_domains") or [])
+
+    assign_values = assign_form_values or {}
+
+    def _assign_int(key: str, default: int | None = None) -> int | None:
+        if key not in assign_values:
+            return default
+        value = assign_values.get(key)
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return default
+            try:
+                return int(text)
+            except ValueError:
+                return default
+        return default
+
+    def _assign_bool(key: str, default: bool = False) -> bool:
+        if key not in assign_values:
+            return default
+        value = assign_values.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            candidate = value.strip().lower()
+            if not candidate:
+                return False
+            return candidate in {"1", "true", "yes", "on"}
+        return default
+
+    assign_company_id = _assign_int("company_id", company_id) or company_id
+    raw_assign_user_value: str = ""
+    if "user_value" in assign_values:
+        value = assign_values.get("user_value")
+        raw_assign_user_value = str(value).strip() if value is not None else ""
+    elif "user_id" in assign_values:
+        value = assign_values.get("user_id")
+        raw_assign_user_value = str(value).strip() if value is not None else ""
+    assign_user_value = raw_assign_user_value
+    assign_user_id: int | None = None
+    if assign_user_value:
+        try:
+            assign_user_id = int(assign_user_value)
+        except ValueError:
+            assign_user_id = None
+    assign_role_id = _assign_int("role_id")
+    assign_staff_permission = _assign_int("staff_permission", 0) or 0
+    if assign_staff_permission < 0:
+        assign_staff_permission = 0
+    if assign_staff_permission > 3:
+        assign_staff_permission = 3
+    assign_can_manage_staff = _assign_bool("can_manage_staff", False)
+    assign_permissions: dict[str, bool] = {}
+    for column in _COMPANY_PERMISSION_COLUMNS:
+        field = column.get("field")
+        if not field:
+            continue
+        assign_permissions[field] = _assign_bool(field, False)
+
+    assign_user_options = company_user_options.get(assign_company_id, []) if is_super_admin else []
+
+    company_automation_tasks: list[dict[str, Any]] = []
+    automation_command_options: list[dict[str, str]] = []
+    automation_company_options: list[dict[str, str]] = []
+
+    if is_super_admin:
+        # Build the set of commands that belong to disabled modules so they can be excluded.
+        try:
+            all_modules = await modules_service.list_modules()
+            disabled_module_slugs = {m["slug"] for m in all_modules if not m.get("enabled")}
+        except Exception:  # pragma: no cover - defensive fallback
+            disabled_module_slugs = set()
+        disabled_commands: set[str] = set()
+        for mod_slug, cmds in COMMANDS_BY_MODULE.items():
+            if mod_slug in disabled_module_slugs:
+                disabled_commands.update(cmds)
+
+        automation_command_options = [
+            {"value": "sync_staff", "label": "Sync staff directory"},
+            {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
+            {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
+            {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
+            {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
+            {"value": "sync_huntress", "label": "Sync Huntress data"},
+            {"value": "sync_to_xero", "label": "Sync to Xero"},
+            {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
+            {"value": "generate_invoice", "label": "Generate Invoice"},
+            {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
+            {"value": "sync_recordings", "label": "Sync call recordings"},
+            {
+                "value": "sync_unifi_talk_recordings",
+                "label": "Sync Unifi Talk recordings",
+            },
+            {"value": "queue_transcriptions", "label": "Queue transcriptions"},
+            {"value": "process_transcription", "label": "Process transcription"},
+        ]
+        automation_command_options = [o for o in automation_command_options if o["value"] not in disabled_commands]
+        default_command_values = {option["value"] for option in automation_command_options}
+
+        try:
+            tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive_tasks)
+        except Exception:  # pragma: no cover - fallback to keep page rendering
+            tasks = []
+
+        existing_commands: set[str] = set()
+        for task in tasks:
+            command_value = task.get("command")
+            if command_value:
+                existing_commands.add(str(command_value))
+
+            raw_company_id = task.get("company_id")
+            try:
+                task_company_id = int(raw_company_id) if raw_company_id is not None else None
+            except (TypeError, ValueError):
+                task_company_id = None
+
+            if task_company_id != company_id:
+                continue
+
+            serialised_task = _main()._serialise_mapping(task)
+            serialised_task["last_run_iso"] = _main()._to_iso(task.get("last_run_at"))
+            serialised_task["company_name"] = (company_record.get("name") or "").strip() or f"Company #{company_id}"
+            company_automation_tasks.append(serialised_task)
+
+        for command in sorted(existing_commands):
+            if command and command not in default_command_values and command not in disabled_commands:
+                automation_command_options.append({"value": command, "label": command})
+
+        automation_company_options = [
+            {
+                "value": str(company_id),
+                "label": (company_record.get("name") or "").strip() or f"Company #{company_id}",
+            }
+        ]
+
+        company_automation_tasks.sort(key=lambda item: (item.get("name") or "").lower())
+
+    # Fetch recurring invoice items for the company
+    recurring_invoice_items = []
+    if is_super_admin:
+        try:
+            items = await recurring_items_repo.list_company_recurring_invoice_items(
+                company_id
+            )
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                items = []
+            else:
+                raise
+        for item in items:
+            recurring_invoice_items.append(_main()._serialise_mapping(item))
+
+    # Fetch billing contacts for the company
+    billing_contacts = []
+    company_staff = []
+    if is_super_admin:
+        try:
+            billing_contacts = await billing_contacts_repo.list_billing_contacts_for_company(
+                company_id
+            )
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                billing_contacts = []
+            else:
+                raise
+        # Get all staff for this company for the dropdown
+        try:
+            company_staff = await staff_repo.list_staff(company_id)
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                company_staff = []
+            else:
+                raise
+
+    # Fetch Microsoft 365 credentials for the company
+    m365_credential_view: dict[str, Any] | None = None
+    if is_super_admin:
+        try:
+            m365_creds = await m365_service.get_credentials(company_id)
+            if m365_creds:
+                expires = m365_creds.get("token_expires_at")
+                if isinstance(expires, datetime):
+                    expires_display = expires.replace(tzinfo=timezone.utc).isoformat()
+                elif expires:
+                    expires_display = str(expires)
+                else:
+                    expires_display = None
+                m365_credential_view = {
+                    "tenant_id": m365_creds.get("tenant_id"),
+                    "client_id": m365_creds.get("client_id"),
+                    "token_expires_at": expires_display,
+                }
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                pass
+            else:
+                raise
+
+    staff_field_config: list[dict[str, Any]] = []
+    staff_custom_field_definitions: list[dict[str, Any]] = []
+    if is_super_admin:
+        staff_field_config = (
+            await staff_field_config_service.load_effective_company_staff_fields(company_id)
+        )
+        staff_custom_field_definitions = (
+            await staff_custom_fields_repo.list_company_owned_definitions(company_id)
+        )
+
+    # Fetch tray install tokens for this company
+    tray_tokens: list[dict[str, Any]] = []
+    if is_super_admin:
+        try:
+            from app.repositories import tray as tray_repo
+            tray_tokens = await tray_repo.list_install_tokens(company_id=company_id)
+        except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
+            if "Database pool not initialised" in str(exc):
+                tray_tokens = []
+            else:
+                raise
+
+    assign_form = {
+        "company_id": assign_company_id,
+        "user_id": assign_user_id,
+        "user_value": assign_user_value,
+        "role_id": assign_role_id,
+        "staff_permission": assign_staff_permission,
+        "can_manage_staff": assign_can_manage_staff,
+        "permissions": assign_permissions,
+    }
+
+    extra = {
+        "title": f"Edit {company_record.get('name') or 'company'}",
+        "company": company_record,
+        "form_data": form_data,
+        "managed_companies": managed_companies,
+        "is_super_admin": is_super_admin,
+        "assignments": assignments,
+        "permission_columns": _COMPANY_PERMISSION_COLUMNS,
+        "staff_permission_options": _STAFF_PERMISSION_OPTIONS,
+        "role_options": role_options,
+        "success_message": success_message,
+        "error_message": error_message,
+        "email_domain_preview": preview_domains,
+        "assign_form": assign_form,
+        "company_user_options": company_user_options,
+        "assign_user_options": assign_user_options,
+        "company_automation_tasks": company_automation_tasks,
+        "automation_command_options": automation_command_options,
+        "automation_company_options": automation_company_options,
+        "recurring_invoice_items": recurring_invoice_items,
+        "billing_contacts": billing_contacts,
+        "company_staff": company_staff,
+        "show_inactive_tasks": show_inactive_tasks,
+        "m365_credential": m365_credential_view,
+        "m365_has_credentials": m365_credential_view is not None,
+        "m365_admin_credentials_configured": bool(all(await _main()._get_m365_admin_credentials(company_id))),
+        "staff_field_config": staff_field_config,
+        "staff_custom_field_definitions": staff_custom_field_definitions,
+        "tray_tokens": tray_tokens,
+    }
+
+    response = await _main()._render_template("admin/company_edit.html", request, user, extra=extra)
+    response.status_code = status_code
+    return response
 
 
 def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
@@ -83,7 +824,7 @@ async def _ensure_company_permission(
     require_admin: bool = False,
     require_staff_manager: bool = False,
 ) -> None:
-    is_super_admin, _, membership_lookup = await _main()._get_company_management_scope(
+    is_super_admin, _, membership_lookup = await _get_company_management_scope(
         request, user
     )
     if is_super_admin:
@@ -112,7 +853,7 @@ async def admin_companies_page(
     current_user, redirect = await _main()._require_authenticated_user(request)
     if redirect:
         return redirect
-    return await _main()._render_companies_dashboard(
+    return await _render_companies_dashboard(
         request,
         current_user,
         selected_company_id=company_id,
@@ -132,7 +873,7 @@ async def admin_company_edit_page(
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
-    return await _main()._render_company_edit_page(
+    return await _render_company_edit_page(
         request,
         current_user,
         company_id=company_id,
@@ -166,14 +907,14 @@ async def admin_create_company(request: Request):
             str(raw_email_domains) if raw_email_domains is not None else ""
         )
     except company_domains.EmailDomainError as exc:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             error_message=str(exc),
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if not name:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             error_message="Enter a company name.",
@@ -198,7 +939,7 @@ async def admin_create_company(request: Request):
         created = await company_repo.create_company(**payload)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create company", error=str(exc))
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             error_message="Unable to create company. Please try again.",
@@ -238,7 +979,7 @@ async def admin_assign_user_to_company(request: Request):
         "staff_permission": staff_permission_raw,
         "can_manage_staff": "can_manage_staff" in form_keys,
     }
-    for column in _main()._COMPANY_PERMISSION_COLUMNS:
+    for column in _COMPANY_PERMISSION_COLUMNS:
         field = column.get("field")
         if field:
             assign_form_state[field] = field in form_keys
@@ -256,7 +997,7 @@ async def admin_assign_user_to_company(request: Request):
     async def _assign_error(message: str, status_code: int):
         if resolved_company_id is None:
             return _main()._companies_redirect(error=message)
-        return await _main()._render_company_edit_page(
+        return await _render_company_edit_page(
             request,
             current_user,
             company_id=resolved_company_id,
@@ -325,7 +1066,7 @@ async def admin_assign_user_to_company(request: Request):
                 staff_permission = 3
 
             permission_values: dict[str, bool] = {}
-            for column in _main()._COMPANY_PERMISSION_COLUMNS:
+            for column in _COMPANY_PERMISSION_COLUMNS:
                 field = column.get("field")
                 if not field:
                     continue
@@ -421,7 +1162,7 @@ async def admin_assign_user_to_company(request: Request):
     assign_form_state["staff_permission"] = staff_permission
 
     permission_values: dict[str, bool] = {}
-    for column in _main()._COMPANY_PERMISSION_COLUMNS:
+    for column in _COMPANY_PERMISSION_COLUMNS:
         field = column.get("field")
         if not field:
             continue
@@ -557,7 +1298,7 @@ async def admin_update_company(company_id: int, request: Request):
     try:
         email_domains = company_domains.parse_email_domain_text(email_domains_text)
     except company_domains.EmailDomainError as exc:
-        return await _main()._render_company_edit_page(
+        return await _render_company_edit_page(
             request,
             current_user,
             company_id=company_id,
@@ -566,7 +1307,7 @@ async def admin_update_company(company_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if not name:
-        return await _main()._render_company_edit_page(
+        return await _render_company_edit_page(
             request,
             current_user,
             company_id=company_id,
@@ -608,7 +1349,7 @@ async def admin_update_company(company_id: int, request: Request):
         await company_repo.update_company(company_id, **updates)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to update company", company_id=company_id, error=str(exc))
-        return await _main()._render_company_edit_page(
+        return await _render_company_edit_page(
             request,
             current_user,
             company_id=company_id,
@@ -802,7 +1543,7 @@ async def admin_create_company_user(request: Request):
     try:
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             error_message="Select a company.",
@@ -816,7 +1557,7 @@ async def admin_create_company_user(request: Request):
         require_staff_manager=True,
     )
     if not email:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             selected_company_id=company_id,
@@ -824,7 +1565,7 @@ async def admin_create_company_user(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if len(password) < 8:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             selected_company_id=company_id,
@@ -833,7 +1574,7 @@ async def admin_create_company_user(request: Request):
         )
     existing_user = await user_repo.get_user_by_email(email)
     if existing_user:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             selected_company_id=company_id,
@@ -875,7 +1616,7 @@ async def admin_invite_company_user(request: Request):
     try:
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             error_message="Select a company.",
@@ -889,7 +1630,7 @@ async def admin_invite_company_user(request: Request):
         require_staff_manager=True,
     )
     if not email:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             selected_company_id=company_id,
@@ -898,7 +1639,7 @@ async def admin_invite_company_user(request: Request):
         )
     existing_user = await user_repo.get_user_by_email(email)
     if existing_user:
-        return await _main()._render_companies_dashboard(
+        return await _render_companies_dashboard(
             request,
             current_user,
             selected_company_id=company_id,
@@ -919,7 +1660,7 @@ async def admin_invite_company_user(request: Request):
         user_id=created_user["id"],
         company_id=company_id,
     )
-    return await _main()._render_companies_dashboard(
+    return await _render_companies_dashboard(
         request,
         current_user,
         selected_company_id=company_id,
