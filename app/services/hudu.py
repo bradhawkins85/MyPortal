@@ -189,11 +189,10 @@ async def create_asset_password(
     base_url = settings["base_url"]
     api_key = settings["api_key"]
 
-    endpoint = f"{base_url}/api/v1/asset_passwords"
+    endpoint = f"{base_url}/api/v1/companies/{company_id}/asset_passwords"
     pw_payload: dict[str, Any] = {
         "name": name,
         "password": password,
-        "company_id": company_id,
     }
     if username:
         pw_payload["username"] = username
