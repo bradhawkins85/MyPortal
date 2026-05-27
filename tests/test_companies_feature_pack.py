@@ -7,6 +7,8 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.companies import PACK
+from app.features.companies import admin_routes as company_routes
+from app.features.companies import handlers as company_handlers
 
 
 EXPECTED = {
@@ -73,6 +75,14 @@ def test_app_main_no_longer_owns_companies_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_companies_pack_owns_handlers():
+    assert company_routes.router.routes[0].endpoint == company_handlers.admin_companies_page
+    assert company_routes.router.routes[1].endpoint == company_handlers.admin_company_edit_page
+    assert company_routes.router.routes[2].endpoint == company_handlers.admin_create_company
+    assert company_routes.router.routes[3].endpoint == company_handlers.admin_assign_user_to_company
+    assert company_routes.router.routes[4].endpoint == company_handlers.admin_update_company
 
 
 def test_companies_pack_loads_and_reloads_cleanly():

@@ -7,6 +7,8 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.automations import PACK
+from app.features.automations import handlers as automation_handlers
+from app.features.automations import routes as automation_routes
 
 
 EXPECTED = {
@@ -59,6 +61,27 @@ def test_app_main_no_longer_owns_automations_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_automations_pack_owns_handlers():
+    assert automation_routes.router.routes[0].endpoint == automation_handlers.admin_automations_page
+    assert (
+        automation_routes.router.routes[1].endpoint
+        == automation_handlers.admin_create_scheduled_automation_page
+    )
+    assert (
+        automation_routes.router.routes[2].endpoint
+        == automation_handlers.admin_create_event_automation_page
+    )
+    assert automation_routes.router.routes[3].endpoint == automation_handlers.admin_create_automation
+    assert automation_routes.router.routes[4].endpoint == automation_handlers.admin_edit_automation_page
+    assert automation_routes.router.routes[5].endpoint == automation_handlers.admin_update_automation
+    assert (
+        automation_routes.router.routes[6].endpoint
+        == automation_handlers.admin_update_automation_status
+    )
+    assert automation_routes.router.routes[7].endpoint == automation_handlers.admin_execute_automation
+    assert automation_routes.router.routes[8].endpoint == automation_handlers.admin_delete_automation
 
 
 def test_automations_pack_loads_and_reloads_cleanly():

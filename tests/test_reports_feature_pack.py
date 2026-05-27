@@ -7,6 +7,8 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.reports import PACK
+from app.features.reports import handlers as report_handlers
+from app.features.reports import routes as report_routes
 
 
 EXPECTED = {
@@ -58,6 +60,17 @@ def test_app_main_no_longer_owns_report_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_reports_pack_owns_handlers():
+    assert report_routes.router.routes[0].endpoint == report_handlers.company_overview_report_page
+    assert report_routes.router.routes[1].endpoint == report_handlers.company_overview_report_pdf
+    assert report_routes.router.routes[2].endpoint == report_handlers.company_overview_report_settings_page
+    assert report_routes.router.routes[3].endpoint == report_handlers.company_overview_report_settings_save
+    assert report_routes.router.routes[4].endpoint == report_handlers.admin_report_cover_image_page
+    assert report_routes.router.routes[5].endpoint == report_handlers.admin_report_cover_image_upload
+    assert report_routes.router.routes[6].endpoint == report_handlers.admin_report_cover_image_delete
+    assert report_routes.router.routes[7].endpoint == report_handlers.admin_report_cover_image_preview
 
 
 def test_reports_pack_loads_and_reloads_cleanly():
