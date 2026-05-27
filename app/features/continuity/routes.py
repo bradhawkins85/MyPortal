@@ -23,19 +23,17 @@ def _main():
 
 
 def _add_plan_datetime_iso_fields(plans: list[dict]) -> None:
+    """Enrich plan dicts with ISO datetime strings for template rendering."""
     for plan in plans:
-        if plan.get("updated_at"):
-            plan["updated_at_iso"] = (
-                plan["updated_at"].isoformat()
-                if isinstance(plan["updated_at"], datetime)
-                else str(plan["updated_at"])
-            )
-        if plan.get("last_reviewed_at"):
-            plan["last_reviewed_at_iso"] = (
-                plan["last_reviewed_at"].isoformat()
-                if isinstance(plan["last_reviewed_at"], datetime)
-                else str(plan["last_reviewed_at"])
-            )
+        for source_field, target_field in (
+            ("updated_at", "updated_at_iso"),
+            ("last_reviewed_at", "last_reviewed_at_iso"),
+        ):
+            value = plan.get(source_field)
+            if value:
+                plan[target_field] = (
+                    value.isoformat() if isinstance(value, datetime) else str(value)
+                )
 
 
 @router.get("/admin/business-continuity-plans", response_class=HTMLResponse)
