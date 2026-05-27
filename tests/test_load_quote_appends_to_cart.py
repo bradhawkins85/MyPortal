@@ -10,7 +10,7 @@ async def test_load_quote_to_cart_appends_items():
     Test that load_quote_to_cart appends quote items to existing cart items
     and adds quantities for duplicate products.
     """
-    from app.main import load_quote_to_cart
+    from app.features.quotes.routes import load_quote_to_cart
     from starlette.requests import Request
     
     # Mock the request
@@ -53,20 +53,20 @@ async def test_load_quote_to_cart_appends_items():
         "unit_price": "10.00",
     }
     
-    with patch("app.main._load_company_section_context") as mock_context, \
-         patch("app.main.session_manager") as mock_session_manager, \
-         patch("app.main.shop_repo") as mock_shop_repo, \
-         patch("app.main.cart_repo") as mock_cart_repo, \
-         patch("app.main.quote") as mock_quote:
+    with patch("app.features.quotes.routes._main") as mock_main, \
+         patch("app.features.quotes.routes.session_manager") as mock_session_manager, \
+         patch("app.features.quotes.routes.shop_repo") as mock_shop_repo, \
+         patch("app.features.quotes.routes.cart_repo") as mock_cart_repo, \
+         patch("app.features.quotes.routes.quote") as mock_quote:
         
         # Setup mocks
-        mock_context.return_value = (
+        mock_main.return_value._load_company_section_context = AsyncMock(return_value=(
             {"id": 1},  # user
             {"id": 1},  # membership
             {"id": 1},  # company
             1,  # company_id
             None,  # redirect
-        )
+        ))
         mock_session_manager.load_session = AsyncMock(return_value=mock_session)
         mock_shop_repo.list_quote_items = AsyncMock(return_value=mock_quote_items)
         mock_shop_repo.get_product_by_id = AsyncMock(return_value=mock_product)
@@ -116,7 +116,7 @@ async def test_load_quote_to_cart_redirects_to_cart():
     """
     Test that load_quote_to_cart redirects to the cart page after loading.
     """
-    from app.main import load_quote_to_cart
+    from app.features.quotes.routes import load_quote_to_cart
     from starlette.requests import Request
     
     # Mock the request
@@ -145,20 +145,20 @@ async def test_load_quote_to_cart_redirects_to_cart():
         "image_url": "http://example.com/image.jpg",
     }
     
-    with patch("app.main._load_company_section_context") as mock_context, \
-         patch("app.main.session_manager") as mock_session_manager, \
-         patch("app.main.shop_repo") as mock_shop_repo, \
-         patch("app.main.cart_repo") as mock_cart_repo, \
-         patch("app.main.quote") as mock_quote:
+    with patch("app.features.quotes.routes._main") as mock_main, \
+         patch("app.features.quotes.routes.session_manager") as mock_session_manager, \
+         patch("app.features.quotes.routes.shop_repo") as mock_shop_repo, \
+         patch("app.features.quotes.routes.cart_repo") as mock_cart_repo, \
+         patch("app.features.quotes.routes.quote") as mock_quote:
         
         # Setup mocks
-        mock_context.return_value = (
+        mock_main.return_value._load_company_section_context = AsyncMock(return_value=(
             {"id": 1},  # user
             {"id": 1},  # membership
             {"id": 1},  # company
             1,  # company_id
             None,  # redirect
-        )
+        ))
         mock_session_manager.load_session = AsyncMock(return_value=mock_session)
         mock_shop_repo.list_quote_items = AsyncMock(return_value=mock_quote_items)
         mock_shop_repo.get_product_by_id = AsyncMock(return_value=mock_product)
