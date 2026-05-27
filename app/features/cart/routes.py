@@ -501,7 +501,7 @@ async def view_cart(
             cart_product_ids,
             company_id=company_id,
         )
-        product_lookup = {}
+        product_lookup: dict[int, dict[str, Any]] = {}
         for product in base_products:
             try:
                 product_lookup[int(product.get("id") or 0)] = product
