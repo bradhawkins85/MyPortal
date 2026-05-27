@@ -1,0 +1,86 @@
+"""Shared helpers for the ``staff`` feature pack."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import HTTPException, Request, status
+from fastapi.responses import RedirectResponse
+
+
+def _main():
+    from app import main as main_module
+
+    return main_module
+
+
+async def _load_staff_context(
+    request: Request,
+    *,
+    require_admin: bool = False,
+    require_super_admin: bool = False,
+):
+    main_module = _main()
+    user, redirect = await main_module._require_authenticated_user(request)
+    if redirect:
+        return user, None, None, 0, None, redirect
+    is_super_admin = bool(user.get("is_super_admin"))
+    if require_super_admin and not is_super_admin:
+        return user, None, None, 0, None, RedirectResponse(
+            url="/", status_code=status.HTTP_303_SEE_OTHER
+        )
+    company_id_raw = user.get("company_id")
+    if company_id_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No company associated with the current user",
+        )
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid company identifier",
+        ) from exc
+    membership = await main_module.user_company_repo.get_user_company(user["id"], company_id)
+    staff_permission = int(membership.get("staff_permission", 0)) if membership else 0
+    if not is_super_admin and staff_permission <= 0:
+        return user, membership, None, staff_permission, company_id, RedirectResponse(
+            url="/", status_code=status.HTTP_303_SEE_OTHER
+        )
+    if require_admin and not (is_super_admin or (membership and membership.get("is_admin"))):
+        return user, membership, None, staff_permission, company_id, RedirectResponse(
+            url="/", status_code=status.HTTP_303_SEE_OTHER
+        )
+    company = await main_module.company_repo.get_company_by_id(company_id)
+    return user, membership, company, staff_permission, company_id, None
+
+
+def _staff_member_matches_company_email_domains(
+    staff_member: dict[str, Any], company_email_domains: list[str]
+) -> bool:
+    """Return whether a staff member should be visible for company domain filtering.
+
+    Staff without an email address are always visible. When no email domains are
+    configured for the company all staff are visible. Staff with email addresses
+    are only visible when the email domain is present in the company's configured
+    email domain list.
+    """
+
+    allowed_domains = {
+        str(domain).strip().lower()
+        for domain in company_email_domains
+        if str(domain).strip()
+    }
+    if not allowed_domains:
+        return True
+    email = str(staff_member.get("email") or "").strip().lower()
+    if not email:
+        return True
+    if "@" not in email:
+        return False
+    _, domain = email.rsplit("@", 1)
+    return domain in allowed_domains
+
+
+__all__ = ["_load_staff_context", "_staff_member_matches_company_email_domains"]
