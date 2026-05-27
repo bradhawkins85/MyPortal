@@ -13,6 +13,7 @@ from starlette.requests import Request
 from starlette.datastructures import FormData, UploadFile
 
 from app import main
+from app.features.tickets import admin_routes
 from app.services.tickets import TicketStatusDefinition
 
 
@@ -269,7 +270,7 @@ async def test_admin_reply_saves_attachments(monkeypatch):
     save_mock = AsyncMock(return_value={"id": 1})
     monkeypatch.setattr(main.attachments_service, "save_uploaded_file", save_mock)
 
-    response = await main.admin_create_ticket_reply(3, request)
+    response = await admin_routes.admin_create_ticket_reply(3, request)
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
     assert "/admin/tickets/3" in response.headers.get("location", "")
@@ -328,7 +329,7 @@ async def test_admin_reply_reports_failed_attachments(monkeypatch):
     save_mock = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(main.attachments_service, "save_uploaded_file", save_mock)
 
-    response = await main.admin_create_ticket_reply(4, request)
+    response = await admin_routes.admin_create_ticket_reply(4, request)
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
     parsed = urlparse(response.headers.get("location", ""))

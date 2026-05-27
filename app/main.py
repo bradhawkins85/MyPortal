@@ -13345,13 +13345,6 @@ async def admin_delete_issue_assignment(
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
-async def admin_create_ticket_reply(ticket_id: int, request: Request):
-    """Compatibility wrapper for direct imports in tests and helper callers."""
-    from app.features.tickets.admin_routes import admin_create_ticket_reply as _pack_handler
-
-    return await _pack_handler(ticket_id, request)
-
-
 async def _render_automations_dashboard(
     request: Request,
     user: dict[str, Any],
