@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.assets import PACK
+from app.features.assets import routes as assets_routes
 
 
 EXPECTED = {
@@ -53,6 +54,15 @@ def test_app_main_no_longer_owns_assets_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
+
+
+def test_asset_helpers_moved_out_of_main_module():
+    """Assets-only helpers should live with the assets feature pack."""
+
+    assert not hasattr(main_module, "_load_asset_context")
+    assert not hasattr(main_module, "_ASSET_TABLE_COLUMNS")
+    assert hasattr(assets_routes, "_load_asset_context")
+    assert hasattr(assets_routes, "_ASSET_TABLE_COLUMNS")
 
 
 def test_assets_pack_loads_and_reloads_cleanly():
