@@ -19,6 +19,9 @@ EXPECTED = {
     ("POST", "/api/mcp/ollama/"),
     ("POST", "/api/mcp/ollama/rpc"),
     ("GET", "/api/mcp/ollama/manifest"),
+    ("POST", "/api/mcp/copilot/"),
+    ("POST", "/api/mcp/copilot/rpc"),
+    ("GET", "/api/mcp/copilot/manifest"),
 }
 
 
