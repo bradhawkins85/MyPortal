@@ -7,6 +7,7 @@ from fastapi import FastAPI
 import app.main as main_module
 from app.core.features import init_registry
 from app.features.quotes import PACK
+from app.features.quotes import routes as quotes_routes
 
 
 EXPECTED = {
@@ -38,6 +39,12 @@ def test_quotes_pack_manifest_declares_all_routes():
     assert PACK.slug == "quotes"
     assert PACK.version
     assert declared == EXPECTED
+
+
+def test_quotes_pack_owns_quote_endpoints():
+    assert quotes_routes.quotes_page.__module__ == "app.features.quotes.routes"
+    assert quotes_routes.load_quote_to_cart.__module__ == "app.features.quotes.routes"
+    assert quotes_routes.save_as_quote.__module__ == "app.features.quotes.routes"
 
 
 def test_app_main_no_longer_owns_quote_routes():
