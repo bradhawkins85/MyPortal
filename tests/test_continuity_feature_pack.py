@@ -16,6 +16,12 @@ EXPECTED = {
     ("GET", "/admin/business-continuity-plans/{plan_id}"),
 }
 
+HANDLER_NAMES = (
+    "admin_business_continuity_plans_page",
+    "admin_new_business_continuity_plan_page",
+    "admin_edit_business_continuity_plan_page",
+)
+
 
 def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
     routes: set[tuple[str, str]] = set()
@@ -48,11 +54,7 @@ def test_app_main_no_longer_owns_continuity_routes():
             f"{method} {path} still mounted directly on app.main; "
             "feature-pack migration is incomplete."
         )
-    for name in (
-        "admin_business_continuity_plans_page",
-        "admin_new_business_continuity_plan_page",
-        "admin_edit_business_continuity_plan_page",
-    ):
+    for name in HANDLER_NAMES:
         assert not hasattr(main_module, name), (
             f"app.main still defines {name}; "
             "feature-pack migration is incomplete."
@@ -60,11 +62,7 @@ def test_app_main_no_longer_owns_continuity_routes():
 
 
 def test_continuity_pack_owns_continuity_handlers():
-    for name in (
-        "admin_business_continuity_plans_page",
-        "admin_new_business_continuity_plan_page",
-        "admin_edit_business_continuity_plan_page",
-    ):
+    for name in HANDLER_NAMES:
         assert hasattr(continuity_routes, name)
 
 
