@@ -2068,8 +2068,6 @@ async def update_staff_member(staff_id: int, request: Request):
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
 
     def get_value(*keys: str) -> Any:
         for key in keys:
