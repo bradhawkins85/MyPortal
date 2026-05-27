@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app import main
+from app.features.staff import handlers as staff_handlers
+from app.features.staff import helpers as staff_helpers
 
 
 class _DummyRequest:
@@ -20,7 +22,7 @@ async def test_create_staff_member_allows_missing_email(monkeypatch):
     request = _DummyRequest({"first_name": "Alex", "last_name": "Rivera"})
 
     monkeypatch.setattr(
-        main,
+        staff_helpers,
         "_load_staff_context",
         AsyncMock(
             return_value=(
@@ -71,7 +73,7 @@ async def test_create_staff_member_allows_missing_email(monkeypatch):
         AsyncMock(return_value=None),
     )
 
-    response = await main.create_staff_member(request)  # type: ignore[arg-type]
+    response = await staff_handlers.create_staff_member(request)  # type: ignore[arg-type]
 
     assert response.status_code == 303
     create_staff_mock.assert_awaited_once()
