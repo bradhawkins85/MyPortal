@@ -1,25 +1,25 @@
-"""Smoke tests for the ``tacticalrmm`` feature pack."""
+"""Smoke tests for the ``backups`` feature pack."""
 
 from __future__ import annotations
-
-import asyncio
-from pathlib import Path
 
 from fastapi import FastAPI
 
 import app.main as main_module
-from app.core.config import Settings
 from app.core.features import init_registry
-from app.features.tacticalrmm import PACK
-from app.features.tacticalrmm import handlers as tacticalrmm_handlers
-from app.features.tacticalrmm import routes as tacticalrmm_routes
+from app.features.backups import PACK
+from app.features.backups import handlers as backup_handlers
+from app.features.backups import routes as backup_routes
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
-    ("POST", "/admin/modules/tacticalrmm/push-companies"),
-    ("POST", "/admin/modules/tacticalrmm/pull-companies"),
+    ("HEAD", "/admin/backup-jobs"),
+    ("GET", "/admin/backup-jobs"),
+    ("HEAD", "/admin/backup-summary"),
+    ("GET", "/admin/backup-summary"),
+    ("POST", "/admin/backup-jobs"),
+    ("POST", "/admin/backup-jobs/{job_id}"),
+    ("POST", "/admin/backup-jobs/{job_id}/delete"),
+    ("POST", "/admin/backup-jobs/{job_id}/regenerate-token"),
 }
 
 
@@ -35,27 +35,19 @@ def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
     return routes
 
 
-def test_tacticalrmm_pack_manifest_declares_all_routes():
+def test_backups_pack_manifest_declares_all_routes():
     declared = set()
     for router in PACK.routers:
         for route in router.routes:
             for method in route.methods or set():
                 declared.add((method, route.path))
 
-    assert PACK.slug == "tacticalrmm"
+    assert PACK.slug == "backups"
     assert PACK.version
     assert declared == EXPECTED
 
 
-def test_tacticalrmm_pack_is_enabled_by_default():
-    default_feature_packs = str(Settings.model_fields["feature_packs"].default).split(",")
-    assert "tacticalrmm" in default_feature_packs
-
-    env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "tacticalrmm" in env_example
-
-
-def test_app_main_no_longer_owns_tacticalrmm_routes():
+def test_app_main_no_longer_owns_backups_routes():
     in_main_app = _routes_for(main_module.app)
     for method, path in EXPECTED:
         assert (method, path) not in in_main_app, (
@@ -64,27 +56,30 @@ def test_app_main_no_longer_owns_tacticalrmm_routes():
         )
 
 
-def test_tacticalrmm_pack_owns_handlers():
+def test_backups_pack_owns_handlers():
+    assert backup_routes.router.routes[0].endpoint == backup_handlers.admin_backup_jobs_page
+    assert backup_routes.router.routes[1].endpoint == backup_handlers.admin_backup_summary_page
+    assert backup_routes.router.routes[2].endpoint == backup_handlers.admin_create_backup_job
+    assert backup_routes.router.routes[3].endpoint == backup_handlers.admin_update_backup_job
+    assert backup_routes.router.routes[4].endpoint == backup_handlers.admin_delete_backup_job
     assert (
-        tacticalrmm_routes.router.routes[0].endpoint
-        == tacticalrmm_handlers.admin_push_companies_to_tactical_rmm
-    )
-    assert (
-        tacticalrmm_routes.router.routes[1].endpoint
-        == tacticalrmm_handlers.admin_pull_companies_from_tactical_rmm
+        backup_routes.router.routes[5].endpoint
+        == backup_handlers.admin_regenerate_backup_job_token
     )
 
 
-def test_tacticalrmm_pack_loads_and_reloads_cleanly():
+def test_backups_pack_loads_and_reloads_cleanly():
+    import asyncio
+
     async def _run() -> None:
         test_app = FastAPI()
         registry = init_registry(test_app)
 
-        await registry.load("tacticalrmm")
+        await registry.load("backups")
         after_load = _routes_for(test_app)
         assert EXPECTED.issubset(after_load)
 
-        await registry.reload("tacticalrmm")
+        await registry.reload("backups")
         after_reload = _routes_for(test_app)
         assert EXPECTED.issubset(after_reload)
 

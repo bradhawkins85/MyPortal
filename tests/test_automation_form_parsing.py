@@ -3,7 +3,7 @@ import json
 import pytest
 from starlette.datastructures import FormData
 
-from app.main import _parse_automation_form_submission
+from app.features.automations.handlers import _parse_automation_form_submission
 
 
 def test_parse_event_form_allows_missing_optional_fields():
