@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+import app.main as main_module
 from app.core.features import init_registry
 from app.features.companies import PACK
 
@@ -63,6 +64,15 @@ def test_companies_pack_manifest_declares_all_routes():
     assert PACK.slug == "companies"
     assert PACK.version
     assert declared == EXPECTED
+
+
+def test_app_main_no_longer_owns_companies_routes():
+    in_main_app = _routes_for(main_module.app)
+    for method, path in EXPECTED:
+        assert (method, path) not in in_main_app, (
+            f"{method} {path} still mounted directly on app.main; "
+            "feature-pack migration is incomplete."
+        )
 
 
 def test_companies_pack_loads_and_reloads_cleanly():
