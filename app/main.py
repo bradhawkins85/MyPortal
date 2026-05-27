@@ -94,7 +94,6 @@ from app.api.routes import (
     tray as tray_api,
     users,
     system,
-    uptimekuma,
     xero,
     chat as chat_api,
     features as features_api,
@@ -1066,7 +1065,6 @@ app.include_router(modules_api.router)
 app.include_router(mcp_api.router)
 app.include_router(mcp_api.copilot_router)
 app.include_router(system.router)
-app.include_router(uptimekuma.router)
 app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
 app.include_router(asset_custom_fields.router)

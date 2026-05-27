@@ -33,6 +33,7 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+    monkeypatch.setattr(main_module.settings, "feature_packs", "uptimekuma")
 
 
 def test_receive_alert_returns_accepted(monkeypatch):
@@ -206,7 +207,10 @@ def test_get_alert_not_found(monkeypatch):
 
     try:
         with TestClient(app) as client:
-            response = client.get("/api/integration-modules/uptimekuma/alerts/99")
+            response = client.get(
+                "/api/integration-modules/uptimekuma/alerts/99",
+                headers={"Accept": "application/json"},
+            )
     finally:
         app.dependency_overrides.clear()
 
