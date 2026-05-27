@@ -78,7 +78,6 @@ from app.api.routes import (
     memberships,
     m365 as m365_api,
     message_templates as message_templates_api,
-    mcp as mcp_api,
     modules as modules_api,
     notifications,
     orders as orders_api,
@@ -1062,7 +1061,6 @@ app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
-app.include_router(mcp_api.copilot_router)
 app.include_router(system.router)
 app.include_router(service_status_api.router)
 app.include_router(backup_jobs_api.router)
