@@ -8,7 +8,7 @@
 {% block header_actions %}
   {% if has_credentials %}
     {{ page_header_actions([
-      {"label": "Sync mailboxes", "type": "button", "variant": "primary",
+      {"label": "Sync mailboxes", "type": "button",
        "attrs": {"id": "sync-mailboxes-btn", "data-sync-mailboxes": ""}},
       {"label": "Start Managed Folder Assistant (all)", "type": "button",
        "attrs": {"data-start-managed-folder-assistant-all": ""}}
@@ -64,23 +64,40 @@
                 <span class="text-muted">–</span>
               {% endif %}
             </td>
-            <td style="white-space:nowrap">
-              <button
-                type="button"
-                class="button button--small"
-                data-perm-btn
-                data-upn="{{ mb.user_principal_name }}"
-                data-display-name="{{ mb.display_name or mb.user_principal_name }}"
-                aria-haspopup="dialog"
-                aria-controls="mailbox-perm-modal"
-              >Mailbox Permissions</button>
-              <button
-                type="button"
-                class="button button--small"
-                data-start-managed-folder-assistant-btn
-                data-upn="{{ mb.user_principal_name }}"
-                data-display-name="{{ mb.display_name or mb.user_principal_name }}"
-              >Start Managed Folder Assistant</button>
+            <td class="table__actions">
+              <details class="header-title-menu__dropdown" data-header-menu>
+                <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                  Actions
+                  <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                    <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                  </svg>
+                  <span class="visually-hidden">Toggle row actions menu</span>
+                </summary>
+                <ul class="header-title-menu__list" role="menu">
+                  <li class="header-title-menu__item" role="none">
+                    <button
+                      type="button"
+                      class="header-title-menu__link"
+                      role="menuitem"
+                      data-perm-btn
+                      data-upn="{{ mb.user_principal_name }}"
+                      data-display-name="{{ mb.display_name or mb.user_principal_name }}"
+                      aria-haspopup="dialog"
+                      aria-controls="mailbox-perm-modal"
+                    >Mailbox Permissions</button>
+                  </li>
+                  <li class="header-title-menu__item" role="none">
+                    <button
+                      type="button"
+                      class="header-title-menu__link"
+                      role="menuitem"
+                      data-start-managed-folder-assistant-btn
+                      data-upn="{{ mb.user_principal_name }}"
+                      data-display-name="{{ mb.display_name or mb.user_principal_name }}"
+                    >Start Managed Folder Assistant</button>
+                  </li>
+                </ul>
+              </details>
             </td>
           </tr>
           {% endfor %}
@@ -124,6 +141,18 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script>
+  // Allow row-level action dropdowns to overflow the table wrapper.
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('[data-table-id="m365-shared-mailboxes"] [data-header-menu]').forEach(function (menu) {
+      var wrapper = menu.closest('.table-wrapper');
+      if (!wrapper) return;
+      menu.addEventListener('toggle', function () {
+        wrapper.style.overflow = menu.open ? 'visible' : '';
+      });
+    });
+  });
+  </script>
   <script>
   (function () {
     var syncBtn = document.querySelector('[data-sync-mailboxes]');
