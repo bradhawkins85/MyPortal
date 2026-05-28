@@ -105,9 +105,34 @@
                             {% endif %}
                         </td>
                         {% if is_super_admin %}
-                        <td>
-                            <button class="btn-edit" onclick="editSubscription('{{ sub.id }}', '{{ sub.status }}', {{ 'true' if sub.auto_renew else 'false' }})">Edit</button>
-                            <button class="btn-delete" onclick="deleteSubscription('{{ sub.id }}')">Delete</button>
+                        <td class="table__actions">
+                            <details class="header-title-menu__dropdown" data-header-menu>
+                                <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                                    Actions
+                                    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                                        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                                    </svg>
+                                    <span class="visually-hidden">Toggle row actions menu</span>
+                                </summary>
+                                <ul class="header-title-menu__list" role="menu">
+                                    <li class="header-title-menu__item" role="none">
+                                        <button
+                                            type="button"
+                                            class="header-title-menu__link"
+                                            role="menuitem"
+                                            onclick="editSubscription('{{ sub.id }}', '{{ sub.status }}', {{ 'true' if sub.auto_renew else 'false' }})"
+                                        >Edit</button>
+                                    </li>
+                                    <li class="header-title-menu__item" role="none">
+                                        <button
+                                            type="button"
+                                            class="header-title-menu__link header-title-menu__link--danger"
+                                            role="menuitem"
+                                            onclick="deleteSubscription('{{ sub.id }}')"
+                                        >Delete</button>
+                                    </li>
+                                </ul>
+                            </details>
                         </td>
                         {% endif %}
                     </tr>
@@ -328,31 +353,101 @@ code {
     border: 1px solid #c3e6cb;
 }
 
-.btn-edit, .btn-delete {
-    padding: 0.4rem 0.8rem;
-    border: none;
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.table__actions {
+    white-space: nowrap;
+}
+
+.header-title-menu__dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.header-title-menu__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid #ccc;
     border-radius: 4px;
+    background: #fff;
     cursor: pointer;
     font-size: 0.85em;
-    margin-right: 0.25rem;
+    user-select: none;
+    list-style: none;
 }
 
-.btn-edit {
-    background: #007bff;
-    color: white;
+.header-title-menu__toggle::-webkit-details-marker {
+    display: none;
 }
 
-.btn-edit:hover {
-    background: #0056b3;
+.header-title-menu__toggle:hover {
+    background: #f0f0f0;
 }
 
-.btn-delete {
-    background: #dc3545;
-    color: white;
+.header-title-menu__icon {
+    width: 1em;
+    height: 1em;
+    fill: currentColor;
+    flex-shrink: 0;
 }
 
-.btn-delete:hover {
-    background: #c82333;
+.header-title-menu__list {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 200;
+    min-width: 130px;
+    margin: 0;
+    padding: 0.25rem 0;
+    list-style: none;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.header-title-menu__item {
+    display: block;
+}
+
+.header-title-menu__link {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 0.9em;
+    color: #333;
+    cursor: pointer;
+    text-decoration: none;
+    box-sizing: border-box;
+}
+
+.header-title-menu__link:hover {
+    background: #f5f5f5;
+    color: #000;
+}
+
+.header-title-menu__link--danger {
+    color: #dc3545;
+}
+
+.header-title-menu__link--danger:hover {
+    background: #f8d7da;
+    color: #721c24;
 }
 
 .modal {
@@ -457,6 +552,17 @@ code {
 </style>
 
 <script>
+// Allow row-level action dropdowns to overflow the table wrapper.
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.subscriptions-table [data-header-menu]').forEach(function (menu) {
+        const wrapper = menu.closest('.subscriptions-table');
+        if (!wrapper) return;
+        menu.addEventListener('toggle', function () {
+            wrapper.style.overflow = menu.open ? 'visible' : '';
+        });
+    });
+});
+
 const csrfToken = {{ csrf_token | tojson }};
 
 function editSubscription(id, status, autoRenew) {
