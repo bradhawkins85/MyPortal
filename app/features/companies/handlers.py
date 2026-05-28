@@ -14,6 +14,8 @@ from urllib.parse import urlencode
 from fastapi import HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+import aiomysql
+
 
 def _main():
     from app import main as main_module
@@ -1349,8 +1351,6 @@ async def admin_update_company(company_id: int, request: Request):
     try:
         await company_repo.update_company(company_id, **updates)
     except Exception as exc:  # pragma: no cover - defensive logging
-        import aiomysql
-
         log_error("Failed to update company", company_id=company_id, error=str(exc))
         error_message = "Unable to update company. Please try again."
         if isinstance(exc, aiomysql.IntegrityError) and exc.args and exc.args[0] == 1062:
