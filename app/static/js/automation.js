@@ -2323,6 +2323,37 @@
     setupScheduleVisibility();
   }
 
+  function bindScheduledTaskRowDropdowns() {
+    // Per-row dropdown panels are inside .table-wrapper which has overflow-x: auto.
+    // Because overflow-x: auto implicitly sets overflow-y to auto, the browser clips
+    // absolutely-positioned children that extend outside the wrapper's padding box.
+    // Fix by repositioning opened panels with position:fixed so they escape the
+    // overflow container entirely.
+    document.querySelectorAll('#scheduled-tasks-table [data-header-menu]').forEach(function (menu) {
+      var summary = menu.querySelector('[data-header-menu-toggle]');
+      var list = menu.querySelector('.header-title-menu__list');
+      if (!summary || !list) {
+        return;
+      }
+      menu.addEventListener('toggle', function () {
+        if (menu.open) {
+          var rect = summary.getBoundingClientRect();
+          list.style.position = 'fixed';
+          list.style.top = (rect.bottom + 4) + 'px';
+          list.style.right = (window.innerWidth - rect.right) + 'px';
+          list.style.left = 'auto';
+          list.style.zIndex = '9999';
+        } else {
+          list.style.position = '';
+          list.style.top = '';
+          list.style.right = '';
+          list.style.left = '';
+          list.style.zIndex = '';
+        }
+      });
+    });
+  }
+
   function initialiseAutomationUI() {
     taskModal = query('task-editor-modal');
     logsModal = query('task-logs-modal');
@@ -2331,6 +2362,7 @@
     clearTaskForm();
     bindTaskForm();
     bindTaskActions();
+    bindScheduledTaskRowDropdowns();
     bindAutomationDeleteActions();
     setupAutomationForm();
     bindAutomationSectionPagination();
