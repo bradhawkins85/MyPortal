@@ -130,16 +130,37 @@
                   —
                 {% endif %}
               </td>
-              <td>
-                <a href="/compliance-checks/{{ a.id }}" class="button button--ghost button--small">View</a>
-                {% if is_super_admin %}
-                <button
-                  type="button"
-                  class="button button--ghost button--small button--danger delete-assignment-btn"
-                  data-assignment-id="{{ a.id }}"
-                  data-check-title="{{ a.check.title if a.check else 'this check' }}"
-                >Delete</button>
-                {% endif %}
+              <td class="table__actions">
+                {%- set row_menu_id = 'compliance-check-actions-menu-' ~ a.id -%}
+                <div class="header-menu" data-header-menu>
+                  <button type="button"
+                          class="button button--ghost button--small header-menu__button"
+                          data-header-menu-toggle
+                          aria-haspopup="menu"
+                          aria-expanded="false"
+                          aria-controls="{{ row_menu_id }}">
+                    <span>Actions</span>
+                    <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                      <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                    </svg>
+                  </button>
+                  <div id="{{ row_menu_id }}"
+                       class="header-menu__panel"
+                       role="menu"
+                       data-header-menu-panel
+                       hidden>
+                    <a class="header-menu__item" role="menuitem" href="/compliance-checks/{{ a.id }}">View</a>
+                    {% if is_super_admin %}
+                    <button
+                      type="button"
+                      class="header-menu__item header-menu__item--danger delete-assignment-btn"
+                      role="menuitem"
+                      data-assignment-id="{{ a.id }}"
+                      data-check-title="{{ a.check.title if a.check else 'this check' }}"
+                    >Delete</button>
+                    {% endif %}
+                  </div>
+                </div>
               </td>
             </tr>
             {% else %}
