@@ -225,7 +225,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="14" class="table__empty">No companies have been registered.</td>
+                  <td colspan="{{ companies_columns | length }}" class="table__empty">No companies have been registered.</td>
                 </tr>
               {% endif %}
             </tbody>
