@@ -31,6 +31,7 @@ QuoteSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
 XERO_ITEM_NAME_MAX_LENGTH = 50
 _XERO_ERROR_DETAIL_MAX_LENGTH = 500
+_XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*?)(\d+)$")
 
 
 class _TemplateValues(dict[str, Any]):
@@ -262,6 +263,83 @@ def _extract_xero_error_detail(response_body: str | None) -> str | None:
     # Fall back to the raw body (truncated) if no structured messages were found
     text = (response_body or "").strip()
     return text[:_XERO_ERROR_DETAIL_MAX_LENGTH] if text else None
+
+
+def _calculate_next_invoice_number(current_invoice_number: str | None) -> str | None:
+    text = str(current_invoice_number or "").strip()
+    if not text:
+        return None
+    match = _XERO_INVOICE_NUMBER_SUFFIX_RE.match(text)
+    if not match:
+        return None
+    prefix, numeric_suffix = match.groups()
+    try:
+        next_value = int(numeric_suffix) + 1
+    except (TypeError, ValueError):
+        return None
+    padded_suffix = str(next_value).zfill(len(numeric_suffix))
+    return f"{prefix}{padded_suffix}"
+
+
+async def _fetch_next_xero_invoice_number(
+    *,
+    client: httpx.AsyncClient,
+    api_url: str,
+    request_headers: Mapping[str, str],
+) -> str | None:
+    """Fetch and increment the latest ACCREC invoice number from Xero."""
+    params = {
+        "where": 'Type=="ACCREC"',
+        "order": "Date DESC",
+        "page": 1,
+    }
+    try:
+        response = await client.get(api_url, headers=dict(request_headers), params=params)
+    except httpx.HTTPError as exc:
+        log_warning("Failed to fetch latest Xero invoice number", error=str(exc))
+        return None
+    status_code_raw = getattr(response, "status_code", None)
+    try:
+        status_code = int(status_code_raw)
+    except (TypeError, ValueError):
+        status_code = 0
+    if status_code != 200:
+        log_warning(
+            "Unexpected status while fetching latest Xero invoice number",
+            status_code=status_code_raw,
+        )
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    invoices = payload.get("Invoices") if isinstance(payload, dict) else None
+    if not isinstance(invoices, list) or not invoices:
+        return None
+
+    latest_number: str | None = None
+    latest_date_value: str | None = None
+    for item in invoices:
+        if not isinstance(item, Mapping):
+            continue
+        invoice_number = str(item.get("InvoiceNumber") or "").strip()
+        if not invoice_number:
+            continue
+        invoice_date = str(
+            item.get("UpdatedDateUTC")
+            or item.get("DateString")
+            or item.get("Date")
+            or ""
+        ).strip()
+        if latest_number is None:
+            latest_number = invoice_number
+            latest_date_value = invoice_date
+            continue
+        if invoice_date and (latest_date_value or "") < invoice_date:
+            latest_number = invoice_number
+            latest_date_value = invoice_date
+
+    return _calculate_next_invoice_number(latest_number)
 
 
 def _is_duplicate_xero_item_error(response: httpx.Response) -> bool:
@@ -1824,12 +1902,13 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
     for invoice in unsynced_invoices:
         invoice_id = int(invoice["id"])
         original_invoice_number = str(invoice.get("invoice_number") or "").strip()
+        working_invoice_number = original_invoice_number
         invoice_lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
         if not invoice_lines:
             skipped_results.append(
                 {
                     "invoice_id": invoice_id,
-                    "invoice_number": original_invoice_number,
+                    "invoice_number": working_invoice_number,
                     "reason": "Invoice has no line items",
                 }
             )
@@ -1854,6 +1933,45 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             invoice_payload["DueDate"] = due_date_value.isoformat()
         if auto_send:
             invoice_payload["SentToContact"] = True
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                next_invoice_number = await _fetch_next_xero_invoice_number(
+                    client=client,
+                    api_url=api_url,
+                    request_headers=request_headers,
+                )
+        except Exception as exc:
+            log_warning(
+                "Failed to retrieve next Xero invoice number",
+                invoice_id=invoice_id,
+                company_id=company_id,
+                error=str(exc),
+            )
+            next_invoice_number = None
+
+        if next_invoice_number:
+            invoice_payload["InvoiceNumber"] = next_invoice_number
+            if next_invoice_number != working_invoice_number:
+                try:
+                    await invoice_repo.patch_invoice(
+                        invoice_id,
+                        invoice_number=next_invoice_number,
+                    )
+                    await _rename_local_invoice_references(
+                        company_id,
+                        working_invoice_number,
+                        next_invoice_number,
+                    )
+                    working_invoice_number = next_invoice_number
+                except Exception as exc:
+                    log_warning(
+                        "Failed to align local invoice number before Xero sync",
+                        invoice_id=invoice_id,
+                        company_id=company_id,
+                        invoice_number=next_invoice_number,
+                        error=str(exc),
+                    )
 
         webhook_payload = {"Invoices": [invoice_payload]}
 
@@ -1934,7 +2052,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 failed_results.append(
                     {
                         "invoice_id": invoice_id,
-                        "invoice_number": original_invoice_number,
+                        "invoice_number": working_invoice_number,
                         "response_status": response_status,
                         "error": xero_error_detail or f"HTTP {response_status}",
                         "event_id": event_id,
@@ -1945,7 +2063,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             response_data = json.loads(response_body or "{}")
             synced_invoice = (response_data.get("Invoices") or [{}])[0]
             xero_invoice_id = str(synced_invoice.get("InvoiceID") or "").strip() or None
-            xero_invoice_number = str(synced_invoice.get("InvoiceNumber") or "").strip() or original_invoice_number
+            xero_invoice_number = str(synced_invoice.get("InvoiceNumber") or "").strip() or working_invoice_number
             xero_status = str(synced_invoice.get("Status") or "").strip() or ("AUTHORISED" if auto_send else "DRAFT")
 
             await invoice_repo.patch_invoice(
@@ -1955,7 +2073,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                 xero_invoice_id=xero_invoice_id,
                 synced_to_xero_at=datetime.now(timezone.utc),
             )
-            await _rename_local_invoice_references(company_id, original_invoice_number, xero_invoice_number)
+            await _rename_local_invoice_references(company_id, working_invoice_number, xero_invoice_number)
 
             synced_results.append(
                 {
@@ -1989,7 +2107,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             failed_results.append(
                 {
                     "invoice_id": invoice_id,
-                    "invoice_number": original_invoice_number,
+                    "invoice_number": working_invoice_number,
                     "error": str(exc),
                     "event_id": event_id,
                 }
@@ -2016,7 +2134,7 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             failed_results.append(
                 {
                     "invoice_id": invoice_id,
-                    "invoice_number": original_invoice_number,
+                    "invoice_number": working_invoice_number,
                     "error": str(exc),
                     "event_id": event_id,
                 }
