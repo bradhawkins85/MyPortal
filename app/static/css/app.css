@@ -5800,6 +5800,51 @@ dialog.modal:not([open]) {
   color: rgba(148, 163, 184, 0.85);
 }
 
+.knowledge-base__feedback-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.knowledge-base__feedback-rating {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.knowledge-base__feedback-rating legend {
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+.knowledge-base__feedback-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.knowledge-base__feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.knowledge-base__feedback-status {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.9);
+}
+
+.knowledge-base__feedback-status.is-success {
+  color: #22c55e;
+}
+
+.knowledge-base__feedback-status.is-error {
+  color: #ef4444;
+}
+
 .table__row--active {
   background: rgba(59, 130, 246, 0.18);
 }

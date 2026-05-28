@@ -99,3 +99,15 @@ class KnowledgeBaseSearchResponse(BaseModel):
     ollama_model: str | None = None
     ollama_summary: str | None = None
 
+
+KnowledgeBaseFeedbackRating = Literal["up", "down"]
+
+
+class KnowledgeBaseFeedbackCreateRequest(BaseModel):
+    rating: KnowledgeBaseFeedbackRating
+    feedback: constr(strip_whitespace=True, max_length=5000) | None = None
+
+
+class KnowledgeBaseFeedbackCreateResponse(BaseModel):
+    ticket_id: int
+    message: str
