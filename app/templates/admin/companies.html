@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import table_column_picker %}
 
 {% block header_title %}<span class="header__title-text">Companies</span>{% endblock %}
 
@@ -8,6 +9,16 @@
     {"label": "Add Company", "type": "button", "variant": "primary", "attrs": {"data-add-company-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "add-company-modal"}}
   ]) }}
 {% endblock %}
+
+{% set companies_columns = [
+  {"key": "name",          "label": "Name",          "default_visible": true},
+  {"key": "syncro_id",     "label": "Syncro ID",     "default_visible": true},
+  {"key": "xero_id",       "label": "Xero ID",       "default_visible": true},
+  {"key": "email_domains", "label": "Email domains", "default_visible": true},
+  {"key": "vip",           "label": "VIP",           "default_visible": true},
+  {"key": "status",        "label": "Status",        "default_visible": true},
+  {"key": "actions",       "label": "Actions",       "default_visible": true}
+] %}
 
 {% block content %}
   <div class="admin-grid admin-grid--columns">
@@ -33,6 +44,9 @@
               aria-label="Filter companies"
               data-table-filter="companies-table"
             />
+          </div>
+          <div class="card__controls card__controls--right">
+            {{ table_column_picker("companies", companies_columns) }}
           </div>
         </header>
         <div class="table-wrapper">
@@ -91,41 +105,57 @@
                       {% endif %}
                     </td>
                     <td class="table__actions" data-column-key="actions">
-                      <div class="table__action-buttons">
-                        <a class="button button--ghost" href="/admin/companies/{{ company.id }}/edit">
-                          Edit
-                        </a>
-                        {% if company.archived %}
-                          <button 
-                            type="button" 
-                            class="button button--ghost" 
-                            data-company-unarchive
-                            data-company-id="{{ company.id }}"
-                            data-company-name="{{ company.name }}"
-                          >
-                            Unarchive
-                          </button>
-                        {% else %}
-                          <button 
-                            type="button" 
-                            class="button button--ghost" 
-                            data-company-archive
-                            data-company-id="{{ company.id }}"
-                            data-company-name="{{ company.name }}"
-                          >
-                            Archive
-                          </button>
-                        {% endif %}
-                        <button 
-                          type="button" 
-                          class="button button--ghost button--danger" 
-                          data-company-delete
-                          data-company-id="{{ company.id }}"
-                          data-company-name="{{ company.name }}"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      <details class="header-title-menu__dropdown" data-header-menu>
+                        <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                          Actions
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                            <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                          </svg>
+                          <span class="visually-hidden">Toggle row actions menu</span>
+                        </summary>
+                        <ul class="header-title-menu__list" role="menu">
+                          <li class="header-title-menu__item" role="none">
+                            <a
+                              class="header-title-menu__link"
+                              role="menuitem"
+                              href="/admin/companies/{{ company.id }}/edit"
+                            >Edit</a>
+                          </li>
+                          {% if company.archived %}
+                            <li class="header-title-menu__item" role="none">
+                              <button
+                                type="button"
+                                class="header-title-menu__link"
+                                role="menuitem"
+                                data-company-unarchive
+                                data-company-id="{{ company.id }}"
+                                data-company-name="{{ company.name | e }}"
+                              >Unarchive</button>
+                            </li>
+                          {% else %}
+                            <li class="header-title-menu__item" role="none">
+                              <button
+                                type="button"
+                                class="header-title-menu__link"
+                                role="menuitem"
+                                data-company-archive
+                                data-company-id="{{ company.id }}"
+                                data-company-name="{{ company.name | e }}"
+                              >Archive</button>
+                            </li>
+                          {% endif %}
+                          <li class="header-title-menu__item" role="none">
+                            <button
+                              type="button"
+                              class="header-title-menu__link header-title-menu__link--danger"
+                              role="menuitem"
+                              data-company-delete
+                              data-company-id="{{ company.id }}"
+                              data-company-name="{{ company.name | e }}"
+                            >Delete</button>
+                          </li>
+                        </ul>
+                      </details>
                     </td>
                   </tr>
                 {% endfor %}
@@ -220,4 +250,16 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script>
+    // Allow row-level action dropdowns to overflow the table wrapper.
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('#companies-table [data-header-menu]').forEach(function (menu) {
+        const wrapper = menu.closest('.table-wrapper');
+        if (!wrapper) return;
+        menu.addEventListener('toggle', function () {
+          wrapper.style.overflow = menu.open ? 'visible' : '';
+        });
+      });
+    });
+  </script>
 {% endblock %}
