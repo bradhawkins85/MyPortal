@@ -11,13 +11,13 @@
 {% endblock %}
 
 {% set companies_columns = [
-  {"key": "name",         "label": "Name",         "default_visible": true},
-  {"key": "syncro_id",    "label": "Syncro ID",    "default_visible": true},
-  {"key": "xero_id",      "label": "Xero ID",      "default_visible": true},
-  {"key": "email_domains","label": "Email domains","default_visible": true},
-  {"key": "vip",          "label": "VIP",          "default_visible": true},
-  {"key": "status",       "label": "Status",       "default_visible": true},
-  {"key": "actions",      "label": "Actions",      "default_visible": true}
+  {"key": "name",          "label": "Name",          "default_visible": true},
+  {"key": "syncro_id",     "label": "Syncro ID",     "default_visible": true},
+  {"key": "xero_id",       "label": "Xero ID",       "default_visible": true},
+  {"key": "email_domains", "label": "Email domains", "default_visible": true},
+  {"key": "vip",           "label": "VIP",           "default_visible": true},
+  {"key": "status",        "label": "Status",        "default_visible": true},
+  {"key": "actions",       "label": "Actions",       "default_visible": true}
 ] %}
 
 {% block content %}
@@ -254,7 +254,7 @@
     // Allow row-level action dropdowns to overflow the table wrapper.
     document.addEventListener('DOMContentLoaded', function () {
       document.querySelectorAll('#companies-table [data-header-menu]').forEach(function (menu) {
-        var wrapper = menu.closest('.table-wrapper');
+        const wrapper = menu.closest('.table-wrapper');
         if (!wrapper) return;
         menu.addEventListener('toggle', function () {
           wrapper.style.overflow = menu.open ? 'visible' : '';
