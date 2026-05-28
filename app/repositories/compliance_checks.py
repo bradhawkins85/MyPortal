@@ -54,9 +54,10 @@ def _build_assignment(row: Any) -> dict[str, Any]:
 
     check_id = item.get("check_id")
     if check_id and "check_title" in item:
+        check_category_id = item.pop("category_id", None)
         item["check"] = {
             "id": check_id,
-            "category_id": item.pop("check_category_id", None),
+            "category_id": check_category_id,
             "code": item.pop("check_code", None),
             "title": item.pop("check_title", None),
             "description": item.pop("check_description", None),
@@ -70,7 +71,7 @@ def _build_assignment(row: Any) -> dict[str, Any]:
             "created_at": None,
             "updated_at": None,
             "category": {
-                "id": item.pop("category_id", None),
+                "id": check_category_id,
                 "code": item.pop("category_code", None),
                 "name": item.pop("category_name", None),
                 "description": item.pop("category_description", None),
