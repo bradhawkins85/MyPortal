@@ -69,7 +69,7 @@
                 <th scope="col" data-sort="string" data-column-key="huntress_organization_id">Huntress organisation ID</th>
                 <th scope="col" data-sort="string" data-column-key="trello_board_id">Trello board ID</th>
                 <th scope="col" data-sort="string" data-column-key="payment_method">Payment Methods</th>
-                <th scope="col" data-sort="number" data-column-key="require_po">Require PO</th>
+                <th scope="col" data-sort="string" data-column-key="require_po">Require PO</th>
                 <th scope="col" data-sort="string" data-column-key="m365_tenant_id">Microsoft 365 Tenant ID</th>
                 <th scope="col" data-sort="number" data-column-key="vip">VIP</th>
                 <th scope="col" data-sort="string" data-column-key="status">Status</th>
@@ -137,8 +137,7 @@
                         <span class="text-muted">—</span>
                       {% endif %}
                     </td>
-                    {% set requires_po = 1 if company.require_po else 0 %}
-                    <td data-label="Require PO" data-value="{{ requires_po }}" data-column-key="require_po">
+                    <td data-label="Require PO" data-value="{{ 'Required' if company.require_po else 'No' }}" data-column-key="require_po">
                       {% if company.require_po %}
                         <span class="tag tag--warning">Required</span>
                       {% else %}
