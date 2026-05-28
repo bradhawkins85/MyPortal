@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -711,11 +712,12 @@ def test_extract_xero_error_detail_unknown_json_structure():
 async def test_sync_company_error_includes_xero_validation_detail():
     """Test that sync_company surfaces Xero validation error messages in failed_invoices."""
 
-    xero_validation_body = (
-        '{"ErrorNumber":10,"Type":"ValidationException",'
-        '"Message":"A validation exception occurred",'
-        '"Elements":[{"ValidationErrors":[{"Message":"The Contact is invalid."}]}]}'
-    )
+    xero_validation_body = json.dumps({
+        "ErrorNumber": 10,
+        "Type": "ValidationException",
+        "Message": "A validation exception occurred",
+        "Elements": [{"ValidationErrors": [{"Message": "The Contact is invalid."}]}],
+    })
 
     with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
          patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \

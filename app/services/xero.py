@@ -30,6 +30,7 @@ OrderItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] |
 QuoteSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
 XERO_ITEM_NAME_MAX_LENGTH = 50
+_XERO_ERROR_DETAIL_MAX_LENGTH = 500
 
 
 class _TemplateValues(dict[str, Any]):
@@ -245,7 +246,7 @@ def _extract_xero_error_detail(response_body: str | None) -> str | None:
         payload = json.loads(response_body)
     except (ValueError, TypeError):
         text = (response_body or "").strip()
-        return text[:500] if text else None
+        return text[:_XERO_ERROR_DETAIL_MAX_LENGTH] if text else None
 
     messages: list[str] = []
     top_message = payload.get("Message")
@@ -260,7 +261,7 @@ def _extract_xero_error_detail(response_body: str | None) -> str | None:
         return "; ".join(messages)
     # Fall back to the raw body (truncated) if no structured messages were found
     text = (response_body or "").strip()
-    return text[:500] if text else None
+    return text[:_XERO_ERROR_DETAIL_MAX_LENGTH] if text else None
 
 
 def _is_duplicate_xero_item_error(response: httpx.Response) -> bool:
