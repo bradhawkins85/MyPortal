@@ -106,28 +106,39 @@
                     <td data-label="Next run" data-column-key="next_run">{{ automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—' }}</td>
                     <td data-label="Last run" data-column-key="last_run">{{ automation.last_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.last_run_at else '—' }}</td>
                     <td class="table__actions" data-column-key="actions">
-                      <div class="table__action-buttons">
-                        <a class="button button--ghost" href="/admin/automations/{{ automation.id }}/edit">Edit</a>
-                        <form action="/admin/automations/{{ automation.id }}/execute" method="post" class="inline-form">
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <button type="submit" class="button button--ghost">Run now</button>
-                        </form>
-                        <form
-                          action="/admin/automations/{{ automation.id }}/delete"
-                          method="post"
-                          class="inline-form"
-                          data-automation-delete
-                          data-automation-id="{{ automation.id }}"
-                          data-automation-name="{{ automation.name }}"
-                        >
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <button type="submit" class="button button--danger">Delete</button>
-                        </form>
-                      </div>
+                      <details class="header-title-menu__dropdown" data-header-menu>
+                        <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                          Actions
+                          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                            <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                          </svg>
+                          <span class="visually-hidden">Toggle row actions menu</span>
+                        </summary>
+                        <ul class="header-title-menu__list" role="menu">
+                          <li class="header-title-menu__item" role="none">
+                            <a class="header-title-menu__link" role="menuitem" href="/admin/automations/{{ automation.id }}/edit">Edit</a>
+                          </li>
+                          <li class="header-title-menu__item" role="none">
+                            <form action="/admin/automations/{{ automation.id }}/execute" method="post" class="inline-form">
+                              {% include "partials/csrf.html" %}
+                              <button type="submit" class="header-title-menu__link" role="menuitem">Run now</button>
+                            </form>
+                          </li>
+                          <li class="header-title-menu__item" role="none">
+                            <form
+                              action="/admin/automations/{{ automation.id }}/delete"
+                              method="post"
+                              class="inline-form"
+                              data-automation-delete
+                              data-automation-id="{{ automation.id }}"
+                              data-automation-name="{{ automation.name }}"
+                            >
+                              {% include "partials/csrf.html" %}
+                              <button type="submit" class="header-title-menu__link header-title-menu__link--danger" role="menuitem">Delete</button>
+                            </form>
+                          </li>
+                        </ul>
+                      </details>
                     </td>
                   </tr>
                 {% endfor %}
@@ -149,4 +160,16 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
+  <script>
+    // Allow row-level action dropdowns to overflow the table wrapper.
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('#automations-table [data-header-menu]').forEach(function (menu) {
+        const wrapper = menu.closest('.table-wrapper');
+        if (!wrapper) return;
+        menu.addEventListener('toggle', function () {
+          wrapper.style.overflow = menu.open ? 'visible' : '';
+        });
+      });
+    });
+  </script>
 {% endblock %}
