@@ -27,6 +27,31 @@
     modal.hidden = true;
   }
 
+  function closeParentHeaderMenu(element) {
+    const menu = element ? element.closest('[data-header-menu]') : null;
+    if (!menu) {
+      return;
+    }
+    if (window.MyPortalHeaderMenu && typeof window.MyPortalHeaderMenu.close === 'function') {
+      window.MyPortalHeaderMenu.close(menu);
+      return;
+    }
+    menu.classList.remove('header-menu--open');
+    const toggle = menu.querySelector('[data-header-menu-toggle]');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+    const panel = menu.querySelector('[data-header-menu-panel]');
+    if (panel) {
+      panel.hidden = true;
+      panel.style.position = '';
+      panel.style.top = '';
+      panel.style.left = '';
+      panel.style.right = '';
+      panel.style.zIndex = '';
+    }
+  }
+
   function bindModalDismissal(modal) {
     if (!modal) {
       return;
@@ -933,6 +958,7 @@
         if (!Number.isFinite(id) || id <= 0 || !editForm || !editIdField) {
           return;
         }
+        closeParentHeaderMenu(button);
 
         setLoadingStatus(editLoadingStatus, 'Loading product details…');
         setFormLoadingState(editForm, true);
@@ -1017,6 +1043,7 @@
         if (!form) {
           return;
         }
+        closeParentHeaderMenu(button);
         form.action = `/shop/admin/product/${id}/visibility`;
         setLoadingStatus(visibilityLoadingStatus, 'Loading visibility restrictions…');
         setFormLoadingState(form, true);
@@ -1047,6 +1074,7 @@
         if (!priceHistoryModal) {
           return;
         }
+        closeParentHeaderMenu(button);
         const id = Number(button.getAttribute('data-product-price-history'));
         const sku = button.getAttribute('data-product-sku') || '';
         const skuLabel = document.getElementById('price-history-sku-label');
