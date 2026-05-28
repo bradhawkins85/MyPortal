@@ -241,15 +241,30 @@
                     {% endif %}
                   </td>
                   <td class="table__actions" data-column-key="actions">
-                    <div class="table__action-buttons">
-                      <button type="button" class="button button--ghost" data-task-run>Run now</button>
-                      <button type="button" class="button button--ghost" data-task-logs>View logs</button>
-                      {% if task.company_edit_url %}
-                        <a class="button button--ghost" href="{{ task.company_edit_url }}">Source</a>
-                      {% else %}
-                        <a class="button button--ghost" href="/admin/automation">Source</a>
-                      {% endif %}
-                    </div>
+                    <details class="header-title-menu__dropdown" data-header-menu>
+                      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                        Actions
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                        </svg>
+                        <span class="visually-hidden">Toggle row actions menu</span>
+                      </summary>
+                      <ul class="header-title-menu__list" role="menu">
+                        <li class="header-title-menu__item" role="none">
+                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-run>Run now</button>
+                        </li>
+                        <li class="header-title-menu__item" role="none">
+                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-logs>View logs</button>
+                        </li>
+                        <li class="header-title-menu__item" role="none">
+                          {% if task.company_edit_url %}
+                            <a class="header-title-menu__link" role="menuitem" href="{{ task.company_edit_url }}">Source</a>
+                          {% else %}
+                            <a class="header-title-menu__link" role="menuitem" href="/admin/automation">Source</a>
+                          {% endif %}
+                        </li>
+                      </ul>
+                    </details>
                   </td>
                 </tr>
               {% endfor %}
