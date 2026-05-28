@@ -230,6 +230,39 @@ def _build_xero_item_payload(
     return item_payload
 
 
+def _extract_xero_error_detail(response_body: str | None) -> str | None:
+    """Extract a human-readable error detail string from a Xero API error response body.
+
+    Xero validation errors are nested inside ``Elements[].ValidationErrors[]``.
+    This helper collects all validation messages and the top-level Message into a
+    single string so callers can surface them without having to re-parse JSON.
+
+    Returns ``None`` when the body is empty or cannot be parsed.
+    """
+    if not response_body:
+        return None
+    try:
+        payload = json.loads(response_body)
+    except (ValueError, TypeError):
+        text = (response_body or "").strip()
+        return text[:500] if text else None
+
+    messages: list[str] = []
+    top_message = payload.get("Message")
+    if top_message:
+        messages.append(str(top_message))
+    for element in payload.get("Elements") or []:
+        for validation_error in (element.get("ValidationErrors") or []):
+            msg = validation_error.get("Message")
+            if msg:
+                messages.append(str(msg))
+    if messages:
+        return "; ".join(messages)
+    # Fall back to the raw body (truncated) if no structured messages were found
+    text = (response_body or "").strip()
+    return text[:500] if text else None
+
+
 def _is_duplicate_xero_item_error(response: httpx.Response) -> bool:
     try:
         payload = response.json()
@@ -1534,11 +1567,12 @@ async def sync_billable_tickets(
                     )
             else:
                 try:
+                    xero_error_detail = _extract_xero_error_detail(response_body)
                     await webhook_monitor.record_manual_failure(
                         event_id,
                         attempt_number=1,
                         status="failed",
-                        error_message=f"HTTP {response_status}",
+                        error_message=xero_error_detail or f"HTTP {response_status}",
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
@@ -1635,17 +1669,19 @@ async def sync_billable_tickets(
                 "event_id": event_id,
             }
         else:
+            xero_error_detail = _extract_xero_error_detail(response_body)
             logger.error(
                 "Xero API returned error status for tickets",
                 company_id=company_id,
                 response_status=response_status,
+                xero_error=xero_error_detail,
                 response_body=response_body,
             )
             return {
                 "status": "failed",
                 "company_id": company_id,
                 "response_status": response_status,
-                "error": f"HTTP {response_status}",
+                "error": xero_error_detail or f"HTTP {response_status}",
                 "event_id": event_id,
             }
     
@@ -1879,11 +1915,12 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                         response_headers=response_headers,
                     )
                 else:
+                    xero_error_detail = _extract_xero_error_detail(response_body)
                     await webhook_monitor.record_manual_failure(
                         event_id,
                         attempt_number=1,
                         status="failed",
-                        error_message=f"HTTP {response_status}",
+                        error_message=xero_error_detail or f"HTTP {response_status}",
                         response_status=response_status,
                         response_body=response_body,
                         request_headers=request_headers,
@@ -1892,12 +1929,13 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     )
 
             if not success:
+                xero_error_detail = _extract_xero_error_detail(response_body)
                 failed_results.append(
                     {
                         "invoice_id": invoice_id,
                         "invoice_number": original_invoice_number,
                         "response_status": response_status,
-                        "error": f"HTTP {response_status}",
+                        "error": xero_error_detail or f"HTTP {response_status}",
                         "event_id": event_id,
                     }
                 )
