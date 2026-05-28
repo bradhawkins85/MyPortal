@@ -130,9 +130,7 @@ async def _render_companies_dashboard(
             *(m365_repo.get_credentials(company_id) for company_id, _ in company_ids_with_rows)
         )
         for (_, company), credentials in zip(company_ids_with_rows, credentials_rows):
-            company["m365_tenant_id"] = (
-                (credentials.get("tenant_id") or "").strip() if credentials else ""
-            )
+            company["m365_tenant_id"] = (credentials or {}).get("tenant_id", "").strip()
 
     ordered_company_ids: list[int] = [
         int(company["id"]) for company in managed_companies if company.get("id") is not None
