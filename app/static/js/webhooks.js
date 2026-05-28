@@ -357,10 +357,17 @@
     updateAttemptDetails(attempt);
   }
 
+  function closeOpenRowMenus() {
+    document
+      .querySelectorAll('#webhooks-table [data-header-menu][open]')
+      .forEach((menu) => menu.removeAttribute('open'));
+  }
+
   async function showAttemptsModal(eventData) {
     if (!attemptsModal || !eventData || !eventData.id) {
       return;
     }
+    closeOpenRowMenus();
     const title = query('webhook-attempts-title');
     if (title) {
       title.textContent = `Webhook attempts — ${eventData.name || `Event #${eventData.id}`}`;
