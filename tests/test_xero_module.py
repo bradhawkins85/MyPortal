@@ -660,7 +660,6 @@ def test_extract_xero_error_detail_none_body():
 
 def test_extract_xero_error_detail_structured_validation_errors():
     """Extracts top-level Message and nested ValidationErrors from a Xero error body."""
-    import json
     from app.services.xero import _extract_xero_error_detail
 
     body = json.dumps({
@@ -685,7 +684,6 @@ def test_extract_xero_error_detail_structured_validation_errors():
 
 def test_extract_xero_error_detail_top_level_message_only():
     """Returns the top-level Message when there are no nested validation errors."""
-    import json
     from app.services.xero import _extract_xero_error_detail
 
     body = json.dumps({"Message": "AuthenticationUnsuccessful"})
@@ -701,7 +699,6 @@ def test_extract_xero_error_detail_non_json_body():
 
 def test_extract_xero_error_detail_unknown_json_structure():
     """Falls back to the raw JSON string when body has no known message keys."""
-    import json
     from app.services.xero import _extract_xero_error_detail
 
     body = json.dumps({"Error": "Invalid request"})
