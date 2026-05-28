@@ -90,13 +90,12 @@
             <th scope="col" data-sort="date" data-mobile-priority="supporting">Expires</th>
             <th scope="col" data-sort="string" data-mobile-priority="supporting">Notes</th>
             <th scope="col" class="table__actions">Actions</th>
-            {% if current_user and (current_user.is_super_admin or membership.is_admin) %}
-              <th scope="col" class="table__actions">Admin</th>
-            {% endif %}
           </tr>
         </thead>
         <tbody>
           {% for quote in quotes %}
+            {% set is_admin = current_user and (current_user.is_super_admin or membership.is_admin) %}
+            {% set has_actions = (not quote.is_expired) or is_admin %}
             <tr data-status="{{ quote.status_value }}">
               <td data-label="Quote">
                 <button type="button" class="button-link" data-quote-view data-quote-number="{{ quote.quote_number }}" data-company-id="{{ quote.company_id }}">
@@ -125,55 +124,71 @@
               </td>
               <td data-label="Notes">{{ quote.notes or '—' }}</td>
               <td class="table__actions">
-                {% if not quote.is_expired %}
-                <form action="/quotes/load/{{ quote.quote_number }}" method="post" style="display: inline;">
-                  {% include "partials/csrf.html" %}
-                  <button type="submit" class="button button--ghost">Load to Cart</button>
-                </form>
-                {% if current_user and (current_user.is_super_admin or membership.is_admin) %}
-                  <button
-                    type="button"
-                    class="button button--ghost"
-                    data-quote-sync
-                    data-quote-number="{{ quote.quote_number }}"
-                    data-company-id="{{ quote.company_id }}"
-                  >
-                    Sync to Xero
-                  </button>
-                {% endif %}
+                {% if has_actions %}
+                  <details class="header-title-menu__dropdown" data-header-menu>
+                    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                      Actions
+                      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                      </svg>
+                      <span class="visually-hidden">Toggle row actions menu</span>
+                    </summary>
+                    <ul class="header-title-menu__list" role="menu">
+                      {% if not quote.is_expired %}
+                        <li class="header-title-menu__item" role="none">
+                          <form action="/quotes/load/{{ quote.quote_number }}" method="post" style="display: contents;">
+                            {% include "partials/csrf.html" %}
+                            <button type="submit" class="header-title-menu__link" role="menuitem">Load to Cart</button>
+                          </form>
+                        </li>
+                        {% if is_admin %}
+                          <li class="header-title-menu__item" role="none">
+                            <button
+                              type="button"
+                              class="header-title-menu__link"
+                              role="menuitem"
+                              data-quote-sync
+                              data-quote-number="{{ quote.quote_number }}"
+                              data-company-id="{{ quote.company_id }}"
+                            >Sync to Xero</button>
+                          </li>
+                        {% endif %}
+                      {% endif %}
+                      {% if is_admin %}
+                        <li class="header-title-menu__item" role="none">
+                          <button
+                            type="button"
+                            class="header-title-menu__link"
+                            role="menuitem"
+                            data-quote-assign
+                            data-quote-number="{{ quote.quote_number }}"
+                            data-company-id="{{ quote.company_id }}"
+                            data-assigned-user-id="{{ quote.assigned_user_id or '' }}"
+                          >Assign</button>
+                        </li>
+                        {% if current_user.is_super_admin %}
+                          <li class="header-title-menu__item" role="none">
+                            <button
+                              type="button"
+                              class="header-title-menu__link header-title-menu__link--danger"
+                              role="menuitem"
+                              data-quote-delete
+                              data-quote-number="{{ quote.quote_number }}"
+                              data-company-id="{{ quote.company_id }}"
+                            >Delete</button>
+                          </li>
+                        {% endif %}
+                      {% endif %}
+                    </ul>
+                  </details>
                 {% else %}
                   <span class="text-muted">Expired</span>
                 {% endif %}
               </td>
-              {% if current_user and (current_user.is_super_admin or membership.is_admin) %}
-                <td class="table__actions">
-                  <button 
-                    type="button" 
-                    class="button button--ghost" 
-                    data-quote-assign
-                    data-quote-number="{{ quote.quote_number }}"
-                    data-company-id="{{ quote.company_id }}"
-                    data-assigned-user-id="{{ quote.assigned_user_id or '' }}"
-                  >
-                    Assign
-                  </button>
-                  {% if current_user.is_super_admin %}
-                    <button 
-                      type="button" 
-                      class="button button--ghost button--danger" 
-                      data-quote-delete
-                      data-quote-number="{{ quote.quote_number }}"
-                      data-company-id="{{ quote.company_id }}"
-                    >
-                      Delete
-                    </button>
-                  {% endif %}
-                </td>
-              {% endif %}
             </tr>
           {% else %}
             <tr>
-              <td colspan="{% if current_user and (current_user.is_super_admin or membership.is_admin) %}10{% else %}9{% endif %}" class="table__empty">No quotes available.</td>
+              <td colspan="9" class="table__empty">No quotes available.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -258,4 +273,16 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script src="{{ static_url('/static/js/quotes.js') }}" defer></script>
+  <script>
+    // Allow row-level action dropdowns to overflow the table wrapper.
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('#quotes-table [data-header-menu]').forEach(function (menu) {
+        const wrapper = menu.closest('.table-wrapper');
+        if (!wrapper) return;
+        menu.addEventListener('toggle', function () {
+          wrapper.style.overflow = menu.open ? 'visible' : '';
+        });
+      });
+    });
+  </script>
 {% endblock %}
