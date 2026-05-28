@@ -192,7 +192,7 @@ async def _render_company_edit_page(
     from app.repositories import billing_contacts as billing_contacts_repo
     from app.repositories import companies as company_repo
     from app.repositories import pending_staff_access as pending_staff_access_repo
-    from app.repositories import recurring_invoice_items as recurring_items_repo
+    from app.repositories import company_recurring_invoice_items as recurring_items_repo
     from app.repositories import roles as role_repo
     from app.repositories import scheduled_tasks as scheduled_tasks_repo
     from app.repositories import staff as staff_repo
