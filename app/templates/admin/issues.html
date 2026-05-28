@@ -190,19 +190,37 @@
                           {% endif %}
                         </td>
                         <td class="table__actions" data-column-key="actions">
-                          <div class="table__action-buttons">
-                            <a class="button button--ghost" href="/admin/issues?issueId={{ issue.issue_id }}">Edit</a>
-                            {% if assignment.assignment_id %}
-                              <form
-                                action="/admin/issues/{{ issue.issue_id }}/assignments/{{ assignment.assignment_id }}/delete"
-                                method="post"
-                                class="inline-form"
-                              >
-                                {% include "partials/csrf.html" %}
-                                <input type="hidden" name="returnUrl" value="{{ return_url }}" />
-                                <button type="submit" class="button button--ghost button--danger">Remove</button>
-                              </form>
-                            {% endif %}
+                          {%- set row_menu_id = 'issue-actions-menu-' ~ assignment.assignment_id -%}
+                          <div class="header-menu" data-header-menu>
+                            <button type="button"
+                                    class="button button--ghost button--small header-menu__button"
+                                    data-header-menu-toggle
+                                    aria-haspopup="menu"
+                                    aria-expanded="false"
+                                    aria-controls="{{ row_menu_id }}">
+                              <span>Actions</span>
+                              <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                                <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                              </svg>
+                            </button>
+                            <div id="{{ row_menu_id }}"
+                                 class="header-menu__panel"
+                                 role="menu"
+                                 data-header-menu-panel
+                                 hidden>
+                              <a class="header-menu__item" href="/admin/issues?issueId={{ issue.issue_id }}" role="menuitem">Edit</a>
+                              {% if assignment.assignment_id %}
+                                <form
+                                  action="/admin/issues/{{ issue.issue_id }}/assignments/{{ assignment.assignment_id }}/delete"
+                                  method="post"
+                                  class="header-menu__form"
+                                >
+                                  {% include "partials/csrf.html" %}
+                                  <input type="hidden" name="returnUrl" value="{{ return_url }}" />
+                                  <button type="submit" class="header-menu__item header-menu__item--danger" role="menuitem">Remove</button>
+                                </form>
+                              {% endif %}
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -219,8 +237,26 @@
                       <td data-label="Status" data-column-key="status"><span class="tag tag--muted">N/A</span></td>
                       <td data-label="Updated" data-column-key="updated"><span class="text-muted">—</span></td>
                       <td class="table__actions" data-column-key="actions">
-                        <div class="table__action-buttons">
-                          <a class="button button--ghost" href="/admin/issues?issueId={{ issue.issue_id }}">Edit</a>
+                        {%- set row_menu_id = 'issue-actions-menu-' ~ issue.issue_id -%}
+                        <div class="header-menu" data-header-menu>
+                          <button type="button"
+                                  class="button button--ghost button--small header-menu__button"
+                                  data-header-menu-toggle
+                                  aria-haspopup="menu"
+                                  aria-expanded="false"
+                                  aria-controls="{{ row_menu_id }}">
+                            <span>Actions</span>
+                            <svg class="header-menu__chevron" aria-hidden="true" viewBox="0 0 20 20" width="14" height="14">
+                              <path fill="currentColor" d="M5.5 7.5 10 12l4.5-4.5z" />
+                            </svg>
+                          </button>
+                          <div id="{{ row_menu_id }}"
+                               class="header-menu__panel"
+                               role="menu"
+                               data-header-menu-panel
+                               hidden>
+                            <a class="header-menu__item" href="/admin/issues?issueId={{ issue.issue_id }}" role="menuitem">Edit</a>
+                          </div>
                         </div>
                       </td>
                     </tr>
