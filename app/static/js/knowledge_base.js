@@ -159,12 +159,8 @@
     feedbackForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const articleSlug = feedbackForm.getAttribute('data-article-slug') || '';
-      const selectedRating = feedbackForm.querySelector('input[name="rating"]:checked');
       const feedbackInput = feedbackForm.querySelector('textarea[name="feedback"]');
       const submitButton = feedbackForm.querySelector('button[type="submit"]');
-      if (!articleSlug || !selectedRating) {
-        return;
-      }
 
       const setStatus = (message, type = '') => {
         if (!feedbackStatus) {
@@ -176,6 +172,11 @@
           feedbackStatus.classList.add(type);
         }
       };
+      const selectedRating = feedbackForm.querySelector('input[name="rating"]:checked');
+      if (!articleSlug || !selectedRating) {
+        setStatus('Please choose thumbs up or thumbs down.', 'is-error');
+        return;
+      }
 
       submitButton?.setAttribute('disabled', 'disabled');
       setStatus('Submitting feedback…');
@@ -203,12 +204,18 @@
               detail = errorPayload.detail;
             }
           } catch (_) {
-            // ignore parse failure and keep default detail
+            // Ignore parse failure and keep default detail.
           }
           throw new Error(detail);
         }
         const payload = await response.json();
-        setStatus(`Thanks! Ticket #${payload.ticket_id} was created.`, 'is-success');
+        let successMessage = 'Feedback submitted.';
+        if (payload && typeof payload.message === 'string' && payload.message.trim()) {
+          successMessage = payload.message.trim();
+        } else if (payload && payload.ticket_id) {
+          successMessage = `Thanks! Ticket #${payload.ticket_id} was created.`;
+        }
+        setStatus(successMessage, 'is-success');
         feedbackForm.reset();
       } catch (error) {
         setStatus(`Failed to submit feedback: ${error.message}`, 'is-error');
