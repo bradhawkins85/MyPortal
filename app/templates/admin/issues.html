@@ -190,7 +190,7 @@
                           {% endif %}
                         </td>
                         <td class="table__actions" data-column-key="actions">
-                          {%- set row_menu_id = 'issue-actions-menu-' ~ assignment.assignment_id -%}
+                          {%- set row_menu_id = 'issue-actions-menu-' ~ issue.issue_id ~ '-' ~ loop.index0 -%}
                           <div class="header-menu" data-header-menu>
                             <button type="button"
                                     class="button button--ghost button--small header-menu__button"
