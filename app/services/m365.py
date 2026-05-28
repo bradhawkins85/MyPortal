@@ -4991,6 +4991,71 @@ async def enable_user_archive(company_id: int, upn: str) -> None:
     )
 
 
+async def start_managed_folder_assistant(company_id: int, upn: str) -> None:
+    """Start Managed Folder Assistant for a specific mailbox ``upn``."""
+    normalised = str(upn or "").strip()
+    if not normalised:
+        raise M365Error("A user principal name is required", http_status=400)
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Start-ManagedFolderAssistant",
+        {"Identity": normalised},
+    )
+    log_info(
+        "M365 managed folder assistant started",
+        company_id=company_id,
+        upn=normalised,
+    )
+
+
+async def start_managed_folder_assistant_all_mailboxes(company_id: int) -> dict[str, int]:
+    """Start Managed Folder Assistant for every mailbox returned by Get-Mailbox."""
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    data = await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Get-Mailbox",
+        {"ResultSize": "Unlimited"},
+    )
+    rows = data.get("value") or []
+    started = 0
+    failed = 0
+
+    for mailbox in rows:
+        if not isinstance(mailbox, dict):
+            continue
+        upn = str(mailbox.get("UserPrincipalName") or "").strip()
+        if not upn:
+            continue
+        try:
+            await _exo_invoke_command(
+                exo_token,
+                tenant_id,
+                "Start-ManagedFolderAssistant",
+                {"Identity": upn},
+            )
+            started += 1
+        except M365Error as exc:
+            failed += 1
+            log_error(
+                "M365 managed folder assistant start failed",
+                company_id=company_id,
+                upn=upn,
+                error=str(exc),
+            )
+
+    log_info(
+        "M365 managed folder assistant all-mailbox run completed",
+        company_id=company_id,
+        started=started,
+        failed=failed,
+    )
+    return {"started": started, "failed": failed}
+
+
 async def remove_calendar_events(company_id: int, upn: str) -> None:
     """Cancel organized meetings for ``upn`` using Exchange Online cmdlets.
 

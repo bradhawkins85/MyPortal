@@ -9,7 +9,9 @@
   {% if has_credentials %}
     {{ page_header_actions([
       {"label": "Sync mailboxes", "type": "button", "variant": "primary",
-       "attrs": {"id": "sync-mailboxes-btn", "data-sync-mailboxes": ""}}
+       "attrs": {"id": "sync-mailboxes-btn", "data-sync-mailboxes": ""}},
+      {"label": "Start Managed Folder Assistant (all)", "type": "button",
+       "attrs": {"data-start-managed-folder-assistant-all": ""}}
     ]) }}
   {% endif %}
 {% endblock %}
@@ -80,6 +82,13 @@
                 aria-haspopup="dialog"
                 aria-controls="mailbox-perm-modal"
               >Mailbox Permissions</button>
+              <button
+                type="button"
+                class="button button--small"
+                data-start-managed-folder-assistant-btn
+                data-upn="{{ mb.user_principal_name }}"
+                data-display-name="{{ mb.display_name or mb.user_principal_name }}"
+              >Start Managed Folder Assistant</button>
               {% if not mb.has_archive %}
               <button
                 type="button"
@@ -135,6 +144,7 @@
   <script>
   (function () {
     var syncBtn = document.querySelector('[data-sync-mailboxes]');
+    var runAllBtn = document.querySelector('[data-start-managed-folder-assistant-all]');
     if (syncBtn) {
       syncBtn.addEventListener('click', function () {
         syncBtn.disabled = true;
@@ -157,6 +167,43 @@
         .catch(function () {
           syncBtn.textContent = originalText;
           syncBtn.disabled = false;
+        });
+      });
+    }
+    if (runAllBtn) {
+      runAllBtn.addEventListener('click', function () {
+        if (!window.confirm('Start Managed Folder Assistant for all mailboxes?')) {
+          return;
+        }
+        runAllBtn.disabled = true;
+        var originalText = runAllBtn.textContent;
+        runAllBtn.textContent = 'Starting…';
+        fetch('/m365/mailboxes/start-managed-folder-assistant/all', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'{% if csrf_token %},
+            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+          }
+        })
+        .then(function (resp) {
+          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (result) {
+          runAllBtn.disabled = false;
+          if (!result.ok || (result.data && result.data.error)) {
+            runAllBtn.textContent = originalText;
+            window.alert((result.data && result.data.error) || 'Failed to start Managed Folder Assistant.');
+            return;
+          }
+          runAllBtn.textContent = '\u2713 Started (' + (result.data.started || 0) + ')';
+          setTimeout(function () {
+            runAllBtn.textContent = originalText;
+          }, 3000);
+        })
+        .catch(function () {
+          runAllBtn.disabled = false;
+          runAllBtn.textContent = originalText;
+          window.alert('Failed to start Managed Folder Assistant. Please try again.');
         });
       });
     }
@@ -257,6 +304,54 @@
             errorEl.textContent = 'Failed to load permissions. Please try again.';
             errorEl.style.display = 'block';
           });
+      });
+    });
+  }());
+  </script>
+  <script>
+  (function () {
+    var buttons = document.querySelectorAll('[data-start-managed-folder-assistant-btn]');
+    if (!buttons.length) return;
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var upn = btn.getAttribute('data-upn');
+        var displayName = btn.getAttribute('data-display-name') || upn;
+        if (!upn) return;
+        if (!window.confirm('Start Managed Folder Assistant for ' + displayName + '?')) {
+          return;
+        }
+        btn.disabled = true;
+        var originalText = btn.textContent;
+        btn.textContent = 'Starting…';
+        fetch('/m365/mailboxes/start-managed-folder-assistant', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'{% if csrf_token %},
+            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+          },
+          body: JSON.stringify({ upn: upn })
+        })
+        .then(function (resp) {
+          return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (result) {
+          if (!result.ok || (result.data && result.data.error)) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+            window.alert((result.data && result.data.error) || 'Failed to start Managed Folder Assistant.');
+            return;
+          }
+          btn.textContent = '\u2713 Started';
+          setTimeout(function () {
+            btn.textContent = originalText;
+            btn.disabled = false;
+          }, 3000);
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = originalText;
+          window.alert('Failed to start Managed Folder Assistant. Please try again.');
+        });
       });
     });
   }());

@@ -3337,6 +3337,71 @@ async def enable_m365_user_archive(request: Request):
     return JSONResponse({"enabled": True})
 
 
+@app.post("/m365/mailboxes/start-managed-folder-assistant", response_class=JSONResponse, tags=["Microsoft 365"])
+async def start_m365_managed_folder_assistant(request: Request):
+    """Start Managed Folder Assistant for a specific mailbox."""
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+    upn = str((body or {}).get("upn") or "").strip()
+    if not upn:
+        return JSONResponse({"error": "A user principal name is required"}, status_code=400)
+
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    known_upns = {str(mb.get("user_principal_name") or "").strip().lower() for mb in user_mbs + shared_mbs}
+    if upn.lower() not in known_upns:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
+
+    try:
+        await m365_service.start_managed_folder_assistant(company_id, upn)
+    except m365_service.M365Error:
+        logger.exception("Failed to start Managed Folder Assistant for UPN %s", upn)
+        return JSONResponse(
+            {"error": "Unable to start Managed Folder Assistant at this time."},
+            status_code=503,
+        )
+    log_info("M365 managed folder assistant requested", company_id=company_id, user_id=user.get("id"), upn=upn)
+    return JSONResponse({"started": True})
+
+
+@app.post("/m365/mailboxes/start-managed-folder-assistant/all", response_class=JSONResponse, tags=["Microsoft 365"])
+async def start_m365_managed_folder_assistant_all(request: Request):
+    """Start Managed Folder Assistant for all mailboxes in the tenant."""
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    try:
+        result = await m365_service.start_managed_folder_assistant_all_mailboxes(company_id)
+    except m365_service.M365Error:
+        logger.exception("Failed to start Managed Folder Assistant for all mailboxes")
+        return JSONResponse(
+            {"error": "Unable to start Managed Folder Assistant for all mailboxes at this time."},
+            status_code=503,
+        )
+    log_info(
+        "M365 managed folder assistant all-mailbox run requested",
+        company_id=company_id,
+        user_id=user.get("id"),
+        started=result.get("started", 0),
+        failed=result.get("failed", 0),
+    )
+    return JSONResponse({
+        "started": int(result.get("started") or 0),
+        "failed": int(result.get("failed") or 0),
+    })
+
+
 @app.get("/m365/mailboxes/permissions", response_class=JSONResponse, tags=["Microsoft 365"])
 async def get_m365_mailbox_permissions(request: Request, upn: str):
     """Return mailbox permission details for a given mailbox UPN.
