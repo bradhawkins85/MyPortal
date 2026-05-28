@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -476,6 +477,7 @@ async def test_sync_company_creates_webhook_monitor_event():
          patch("app.services.xero.invoice_repo.list_unsynced_company_invoices") as mock_list_unsynced, \
          patch("app.services.xero.invoice_lines_repo.list_invoice_lines") as mock_list_lines, \
          patch("app.services.xero.invoice_repo.patch_invoice") as mock_patch_invoice, \
+         patch("app.services.xero._fetch_next_xero_invoice_number") as mock_fetch_next_invoice_number, \
          patch("app.services.xero.billed_time_repo.rename_invoice_number") as mock_rename_billed, \
          patch("app.services.xero.tickets_repo.rename_xero_invoice_number") as mock_rename_tickets, \
          patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
@@ -520,6 +522,7 @@ async def test_sync_company_creates_webhook_monitor_event():
         ]
         
         mock_get_token.return_value = "test-access-token"
+        mock_fetch_next_invoice_number.return_value = "XERO-1001"
         
         mock_create_event.return_value = {
             "id": 456,
@@ -560,6 +563,7 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert post_call[1]["headers"]["Authorization"] == "Bearer test-access-token"
         assert post_call[1]["headers"]["xero-tenant-id"] == "test-tenant-id"
         assert post_call[1]["json"]["Invoices"][0]["Reference"] == "MyPortal INV-LOCAL-001"
+        assert post_call[1]["json"]["Invoices"][0]["InvoiceNumber"] == "XERO-1001"
         
         # Verify success was recorded
         mock_record_success.assert_called_once()
@@ -568,9 +572,15 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert record_call[1]["attempt_number"] == 1
         assert record_call[1]["response_status"] == 200
         assert record_call[1]["response_body"] == '{"Invoices": [{"InvoiceID": "invoice-123", "InvoiceNumber": "XERO-1001", "Status": "DRAFT"}]}'
-        mock_patch_invoice.assert_awaited_once()
-        mock_rename_billed.assert_awaited_once_with(123, "INV-LOCAL-001", "XERO-1001")
-        mock_rename_tickets.assert_awaited_once_with(123, "INV-LOCAL-001", "XERO-1001")
+        assert mock_patch_invoice.await_count == 2
+        assert mock_patch_invoice.await_args_list[0].args[0] == 321
+        assert mock_patch_invoice.await_args_list[0].kwargs["invoice_number"] == "XERO-1001"
+        assert mock_patch_invoice.await_args_list[1].args[0] == 321
+        assert mock_patch_invoice.await_args_list[1].kwargs["invoice_number"] == "XERO-1001"
+        assert mock_patch_invoice.await_args_list[1].kwargs["status"] == "draft"
+        assert mock_patch_invoice.await_args_list[1].kwargs["xero_invoice_id"] == "invoice-123"
+        assert mock_rename_billed.await_count == 1
+        assert mock_rename_tickets.await_count == 1
 
 
 @pytest.mark.anyio("asyncio")
@@ -636,6 +646,8 @@ async def test_sync_company_records_webhook_failure():
         assert result["failed_count"] == 1
         assert result["failed_invoices"][0]["response_status"] == 400
         assert result["failed_invoices"][0]["event_id"] == 789
+        # The error field should now contain the actual Xero response body, not just "HTTP 400"
+        assert result["failed_invoices"][0]["error"] == '{"Error": "Invalid request"}'
         
         # Verify failure was recorded
         mock_record_failure.assert_called_once()
@@ -644,4 +656,120 @@ async def test_sync_company_records_webhook_failure():
         assert record_call[1]["attempt_number"] == 1
         assert record_call[1]["status"] == "failed"
         assert record_call[1]["response_status"] == 400
-        assert record_call[1]["error_message"] == "HTTP 400"
+        # error_message should now contain the extracted Xero error detail
+        assert record_call[1]["error_message"] == '{"Error": "Invalid request"}'
+
+
+def test_extract_xero_error_detail_none_body():
+    """Returns None when given no body."""
+    from app.services.xero import _extract_xero_error_detail
+    assert _extract_xero_error_detail(None) is None
+    assert _extract_xero_error_detail("") is None
+
+
+def test_extract_xero_error_detail_structured_validation_errors():
+    """Extracts top-level Message and nested ValidationErrors from a Xero error body."""
+    from app.services.xero import _extract_xero_error_detail
+
+    body = json.dumps({
+        "ErrorNumber": 10,
+        "Type": "ValidationException",
+        "Message": "A validation exception occurred",
+        "Elements": [
+            {
+                "ValidationErrors": [
+                    {"Message": "The Contact is invalid."},
+                    {"Message": "Account code '999' is not a valid account."},
+                ]
+            }
+        ],
+    })
+    result = _extract_xero_error_detail(body)
+    assert result is not None
+    assert "A validation exception occurred" in result
+    assert "The Contact is invalid." in result
+    assert "Account code '999' is not a valid account." in result
+
+
+def test_extract_xero_error_detail_top_level_message_only():
+    """Returns the top-level Message when there are no nested validation errors."""
+    from app.services.xero import _extract_xero_error_detail
+
+    body = json.dumps({"Message": "AuthenticationUnsuccessful"})
+    assert _extract_xero_error_detail(body) == "AuthenticationUnsuccessful"
+
+
+def test_extract_xero_error_detail_non_json_body():
+    """Falls back to the raw text for non-JSON bodies."""
+    from app.services.xero import _extract_xero_error_detail
+
+    assert _extract_xero_error_detail("Bad Request") == "Bad Request"
+
+
+def test_extract_xero_error_detail_unknown_json_structure():
+    """Falls back to the raw JSON string when body has no known message keys."""
+    from app.services.xero import _extract_xero_error_detail
+
+    body = json.dumps({"Error": "Invalid request"})
+    assert _extract_xero_error_detail(body) == body
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_error_includes_xero_validation_detail():
+    """Test that sync_company surfaces Xero validation error messages in failed_invoices."""
+
+    xero_validation_body = json.dumps({
+        "ErrorNumber": 10,
+        "Type": "ValidationException",
+        "Message": "A validation exception occurred",
+        "Elements": [{"ValidationErrors": [{"Message": "The Contact is invalid."}]}],
+    })
+
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.invoice_repo.list_unsynced_company_invoices") as mock_list_unsynced, \
+         patch("app.services.xero.invoice_lines_repo.list_invoice_lines") as mock_list_lines, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_failure") as mock_record_failure, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+            },
+        }
+        mock_get_company.return_value = {"id": 1, "name": "ACME Ltd", "xero_id": None}
+        mock_list_unsynced.return_value = [
+            {"id": 1, "invoice_number": "INV-202605-0001", "due_date": None}
+        ]
+        mock_list_lines.return_value = [
+            {"description": "Support", "quantity": 1.0, "unit_amount": 100.0, "product_code": None}
+        ]
+        mock_get_token.return_value = "access-token"
+        mock_create_event.return_value = {"id": 999}
+
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = xero_validation_body
+        mock_response.headers = {}
+        mock_client.post.return_value = mock_response
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        result = await xero_service.sync_company(1)
+
+    assert result["status"] == "failed"
+    assert result["failed_count"] == 1
+    error = result["failed_invoices"][0]["error"]
+    assert "A validation exception occurred" in error
+    assert "The Contact is invalid." in error
+
+    # Webhook monitor should also receive the detailed error message
+    record_call = mock_record_failure.call_args
+    assert "A validation exception occurred" in record_call[1]["error_message"]
+    assert "The Contact is invalid." in record_call[1]["error_message"]
