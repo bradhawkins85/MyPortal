@@ -5834,15 +5834,15 @@ dialog.modal:not([open]) {
 
 .knowledge-base__feedback-status {
   margin: 0;
-  color: rgba(148, 163, 184, 0.9);
+  color: var(--color-text-muted, #94a3b8);
 }
 
 .knowledge-base__feedback-status.is-success {
-  color: #22c55e;
+  color: var(--color-success, #22c55e);
 }
 
 .knowledge-base__feedback-status.is-error {
-  color: #ef4444;
+  color: var(--color-danger, #ef4444);
 }
 
 .table__row--active {

@@ -53,6 +53,16 @@ def _audit_article_summary(article: dict | None) -> dict | None:
     return {key: article.get(key) for key in _AUDIT_ARTICLE_FIELDS}
 
 
+def _resolve_feedback_company_id(session: SessionData, current_user: dict) -> int | None:
+    if session.active_company_id is not None:
+        return session.active_company_id
+    fallback_company = current_user.get("company_id")
+    try:
+        return int(fallback_company) if fallback_company is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def get_access_context(
     optional_user: dict | None = Depends(get_optional_user),
 ) -> kb_service.ArticleAccessContext:
@@ -292,6 +302,7 @@ async def submit_article_feedback(
     current_user: dict = Depends(get_current_user),
     session: SessionData = Depends(get_current_session),
 ) -> KnowledgeBaseFeedbackCreateResponse:
+    """Create a ticket from authenticated knowledge base article feedback."""
     access_context = await kb_service.build_access_context(current_user)
     article = await kb_service.get_article_by_slug_for_context(
         slug,
@@ -309,9 +320,11 @@ async def submit_article_feedback(
     article_slug = article.get("slug") or slug
     feedback_text = (payload.feedback or "").strip()
     feedback_block = feedback_text or "(No additional comments provided.)"
+    requester_email = current_user.get("email") or "unknown"
+    company_id = _resolve_feedback_company_id(session, current_user)
     subject = f"Knowledge base feedback: {rating_label} · {article_title}"
     description = (
-        f"Knowledge base feedback submitted by user {user_id}.\n"
+        f"Knowledge base feedback submitted by user {user_id} ({requester_email}).\n"
         f"Article: {article_title}\n"
         f"Article URL: /knowledge-base/articles/{article_slug}\n"
         f"Rating: {rating_label}\n\n"
@@ -322,7 +335,7 @@ async def submit_article_feedback(
         subject=subject,
         description=description,
         requester_id=user_id,
-        company_id=session.active_company_id or current_user.get("company_id"),
+        company_id=company_id,
         assigned_user_id=None,
         priority="normal",
         status=status_value,
@@ -331,7 +344,7 @@ async def submit_article_feedback(
         external_reference=f"kb-feedback:{article_slug}:{payload.rating}",
         trigger_automations=True,
         initial_reply_author_id=user_id,
-        requester_email=current_user.get("email"),
+        requester_email=requester_email,
     )
     ticket_id = int(ticket["id"])
     await audit_service.record(

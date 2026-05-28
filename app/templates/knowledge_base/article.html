@@ -97,17 +97,17 @@
     <section class="card card--panel knowledge-base__feedback" data-kb-feedback>
       <header class="card__header card__header--stacked">
         <h2 class="card__title">Feedback</h2>
-        <p class="card__subtitle">Share improvements and quickly rate this article.</p>
+        <p class="card__subtitle">Rate this article and share feedback for improvements.</p>
       </header>
       <form class="card__body knowledge-base__feedback-form" data-kb-feedback-form data-article-slug="{{ kb_article.slug }}">
         <fieldset class="knowledge-base__feedback-rating">
           <legend>How helpful was this article?</legend>
-          <label class="knowledge-base__feedback-choice">
-            <input type="radio" name="rating" value="up" checked />
+          <label class="knowledge-base__feedback-choice" for="kb-feedback-rating-up">
+            <input id="kb-feedback-rating-up" type="radio" name="rating" value="up" />
             <span>👍 Thumbs up</span>
           </label>
-          <label class="knowledge-base__feedback-choice">
-            <input type="radio" name="rating" value="down" />
+          <label class="knowledge-base__feedback-choice" for="kb-feedback-rating-down">
+            <input id="kb-feedback-rating-down" type="radio" name="rating" value="down" />
             <span>👎 Thumbs down</span>
           </label>
         </fieldset>
