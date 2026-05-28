@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -1348,13 +1349,22 @@ async def admin_update_company(company_id: int, request: Request):
     try:
         await company_repo.update_company(company_id, **updates)
     except Exception as exc:  # pragma: no cover - defensive logging
+        import aiomysql
+
         log_error("Failed to update company", company_id=company_id, error=str(exc))
+        error_message = "Unable to update company. Please try again."
+        if isinstance(exc, aiomysql.IntegrityError) and exc.args and exc.args[0] == 1062:
+            match = re.search(r"Duplicate entry '([^']+)'", str(exc))
+            if match:
+                error_message = f"The email domain '{match.group(1)}' is already assigned to another company."
+            else:
+                error_message = "One of the email domains is already assigned to another company."
         return await _render_company_edit_page(
             request,
             current_user,
             company_id=company_id,
             form_values=form_values,
-            error_message="Unable to update company. Please try again.",
+            error_message=error_message,
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     if huntress_organization_id:
