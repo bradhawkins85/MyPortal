@@ -31,7 +31,7 @@ QuoteSummaryFetcher = Callable[[str, int], Awaitable[Mapping[str, Any] | None]]
 QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] | None]]
 XERO_ITEM_NAME_MAX_LENGTH = 50
 _XERO_ERROR_DETAIL_MAX_LENGTH = 500
-_XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*?)(\d+)$")
+_XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*)(\d+)$")
 
 
 class _TemplateValues(dict[str, Any]):
@@ -290,7 +290,7 @@ async def _fetch_next_xero_invoice_number(
     """Fetch and increment the latest ACCREC invoice number from Xero."""
     params = {
         "where": 'Type=="ACCREC"',
-        "order": "Date DESC",
+        "order": "InvoiceNumber DESC",
         "page": 1,
     }
     try:
@@ -318,26 +318,14 @@ async def _fetch_next_xero_invoice_number(
         return None
 
     latest_number: str | None = None
-    latest_date_value: str | None = None
     for item in invoices:
         if not isinstance(item, Mapping):
             continue
         invoice_number = str(item.get("InvoiceNumber") or "").strip()
         if not invoice_number:
             continue
-        invoice_date = str(
-            item.get("UpdatedDateUTC")
-            or item.get("DateString")
-            or item.get("Date")
-            or ""
-        ).strip()
-        if latest_number is None:
-            latest_number = invoice_number
-            latest_date_value = invoice_date
-            continue
-        if invoice_date and (latest_date_value or "") < invoice_date:
-            latest_number = invoice_number
-            latest_date_value = invoice_date
+        latest_number = invoice_number
+        break
 
     return _calculate_next_invoice_number(latest_number)
 
@@ -1934,6 +1922,12 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         if auto_send:
             invoice_payload["SentToContact"] = True
 
+        webhook_payload = {"Invoices": [invoice_payload]}
+        event_id: int | None = None
+        response_status: int | None = None
+        response_body: str | None = None
+        response_headers: dict[str, Any] | None = None
+
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 next_invoice_number = await _fetch_next_xero_invoice_number(
@@ -1941,71 +1935,53 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
                     api_url=api_url,
                     request_headers=request_headers,
                 )
-        except Exception as exc:
-            log_warning(
-                "Failed to retrieve next Xero invoice number",
-                invoice_id=invoice_id,
-                company_id=company_id,
-                error=str(exc),
-            )
-            next_invoice_number = None
+                if next_invoice_number:
+                    invoice_payload["InvoiceNumber"] = next_invoice_number
+                    if next_invoice_number != working_invoice_number:
+                        try:
+                            await invoice_repo.patch_invoice(
+                                invoice_id,
+                                invoice_number=next_invoice_number,
+                            )
+                            await _rename_local_invoice_references(
+                                company_id,
+                                working_invoice_number,
+                                next_invoice_number,
+                            )
+                            working_invoice_number = next_invoice_number
+                        except Exception as exc:
+                            log_warning(
+                                "Failed to align local invoice number before Xero sync",
+                                invoice_id=invoice_id,
+                                company_id=company_id,
+                                invoice_number=next_invoice_number,
+                                error=str(exc),
+                            )
 
-        if next_invoice_number:
-            invoice_payload["InvoiceNumber"] = next_invoice_number
-            if next_invoice_number != working_invoice_number:
+                webhook_payload = {"Invoices": [invoice_payload]}
                 try:
-                    await invoice_repo.patch_invoice(
-                        invoice_id,
-                        invoice_number=next_invoice_number,
+                    event = await webhook_monitor.create_manual_event(
+                        name="xero.sync.company",
+                        target_url=api_url,
+                        payload=webhook_payload,
+                        headers=request_headers,
+                        max_attempts=1,
+                        backoff_seconds=0,
                     )
-                    await _rename_local_invoice_references(
-                        company_id,
-                        working_invoice_number,
-                        next_invoice_number,
-                    )
-                    working_invoice_number = next_invoice_number
                 except Exception as exc:
-                    log_warning(
-                        "Failed to align local invoice number before Xero sync",
-                        invoice_id=invoice_id,
+                    logger.error(
+                        "Failed to create webhook monitor event",
                         company_id=company_id,
-                        invoice_number=next_invoice_number,
+                        invoice_id=invoice_id,
                         error=str(exc),
                     )
+                    event = None
+                if event and event.get("id") is not None:
+                    try:
+                        event_id = int(event["id"])
+                    except (TypeError, ValueError):
+                        event_id = None
 
-        webhook_payload = {"Invoices": [invoice_payload]}
-
-        try:
-            event = await webhook_monitor.create_manual_event(
-                name="xero.sync.company",
-                target_url=api_url,
-                payload=webhook_payload,
-                headers=request_headers,
-                max_attempts=1,
-                backoff_seconds=0,
-            )
-        except Exception as exc:
-            logger.error(
-                "Failed to create webhook monitor event",
-                company_id=company_id,
-                invoice_id=invoice_id,
-                error=str(exc),
-            )
-            event = None
-
-        event_id: int | None = None
-        if event and event.get("id") is not None:
-            try:
-                event_id = int(event["id"])
-            except (TypeError, ValueError):
-                event_id = None
-
-        response_status: int | None = None
-        response_body: str | None = None
-        response_headers: dict[str, Any] | None = None
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
                 response, _item_ensure_result = await _post_xero_invoice_with_product_retry(
                     client=client,
                     api_url=api_url,
