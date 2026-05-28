@@ -93,6 +93,40 @@
       {% endif %}
     </div>
   </article>
+  {% if has_authenticated_user %}
+    <section class="card card--panel knowledge-base__feedback" data-kb-feedback>
+      <header class="card__header card__header--stacked">
+        <h2 class="card__title">Feedback</h2>
+        <p class="card__subtitle">Share improvements and quickly rate this article.</p>
+      </header>
+      <form class="card__body knowledge-base__feedback-form" data-kb-feedback-form data-article-slug="{{ kb_article.slug }}">
+        <fieldset class="knowledge-base__feedback-rating">
+          <legend>How helpful was this article?</legend>
+          <label class="knowledge-base__feedback-choice">
+            <input type="radio" name="rating" value="up" checked />
+            <span>👍 Thumbs up</span>
+          </label>
+          <label class="knowledge-base__feedback-choice">
+            <input type="radio" name="rating" value="down" />
+            <span>👎 Thumbs down</span>
+          </label>
+        </fieldset>
+        <label for="kb-feedback-message">Additional feedback (optional)</label>
+        <textarea
+          id="kb-feedback-message"
+          name="feedback"
+          class="input"
+          rows="4"
+          maxlength="5000"
+          placeholder="Tell us what could be improved."
+        ></textarea>
+        <div class="knowledge-base__feedback-actions">
+          <button type="submit" class="button button--primary">Submit feedback</button>
+          <p class="knowledge-base__feedback-status" data-kb-feedback-status role="status" aria-live="polite"></p>
+        </div>
+      </form>
+    </section>
+  {% endif %}
 </div>
 {% endblock %}
 

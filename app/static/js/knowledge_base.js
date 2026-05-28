@@ -18,11 +18,8 @@
     return getCookie('myportal_session_csrf');
   }
 
-  const form = document.querySelector('[data-knowledge-base-search]');
-  if (!form) {
-    return;
-  }
-  const input = form.querySelector('input[name="query"]');
+  const searchForm = document.querySelector('[data-knowledge-base-search]');
+  const input = searchForm ? searchForm.querySelector('input[name="query"]') : null;
   const resultsSection = document.querySelector('[data-knowledge-base-results]');
   const resultsBody = document.querySelector('[data-knowledge-base-results-body]');
   const ollamaSection = document.querySelector('[data-knowledge-base-ollama]');
@@ -108,50 +105,116 @@
     }
   }
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    if (!input) {
-      return;
-    }
-    const query = input.value.trim();
-    if (!query) {
-      input.focus();
-      return;
-    }
-    form.classList.add('is-loading');
-    if (inFlightController) {
-      inFlightController.abort();
-    }
-    inFlightController = new AbortController();
-    try {
-      const headers = {
-        'Content-Type': 'application/json',
-      };
-      const csrfToken = getCsrfToken();
-      if (csrfToken) {
-        headers['X-CSRF-Token'] = csrfToken;
-      }
-
-      const response = await fetch('/api/knowledge-base/search', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query }),
-        signal: inFlightController.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`Search failed with status ${response.status}`);
-      }
-      const payload = await response.json();
-      renderResults(payload);
-    } catch (error) {
-      if (error.name === 'AbortError') {
+  if (searchForm) {
+    searchForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!input) {
         return;
       }
-      renderError(error);
-    } finally {
-      form.classList.remove('is-loading');
-      inFlightController = null;
-    }
-  });
-})();
+      const query = input.value.trim();
+      if (!query) {
+        input.focus();
+        return;
+      }
+      searchForm.classList.add('is-loading');
+      if (inFlightController) {
+        inFlightController.abort();
+      }
+      inFlightController = new AbortController();
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+        };
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
 
+        const response = await fetch('/api/knowledge-base/search', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ query }),
+          signal: inFlightController.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Search failed with status ${response.status}`);
+        }
+        const payload = await response.json();
+        renderResults(payload);
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          return;
+        }
+        renderError(error);
+      } finally {
+        searchForm.classList.remove('is-loading');
+        inFlightController = null;
+      }
+    });
+  }
+
+  const feedbackForm = document.querySelector('[data-kb-feedback-form]');
+  const feedbackStatus = document.querySelector('[data-kb-feedback-status]');
+  if (feedbackForm) {
+    feedbackForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const articleSlug = feedbackForm.getAttribute('data-article-slug') || '';
+      const selectedRating = feedbackForm.querySelector('input[name="rating"]:checked');
+      const feedbackInput = feedbackForm.querySelector('textarea[name="feedback"]');
+      const submitButton = feedbackForm.querySelector('button[type="submit"]');
+      if (!articleSlug || !selectedRating) {
+        return;
+      }
+
+      const setStatus = (message, type = '') => {
+        if (!feedbackStatus) {
+          return;
+        }
+        feedbackStatus.textContent = message;
+        feedbackStatus.classList.remove('is-success', 'is-error');
+        if (type) {
+          feedbackStatus.classList.add(type);
+        }
+      };
+
+      submitButton?.setAttribute('disabled', 'disabled');
+      setStatus('Submitting feedback…');
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+        };
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+        const response = await fetch(`/api/knowledge-base/articles/${encodeURIComponent(articleSlug)}/feedback`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            rating: selectedRating.value,
+            feedback: (feedbackInput?.value || '').trim(),
+          }),
+        });
+        if (!response.ok) {
+          let detail = `status ${response.status}`;
+          try {
+            const errorPayload = await response.json();
+            if (errorPayload && typeof errorPayload.detail === 'string' && errorPayload.detail.trim()) {
+              detail = errorPayload.detail;
+            }
+          } catch (_) {
+            // ignore parse failure and keep default detail
+          }
+          throw new Error(detail);
+        }
+        const payload = await response.json();
+        setStatus(`Thanks! Ticket #${payload.ticket_id} was created.`, 'is-success');
+        feedbackForm.reset();
+      } catch (error) {
+        setStatus(`Failed to submit feedback: ${error.message}`, 'is-error');
+      } finally {
+        submitButton?.removeAttribute('disabled');
+      }
+    });
+  }
+})();

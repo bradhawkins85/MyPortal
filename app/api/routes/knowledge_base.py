@@ -4,19 +4,23 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
 
-from app.api.dependencies.auth import get_optional_user, require_super_admin
+from app.api.dependencies.auth import get_current_session, get_current_user, get_optional_user, require_super_admin
 from app.repositories import knowledge_base as kb_repo
 from app.schemas.knowledge_base import (
     KnowledgeBaseArticleCreate,
+    KnowledgeBaseFeedbackCreateRequest,
+    KnowledgeBaseFeedbackCreateResponse,
     KnowledgeBaseArticleListItem,
     KnowledgeBaseArticleResponse,
     KnowledgeBaseArticleUpdate,
     KnowledgeBaseSearchRequest,
     KnowledgeBaseSearchResponse,
 )
+from app.security.session import SessionData
 from app.services import audit as audit_service
 from app.services import knowledge_base as kb_service
 from app.services import file_storage
+from app.services import tickets as tickets_service
 
 router = APIRouter(prefix="/api/knowledge-base", tags=["Knowledge Base"])
 
@@ -276,6 +280,80 @@ async def search_articles(
     return KnowledgeBaseSearchResponse(**result)
 
 
+@router.post(
+    "/articles/{slug}/feedback",
+    response_model=KnowledgeBaseFeedbackCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_article_feedback(
+    slug: str,
+    payload: KnowledgeBaseFeedbackCreateRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    session: SessionData = Depends(get_current_session),
+) -> KnowledgeBaseFeedbackCreateResponse:
+    access_context = await kb_service.build_access_context(current_user)
+    article = await kb_service.get_article_by_slug_for_context(
+        slug,
+        access_context,
+        include_unpublished=False,
+        include_permissions=False,
+    )
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    user_id = int(current_user["id"])
+    status_value = await tickets_service.resolve_status_or_default(None)
+    rating_label = "Thumbs up" if payload.rating == "up" else "Thumbs down"
+    article_title = article.get("title") or slug
+    article_slug = article.get("slug") or slug
+    feedback_text = (payload.feedback or "").strip()
+    feedback_block = feedback_text or "(No additional comments provided.)"
+    subject = f"Knowledge base feedback: {rating_label} · {article_title}"
+    description = (
+        f"Knowledge base feedback submitted by user {user_id}.\n"
+        f"Article: {article_title}\n"
+        f"Article URL: /knowledge-base/articles/{article_slug}\n"
+        f"Rating: {rating_label}\n\n"
+        f"Feedback:\n{feedback_block}"
+    )
+
+    ticket = await tickets_service.create_ticket(
+        subject=subject,
+        description=description,
+        requester_id=user_id,
+        company_id=session.active_company_id or current_user.get("company_id"),
+        assigned_user_id=None,
+        priority="normal",
+        status=status_value,
+        category="knowledge_base_feedback",
+        module_slug="knowledge_base",
+        external_reference=f"kb-feedback:{article_slug}:{payload.rating}",
+        trigger_automations=True,
+        initial_reply_author_id=user_id,
+        requester_email=current_user.get("email"),
+    )
+    ticket_id = int(ticket["id"])
+    await audit_service.record(
+        action="knowledge_base.feedback.submit",
+        request=request,
+        user_id=user_id,
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after={
+            "ticket_id": ticket_id,
+            "article_slug": article_slug,
+            "rating": payload.rating,
+            "feedback_length": len(feedback_text),
+        },
+    )
+    return KnowledgeBaseFeedbackCreateResponse(
+        ticket_id=ticket_id,
+        message="Thanks for the feedback. A ticket has been created for review.",
+    )
+
+
 @router.post("/upload-image")
 async def upload_image(
     file: UploadFile = File(...),
@@ -298,4 +376,3 @@ async def upload_image(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload image: {str(exc)}"
         ) from exc
-
