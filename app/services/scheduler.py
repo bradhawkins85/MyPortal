@@ -668,7 +668,7 @@ class SchedulerService:
                                 or result.get("event_status")
                                 or ""
                             ).strip().lower()
-                            if result_status in {"failed", "error"}:
+                            if result_status in {"failed", "error", "partial"}:
                                 status = "failed"
                             elif result_status == "skipped":
                                 status = "skipped"
@@ -688,7 +688,7 @@ class SchedulerService:
                                 or result.get("event_status")
                                 or ""
                             ).strip().lower()
-                            if result_status in {"failed", "error"}:
+                            if result_status in {"failed", "error", "partial"}:
                                 status = "failed"
                             elif result_status == "skipped":
                                 status = "skipped"
