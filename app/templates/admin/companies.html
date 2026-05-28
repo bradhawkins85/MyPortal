@@ -12,9 +12,16 @@
 
 {% set companies_columns = [
   {"key": "name",          "label": "Name",          "default_visible": true},
-  {"key": "syncro_id",     "label": "Syncro ID",     "default_visible": true},
-  {"key": "xero_id",       "label": "Xero ID",       "default_visible": true},
-  {"key": "email_domains", "label": "Email domains", "default_visible": true},
+  {"key": "syncro_id",     "label": "Syncro ID",     "default_visible": false},
+  {"key": "xero_id",       "label": "Xero ID",       "default_visible": false},
+  {"key": "email_domains", "label": "Email domains", "default_visible": false},
+  {"key": "tacticalrmm_client_id",     "label": "Tactical RMM client ID",      "default_visible": false},
+  {"key": "hudu_id",                   "label": "Hudu ID",                      "default_visible": false},
+  {"key": "huntress_organization_id",  "label": "Huntress organisation ID",     "default_visible": false},
+  {"key": "trello_board_id",           "label": "Trello board ID",              "default_visible": false},
+  {"key": "payment_method",            "label": "Payment Methods",              "default_visible": false},
+  {"key": "require_po",                "label": "Require PO",                   "default_visible": false},
+  {"key": "m365_tenant_id",            "label": "Microsoft 365 Tenant ID",      "default_visible": false},
   {"key": "vip",           "label": "VIP",           "default_visible": true},
   {"key": "status",        "label": "Status",        "default_visible": true},
   {"key": "actions",       "label": "Actions",       "default_visible": true}
@@ -57,6 +64,13 @@
                 <th scope="col" data-sort="string" data-column-key="syncro_id">Syncro ID</th>
                 <th scope="col" data-sort="string" data-column-key="xero_id">Xero ID</th>
                 <th scope="col" data-sort="string" data-column-key="email_domains">Email domains</th>
+                <th scope="col" data-sort="string" data-column-key="tacticalrmm_client_id">Tactical RMM client ID</th>
+                <th scope="col" data-sort="string" data-column-key="hudu_id">Hudu ID</th>
+                <th scope="col" data-sort="string" data-column-key="huntress_organization_id">Huntress organisation ID</th>
+                <th scope="col" data-sort="string" data-column-key="trello_board_id">Trello board ID</th>
+                <th scope="col" data-sort="string" data-column-key="payment_method">Payment Methods</th>
+                <th scope="col" data-sort="number" data-column-key="require_po">Require PO</th>
+                <th scope="col" data-sort="string" data-column-key="m365_tenant_id">Microsoft 365 Tenant ID</th>
                 <th scope="col" data-sort="number" data-column-key="vip">VIP</th>
                 <th scope="col" data-sort="string" data-column-key="status">Status</th>
                 <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
@@ -84,6 +98,56 @@
                     <td data-label="Email domains" data-value="{{ company.email_domains | join(', ') }}" data-column-key="email_domains">
                       {% if company.email_domains %}
                         {{ company.email_domains | join(', ') }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Tactical RMM client ID" data-value="{{ company.tacticalrmm_client_id or '' }}" data-column-key="tacticalrmm_client_id">
+                      {% if company.tacticalrmm_client_id %}
+                        {{ company.tacticalrmm_client_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Hudu ID" data-value="{{ company.hudu_id or '' }}" data-column-key="hudu_id">
+                      {% if company.hudu_id %}
+                        {{ company.hudu_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Huntress organisation ID" data-value="{{ company.huntress_organization_id or '' }}" data-column-key="huntress_organization_id">
+                      {% if company.huntress_organization_id %}
+                        {{ company.huntress_organization_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Trello board ID" data-value="{{ company.trello_board_id or '' }}" data-column-key="trello_board_id">
+                      {% if company.trello_board_id %}
+                        {{ company.trello_board_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Payment Methods" data-value="{{ company.payment_method or '' }}" data-column-key="payment_method">
+                      {% if company.payment_method %}
+                        {{ company.payment_method | replace('_', ' ') | replace(',', ', ') | title }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    {% set requires_po = 1 if company.require_po else 0 %}
+                    <td data-label="Require PO" data-value="{{ requires_po }}" data-column-key="require_po">
+                      {% if company.require_po %}
+                        <span class="tag tag--warning">Required</span>
+                      {% else %}
+                        <span class="tag tag--muted">No</span>
+                      {% endif %}
+                    </td>
+                    <td data-label="Microsoft 365 Tenant ID" data-value="{{ company.m365_tenant_id or '' }}" data-column-key="m365_tenant_id">
+                      {% if company.m365_tenant_id %}
+                        {{ company.m365_tenant_id }}
                       {% else %}
                         <span class="text-muted">—</span>
                       {% endif %}
@@ -161,7 +225,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="7" class="table__empty">No companies have been registered.</td>
+                  <td colspan="14" class="table__empty">No companies have been registered.</td>
                 </tr>
               {% endif %}
             </tbody>
