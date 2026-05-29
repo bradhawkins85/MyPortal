@@ -539,6 +539,7 @@ async def test_schedule_ticket_sync_records_skipped_outcome_in_webhook_monitor(
 
     created_events: list[dict[str, object]] = []
     failure_records: list[dict[str, object]] = []
+    completion_event = asyncio.Event()
 
     async def fake_create_manual_event(**kwargs):
         created_events.append(kwargs)
@@ -549,6 +550,7 @@ async def test_schedule_ticket_sync_records_skipped_outcome_in_webhook_monitor(
 
     async def fake_record_manual_failure(event_id, **kwargs):
         failure_records.append({"event_id": event_id, **kwargs})
+        completion_event.set()
         return {"id": event_id, **kwargs}
 
     reset_solidtime_caches.setattr(
@@ -562,8 +564,7 @@ async def test_schedule_ticket_sync_records_skipped_outcome_in_webhook_monitor(
     )
 
     solidtime.schedule_ticket_sync(77)
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    await asyncio.wait_for(completion_event.wait(), timeout=1.0)
 
     assert created_events
     assert created_events[0]["name"] == "solidtime.ticket.sync"

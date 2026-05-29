@@ -1229,7 +1229,7 @@ def _solidtime_monitor_target_url(settings: Mapping[str, Any] | None) -> str:
     return "solidtime://ticket-sync"
 
 
-def _ticket_sync_skip_reason(
+def _ticket_sync_outcome_reason(
     *,
     settings: Mapping[str, Any] | None,
     sync_result: dict[str, Any] | None,
@@ -1244,7 +1244,7 @@ def _ticket_sync_skip_reason(
         return "Solidtime base URL is not configured"
     if not str(settings.get("api_token") or "").strip():
         return "Solidtime API token is not configured"
-    if not bool(settings.get("sync_tickets_to_projects", True)):
+    if settings.get("sync_tickets_to_projects") is False:
         return "sync_tickets_to_projects is disabled"
     return "sync returned no action"
 
@@ -1321,7 +1321,7 @@ def schedule_ticket_sync(ticket_id: int) -> None:
         try:
             settings_snapshot = await _load_module_settings()
             result = await sync_ticket_to_project(int(ticket_id))
-            reason = _ticket_sync_skip_reason(
+            reason = _ticket_sync_outcome_reason(
                 settings=settings_snapshot, sync_result=result
             )
             if result is None:
