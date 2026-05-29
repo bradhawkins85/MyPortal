@@ -954,13 +954,28 @@ async def sync_ticket_to_project(ticket_id: int) -> dict[str, Any] | None:
     """
     try:
         settings = await _get_effective_settings()
-    except SolidtimeConfigurationError:
+    except SolidtimeConfigurationError as exc:
+        log_info(
+            "Solidtime ticket sync skipped",
+            ticket_id=ticket_id,
+            reason=str(exc),
+        )
         return None
     if not settings.get("sync_tickets_to_projects"):
+        log_info(
+            "Solidtime ticket sync skipped",
+            ticket_id=ticket_id,
+            reason="sync_tickets_to_projects is disabled",
+        )
         return None
 
     ticket = await tickets_repo.get_ticket(int(ticket_id))
     if not ticket:
+        log_info(
+            "Solidtime ticket sync skipped",
+            ticket_id=ticket_id,
+            reason="ticket was not found",
+        )
         return None
 
     org_id = settings["organization_id"]
@@ -1202,6 +1217,98 @@ def _track_background_task(task: asyncio.Task[Any]) -> None:
     task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
+def _solidtime_monitor_target_url(settings: Mapping[str, Any] | None) -> str:
+    base_url = ""
+    if settings:
+        base_url = str(settings.get("base_url") or "").strip()
+    if base_url:
+        try:
+            return _normalise_base_url(base_url)
+        except SolidtimeConfigurationError:
+            return "solidtime://invalid-base-url"
+    return "solidtime://ticket-sync"
+
+
+def _ticket_sync_outcome_reason(
+    *,
+    settings: Mapping[str, Any] | None,
+    sync_result: dict[str, Any] | None,
+) -> str:
+    if sync_result is not None:
+        return "ticket synced"
+    if not settings:
+        return "Solidtime module is not configured"
+    if not bool(settings.get("enabled")):
+        return "Solidtime module is disabled"
+    if not str(settings.get("base_url") or "").strip():
+        return "Solidtime base URL is not configured"
+    if not str(settings.get("api_token") or "").strip():
+        return "Solidtime API token is not configured"
+    if settings.get("sync_tickets_to_projects") is False:
+        return "sync_tickets_to_projects is disabled"
+    return "sync returned no action"
+
+
+async def _record_ticket_sync_outcome(
+    *,
+    ticket_id: int,
+    settings: Mapping[str, Any] | None,
+    status: str,
+    reason: str,
+    error_message: str | None = None,
+    sync_result: Mapping[str, Any] | None = None,
+) -> None:
+    target_url = _solidtime_monitor_target_url(settings)
+    payload: dict[str, Any] = {
+        "operation": "ticket_sync",
+        "ticket_id": ticket_id,
+        "status": status,
+        "reason": reason,
+    }
+    if sync_result is not None:
+        payload["result"] = sync_result
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="solidtime.ticket.sync",
+            target_url=target_url,
+            payload=payload,
+            headers=None,
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+        if not event or event.get("id") is None:
+            return
+        event_id = int(event["id"])
+        if status == "succeeded":
+            await webhook_monitor.record_manual_success(
+                event_id,
+                attempt_number=1,
+                response_status=200,
+                response_body=reason,
+                request_headers=None,
+                request_body=payload,
+                response_headers=None,
+            )
+            return
+        await webhook_monitor.record_manual_failure(
+            event_id,
+            attempt_number=1,
+            status=status,
+            error_message=error_message or reason,
+            response_status=None,
+            response_body=reason,
+            request_headers=None,
+            request_body=payload,
+            response_headers=None,
+        )
+    except Exception as exc:  # pragma: no cover - monitor safety
+        log_error(
+            "Failed to record Solidtime ticket sync in webhook monitor",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+
+
 def schedule_ticket_sync(ticket_id: int) -> None:
     """Schedule a fire-and-forget push of a ticket to Solidtime."""
     try:
@@ -1210,21 +1317,69 @@ def schedule_ticket_sync(ticket_id: int) -> None:
         return
 
     async def _run() -> None:
+        settings_snapshot: Mapping[str, Any] | None = None
         try:
-            await sync_ticket_to_project(int(ticket_id))
-        except SolidtimeConfigurationError:
-            pass
+            settings_snapshot = await _load_module_settings()
+            result = await sync_ticket_to_project(int(ticket_id))
+            reason = _ticket_sync_outcome_reason(
+                settings=settings_snapshot, sync_result=result
+            )
+            if result is None:
+                await _record_ticket_sync_outcome(
+                    ticket_id=int(ticket_id),
+                    settings=settings_snapshot,
+                    status="skipped",
+                    reason=reason,
+                    error_message=reason,
+                    sync_result=None,
+                )
+            else:
+                await _record_ticket_sync_outcome(
+                    ticket_id=int(ticket_id),
+                    settings=settings_snapshot,
+                    status="succeeded",
+                    reason=reason,
+                    sync_result=result,
+                )
+        except SolidtimeConfigurationError as exc:
+            reason = str(exc)
+            log_warning(
+                "Solidtime ticket sync skipped",
+                ticket_id=ticket_id,
+                reason=reason,
+            )
+            await _record_ticket_sync_outcome(
+                ticket_id=int(ticket_id),
+                settings=settings_snapshot,
+                status="skipped",
+                reason=reason,
+                error_message=reason,
+            )
         except SolidtimeAPIError as exc:
             log_warning(
                 "Solidtime ticket sync failed",
                 ticket_id=ticket_id,
                 error=str(exc),
             )
+            await _record_ticket_sync_outcome(
+                ticket_id=int(ticket_id),
+                settings=settings_snapshot,
+                status="failed",
+                reason="Solidtime API error",
+                error_message=str(exc),
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
                 "Unexpected error during Solidtime ticket sync",
                 ticket_id=ticket_id,
                 error=str(exc),
+            )
+            await _record_ticket_sync_outcome(
+                ticket_id=int(ticket_id),
+                settings=settings_snapshot,
+                status="error",
+                reason="Unexpected error during ticket sync",
+                error_message=str(exc),
             )
 
     _track_background_task(loop.create_task(_run()))
