@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import httpx
@@ -186,6 +187,85 @@ async def test_get_effective_settings_rejects_invalid_url(reset_solidtime_caches
     reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
     with pytest.raises(SolidtimeConfigurationError):
         await solidtime._get_effective_settings()
+
+
+def test_solidtime_monitor_target_url_uses_invalid_scheme_fallback():
+    assert (
+        solidtime._solidtime_monitor_target_url({"base_url": "ftp://bad.example"})
+        == "solidtime://invalid-base-url"
+    )
+
+
+@pytest.mark.parametrize(
+    ("settings", "sync_result", "expected"),
+    [
+        (None, None, "Solidtime module is not configured"),
+        ({"enabled": False}, None, "Solidtime module is disabled"),
+        ({"enabled": True, "base_url": "", "api_token": "tok"}, None, "Solidtime base URL is not configured"),
+        ({"enabled": True, "base_url": "https://app.solidtime.io", "api_token": ""}, None, "Solidtime API token is not configured"),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok", "sync_tickets_to_projects": False},
+            None,
+            "sync_tickets_to_projects is disabled",
+        ),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok"},
+            None,
+            "sync returned no action",
+        ),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok"},
+            {"ticket_id": 1},
+            "ticket synced",
+        ),
+    ],
+)
+def test_ticket_sync_outcome_reason_variants(settings, sync_result, expected):
+    assert (
+        solidtime._ticket_sync_outcome_reason(settings=settings, sync_result=sync_result)
+        == expected
+    )
+
+
+@pytest.mark.anyio
+async def test_record_ticket_sync_outcome_records_success(reset_solidtime_caches):
+    created: list[dict[str, object]] = []
+    successes: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+
+    async def fake_create_manual_event(**kwargs):
+        created.append(kwargs)
+        return {"id": 321}
+
+    async def fake_record_manual_success(event_id, **kwargs):
+        successes.append({"event_id": event_id, **kwargs})
+        return {"id": event_id}
+
+    async def fake_record_manual_failure(event_id, **kwargs):
+        failures.append({"event_id": event_id, **kwargs})
+        return {"id": event_id}
+
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "create_manual_event", fake_create_manual_event
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "record_manual_success", fake_record_manual_success
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "record_manual_failure", fake_record_manual_failure
+    )
+
+    await solidtime._record_ticket_sync_outcome(
+        ticket_id=9,
+        settings={"base_url": "https://app.solidtime.io"},
+        status="succeeded",
+        reason="ticket synced",
+        sync_result={"solidtime_project_id": "proj-9"},
+    )
+
+    assert created and created[0]["name"] == "solidtime.ticket.sync"
+    assert successes and successes[0]["event_id"] == 321
+    assert not failures
 
 
 @pytest.mark.anyio
@@ -488,6 +568,89 @@ async def test_sync_ticket_skips_when_module_disabled(reset_solidtime_caches):
     reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
     # Should silently no-op rather than raise.
     assert await solidtime.sync_ticket_to_project(1) is None
+
+
+@pytest.mark.anyio
+async def test_sync_ticket_logs_reason_when_ticket_push_toggle_off(reset_solidtime_caches):
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_tickets_to_projects": False,
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    log_calls: list[dict[str, object]] = []
+
+    def fake_log_info(message: str, **kwargs):
+        log_calls.append({"message": message, **kwargs})
+
+    reset_solidtime_caches.setattr(solidtime, "log_info", fake_log_info)
+
+    assert await solidtime.sync_ticket_to_project(22) is None
+    assert any(
+        call.get("message") == "Solidtime ticket sync skipped"
+        and call.get("reason") == "sync_tickets_to_projects is disabled"
+        and call.get("ticket_id") == 22
+        for call in log_calls
+    )
+
+
+@pytest.mark.anyio
+async def test_schedule_ticket_sync_records_skipped_outcome_when_module_disabled(
+    reset_solidtime_caches,
+):
+    async def fake_get_module(slug):
+        return {
+            "enabled": False,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    created_events: list[dict[str, object]] = []
+    failure_records: list[dict[str, object]] = []
+    completion_event = asyncio.Event()
+
+    async def fake_create_manual_event(**kwargs):
+        created_events.append(kwargs)
+        return {"id": 901}
+
+    async def fake_record_manual_success(event_id, **kwargs):
+        return {"id": event_id, **kwargs}
+
+    async def fake_record_manual_failure(event_id, **kwargs):
+        failure_records.append({"event_id": event_id, **kwargs})
+        completion_event.set()
+        return {"id": event_id, **kwargs}
+
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "create_manual_event", fake_create_manual_event
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "record_manual_success", fake_record_manual_success
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "record_manual_failure", fake_record_manual_failure
+    )
+
+    solidtime.schedule_ticket_sync(77)
+    await asyncio.wait_for(completion_event.wait(), timeout=1.0)
+
+    assert created_events
+    assert created_events[0]["name"] == "solidtime.ticket.sync"
+    assert failure_records
+    assert failure_records[0]["event_id"] == 901
+    assert failure_records[0]["status"] == "skipped"
+    assert "disabled" in str(failure_records[0]["error_message"]).lower()
 
 
 @pytest.mark.anyio
@@ -1006,4 +1169,3 @@ async def test_reconcile_once_returns_reason_when_organization_id_missing(
 
     assert summary["status"] == "skipped"
     assert "organization_id" in str(summary.get("reason", ""))
-
