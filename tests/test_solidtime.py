@@ -523,7 +523,7 @@ async def test_sync_ticket_logs_reason_when_ticket_push_toggle_off(reset_solidti
 
 
 @pytest.mark.anyio
-async def test_schedule_ticket_sync_records_skipped_outcome_in_webhook_monitor(
+async def test_schedule_ticket_sync_records_skipped_outcome_when_module_disabled(
     reset_solidtime_caches,
 ):
     async def fake_get_module(slug):

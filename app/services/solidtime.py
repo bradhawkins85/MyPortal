@@ -1225,7 +1225,7 @@ def _solidtime_monitor_target_url(settings: Mapping[str, Any] | None) -> str:
         try:
             return _normalise_base_url(base_url)
         except SolidtimeConfigurationError:
-            return base_url
+            return "solidtime://invalid-base-url"
     return "solidtime://ticket-sync"
 
 
@@ -1266,7 +1266,7 @@ async def _record_ticket_sync_outcome(
         "reason": reason,
     }
     if sync_result is not None:
-        payload["result"] = dict(sync_result)
+        payload["result"] = sync_result
     try:
         event = await webhook_monitor.create_manual_event(
             name="solidtime.ticket.sync",
