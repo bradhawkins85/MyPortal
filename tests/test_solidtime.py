@@ -189,6 +189,85 @@ async def test_get_effective_settings_rejects_invalid_url(reset_solidtime_caches
         await solidtime._get_effective_settings()
 
 
+def test_solidtime_monitor_target_url_uses_invalid_scheme_fallback():
+    assert (
+        solidtime._solidtime_monitor_target_url({"base_url": "ftp://bad.example"})
+        == "solidtime://invalid-base-url"
+    )
+
+
+@pytest.mark.parametrize(
+    ("settings", "sync_result", "expected"),
+    [
+        (None, None, "Solidtime module is not configured"),
+        ({"enabled": False}, None, "Solidtime module is disabled"),
+        ({"enabled": True, "base_url": "", "api_token": "tok"}, None, "Solidtime base URL is not configured"),
+        ({"enabled": True, "base_url": "https://app.solidtime.io", "api_token": ""}, None, "Solidtime API token is not configured"),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok", "sync_tickets_to_projects": False},
+            None,
+            "sync_tickets_to_projects is disabled",
+        ),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok"},
+            None,
+            "sync returned no action",
+        ),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok"},
+            {"ticket_id": 1},
+            "ticket synced",
+        ),
+    ],
+)
+def test_ticket_sync_outcome_reason_variants(settings, sync_result, expected):
+    assert (
+        solidtime._ticket_sync_outcome_reason(settings=settings, sync_result=sync_result)
+        == expected
+    )
+
+
+@pytest.mark.anyio
+async def test_record_ticket_sync_outcome_records_success(reset_solidtime_caches):
+    created: list[dict[str, object]] = []
+    successes: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
+
+    async def fake_create_manual_event(**kwargs):
+        created.append(kwargs)
+        return {"id": 321}
+
+    async def fake_record_manual_success(event_id, **kwargs):
+        successes.append({"event_id": event_id, **kwargs})
+        return {"id": event_id}
+
+    async def fake_record_manual_failure(event_id, **kwargs):
+        failures.append({"event_id": event_id, **kwargs})
+        return {"id": event_id}
+
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "create_manual_event", fake_create_manual_event
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "record_manual_success", fake_record_manual_success
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "record_manual_failure", fake_record_manual_failure
+    )
+
+    await solidtime._record_ticket_sync_outcome(
+        ticket_id=9,
+        settings={"base_url": "https://app.solidtime.io"},
+        status="succeeded",
+        reason="ticket synced",
+        sync_result={"solidtime_project_id": "proj-9"},
+    )
+
+    assert created and created[0]["name"] == "solidtime.ticket.sync"
+    assert successes and successes[0]["event_id"] == 321
+    assert not failures
+
+
 @pytest.mark.anyio
 async def test_request_records_webhook_and_unwraps_data(reset_solidtime_caches):
     async def fake_get_module(slug):
