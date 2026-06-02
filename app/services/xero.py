@@ -162,11 +162,12 @@ def _coerce_minutes(value: Any) -> int:
 
 
 def _build_xero_contact_payload(company: Mapping[str, Any], company_id: int) -> dict[str, Any]:
-    xero_id = company.get("xero_id")
+    xero_id = str(company.get("xero_id") or "").strip()
+    company_name = str(company.get("name") or f"Company #{company_id}").strip()
+    payload: dict[str, Any] = {"Name": company_name}
     if xero_id:
-        return {"ContactID": str(xero_id)}
-    company_name = company.get("name") or f"Company #{company_id}"
-    return {"Name": str(company_name).strip()}
+        payload["ContactID"] = xero_id
+    return payload
 
 
 def _build_xero_line_items_from_local_invoice(
@@ -891,13 +892,11 @@ async def build_ticket_invoices(
         if not line_items:
             continue
 
-        contact_payload: dict[str, Any] = {}
-        xero_id = company_record.get("xero_id")
-        if xero_id:
-            contact_payload["ContactID"] = str(xero_id)
         name = (company_record.get("name") or f"Company #{company_id}").strip()
-        if not contact_payload:
-            contact_payload["Name"] = name
+        xero_id = str(company_record.get("xero_id") or "").strip()
+        contact_payload: dict[str, Any] = {"Name": name}
+        if xero_id:
+            contact_payload["ContactID"] = xero_id
 
         invoice_key = (company_id, invoice_day)
         ticket_numbers = _collect_ticket_numbers(context_tickets)
@@ -985,13 +984,11 @@ async def build_order_invoice(
         return None
 
     company_record = await fetch_company(company_id) or {}
-    contact_payload: dict[str, Any] = {}
-    xero_id = company_record.get("xero_id")
-    if xero_id:
-        contact_payload["ContactID"] = str(xero_id)
     name = (company_record.get("name") or f"Company #{company_id}").strip()
-    if not contact_payload:
-        contact_payload["Name"] = name
+    xero_id = str(company_record.get("xero_id") or "").strip()
+    contact_payload: dict[str, Any] = {"Name": name}
+    if xero_id:
+        contact_payload["ContactID"] = xero_id
 
     line_items: list[dict[str, Any]] = []
     context_items: list[dict[str, Any]] = []
@@ -1076,13 +1073,11 @@ async def build_quote_invoice(
         return None
 
     company_record = await fetch_company(company_id) or {}
-    contact_payload: dict[str, Any] = {}
-    xero_id = company_record.get("xero_id")
-    if xero_id:
-        contact_payload["ContactID"] = str(xero_id)
     name = (company_record.get("name") or f"Company #{company_id}").strip()
-    if not contact_payload:
-        contact_payload["Name"] = name
+    xero_id = str(company_record.get("xero_id") or "").strip()
+    contact_payload: dict[str, Any] = {"Name": name}
+    if xero_id:
+        contact_payload["ContactID"] = xero_id
 
     line_items: list[dict[str, Any]] = []
     context_items: list[dict[str, Any]] = []
@@ -1520,13 +1515,11 @@ async def sync_billable_tickets(
             "company_id": company_id,
         }
     
-    xero_id = company.get("xero_id")
-    contact_payload: dict[str, Any] = {}
+    company_name = str(company.get("name") or f"Company #{company_id}").strip()
+    xero_id = str(company.get("xero_id") or "").strip()
+    contact_payload: dict[str, Any] = {"Name": company_name}
     if xero_id:
-        contact_payload["ContactID"] = str(xero_id)
-    else:
-        company_name = company.get("name") or f"Company #{company_id}"
-        contact_payload["Name"] = str(company_name).strip()
+        contact_payload["ContactID"] = xero_id
     
     invoice_payload = {
         "Type": "ACCREC",
@@ -2811,13 +2804,11 @@ async def send_subscription_charge_to_xero(
     line_items.append(line_item)
     
     # Build contact payload
-    xero_id = company.get("xero_id")
-    contact_payload: dict[str, Any] = {}
+    company_name = str(company.get("name") or f"Company #{customer_id}").strip()
+    xero_id = str(company.get("xero_id") or "").strip()
+    contact_payload: dict[str, Any] = {"Name": company_name}
     if xero_id:
-        contact_payload["ContactID"] = str(xero_id)
-    else:
-        company_name = company.get("name") or f"Company #{customer_id}"
-        contact_payload["Name"] = str(company_name).strip()
+        contact_payload["ContactID"] = xero_id
     
     # Build reference
     reference = f"{reference_prefix} - Subscription {subscription_id[:8]}"
