@@ -347,6 +347,8 @@ def test_scheduled_tasks_page_edit_button_and_modal_present(super_admin_context,
     assert 'data-task-edit' in html
     assert 'id="task-editor-modal"' in html
     assert 'id="scheduled-task-form"' in html
+    assert 'id="task-command" name="command" required data-initial-focus' in html
+    assert 'id="task-name-display"' in html
 
 
 def test_admin_automation_redirects(super_admin_context):
