@@ -63,6 +63,7 @@
 {% block content %}
 <div class="management management--single" data-layout>
   <section class="management__content">
+    {% set upgrade_status = upgrade_status | default({}, true) %}
     <header class="management__header">
       <form method="get" class="management__filters">
         <label class="form-checkbox-label">
@@ -85,6 +86,19 @@
     {% if error_message %}
       <div class="alert alert--danger" role="alert">{{ error_message }}</div>
     {% endif %}
+    <div class="alert alert--info" role="status">
+      <strong>Upgrade mode:</strong> {{ upgrade_status.configured_mode | default('graceful') }}
+      {% if upgrade_status.pending %}
+        <br />
+        <strong>Pending upgrade:</strong> {{ upgrade_status.requested_mode | default(upgrade_status.configured_mode | default('graceful')) }}
+        {% if upgrade_status.requested_reason %} ({{ upgrade_status.requested_reason }}){% endif %}
+      {% endif %}
+      {% if upgrade_status.last_status %}
+        <br />
+        <strong>Last upgrade:</strong> {{ upgrade_status.last_status }} via {{ upgrade_status.last_mode | default(upgrade_status.configured_mode | default('graceful')) }}
+        {% if upgrade_status.last_reason %} ({{ upgrade_status.last_reason }}){% endif %}
+      {% endif %}
+    </div>
 
     {# Hidden bulk-delete form #}
     <form
@@ -312,14 +326,13 @@
             readonly
             aria-readonly="true"
             tabindex="-1"
-            data-initial-focus
           />
           <p class="form-help">Generated automatically from the selected company and command.</p>
           <input type="hidden" id="task-name" name="name" />
         </div>
         <div class="form-field">
           <label class="form-label" for="task-command">Command</label>
-          <select class="form-input" id="task-command" name="command" required>
+          <select class="form-input" id="task-command" name="command" required data-initial-focus>
             {% for option in command_options %}
               <option value="{{ option.value }}">{{ option.label }}</option>
             {% endfor %}

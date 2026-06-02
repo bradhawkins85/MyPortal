@@ -4,6 +4,42 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv"
+FLAG_DIR="${PROJECT_ROOT}/var/state"
+SYSTEM_UPDATE_FLAG_FILE="${FLAG_DIR}/system_update.flag"
+SYSTEM_UPDATE_STATUS_FILE="${FLAG_DIR}/system_update.status"
+
+normalise_upgrade_mode() {
+  local raw="${1:-}"
+  case "${raw,,}" in
+    graceful|rolling|restart)
+      printf '%s' "${raw,,}"
+      ;;
+    *)
+      printf '%s' "graceful"
+      ;;
+  esac
+}
+
+read_flag_var() {
+  local key="$1"
+  if [[ ! -f "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
+    return
+  fi
+  awk -F'=' -v lookup="$key" '
+    $0 !~ /^[[:space:]]*#/ && index($0, "=") > 0 {
+      current=$1
+      sub(/^[[:space:]]+/, "", current)
+      sub(/[[:space:]]+$/, "", current)
+      if (current == lookup) {
+        value=substr($0, index($0, "=") + 1)
+        sub(/^[[:space:]]+/, "", value)
+        sub(/[[:space:]]+$/, "", value)
+        print value
+        exit
+      }
+    }
+  ' "$SYSTEM_UPDATE_FLAG_FILE"
+}
 
 purge_spurious_dist_info() {
   if [[ ! -d "$VENV_DIR" ]]; then
@@ -54,7 +90,7 @@ clean_pycache_files() {
 }
 
 AUTO_FALLBACK=0
-RESTART_MODE="default"
+EXPLICIT_RESTART_MODE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -66,19 +102,24 @@ while [[ $# -gt 0 ]]; do
       # Zero-downtime single-server reload: ``systemctl reload`` sends
       # SIGHUP, which uvicorn workers handle by cycling without
       # dropping accepted connections.  See docs/zero_downtime_upgrades.md.
-      RESTART_MODE="graceful"
+      EXPLICIT_RESTART_MODE="graceful"
       shift
       ;;
     --rolling)
       # Two-instance rolling deploy across systemd templated services
       # (myportal@blue, myportal@green) sharing a single database.  See
       # docs/zero_downtime_upgrades.md (Track B2).
-      RESTART_MODE="rolling"
+      EXPLICIT_RESTART_MODE="rolling"
+      shift
+      ;;
+    --restart)
+      # Force the classic full service restart path.
+      EXPLICIT_RESTART_MODE="restart"
       shift
       ;;
     --help|-h)
       cat <<'USAGE'
-Usage: upgrade.sh [--auto-fallback] [--graceful | --rolling]
+Usage: upgrade.sh [--auto-fallback] [--graceful | --rolling | --restart]
 
 Fetch and apply the latest application code from the configured Git remote.
 
@@ -96,6 +137,7 @@ Options:
                    + deploy/systemd/myportal@.service.  One instance is
                    drained, upgraded, healthchecked, and brought back
                    before the other is touched.
+  --restart        Force a classic full service restart after updating.
 USAGE
       exit 0
       ;;
@@ -208,14 +250,140 @@ else:
 PY
 }
 
+write_upgrade_status() {
+  local status="$1"
+  local message="$2"
+  local reason="${3:-}"
+  local started_at="${4:-${UPGRADE_STARTED_AT:-}}"
+  local finished_at="${5:-$(date --iso-8601=seconds)}"
+  local ready_wait="${6:-${UPGRADE_READY_WAIT_SECONDS:-0}}"
+  mkdir -p "$FLAG_DIR"
+  cat >"$SYSTEM_UPDATE_STATUS_FILE" <<EOF
+started_at=${started_at}
+finished_at=${finished_at}
+status=${status}
+mode=${RESTART_MODE}
+requested_mode=${REQUESTED_UPGRADE_MODE}
+reason=${reason}
+message=${message}
+ready_wait_seconds=${ready_wait}
+EOF
+  chmod 640 "$SYSTEM_UPDATE_STATUS_FILE" >/dev/null 2>&1 || true
+}
+
+detect_destructive_migration_change() {
+  local changed="$1"
+  while IFS= read -r path; do
+    [[ -z "$path" || "$path" != migrations/* ]] && continue
+    if [[ "$path" == *CONTRACT.md || "$path" == *contract* ]]; then
+      return 0
+    fi
+    if [[ -f "$PROJECT_ROOT/$path" ]] && grep -Eiq 'drop[[:space:]]+(column|table|index)|rename[[:space:]]+(column|table)|alter[[:space:]]+table' "$PROJECT_ROOT/$path"; then
+      return 0
+    fi
+  done <<<"$changed"
+  return 1
+}
+
+classify_upgrade_reason() {
+  local changed="$1"
+  if [[ -z "$changed" ]]; then
+    printf '%s' "application_reload_required"
+    return
+  fi
+  if grep -Eq '(^|[[:space:]])pyproject\.toml($|[[:space:]])' <<<"$changed"; then
+    printf '%s' "dependency_manifest_changed"
+    return
+  fi
+  if detect_destructive_migration_change "$changed"; then
+    printf '%s' "destructive_migration_phase"
+    return
+  fi
+  if grep -Eq '^migrations/' <<<"$changed"; then
+    printf '%s' "migrations_changed"
+    return
+  fi
+  if grep -Eq '^deploy/' <<<"$changed"; then
+    printf '%s' "deployment_topology_changed"
+    return
+  fi
+  if grep -Eq '^scripts/' <<<"$changed"; then
+    printf '%s' "upgrade_runtime_changed"
+    return
+  fi
+  if grep -Eq '^app/' <<<"$changed"; then
+    printf '%s' "shared_app_code_changed"
+    return
+  fi
+  printf '%s' "application_reload_required"
+}
+
+resolve_requested_upgrade_mode() {
+  if [[ -n "${EXPLICIT_RESTART_MODE:-}" ]]; then
+    printf '%s' "$EXPLICIT_RESTART_MODE"
+    return
+  fi
+  local from_flag
+  from_flag=$(read_flag_var "requested_mode")
+  if [[ -n "$from_flag" ]]; then
+    normalise_upgrade_mode "$from_flag"
+    return
+  fi
+  normalise_upgrade_mode "${APP_UPGRADE_MODE:-graceful}"
+}
+
+resolve_effective_upgrade_mode() {
+  local requested_mode="$1"
+  local changed="$2"
+  local reason
+
+  if [[ "${FORCE_RESTART:-0}" == "1" ]]; then
+    UPGRADE_REASON="force_restart_requested"
+    printf '%s' "restart"
+    return
+  fi
+
+  reason=$(classify_upgrade_reason "$changed")
+  UPGRADE_REASON="$reason"
+  case "$reason" in
+    dependency_manifest_changed|destructive_migration_phase)
+      printf '%s' "restart"
+      ;;
+    *)
+      printf '%s' "$requested_mode"
+      ;;
+  esac
+}
+
 PYTHON_INTERPRETER=$(detect_python_interpreter)
 
 cd "$PROJECT_ROOT"
 
 purge_spurious_dist_info
-trap purge_spurious_dist_info EXIT
 
 ensure_env_default "$PYTHON_INTERPRETER" "ENABLE_AUTO_REFRESH" "false"
+REQUESTED_UPGRADE_MODE=$(resolve_requested_upgrade_mode)
+RESTART_MODE="$REQUESTED_UPGRADE_MODE"
+UPGRADE_REASON=$(read_flag_var "requested_reason")
+UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
+UPGRADE_READY_WAIT_SECONDS=0
+UPGRADE_STATUS_WRITTEN=0
+
+on_exit() {
+  local exit_code=$?
+  purge_spurious_dist_info
+  if [[ "$UPGRADE_STATUS_WRITTEN" == "0" ]]; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      write_upgrade_status "succeeded" "Upgrade completed." "$UPGRADE_REASON"
+    else
+      write_upgrade_status "failed" "Upgrade failed with exit code ${exit_code}." "$UPGRADE_REASON"
+    fi
+  fi
+  trap - EXIT
+  exit "$exit_code"
+}
+
+trap on_exit EXIT
 
 detect_service_name() {
   local explicit
@@ -411,7 +579,7 @@ run_restart_helper() {
     rolling)
       run_rolling_restart
       ;;
-    *)
+    restart)
       local status=0
       "${SCRIPT_DIR}/restart.sh" || status=$?
       if [[ "$status" -eq 0 ]]; then
@@ -420,6 +588,10 @@ run_restart_helper() {
         echo "Error: restart helper exited with status ${status}." >&2
         exit "$status"
       fi
+      ;;
+    *)
+      echo "Error: Unsupported restart mode '${RESTART_MODE}'." >&2
+      exit 1
       ;;
   esac
 }
@@ -467,10 +639,14 @@ run_graceful_reload() {
     exit 1
   fi
   local probe="${MYPORTAL_READYZ_URL:-http://127.0.0.1:8000/readyz}"
+  local ready_started=$SECONDS
   echo "Graceful reload: waiting for ${probe} to return 200..."
   if ! wait_for_ready "$probe" "${MYPORTAL_READY_TIMEOUT:-60}"; then
+    UPGRADE_READY_WAIT_SECONDS=$((SECONDS - ready_started))
     exit 1
   fi
+  UPGRADE_READY_WAIT_SECONDS=$((SECONDS - ready_started))
+  echo "Graceful reload: readiness confirmed after ${UPGRADE_READY_WAIT_SECONDS}s."
   echo "Graceful reload complete."
 }
 
@@ -484,6 +660,21 @@ run_rolling_restart() {
   declare -A port_for
   port_for[blue]="${MYPORTAL_BLUE_PORT:-8001}"
   port_for[green]="${MYPORTAL_GREEN_PORT:-8002}"
+  local total_ready_wait=0
+
+  restore_all_instances() {
+    if [[ ! -w "$state_file" && ! -w "$(dirname "$state_file")" ]]; then
+      return
+    fi
+    {
+      for other in "${instances[@]}"; do
+        echo "server 127.0.0.1:${port_for[$other]} max_fails=3 fail_timeout=10s;"
+      done
+    } > "$state_file"
+    if command -v nginx >/dev/null 2>&1; then
+      nginx -s reload || true
+    fi
+  }
 
   for instance in "${instances[@]}"; do
     local unit="myportal@${instance}.service"
@@ -515,13 +706,18 @@ run_rolling_restart() {
 
     echo "Rolling deploy: restarting ${unit}..."
     if ! systemctl restart "$unit"; then
+      restore_all_instances
       echo "Error: systemctl restart ${unit} failed; aborting rolling deploy with ${instance} drained." >&2
       exit 1
     fi
+    local ready_started=$SECONDS
     if ! wait_for_ready "http://127.0.0.1:${port}/readyz" "${MYPORTAL_READY_TIMEOUT:-60}"; then
+      total_ready_wait=$((total_ready_wait + SECONDS - ready_started))
+      restore_all_instances
       echo "Error: ${instance} failed readiness check; aborting rolling deploy with ${instance} drained." >&2
       exit 1
     fi
+    total_ready_wait=$((total_ready_wait + SECONDS - ready_started))
 
     # Re-enable the instance in the upstream and reload nginx.
     if [[ -w "$state_file" || -w "$(dirname "$state_file")" ]]; then
@@ -536,6 +732,8 @@ run_rolling_restart() {
     fi
     echo "Rolling deploy: ${instance} back in service."
   done
+  UPGRADE_READY_WAIT_SECONDS="$total_ready_wait"
+  echo "Rolling deploy: readiness confirmed after ${UPGRADE_READY_WAIT_SECONDS}s total."
   echo "Rolling deploy complete."
 }
 
@@ -811,6 +1009,7 @@ build_tray_app() {
   fi
 }
 
+changed_files=""
 if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   echo "Repository updated to $POST_PULL_HEAD."
   update_version_file
@@ -855,6 +1054,7 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
   fi
 
   if [[ -n "$FEATURE_PACK_DIFF_SLUGS" ]]; then
+    UPGRADE_REASON="feature_pack_hot_reload"
     echo "Pulled diff is scoped to feature pack(s): ${FEATURE_PACK_DIFF_SLUGS}."
     echo "Skipping dependency install and service restart; the running scheduler will hot-reload these packs."
     mkdir -p "${PROJECT_ROOT}/var/state"
@@ -864,25 +1064,42 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
       done
     } > "${PROJECT_ROOT}/var/state/feature_pack_reload.flag"
     chmod 640 "${PROJECT_ROOT}/var/state/feature_pack_reload.flag" >/dev/null 2>&1 || true
+    write_upgrade_status "succeeded" "Feature pack hot-reload scheduled for ${FEATURE_PACK_DIFF_SLUGS}." "$UPGRADE_REASON"
+    UPGRADE_STATUS_WRITTEN=1
   else
+    RESTART_MODE=$(resolve_effective_upgrade_mode "$REQUESTED_UPGRADE_MODE" "$changed_files")
+    echo "Applying upgrade using ${RESTART_MODE} mode (requested: ${REQUESTED_UPGRADE_MODE}; reason: ${UPGRADE_REASON})."
     install_dependencies
     build_tray_app
     if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
       run_restart_helper
+      write_upgrade_status "succeeded" "Upgrade applied using ${RESTART_MODE} mode." "$UPGRADE_REASON"
+      UPGRADE_STATUS_WRITTEN=1
     else
       echo "Auto-fallback mode detected; caller will relaunch the service." >&2
+      write_upgrade_status "succeeded" "Dependencies updated; caller will relaunch the service." "$UPGRADE_REASON"
+      UPGRADE_STATUS_WRITTEN=1
     fi
   fi
 elif [[ "$FORCE_RESTART" == "1" ]]; then
+  RESTART_MODE="restart"
+  UPGRADE_REASON="force_restart_requested"
   echo "No repository changes detected but FORCE_RESTART=1; reinstalling dependencies and restarting service."
   update_version_file
   install_dependencies
   build_tray_app
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
     run_restart_helper
+    write_upgrade_status "succeeded" "Force restart completed." "$UPGRADE_REASON"
+    UPGRADE_STATUS_WRITTEN=1
   else
     echo "Auto-fallback mode detected; caller responsible for restart handling." >&2
+    write_upgrade_status "succeeded" "Dependencies refreshed; caller responsible for restart handling." "$UPGRADE_REASON"
+    UPGRADE_STATUS_WRITTEN=1
   fi
 else
   echo "No changes detected from remote."
+  UPGRADE_REASON="already_up_to_date"
+  write_upgrade_status "skipped" "No changes detected from remote." "$UPGRADE_REASON"
+  UPGRADE_STATUS_WRITTEN=1
 fi

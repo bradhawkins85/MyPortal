@@ -142,9 +142,11 @@ journalctl -u myportal.service -f
 ```
 
 If you run updates via `scripts/upgrade.sh` or the scheduler's `system_update`
-task, the restart helper honours two environment variables defined in
+task, the upgrade helper honours three environment variables defined in
 `.env`:
 
+- `APP_UPGRADE_MODE` selects the default deploy path for queued updates:
+  `graceful` (default), `rolling`, or `restart`.
 - `SYSTEMD_SERVICE_NAME` overrides the default `myportal` unit name.
 - `APP_RESTART_COMMAND` executes a custom restart command (for example,
   `sudo systemctl restart myportal.service`) before falling back to the
@@ -155,18 +157,22 @@ non-zero status so scheduled updates surface actionable errors instead of
 silently continuing without restarting the application.
 
 When deploying updates, pull the latest code, reinstall dependencies if
-needed, and reload the service:
+needed, and prefer the helper so upgrades stay on the zero-downtime path:
 
 ```bash
 cd /opt/myportal
 sudo -u myportal -H git pull origin main
 sudo -u myportal -H /opt/myportal/.venv/bin/pip install -e .
-systemctl restart myportal.service
+sudo -u myportal /opt/myportal/scripts/upgrade.sh --graceful
 ```
 
-For **zero-downtime upgrades**, replace `systemctl restart` with
-`systemctl reload` (which sends `SIGHUP` so Uvicorn workers cycle
-without dropping connections), or use the helper script:
+For **zero-downtime upgrades**, `APP_UPGRADE_MODE=graceful` keeps
+single-instance installs on `systemctl reload` (which sends `SIGHUP` so
+Uvicorn workers cycle without dropping connections), while
+`APP_UPGRADE_MODE=rolling` promotes the blue/green topology in
+`deploy/systemd/myportal@.service` + `deploy/nginx/myportal-bluegreen.conf`.
+Use `APP_UPGRADE_MODE=restart` only when you explicitly want the classic
+full-restart path:
 
 ```bash
 sudo -u myportal /opt/myportal/scripts/upgrade.sh --graceful
