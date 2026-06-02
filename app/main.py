@@ -195,6 +195,7 @@ from app.services import issues as issues_service
 from app.services import reports as reports_service
 from app.services import reporting as reporting_service
 from app.services import service_status as service_status_service
+from app.services import system_state as system_state_service
 from app.services import backup_jobs as backup_jobs_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
@@ -5247,6 +5248,7 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
         "command_options": command_options,
         "company_options": company_options,
         "show_inactive_tasks": show_inactive,
+        "upgrade_status": system_state_service.get_upgrade_status(),
     }
     return await _render_template("admin/automation.html", request, current_user, extra=extra)
 
@@ -5300,6 +5302,7 @@ async def admin_scheduled_tasks(
         "show_inactive": show_inactive,
         "success_message": success,
         "error_message": error,
+        "upgrade_status": system_state_service.get_upgrade_status(),
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 

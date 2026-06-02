@@ -6,4 +6,7 @@ def test_process_update_flag_script_uses_system_update_flag_and_upgrade_helper()
     contents = script_path.read_text()
     assert "system_update.flag" in contents
     assert "upgrade.sh" in contents
+    assert "--graceful" in contents
+    assert "APP_UPGRADE_MODE" in contents
+    assert "requested_mode" in contents
     assert "flock" in contents

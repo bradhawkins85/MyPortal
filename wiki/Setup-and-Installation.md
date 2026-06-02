@@ -155,13 +155,14 @@ PY
 Use the upgrade script:
 
 ```bash
-scripts/upgrade.sh
+scripts/upgrade.sh --graceful
 ```
 
-This creates a restart flag at `var/state/restart_required.flag`. Schedule `scripts/process_update_flag.sh` via cron to:
+This writes `var/state/system_update.flag`. Schedule `scripts/process_update_flag.sh` via cron to:
 - Check for the flag every minute
 - Reinstall dependencies
-- Restart the ASGI service when required
+- Default to the configured zero-downtime upgrade mode (`APP_UPGRADE_MODE`, default `graceful`)
+- Use a full restart only when explicitly requested or required by the upgrade
 
 Example cron configuration in `deploy/cron/process_update_flag.cron`.
 
@@ -170,7 +171,7 @@ Example cron configuration in `deploy/cron/process_update_flag.cron`.
 ```bash
 git pull origin main
 pip install -e .
-systemctl restart myportal.service
+scripts/upgrade.sh --graceful
 ```
 
 ## First-Time Setup

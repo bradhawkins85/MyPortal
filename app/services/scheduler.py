@@ -39,6 +39,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
+_DEFAULT_UPGRADE_MODE = "graceful"
+_VALID_UPGRADE_MODES = {"graceful", "rolling", "restart"}
 # Flag file that ``scripts/upgrade.sh`` writes when it pulls a
 # feature-pack-only diff.  The scheduler polls it on a short interval
 # and reloads each listed slug in-process so the running app picks up
@@ -80,6 +82,13 @@ COMMANDS_BY_MODULE: dict[str, set[str]] = {
     "tacticalrmm": {"push_tactical_companies", "pull_tactical_companies"},
     "huntress": {"sync_huntress"},
 }
+
+
+def _normalise_upgrade_mode(value: str | None) -> str:
+    if not value:
+        return _DEFAULT_UPGRADE_MODE
+    mode = value.strip().lower()
+    return mode if mode in _VALID_UPGRADE_MODES else _DEFAULT_UPGRADE_MODE
 
 
 def _truncate_output(payload: str | bytes | None) -> str | None:
@@ -1075,6 +1084,13 @@ class SchedulerService:
                 )
                 return message
 
+            requested_mode = self._resolve_requested_upgrade_mode(force_restart=force_restart)
+            changed_files: list[str] | None = None
+            if not force_restart:
+                fetched_head = await self._fetch_remote_main_ref()
+                if fetched_head:
+                    changed_files = await self._list_changed_files(local_head, fetched_head)
+
             # Try to apply the update via the in-process feature-pack
             # reload API when the incoming diff is limited to one or
             # more feature packs whose ``PACK.version`` has been bumped.
@@ -1091,9 +1107,16 @@ class SchedulerService:
 
             self._ensure_update_flag_directory()
             timestamp = datetime.now(timezone.utc).isoformat()
+            requested_reason = (
+                "manual_restart_requested"
+                if force_restart
+                else self._classify_full_upgrade_reason(changed_files)
+            )
             flag_payload = (
                 f"requested_at={timestamp}\n"
                 f"requested_from_ui={str(force_restart).lower()}\n"
+                f"requested_mode={requested_mode}\n"
+                f"requested_reason={requested_reason}\n"
                 f"local_head={local_head}\n"
                 f"remote_head={remote_head}\n"
             )
@@ -1105,9 +1128,14 @@ class SchedulerService:
                 flag=str(_SYSTEM_UPDATE_FLAG_PATH),
                 local_head=local_head,
                 remote_head=remote_head,
+                requested_mode=requested_mode,
+                requested_reason=requested_reason,
                 requested_from_ui=force_restart,
             )
-            return f"Update scheduled via {_SYSTEM_UPDATE_FLAG_PATH.name}."
+            return (
+                f"Update scheduled via {_SYSTEM_UPDATE_FLAG_PATH.name} "
+                f"using {requested_mode} mode."
+            )
 
     async def _try_feature_pack_hot_reload(
         self, *, local_head: str, remote_head: str
@@ -1427,6 +1455,33 @@ class SchedulerService:
             return None
         match = _PACK_VERSION_RE.search(stdout)
         return match.group(1) if match else None
+
+    @staticmethod
+    def _resolve_requested_upgrade_mode(*, force_restart: bool = False) -> str:
+        if force_restart:
+            return "restart"
+        return _normalise_upgrade_mode(os.getenv("APP_UPGRADE_MODE"))
+
+    @staticmethod
+    def _classify_full_upgrade_reason(changed_files: list[str] | None) -> str:
+        if not changed_files:
+            return "application_reload_required"
+
+        stripped = [path.strip() for path in changed_files if path and path.strip()]
+        if not stripped:
+            return "application_reload_required"
+
+        if any(path == "pyproject.toml" for path in stripped):
+            return "dependency_manifest_changed"
+        if any(path.startswith("migrations/") for path in stripped):
+            return "migrations_changed"
+        if any(path.startswith("deploy/") for path in stripped):
+            return "deployment_topology_changed"
+        if any(path.startswith("scripts/") for path in stripped):
+            return "upgrade_runtime_changed"
+        if any(path.startswith("app/") for path in stripped):
+            return "shared_app_code_changed"
+        return "application_reload_required"
 
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)

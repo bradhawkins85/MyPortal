@@ -139,6 +139,18 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
 
     monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
     monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(
+        main_module.system_state_service,
+        "get_upgrade_status",
+        lambda: {
+            "configured_mode": "graceful",
+            "pending": True,
+            "requested_mode": "rolling",
+            "requested_reason": "deployment_topology_changed",
+            "last_status": "succeeded",
+            "last_mode": "graceful",
+        },
+    )
 
     with TestClient(app) as client:
         response = client.get("/admin/scheduled-tasks")
@@ -152,6 +164,9 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     assert "Sync staff" in html
     assert "All companies" in html
     assert "2025-06-01T10:00:00+00:00" in html
+    assert "Upgrade mode:" in html
+    assert "Pending upgrade:" in html
+    assert "rolling" in html
     _, separator, header_html = html.partition('class="header__actions" data-header-actions')
     assert separator
     header_html, _, _ = header_html.partition("</header>")

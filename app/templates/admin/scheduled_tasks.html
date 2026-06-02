@@ -57,6 +57,7 @@
 {% block content %}
 <div class="management management--single" data-layout>
   <section class="management__content">
+    {% set upgrade_status = upgrade_status | default({}, true) %}
     <header class="management__header">
       <form method="get" class="management__filters">
         <label class="form-checkbox-label">
@@ -79,6 +80,19 @@
     {% if error_message %}
       <div class="alert alert--danger" role="alert">{{ error_message }}</div>
     {% endif %}
+    <div class="alert alert--info" role="status">
+      <strong>Upgrade mode:</strong> {{ upgrade_status.configured_mode | default('graceful') }}
+      {% if upgrade_status.pending %}
+        <br />
+        <strong>Pending upgrade:</strong> {{ upgrade_status.requested_mode | default(upgrade_status.configured_mode | default('graceful')) }}
+        {% if upgrade_status.requested_reason %} ({{ upgrade_status.requested_reason }}){% endif %}
+      {% endif %}
+      {% if upgrade_status.last_status %}
+        <br />
+        <strong>Last upgrade:</strong> {{ upgrade_status.last_status }} via {{ upgrade_status.last_mode | default(upgrade_status.configured_mode | default('graceful')) }}
+        {% if upgrade_status.last_reason %} ({{ upgrade_status.last_reason }}){% endif %}
+      {% endif %}
+    </div>
 
     {# Hidden bulk-delete form #}
     <form
