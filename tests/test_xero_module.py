@@ -477,7 +477,6 @@ async def test_sync_company_creates_webhook_monitor_event():
          patch("app.services.xero.invoice_repo.list_unsynced_company_invoices") as mock_list_unsynced, \
          patch("app.services.xero.invoice_lines_repo.list_invoice_lines") as mock_list_lines, \
          patch("app.services.xero.invoice_repo.patch_invoice") as mock_patch_invoice, \
-         patch("app.services.xero._fetch_next_xero_invoice_number") as mock_fetch_next_invoice_number, \
          patch("app.services.xero.billed_time_repo.rename_invoice_number") as mock_rename_billed, \
          patch("app.services.xero.tickets_repo.rename_xero_invoice_number") as mock_rename_tickets, \
          patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
@@ -522,7 +521,6 @@ async def test_sync_company_creates_webhook_monitor_event():
         ]
         
         mock_get_token.return_value = "test-access-token"
-        mock_fetch_next_invoice_number.return_value = "XERO-1001"
         
         mock_create_event.return_value = {
             "id": 456,
@@ -563,7 +561,7 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert post_call[1]["headers"]["Authorization"] == "Bearer test-access-token"
         assert post_call[1]["headers"]["xero-tenant-id"] == "test-tenant-id"
         assert post_call[1]["json"]["Invoices"][0]["Reference"] == "MyPortal INV-LOCAL-001"
-        assert post_call[1]["json"]["Invoices"][0]["InvoiceNumber"] == "XERO-1001"
+        assert "InvoiceNumber" not in post_call[1]["json"]["Invoices"][0]
         
         # Verify success was recorded
         mock_record_success.assert_called_once()
@@ -572,13 +570,11 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert record_call[1]["attempt_number"] == 1
         assert record_call[1]["response_status"] == 200
         assert record_call[1]["response_body"] == '{"Invoices": [{"InvoiceID": "invoice-123", "InvoiceNumber": "XERO-1001", "Status": "DRAFT"}]}'
-        assert mock_patch_invoice.await_count == 2
+        assert mock_patch_invoice.await_count == 1
         assert mock_patch_invoice.await_args_list[0].args[0] == 321
         assert mock_patch_invoice.await_args_list[0].kwargs["invoice_number"] == "XERO-1001"
-        assert mock_patch_invoice.await_args_list[1].args[0] == 321
-        assert mock_patch_invoice.await_args_list[1].kwargs["invoice_number"] == "XERO-1001"
-        assert mock_patch_invoice.await_args_list[1].kwargs["status"] == "draft"
-        assert mock_patch_invoice.await_args_list[1].kwargs["xero_invoice_id"] == "invoice-123"
+        assert mock_patch_invoice.await_args_list[0].kwargs["status"] == "draft"
+        assert mock_patch_invoice.await_args_list[0].kwargs["xero_invoice_id"] == "invoice-123"
         assert mock_rename_billed.await_count == 1
         assert mock_rename_tickets.await_count == 1
 
