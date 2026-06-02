@@ -7004,6 +7004,11 @@ dialog.dialog::backdrop {
   color: rgba(229, 231, 235, 0.88);
 }
 
+.status--xero {
+  background: rgba(19, 181, 234, 0.18);
+  color: #7de8fc;
+}
+
 .plan-header {
   display: flex;
   align-items: center;
