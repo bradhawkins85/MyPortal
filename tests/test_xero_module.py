@@ -773,3 +773,234 @@ async def test_sync_company_error_includes_xero_validation_detail():
     record_call = mock_record_failure.call_args
     assert "A validation exception occurred" in record_call[1]["error_message"]
     assert "The Contact is invalid." in record_call[1]["error_message"]
+
+
+# ---------------------------------------------------------------------------
+# Tests for _lookup_xero_contact_id and _resolve_xero_contact_payload
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio("asyncio")
+async def test_lookup_xero_contact_id_returns_contact_id_on_success():
+    """Returns the ContactID when Xero responds with a matching contact."""
+    from app.services.xero import _lookup_xero_contact_id
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "Contacts": [{"ContactID": "abc-123", "Name": "ACME Ltd"}]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    result = await _lookup_xero_contact_id(
+        "ACME Ltd",
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result == "abc-123"
+    mock_client.get.assert_awaited_once()
+    call_kwargs = mock_client.get.call_args
+    assert call_kwargs[1]["params"]["where"] == 'Name=="ACME Ltd"'
+    assert call_kwargs[1]["params"]["summaryOnly"] == "true"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_lookup_xero_contact_id_returns_none_on_non_200():
+    """Returns None when Xero returns a non-200 status code."""
+    from app.services.xero import _lookup_xero_contact_id
+
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    result = await _lookup_xero_contact_id(
+        "ACME Ltd",
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_lookup_xero_contact_id_returns_none_on_empty_contacts():
+    """Returns None when Xero returns 200 but no matching contacts."""
+    from app.services.xero import _lookup_xero_contact_id
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"Contacts": []}
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    result = await _lookup_xero_contact_id(
+        "Unknown Corp",
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_lookup_xero_contact_id_returns_none_on_http_error():
+    """Returns None gracefully when the HTTP request itself raises an exception."""
+    import httpx
+    from app.services.xero import _lookup_xero_contact_id
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = httpx.HTTPError("connection refused")
+
+    result = await _lookup_xero_contact_id(
+        "ACME Ltd",
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_resolve_xero_contact_payload_skips_lookup_when_contact_id_present():
+    """Does not call Xero when the payload already has a ContactID."""
+    from app.services.xero import _resolve_xero_contact_payload
+
+    mock_client = AsyncMock()
+    existing_payload = {"Name": "ACME Ltd", "ContactID": "existing-id"}
+
+    result = await _resolve_xero_contact_payload(
+        existing_payload,
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result == existing_payload
+    mock_client.get.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_resolve_xero_contact_payload_injects_contact_id_when_found():
+    """Injects ContactID when lookup finds an existing contact."""
+    from app.services.xero import _resolve_xero_contact_payload
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "Contacts": [{"ContactID": "found-id", "Name": "ACME Ltd"}]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    result = await _resolve_xero_contact_payload(
+        {"Name": "ACME Ltd"},
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result["ContactID"] == "found-id"
+    assert result["Name"] == "ACME Ltd"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_resolve_xero_contact_payload_returns_name_only_when_not_found():
+    """Returns the original name-only payload when the contact lookup finds nothing."""
+    from app.services.xero import _resolve_xero_contact_payload
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"Contacts": []}
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    original = {"Name": "Brand New Corp"}
+    result = await _resolve_xero_contact_payload(
+        original,
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result == original
+    assert "ContactID" not in result
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_uses_existing_contact_when_xero_id_missing():
+    """sync_company resolves ContactID via Xero API when company has no xero_id."""
+    import json as _json
+
+    xero_success_body = _json.dumps({
+        "Invoices": [{"InvoiceID": "inv-001", "InvoiceNumber": "INV-001", "Status": "AUTHORISED"}]
+    })
+
+    with patch("app.services.xero.modules_service.get_module") as mock_get_module, \
+         patch("app.services.xero.company_repo.get_company_by_id") as mock_get_company, \
+         patch("app.services.xero.invoice_repo.list_unsynced_company_invoices") as mock_list_unsynced, \
+         patch("app.services.xero.invoice_lines_repo.list_invoice_lines") as mock_list_lines, \
+         patch("app.services.xero.modules_service.acquire_xero_access_token") as mock_get_token, \
+         patch("app.services.xero.webhook_monitor.create_manual_event") as mock_create_event, \
+         patch("app.services.xero.webhook_monitor.record_manual_success") as mock_record_success, \
+         patch("app.services.xero.invoice_repo.patch_invoice") as mock_patch_invoice, \
+         patch("app.services.xero._rename_local_invoice_references") as mock_rename, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client_class:
+
+        mock_get_module.return_value = {
+            "enabled": True,
+            "settings": {
+                "client_id": "test-client-id",
+                "client_secret": "test-secret",
+                "refresh_token": "test-refresh",
+                "tenant_id": "test-tenant-id",
+            },
+        }
+        mock_get_company.return_value = {"id": 1, "name": "ACME Ltd", "xero_id": None}
+        mock_list_unsynced.return_value = [
+            {"id": 1, "invoice_number": "INV-001", "due_date": None}
+        ]
+        mock_list_lines.return_value = [
+            {"description": "Support", "quantity": 1.0, "unit_amount": 100.0, "product_code": None}
+        ]
+        mock_get_token.return_value = "access-token"
+        mock_create_event.return_value = {"id": 999}
+
+        # GET (contact lookup) succeeds; POST (invoice creation) succeeds
+        get_response = MagicMock()
+        get_response.status_code = 200
+        get_response.json.return_value = {
+            "Contacts": [{"ContactID": "xero-contact-abc", "Name": "ACME Ltd"}]
+        }
+
+        post_response = MagicMock()
+        post_response.status_code = 200
+        post_response.text = xero_success_body
+        post_response.json.return_value = _json.loads(xero_success_body)
+        post_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = get_response
+        mock_client.post.return_value = post_response
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        result = await xero_service.sync_company(1)
+
+    assert result["status"] == "succeeded"
+    assert result["synced_count"] == 1
+
+    # Verify the POST body contained the resolved ContactID
+    post_call = mock_client.post.call_args
+    posted_body = post_call[1]["json"] if "json" in post_call[1] else post_call[0][1]
+    invoice = posted_body["Invoices"][0]
+    assert invoice["Contact"].get("ContactID") == "xero-contact-abc"

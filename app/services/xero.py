@@ -170,6 +170,81 @@ def _build_xero_contact_payload(company: Mapping[str, Any], company_id: int) -> 
     return payload
 
 
+async def _lookup_xero_contact_id(
+    name: str,
+    *,
+    client: httpx.AsyncClient,
+    tenant_id: str,
+    access_token: str,
+) -> str | None:
+    """Look up an existing Xero contact by exact name and return its ContactID.
+
+    Returns ``None`` if no matching contact is found or if the lookup fails.
+    """
+    contacts_url = "https://api.xero.com/api.xro/2.0/Contacts"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Accept": "application/json",
+    }
+    params: dict[str, str] = {
+        "where": f'Name=="{name}"',
+        "summaryOnly": "true",
+    }
+    try:
+        response = await client.get(contacts_url, headers=headers, params=params)
+    except httpx.HTTPError as exc:
+        log_warning("Failed to look up Xero contact by name", name=name, error=str(exc))
+        return None
+    if response.status_code != 200:
+        log_warning(
+            "Unexpected response while looking up Xero contact",
+            name=name,
+            status_code=response.status_code,
+        )
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    contacts = payload.get("Contacts") if isinstance(payload, dict) else None
+    if not isinstance(contacts, list) or not contacts:
+        return None
+    contact_id = str(contacts[0].get("ContactID") or "").strip()
+    return contact_id or None
+
+
+async def _resolve_xero_contact_payload(
+    contact_payload: dict[str, Any],
+    *,
+    client: httpx.AsyncClient,
+    tenant_id: str,
+    access_token: str,
+) -> dict[str, Any]:
+    """Return a contact payload with ``ContactID`` populated from Xero if not already set.
+
+    When the contact already has a ``ContactID`` the payload is returned unchanged.
+    Otherwise the Xero Contacts API is queried by name.  If a matching contact is
+    found its ``ContactID`` is added so that the invoice is created under the existing
+    contact rather than triggering a new-contact creation attempt (which would fail
+    with "Contact Name already exists" for contacts that already exist in Xero).
+    """
+    if contact_payload.get("ContactID"):
+        return contact_payload
+    name = str(contact_payload.get("Name") or "").strip()
+    if not name:
+        return contact_payload
+    contact_id = await _lookup_xero_contact_id(
+        name,
+        client=client,
+        tenant_id=tenant_id,
+        access_token=access_token,
+    )
+    if contact_id:
+        return {**contact_payload, "ContactID": contact_id}
+    return contact_payload
+
+
 def _build_xero_line_items_from_local_invoice(
     invoice_lines: Sequence[Mapping[str, Any]],
     *,
@@ -1520,7 +1595,25 @@ async def sync_billable_tickets(
     contact_payload: dict[str, Any] = {"Name": company_name}
     if xero_id:
         contact_payload["ContactID"] = xero_id
-    
+
+    # Make API call to Xero
+    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
+    request_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "xero-tenant-id": tenant_id,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    if not contact_payload.get("ContactID"):
+        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
+            contact_payload = await _resolve_xero_contact_payload(
+                contact_payload,
+                client=resolve_client,
+                tenant_id=tenant_id,
+                access_token=access_token,
+            )
+
     invoice_payload = {
         "Type": "ACCREC",
         "Contact": contact_payload,
@@ -1530,19 +1623,10 @@ async def sync_billable_tickets(
         "Date": date.today().isoformat(),
         "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
-    
+
     if auto_send:
         invoice_payload["SentToContact"] = True
-    
-    # Make API call to Xero
-    api_url = "https://api.xero.com/api.xro/2.0/Invoices"
-    request_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "xero-tenant-id": tenant_id,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    
+
     # Create webhook monitor event with the exact request payload so manual retries
     # resend the same body that was submitted to Xero.
     webhook_payload = {"Invoices": [invoice_payload]}
@@ -1875,6 +1959,14 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         "Accept": "application/json",
     }
     contact_payload = _build_xero_contact_payload(company, company_id)
+    if not contact_payload.get("ContactID"):
+        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
+            contact_payload = await _resolve_xero_contact_payload(
+                contact_payload,
+                client=resolve_client,
+                tenant_id=tenant_id,
+                access_token=access_token,
+            )
 
     synced_results: list[dict[str, Any]] = []
     failed_results: list[dict[str, Any]] = []
@@ -2229,6 +2321,15 @@ async def send_order_to_xero(
             "company_id": company_id,
         }
     
+    if not invoice_data["contact"].get("ContactID"):
+        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
+            invoice_data["contact"] = await _resolve_xero_contact_payload(
+                invoice_data["contact"],
+                client=resolve_client,
+                tenant_id=tenant_id,
+                access_token=access_token,
+            )
+
     xero_payload = {
         "Type": "ACCREC",
         "Contact": invoice_data["contact"],
@@ -2238,7 +2339,7 @@ async def send_order_to_xero(
         "Date": date.today().isoformat(),
         "Status": "DRAFT",
     }
-    
+
     # Make API call to Xero
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"
     request_headers = {
@@ -2247,7 +2348,7 @@ async def send_order_to_xero(
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    
+
     # Persist the exact request payload for webhook retries
     webhook_payload = {"Invoices": [xero_payload]}
 
@@ -2519,6 +2620,15 @@ async def send_quote_to_xero(
             "quote_number": quote_number,
             "company_id": company_id,
         }
+
+    if not invoice_data["contact"].get("ContactID"):
+        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
+            invoice_data["contact"] = await _resolve_xero_contact_payload(
+                invoice_data["contact"],
+                client=resolve_client,
+                tenant_id=tenant_id,
+                access_token=access_token,
+            )
 
     xero_payload = {
         "Contact": invoice_data["contact"],
@@ -2809,7 +2919,16 @@ async def send_subscription_charge_to_xero(
     contact_payload: dict[str, Any] = {"Name": company_name}
     if xero_id:
         contact_payload["ContactID"] = xero_id
-    
+
+    if not contact_payload.get("ContactID"):
+        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
+            contact_payload = await _resolve_xero_contact_payload(
+                contact_payload,
+                client=resolve_client,
+                tenant_id=tenant_id,
+                access_token=access_token,
+            )
+
     # Build reference
     reference = f"{reference_prefix} - Subscription {subscription_id[:8]}"
     
