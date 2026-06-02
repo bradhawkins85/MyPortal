@@ -55,6 +55,11 @@ async def test_admin_automation_hides_inactive_by_default(monkeypatch):
         "list_companies",
         AsyncMock(return_value=[{"id": 1, "name": "Example Co"}]),
     )
+    monkeypatch.setattr(
+        main.system_state_service,
+        "get_upgrade_status",
+        lambda: {"configured_mode": "graceful", "last_status": "succeeded"},
+    )
 
     captured: dict[str, Any] = {}
 
@@ -71,6 +76,7 @@ async def test_admin_automation_hides_inactive_by_default(monkeypatch):
     list_tasks_mock.assert_called_once_with(include_inactive=False)
     extra = captured.get("extra", {})
     assert extra.get("show_inactive_tasks") is False
+    assert extra.get("upgrade_status", {}).get("configured_mode") == "graceful"
 
 
 @pytest.mark.anyio("asyncio")
@@ -110,6 +116,11 @@ async def test_admin_automation_shows_inactive_when_requested(monkeypatch):
         "list_companies",
         AsyncMock(return_value=[{"id": 1, "name": "Example Co"}]),
     )
+    monkeypatch.setattr(
+        main.system_state_service,
+        "get_upgrade_status",
+        lambda: {"configured_mode": "rolling", "pending": True},
+    )
 
     captured: dict[str, Any] = {}
 
@@ -126,3 +137,4 @@ async def test_admin_automation_shows_inactive_when_requested(monkeypatch):
     list_tasks_mock.assert_called_once_with(include_inactive=True)
     extra = captured.get("extra", {})
     assert extra.get("show_inactive_tasks") is True
+    assert extra.get("upgrade_status", {}).get("configured_mode") == "rolling"

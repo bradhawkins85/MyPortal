@@ -413,12 +413,12 @@ For an nginx frontend that listens on port 80 and proxies to the app, use
 
 ## Updating from GitHub
 
-Use the Python-focused automation scripts to stay current. The UI/scheduler checks GitHub for new commits on `origin/main` and, when one is available, writes `var/state/system_update.flag`. Schedule `scripts/process_update_flag.sh` from cron (see `deploy/cron/process_update_flag.cron`) to process that flag every minute: it runs `scripts/upgrade.sh`, which updates code, reinstalls dependencies, restarts the service, and then clears the flag file on success. If you prefer to run the steps manually, execute the following commands:
+Use the Python-focused automation scripts to stay current. The UI/scheduler checks GitHub for new commits on `origin/main` and, when one is available, writes `var/state/system_update.flag`. Schedule `scripts/process_update_flag.sh` from cron (see `deploy/cron/process_update_flag.cron`) to process that flag every minute: it runs `scripts/upgrade.sh` in the configured deployment mode (`APP_UPGRADE_MODE=graceful|rolling|restart`, default `graceful`), waits for `/readyz` in zero-downtime modes, and only falls back to a full restart when explicitly requested or when the update requires it. If you prefer to run the steps manually, execute the following commands:
 
 ```bash
 git pull origin main
 pip install -e .
-systemctl restart myportal.service
+sudo -u myportal /opt/myportal/scripts/upgrade.sh --graceful
 ```
 
 ## OpnForm Integration
