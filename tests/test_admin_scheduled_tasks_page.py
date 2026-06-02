@@ -400,6 +400,11 @@ def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, monkeypa
     monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
     monkeypatch.setattr(main_module.scheduled_tasks_repo, "rename_task", fake_rename_task)
     monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+    monkeypatch.setattr(
+        main_module.system_state_service,
+        "get_upgrade_status",
+        lambda: {"configured_mode": "graceful"},
+    )
 
     with TestClient(app, follow_redirects=False) as client:
         response = client.post(
@@ -452,8 +457,13 @@ def test_bulk_rename_unknown_command(super_admin_context, csrf_session, monkeypa
     assert renamed[5] == "All companies \u2014 custom_command"
 
 
-def test_bulk_rename_no_ids(super_admin_context, csrf_session):
+def test_bulk_rename_no_ids(super_admin_context, csrf_session, monkeypatch):
     """Bulk rename with no IDs redirects with an error message."""
+    monkeypatch.setattr(
+        main_module.system_state_service,
+        "get_upgrade_status",
+        lambda: {"configured_mode": "graceful"},
+    )
     with TestClient(app, follow_redirects=False) as client:
         response = client.post(
             "/admin/scheduled-tasks/bulk-rename",
