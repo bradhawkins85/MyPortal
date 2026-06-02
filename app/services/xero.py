@@ -19,6 +19,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import users as users_repo
 from app.services import modules as modules_service
 from app.services import webhook_monitor
 
@@ -102,6 +103,14 @@ def _format_line_description(
     ticket: Mapping[str, Any],
     labour: Mapping[str, Any] | None,
     minutes: int,
+    *,
+    requester_name: str = "",
+    requester_email: str = "",
+    ticket_created_date: str = "",
+    ticket_resolved_date: str = "",
+    billable_minutes: int = 0,
+    non_billable_minutes: int = 0,
+    duration_days: int | str = "",
 ) -> str:
     safe_template = template.strip() or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
     subject = str(ticket.get("subject") or "").strip()
@@ -118,6 +127,13 @@ def _format_line_description(
         labour_minutes=labour_minutes,
         labour_hours=float(_quantize(labour_hours_decimal)) if labour_minutes else 0.0,
         labour_suffix=f" · {labour_name}" if labour_name else "",
+        requester_name=requester_name,
+        requester_email=requester_email,
+        ticket_created_date=ticket_created_date,
+        ticket_resolved_date=ticket_resolved_date,
+        billable_minutes=billable_minutes,
+        non_billable_minutes=non_billable_minutes,
+        duration_days=duration_days,
     )
     try:
         description = safe_template.format_map(values).strip()
@@ -159,6 +175,43 @@ def _coerce_minutes(value: Any) -> int:
         return max(0, int(str(value)))
     except (TypeError, ValueError):
         return 0
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        parsed = text.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(parsed)
+        except ValueError:
+            return None
+    return None
+
+
+def _format_date_value(value: Any) -> str:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value.isoformat()
+    dt = _coerce_datetime(value)
+    if dt is None:
+        return ""
+    return dt.date().isoformat()
+
+
+def _duration_days(created_at: Any, resolved_at: Any) -> int | str:
+    opened_dt = _coerce_datetime(created_at)
+    resolved_dt = _coerce_datetime(resolved_at)
+    if opened_dt is None or resolved_dt is None:
+        return ""
+    delta = resolved_dt - opened_dt
+    if delta.total_seconds() < 0:
+        return ""
+    return delta.days
 
 
 def _build_xero_contact_payload(company: Mapping[str, Any], company_id: int) -> dict[str, Any]:
@@ -840,6 +893,7 @@ async def build_ticket_invoices(
         return []
 
     tickets_by_company: dict[int, list[dict[str, Any]]] = {}
+    requester_cache: dict[int, dict[str, Any]] = {}
     for ticket_id in unique_ticket_ids:
         ticket = await fetch_ticket(ticket_id)
         if not ticket:
@@ -856,12 +910,14 @@ async def build_ticket_invoices(
         replies = await fetch_replies(ticket_id) or []
         labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
         billable_minutes = 0
+        non_billable_minutes = 0
         for reply in replies:
             minutes = _coerce_minutes(reply.get("minutes_spent"))
             if minutes <= 0:
                 continue
             is_billable = reply.get("is_billable")
             if not is_billable:
+                non_billable_minutes += minutes
                 continue
             billable_minutes += minutes
             labour_code = str(reply.get("labour_type_code") or "").strip() or None
@@ -879,6 +935,7 @@ async def build_ticket_invoices(
         entry = {
             "ticket": ticket,
             "billable_minutes": billable_minutes,
+            "non_billable_minutes": non_billable_minutes,
             "labour_groups": list(labour_map.values()) if labour_map else [],
         }
         tickets_by_company.setdefault(company_id, []).append(entry)
@@ -900,8 +957,35 @@ async def build_ticket_invoices(
         for item in entries:
             ticket = item.get("ticket") or {}
             ticket_minutes = int(item.get("billable_minutes") or 0)
+            non_billable_minutes = int(item.get("non_billable_minutes") or 0)
             total_minutes += ticket_minutes
             labour_groups = item.get("labour_groups") or []
+            requester_name = str(ticket.get("requester_name") or "").strip()
+            requester_email = str(ticket.get("requester_email") or "").strip()
+            if not requester_email:
+                requester_email = str(ticket.get("email") or "").strip()
+
+            if not requester_name or not requester_email:
+                requester_id = ticket.get("requester_id")
+                try:
+                    requester_id_int = int(requester_id) if requester_id is not None else 0
+                except (TypeError, ValueError):
+                    requester_id_int = 0
+                if requester_id_int > 0:
+                    requester = requester_cache.get(requester_id_int)
+                    if requester is None:
+                        requester = await users_repo.get_user_by_id(requester_id_int) or {}
+                        requester_cache[requester_id_int] = requester
+                    if not requester_name:
+                        first = str(requester.get("first_name") or "").strip()
+                        last = str(requester.get("last_name") or "").strip()
+                        requester_name = " ".join(part for part in (first, last) if part)
+                    if not requester_email:
+                        requester_email = str(requester.get("email") or "").strip()
+
+            ticket_created_date = _format_date_value(ticket.get("created_at"))
+            ticket_resolved_date = _format_date_value(ticket.get("closed_at"))
+            duration_days = _duration_days(ticket.get("created_at"), ticket.get("closed_at"))
             if labour_groups:
                 for group in labour_groups:
                     group_minutes = int(group.get("minutes") or 0)
@@ -913,6 +997,13 @@ async def build_ticket_invoices(
                         ticket,
                         group,
                         group_minutes,
+                        requester_name=requester_name,
+                        requester_email=requester_email,
+                        ticket_created_date=ticket_created_date,
+                        ticket_resolved_date=ticket_resolved_date,
+                        billable_minutes=ticket_minutes,
+                        non_billable_minutes=non_billable_minutes,
+                        duration_days=duration_days,
                     )
                     
                     # Determine rate to use: Local labour type rate, otherwise default hourly rate
@@ -946,6 +1037,13 @@ async def build_ticket_invoices(
                     ticket,
                     None,
                     ticket_minutes,
+                    requester_name=requester_name,
+                    requester_email=requester_email,
+                    ticket_created_date=ticket_created_date,
+                    ticket_resolved_date=ticket_resolved_date,
+                    billable_minutes=ticket_minutes,
+                    non_billable_minutes=non_billable_minutes,
+                    duration_days=duration_days,
                 )
                 line_item = {
                     "Description": description,
@@ -962,6 +1060,12 @@ async def build_ticket_invoices(
                     "subject": ticket.get("subject"),
                     "status": ticket.get("status"),
                     "billable_minutes": ticket_minutes,
+                    "non_billable_minutes": non_billable_minutes,
+                    "requester_name": requester_name,
+                    "requester_email": requester_email,
+                    "created_date": ticket_created_date,
+                    "resolved_date": ticket_resolved_date,
+                    "duration_days": duration_days,
                     "labour_groups": labour_groups,
                 }
             )
