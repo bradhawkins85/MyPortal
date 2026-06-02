@@ -185,6 +185,8 @@
         return input;
       };
 
+      const getFailureTicketLabel = (mode) => (mode === 'pause' ? 'Create ticket on pause' : 'Create ticket on failure');
+
       const renderStepsForWorkflow = (wf, stepsContainer) => {
         stepsContainer.innerHTML = '';
         if (!wf.steps.length) {
@@ -288,16 +290,23 @@
 
           const failureSelect = makeInput({
             type: 'select',
-            options: [{ value: 'fail_fast', label: 'Fail fast' }, { value: 'continue', label: 'Continue' }],
+            options: [
+              { value: 'fail_fast', label: 'Fail fast' },
+              { value: 'pause', label: 'Pause' },
+              { value: 'continue', label: 'Continue' },
+            ],
           }, step.failure_policy.mode);
           body.append(makeLabel('Failure mode'), failureSelect);
-          failureSelect.addEventListener('change', () => { wf.steps[index].failure_policy.mode = failureSelect.value; });
+          failureSelect.addEventListener('change', () => {
+            wf.steps[index].failure_policy.mode = failureSelect.value;
+            ticketText.textContent = getFailureTicketLabel(failureSelect.value);
+          });
 
           const ticketWrap = document.createElement('label');
           ticketWrap.className = 'form-checkbox';
           const ticketInput = makeInput({ type: 'checkbox' }, step.failure_policy.create_ticket_on_failure);
           const ticketText = document.createElement('span');
-          ticketText.textContent = 'Create ticket on failure';
+          ticketText.textContent = getFailureTicketLabel(step.failure_policy.mode);
           ticketWrap.append(ticketInput, ticketText);
           ticketInput.addEventListener('change', () => { wf.steps[index].failure_policy.create_ticket_on_failure = ticketInput.checked; });
           body.appendChild(ticketWrap);
