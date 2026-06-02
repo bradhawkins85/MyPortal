@@ -1257,6 +1257,7 @@
       const input = document.querySelector('[data-table-filter="scheduled-tasks-table"]');
       if (input) {
         input.value = value;
+        // The table filter listens for 'input' events, so dispatch one to trigger filtering.
         input.dispatchEvent(new Event('input', { bubbles: true }));
       }
     } catch (err) {
@@ -1264,9 +1265,11 @@
     }
   }
 
+  // Closes the row's action <details> dropdown (data-header-menu) when an action button inside
+  // it is activated. The [data-header-menu] element is always a <details> element in this page.
   function closeRowDropdown(button) {
     const menu = button.closest('[data-header-menu]');
-    if (menu) {
+    if (menu && typeof menu.open !== 'undefined') {
       menu.open = false;
     }
   }
