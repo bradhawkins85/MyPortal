@@ -1083,6 +1083,7 @@ async def build_order_invoice(
         if unit_amount is not None:
             line_item["UnitAmount"] = unit_amount
         elif not sku:
+            # Without an item code, Xero has no product default to apply.
             line_item["UnitAmount"] = 0.0
         if sku:
             line_item["ItemCode"] = str(sku)
@@ -1175,6 +1176,7 @@ async def build_quote_invoice(
         if unit_amount is not None:
             line_item["UnitAmount"] = unit_amount
         elif not sku:
+            # Without an item code, Xero has no product default to apply.
             line_item["UnitAmount"] = 0.0
         if sku:
             line_item["ItemCode"] = str(sku)
