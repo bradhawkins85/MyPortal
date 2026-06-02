@@ -187,8 +187,10 @@ async def _lookup_xero_contact_id(
         "xero-tenant-id": tenant_id,
         "Accept": "application/json",
     }
+    # Escape any double quotes in the name to avoid malforming the OData where clause.
+    escaped_name = name.replace('"', '\\"')
     params: dict[str, str] = {
-        "where": f'Name=="{name}"',
+        "where": f'Name=="{escaped_name}"',
         "summaryOnly": "true",
     }
     try:
