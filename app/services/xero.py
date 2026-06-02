@@ -2007,7 +2007,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
             "Contact": dict(contact_payload),
             "LineItems": xero_line_items,
             "LineAmountTypes": line_amount_type,
-            "Reference": f"MyPortal {original_invoice_number}" if original_invoice_number else "MyPortal Invoice",
             "Date": date.today().isoformat(),
             "Status": "AUTHORISED" if auto_send else "DRAFT",
         }

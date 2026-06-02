@@ -562,7 +562,7 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert post_call[0][0] == "https://api.xero.com/api.xro/2.0/Invoices"
         assert post_call[1]["headers"]["Authorization"] == "Bearer test-access-token"
         assert post_call[1]["headers"]["xero-tenant-id"] == "test-tenant-id"
-        assert post_call[1]["json"]["Invoices"][0]["Reference"] == "MyPortal INV-LOCAL-001"
+        assert "Reference" not in post_call[1]["json"]["Invoices"][0]
         assert "InvoiceNumber" not in post_call[1]["json"]["Invoices"][0]
         
         # Verify success was recorded
