@@ -1293,6 +1293,7 @@ html {
   flex-direction: column;
   gap: 0.25rem;
   z-index: 40;
+  overflow: hidden;
 }
 
 .header-title-menu__item {
