@@ -100,8 +100,8 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
 
         call_args = mock_client_instance.post.call_args
         invoice_payload = call_args[1]["json"]["Invoices"][0]
-        assert invoice_payload["Contact"] == {"ContactID": "xero-test-123"}
-        assert invoice_payload["Reference"] == "MyPortal INV-202603-0001"
+        assert invoice_payload["Contact"]["ContactID"] == "xero-test-123"
+        assert "Reference" not in invoice_payload
         assert invoice_payload["DueDate"] == "2026-04-01"
         assert invoice_payload["LineItems"] == [
             {
