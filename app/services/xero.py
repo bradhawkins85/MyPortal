@@ -208,10 +208,9 @@ def _duration_days(created_at: Any, resolved_at: Any) -> int | str:
     resolved_dt = _coerce_datetime(resolved_at)
     if opened_dt is None or resolved_dt is None:
         return ""
-    delta = resolved_dt - opened_dt
-    if delta.total_seconds() < 0:
+    if resolved_dt < opened_dt:
         return ""
-    return delta.days
+    return (resolved_dt.date() - opened_dt.date()).days
 
 
 def _build_xero_contact_payload(company: Mapping[str, Any], company_id: int) -> dict[str, Any]:
@@ -961,9 +960,9 @@ async def build_ticket_invoices(
             total_minutes += ticket_minutes
             labour_groups = item.get("labour_groups") or []
             requester_name = str(ticket.get("requester_name") or "").strip()
-            requester_email = str(ticket.get("requester_email") or "").strip()
-            if not requester_email:
-                requester_email = str(ticket.get("email") or "").strip()
+            requester_email = str(
+                ticket.get("requester_email") or ticket.get("email") or ""
+            ).strip()
 
             if not requester_name or not requester_email:
                 requester_id = ticket.get("requester_id")
@@ -1005,7 +1004,7 @@ async def build_ticket_invoices(
                         non_billable_minutes=non_billable_minutes,
                         duration_days=duration_days,
                     )
-                    
+
                     # Determine rate to use: Local labour type rate, otherwise default hourly rate
                     labour_code = str(group.get("code") or "").strip()
                     local_rate = group.get("rate")
