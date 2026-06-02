@@ -6,10 +6,15 @@ from unittest.mock import AsyncMock
 import app.main as main_module
 import pytest
 from fastapi.testclient import TestClient
+from starlette.datastructures import FormData
 
 from app.core.database import db
 from app.main import app, scheduler_service
 from app.security.session import SessionData
+
+
+async def _dummy_receive():
+    return {"type": "http.request", "body": b"", "more_body": False}
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +103,11 @@ def csrf_session(monkeypatch):
     return session
 
 
+def _make_post_request(path: str):
+    scope = {"type": "http", "method": "POST", "path": path, "headers": []}
+    return main_module.Request(scope, _dummy_receive)
+
+
 def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     """Test that the scheduled tasks page renders task data including company links."""
     last_run = datetime(2025, 6, 1, 10, 0, tzinfo=timezone.utc)
@@ -172,7 +182,8 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     header_html, _, _ = header_html.partition("</header>")
     assert 'aria-controls="scheduled-tasks-bulk-actions-menu"' in header_html
     assert 'id="scheduled-tasks-bulk-actions-menu"' in header_html
-    assert ">Manage Tasks<" in header_html
+    assert ">Manage Tasks<" not in header_html
+    assert 'data-task-create' in header_html
 
 
 def test_scheduled_tasks_page_empty(super_admin_context, monkeypatch):
@@ -301,6 +312,52 @@ def test_scheduled_tasks_page_failed_task_status(super_admin_context, monkeypatc
     assert "failed" in html
 
 
+def test_scheduled_tasks_page_edit_button_and_modal_present(super_admin_context, monkeypatch):
+    """Test that the Edit button and task editor modal are rendered on the page."""
+
+    async def fake_list_tasks(include_inactive=False):
+        return [
+            {
+                "id": 1,
+                "name": "Sync staff",
+                "command": "sync_staff",
+                "cron": "30 3 * * *",
+                "company_id": None,
+                "active": True,
+                "last_run_at": None,
+                "last_status": None,
+                "last_error": None,
+                "description": None,
+                "max_retries": 12,
+                "retry_backoff_seconds": 300,
+            }
+        ]
+
+    async def fake_list_companies():
+        return []
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/scheduled-tasks")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'data-task-edit' in html
+    assert 'id="task-editor-modal"' in html
+    assert 'id="scheduled-task-form"' in html
+
+
+def test_admin_automation_redirects(super_admin_context):
+    """GET /admin/automation should permanently redirect to /admin/scheduled-tasks."""
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get("/admin/automation")
+
+    assert response.status_code == 301
+    assert response.headers["location"] == "/admin/scheduled-tasks"
+
+
 def test_bulk_delete_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
     """Test that bulk delete removes the selected tasks and redirects with a success message."""
     deleted: list[list[int]] = []
@@ -338,7 +395,8 @@ def test_bulk_delete_scheduled_tasks_no_ids(super_admin_context, csrf_session):
     assert "error=" in response.headers["location"]
 
 
-def test_bulk_delete_scheduled_tasks_requires_super_admin(monkeypatch, csrf_session):
+@pytest.mark.asyncio
+async def test_bulk_delete_scheduled_tasks_requires_super_admin(monkeypatch, csrf_session):
     """Bulk delete redirects non-super-admins."""
     from fastapi.responses import RedirectResponse
 
@@ -346,17 +404,20 @@ def test_bulk_delete_scheduled_tasks_requires_super_admin(monkeypatch, csrf_sess
         return None, RedirectResponse(url="/login", status_code=302)
 
     monkeypatch.setattr(main_module, "_require_super_admin_page", fake_require_super_admin_page)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-delete")
 
-    with TestClient(app, follow_redirects=False) as client:
-        response = client.post(
-            "/admin/scheduled-tasks/bulk-delete",
-            data={"taskIds": ["1"], "_csrf": csrf_session.csrf_token},
-        )
+    async def fake_form():
+        return FormData([("taskIds", "1"), ("_csrf", csrf_session.csrf_token)])
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = await main_module.admin_bulk_delete_scheduled_tasks(request)
 
     assert response.status_code == 302
 
 
-def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
+@pytest.mark.asyncio
+async def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
     """Test that bulk rename updates task names to 'Company — Command' format."""
     renamed: dict[int, str] = {}
 
@@ -405,12 +466,14 @@ def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, monkeypa
         "get_upgrade_status",
         lambda: {"configured_mode": "graceful"},
     )
+    request = _make_post_request("/admin/scheduled-tasks/bulk-rename")
 
-    with TestClient(app, follow_redirects=False) as client:
-        response = client.post(
-            "/admin/scheduled-tasks/bulk-rename",
-            data={"taskIds": ["1", "2"], "_csrf": csrf_session.csrf_token},
-        )
+    async def fake_form():
+        return FormData([("taskIds", "1"), ("taskIds", "2"), ("_csrf", csrf_session.csrf_token)])
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = await main_module.admin_bulk_rename_scheduled_tasks(request)
 
     assert response.status_code == 303
     assert "success=" in response.headers["location"]
@@ -418,7 +481,8 @@ def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, monkeypa
     assert renamed[2] == "Acme Corp \u2014 Sync Microsoft 365 licenses"
 
 
-def test_bulk_rename_unknown_command(super_admin_context, csrf_session, monkeypatch):
+@pytest.mark.asyncio
+async def test_bulk_rename_unknown_command(super_admin_context, csrf_session, monkeypatch):
     """Bulk rename falls back to the raw command string for unknown commands."""
     renamed: dict[int, str] = {}
 
@@ -446,29 +510,34 @@ def test_bulk_rename_unknown_command(super_admin_context, csrf_session, monkeypa
     monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
     monkeypatch.setattr(main_module.scheduled_tasks_repo, "rename_task", fake_rename_task)
     monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-rename")
 
-    with TestClient(app, follow_redirects=False) as client:
-        response = client.post(
-            "/admin/scheduled-tasks/bulk-rename",
-            data={"taskIds": ["5"], "_csrf": csrf_session.csrf_token},
-        )
+    async def fake_form():
+        return FormData([("taskIds", "5"), ("_csrf", csrf_session.csrf_token)])
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = await main_module.admin_bulk_rename_scheduled_tasks(request)
 
     assert response.status_code == 303
     assert renamed[5] == "All companies \u2014 custom_command"
 
 
-def test_bulk_rename_no_ids(super_admin_context, csrf_session, monkeypatch):
+@pytest.mark.asyncio
+async def test_bulk_rename_no_ids(super_admin_context, csrf_session, monkeypatch):
     """Bulk rename with no IDs redirects with an error message."""
     monkeypatch.setattr(
         main_module.system_state_service,
         "get_upgrade_status",
         lambda: {"configured_mode": "graceful"},
     )
-    with TestClient(app, follow_redirects=False) as client:
-        response = client.post(
-            "/admin/scheduled-tasks/bulk-rename",
-            data={"_csrf": csrf_session.csrf_token},
-        )
+    request = _make_post_request("/admin/scheduled-tasks/bulk-rename")
+
+    async def fake_form():
+        return FormData([("_csrf", csrf_session.csrf_token)])
+
+    monkeypatch.setattr(request, "form", fake_form)
+    response = await main_module.admin_bulk_rename_scheduled_tasks(request)
 
     assert response.status_code == 303
     assert "error=" in response.headers["location"]

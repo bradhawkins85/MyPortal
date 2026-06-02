@@ -5156,101 +5156,7 @@ async def admin_roles(request: Request):
 
 @app.get("/admin/automation", response_class=HTMLResponse)
 async def admin_automation(request: Request, show_inactive: bool = Query(default=False)):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive)
-    companies = await company_repo.list_companies()
-
-    company_lookup: dict[int, str] = {}
-    for company in companies:
-        try:
-            company_id = int(company.get("id")) if company.get("id") is not None else None
-        except (TypeError, ValueError):
-            company_id = None
-        if company_id is None:
-            continue
-        company_lookup[company_id] = str(company.get("name") or f"Company #{company_id}")
-
-    prepared_tasks: list[dict[str, Any]] = []
-    global_tasks: list[dict[str, Any]] = []
-    missing_company_ids: set[int] = set()
-    for task in tasks:
-        serialised_task = _serialise_mapping(task)
-        serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
-        company_id = task.get("company_id")
-        company_name: str
-        if company_id is None:
-            company_name = "All companies"
-        else:
-            try:
-                company_key = int(company_id)
-            except (TypeError, ValueError):
-                company_key = None
-            if company_key is None:
-                company_name = "All companies"
-            else:
-                company_name = company_lookup.get(company_key)
-                if not company_name:
-                    company_name = f"Company #{company_key}"
-                    missing_company_ids.add(company_key)
-        serialised_task["company_name"] = company_name
-        prepared_tasks.append(serialised_task)
-        if company_id is None or company_name.lower() == "all companies":
-            global_tasks.append(serialised_task)
-    # Build the set of commands that belong to disabled modules so they can be excluded.
-    try:
-        all_modules = await modules_service.list_modules()
-        disabled_module_slugs = {m["slug"] for m in all_modules if not m.get("enabled")}
-    except Exception:  # pragma: no cover - defensive fallback
-        disabled_module_slugs = set()
-    disabled_commands_global: set[str] = set()
-    for mod_slug, cmds in COMMANDS_BY_MODULE.items():
-        if mod_slug in disabled_module_slugs:
-            disabled_commands_global.update(cmds)
-
-    command_options = [
-        {"value": "sync_staff", "label": "Sync staff directory"},
-        {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
-        {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
-        {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
-        {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
-        {"value": "sync_huntress", "label": "Sync Huntress data"},
-        {"value": "sync_to_xero", "label": "Sync to Xero"},
-        {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
-        {"value": "generate_invoice", "label": "Generate Invoice"},
-        {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
-        {"value": "sync_recordings", "label": "Sync call recordings"},
-        {
-            "value": "sync_unifi_talk_recordings",
-            "label": "Sync Unifi Talk recordings",
-        },
-        {"value": "queue_transcriptions", "label": "Queue transcriptions"},
-        {"value": "process_transcription", "label": "Process transcription"},
-    ]
-    command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
-    existing_commands = {task.get("command") for task in tasks if task.get("command")}
-    for command in sorted(existing_commands):
-        if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
-            command_options.append({"value": str(command), "label": str(command)})
-    company_options = [
-        {"value": "", "label": "All companies"},
-    ]
-    for company_id, company_name in sorted(company_lookup.items(), key=lambda item: item[1].lower()):
-        company_options.append({"value": str(company_id), "label": company_name})
-    for company_id in sorted(missing_company_ids):
-        company_options.append({"value": str(company_id), "label": f"Company #{company_id}"})
-
-    extra = {
-        "title": "System Automation",
-        "tasks": prepared_tasks,
-        "global_tasks": global_tasks,
-        "command_options": command_options,
-        "company_options": company_options,
-        "show_inactive_tasks": show_inactive,
-        "upgrade_status": system_state_service.get_upgrade_status(),
-    }
-    return await _render_template("admin/automation.html", request, current_user, extra=extra)
+    return RedirectResponse(url="/admin/scheduled-tasks", status_code=status.HTTP_301_MOVED_PERMANENTLY)
 
 
 @app.get("/admin/scheduled-tasks", response_class=HTMLResponse)
@@ -5277,6 +5183,7 @@ async def admin_scheduled_tasks(
         company_lookup[company_id] = str(company.get("name") or f"Company #{company_id}")
 
     prepared_tasks: list[dict[str, Any]] = []
+    missing_company_ids: set[int] = set()
     for task in tasks:
         serialised_task = _serialise_mapping(task)
         serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
@@ -5291,10 +5198,51 @@ async def admin_scheduled_tasks(
             serialised_task["company_name"] = "All companies"
             serialised_task["company_edit_url"] = None
         else:
-            company_name = company_lookup.get(company_key, f"Company #{company_key}")
+            company_name = company_lookup.get(company_key)
+            if not company_name:
+                company_name = f"Company #{company_key}"
+                missing_company_ids.add(company_key)
             serialised_task["company_name"] = company_name
             serialised_task["company_edit_url"] = f"/admin/companies/{company_key}/edit"
         prepared_tasks.append(serialised_task)
+
+    try:
+        all_modules = await modules_service.list_modules()
+        disabled_module_slugs = {m["slug"] for m in all_modules if not m.get("enabled")}
+    except Exception:  # pragma: no cover - defensive fallback
+        disabled_module_slugs = set()
+    disabled_commands_global: set[str] = set()
+    for mod_slug, cmds in COMMANDS_BY_MODULE.items():
+        if mod_slug in disabled_module_slugs:
+            disabled_commands_global.update(cmds)
+
+    command_options = [
+        {"value": "sync_staff", "label": "Sync staff directory"},
+        {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
+        {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
+        {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
+        {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
+        {"value": "sync_huntress", "label": "Sync Huntress data"},
+        {"value": "sync_to_xero", "label": "Sync to Xero"},
+        {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
+        {"value": "generate_invoice", "label": "Generate Invoice"},
+        {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
+        {"value": "sync_recordings", "label": "Sync call recordings"},
+        {"value": "sync_unifi_talk_recordings", "label": "Sync Unifi Talk recordings"},
+        {"value": "queue_transcriptions", "label": "Queue transcriptions"},
+        {"value": "process_transcription", "label": "Process transcription"},
+    ]
+    command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
+    existing_commands = {task.get("command") for task in tasks if task.get("command")}
+    for command in sorted(existing_commands):
+        if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
+            command_options.append({"value": str(command), "label": str(command)})
+
+    company_options = [{"value": "", "label": "All companies"}]
+    for cid, cname in sorted(company_lookup.items(), key=lambda item: item[1].lower()):
+        company_options.append({"value": str(cid), "label": cname})
+    for cid in sorted(missing_company_ids):
+        company_options.append({"value": str(cid), "label": f"Company #{cid}"})
 
     extra = {
         "title": "Scheduled Tasks",
@@ -5303,6 +5251,8 @@ async def admin_scheduled_tasks(
         "success_message": success,
         "error_message": error,
         "upgrade_status": system_state_service.get_upgrade_status(),
+        "command_options": command_options,
+        "company_options": company_options,
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
 
