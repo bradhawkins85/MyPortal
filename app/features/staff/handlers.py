@@ -1930,6 +1930,30 @@ async def retry_workflow_execution(execution_id: int, request: Request):
     return JSONResponse(result)
 
 
+async def resume_workflow_execution(execution_id: int, request: Request):
+    (
+        user,
+        _membership,
+        _company,
+        _staff_permission,
+        _company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_admin=True)
+    if redirect:
+        return redirect
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    try:
+        result = await staff_onboarding_workflow_service.resume_paused_workflow_execution(
+            execution_id=execution_id,
+            initiated_by_user_id=int(user["id"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JSONResponse(result)
+
+
 async def create_staff_member(request: Request):
     (
         user,

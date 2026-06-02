@@ -198,11 +198,13 @@ class WorkflowStepError(RuntimeError):
         step_name: str | None = None,
         request_payload: dict[str, Any] | None = None,
         http_status: int | None = None,
+        create_ticket_on_failure: bool = True,
     ) -> None:
         super().__init__(message)
         self.step_name = step_name
         self.request_payload = request_payload or {}
         self.http_status = http_status
+        self.create_ticket_on_failure = bool(create_ticket_on_failure)
 
 
 class LicenseExhaustionError(WorkflowStepError):
@@ -868,12 +870,18 @@ def _resolve_step_max_retries(step: dict[str, Any], *, default_max_retries: int)
         return max(0, int(default_max_retries))
 
 
-def _resolve_step_failure_mode(step: dict[str, Any]) -> str:
+def _resolve_step_failure_policy(step: dict[str, Any]) -> dict[str, Any]:
     failure_policy = step.get("failure_policy") if isinstance(step.get("failure_policy"), dict) else {}
     mode = str(failure_policy.get("mode") or "fail_fast").strip().lower()
-    if mode not in {"fail_fast", "continue"}:
-        return "fail_fast"
-    return mode
+    if mode not in {"continue", "fail_fast", "pause"}:
+        mode = "fail_fast"
+    create_ticket_on_failure = bool(
+        failure_policy.get("create_ticket_on_failure", failure_policy.get("createTicketOnFailure", True))
+    )
+    return {
+        "mode": mode,
+        "create_ticket_on_failure": create_ticket_on_failure,
+    }
 
 
 def _normalize_condition_values(raw: Any) -> list[str]:
@@ -2298,7 +2306,7 @@ async def _execute_policy_steps(
             continue
         request_payload = _redact_payload(resolved_step, secret_vars=secret_vars)
         step_max_retries = _resolve_step_max_retries(step, default_max_retries=max_retries)
-        step_failure_mode = _resolve_step_failure_mode(step)
+        step_failure_policy = _resolve_step_failure_policy(step)
         try:
             response_payload = await _attempt_step(
                 execution_id=execution_id,
@@ -2313,14 +2321,31 @@ async def _execute_policy_steps(
                     vars_map=vars_map,
                 ),
             )
-        except WorkflowStepError:
-            if step_failure_mode == "continue":
+        except WorkflowStepError as exc:
+            if step_failure_policy["mode"] == "continue":
                 await workflow_repo.update_execution_state(
                     execution_id,
                     state=STATE_OFFBOARDING_IN_PROGRESS if direction == DIRECTION_OFFBOARDING else STATE_PROVISIONING,
                     current_step=f"{index + 1}:{step_name}:failed_continue",
                 )
                 continue
+            if step_failure_policy["mode"] == "pause":
+                await workflow_repo.update_execution_state(
+                    execution_id,
+                    state=waiting_external_state,
+                    current_step=f"{index + 1}:{step_name}:paused",
+                    last_error=str(exc),
+                )
+                return {
+                    "paused": True,
+                    "confirmation_token": None,
+                    "pause_reason": "step_failure",
+                    "step_name": step_name,
+                    "error_text": str(exc),
+                    "request_payload": exc.request_payload,
+                    "create_ticket_on_pause": bool(step_failure_policy["create_ticket_on_failure"]),
+                }
+            exc.create_ticket_on_failure = bool(step_failure_policy["create_ticket_on_failure"])
             raise
         step_outputs = response_payload if isinstance(response_payload, dict) else {"result": response_payload}
         context_patch: dict[str, Any] = {"vars": {}, "secret_vars": []}
@@ -2589,6 +2614,37 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         )
         if execution_result.get("paused"):
             paused_state = STATE_OFFBOARDING_WAITING_EXTERNAL if direction == DIRECTION_OFFBOARDING else STATE_WAITING_EXTERNAL
+            ticket_id: int | None = None
+            if execution_result.get("pause_reason") == "step_failure" and execution_result.get("create_ticket_on_pause"):
+                try:
+                    ticket_id = await _create_failure_ticket(
+                        company_id=company_id,
+                        staff=staff,
+                        error_text=str(execution_result.get("error_text") or "Workflow paused"),
+                        error_context={
+                            "execution_id": execution_id,
+                            "workflow_key": workflow_key,
+                            "current_state": in_progress_state,
+                            "step": execution_result.get("step_name") or "workflow_step",
+                            "payload": execution_result.get("request_payload"),
+                            "pause_reason": "step_failure",
+                        },
+                    )
+                except Exception as ticket_exc:  # noqa: BLE001
+                    log_error(
+                        "Failed to create helpdesk ticket for paused workflow",
+                        company_id=company_id,
+                        staff_id=staff_id,
+                        execution_id=execution_id,
+                        error=str(ticket_exc),
+                    )
+            await workflow_repo.update_execution_state(
+                execution_id,
+                state=paused_state,
+                current_step=f"paused_{execution_result.get('step_name') or 'workflow_step'}",
+                last_error=str(execution_result.get("error_text") or execution_result.get("pause_reason") or "paused"),
+                helpdesk_ticket_id=ticket_id,
+            )
             if updates_staff_status:
                 await staff_repo.update_staff(
                     staff_id,
@@ -2620,6 +2676,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 "state": paused_state,
                 "execution_id": execution_id,
                 "confirmation_token": execution_result.get("confirmation_token"),
+                "helpdesk_ticket_id": ticket_id,
             }
 
         completed_at = _utc_now_naive()
@@ -2767,26 +2824,27 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
         failed_payload = exc.request_payload if isinstance(exc, WorkflowStepError) else None
 
         ticket_id: int | None = None
-        try:
-            ticket_id = await _create_failure_ticket(
-                company_id=company_id,
-                staff=staff,
-                error_text=error_text,
-                error_context={
-                    "execution_id": execution_id,
-                    "workflow_key": workflow_key,
-                    "current_state": in_progress_state,
-                    "step": failed_step or "provisioning_pipeline",
-                    "payload": failed_payload,
-                },
-            )
-        except Exception as ticket_exc:  # noqa: BLE001
-            log_error(
-                "Failed to create helpdesk ticket for onboarding workflow failure",
-                company_id=company_id,
-                staff_id=staff_id,
-                error=str(ticket_exc),
-            )
+        if getattr(exc, "create_ticket_on_failure", True):
+            try:
+                ticket_id = await _create_failure_ticket(
+                    company_id=company_id,
+                    staff=staff,
+                    error_text=error_text,
+                    error_context={
+                        "execution_id": execution_id,
+                        "workflow_key": workflow_key,
+                        "current_state": in_progress_state,
+                        "step": failed_step or "provisioning_pipeline",
+                        "payload": failed_payload,
+                    },
+                )
+            except Exception as ticket_exc:  # noqa: BLE001
+                log_error(
+                    "Failed to create helpdesk ticket for onboarding workflow failure",
+                    company_id=company_id,
+                    staff_id=staff_id,
+                    error=str(ticket_exc),
+                )
 
         await workflow_repo.update_execution_state(
             execution_id,
@@ -3059,6 +3117,34 @@ async def retry_failed_workflow_execution(
         "staff_name": staff_name,
         "original_execution_id": execution_id,
     }
+
+
+async def resume_paused_workflow_execution(
+    *,
+    execution_id: int,
+    initiated_by_user_id: int | None,
+) -> dict[str, Any]:
+    execution = await workflow_repo.get_execution_by_id(execution_id)
+    if not execution:
+        raise ValueError("Workflow execution not found")
+
+    state = str(execution.get("state") or "").strip().lower()
+    resumable_states = {
+        STATE_WAITING_EXTERNAL,
+        STATE_OFFBOARDING_WAITING_EXTERNAL,
+        STATE_PAUSED_LICENSE_UNAVAILABLE,
+    }
+    if state not in resumable_states:
+        raise ValueError(f"Execution is not in a resumable state (current: {state})")
+
+    company_id = int(execution["company_id"])
+    staff_id = int(execution["staff_id"])
+    return await resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=company_id,
+        staff_id=staff_id,
+        execution_id=execution_id,
+        initiated_by_user_id=initiated_by_user_id,
+    )
 
 
 async def confirm_external_checkpoint_and_resume(
