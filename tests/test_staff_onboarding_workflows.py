@@ -669,6 +669,69 @@ async def test_resume_workflow_pauses_on_license_exhaustion(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_resume_workflow_pause_mode_creates_ticket(monkeypatch):
+    staff_record = {
+        "id": 602,
+        "company_id": 10,
+        "first_name": "Pat",
+        "last_name": "Lee",
+        "email": "pat@example.com",
+        "enabled": True,
+        "is_ex_staff": False,
+        "onboarding_status": workflows.STATE_APPROVED,
+    }
+    monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_company_workflow_policy",
+        AsyncMock(
+            return_value={
+                "workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY,
+                "max_retries": 0,
+                "config": {},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_execution_by_id",
+        AsyncMock(return_value={"id": 91, "direction": workflows.DIRECTION_ONBOARDING}),
+    )
+    monkeypatch.setattr(
+        workflows,
+        "_execute_policy_steps",
+        AsyncMock(
+            return_value={
+                "paused": True,
+                "pause_reason": "step_failure",
+                "step_name": "Create user",
+                "error_text": "create failed",
+                "request_payload": {"user": "pat@example.com"},
+                "create_ticket_on_pause": True,
+            }
+        ),
+    )
+    ticket_mock = AsyncMock(return_value=445)
+    monkeypatch.setattr(workflows, "_create_failure_ticket", ticket_mock)
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", AsyncMock())
+    monkeypatch.setattr(workflows.staff_repo, "update_staff", AsyncMock())
+
+    result = await workflows.resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=10,
+        staff_id=602,
+        execution_id=91,
+        initiated_by_user_id=None,
+    )
+
+    assert result["state"] == workflows.STATE_WAITING_EXTERNAL
+    assert result["helpdesk_ticket_id"] == 445
+    context = ticket_mock.await_args.kwargs["error_context"]
+    assert context["step"] == "Create user"
+    assert context["payload"] == {"user": "pat@example.com"}
+    assert context["pause_reason"] == "step_failure"
+
+
+@pytest.mark.anyio
 async def test_process_paused_license_executions_resumes_eligible_execution(monkeypatch):
     claim_mock = AsyncMock(
         side_effect=[
@@ -684,6 +747,18 @@ async def test_process_paused_license_executions_resumes_eligible_execution(monk
 
     assert result == {"resumed": 1, "skipped": 0}
     resume_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_resume_paused_workflow_execution_rejects_non_paused_state(monkeypatch):
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_execution_by_id",
+        AsyncMock(return_value={"id": 33, "state": workflows.STATE_COMPLETED}),
+    )
+
+    with pytest.raises(ValueError, match="not in a resumable state"):
+        await workflows.resume_paused_workflow_execution(execution_id=33, initiated_by_user_id=1)
 
 
 @pytest.mark.anyio

@@ -292,6 +292,50 @@ async def test_execute_policy_steps_continues_when_step_failure_mode_continue(mo
 
 
 @pytest.mark.anyio
+async def test_execute_policy_steps_pauses_when_step_failure_mode_pause(monkeypatch):
+    monkeypatch.setattr(
+        workflows,
+        "_normalise_workflow_steps",
+        lambda *_args, **_kwargs: [
+            {
+                "name": "Create user",
+                "type": "create_user",
+                "failure_policy": {"mode": "pause", "create_ticket_on_failure": True},
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_step_logs_for_execution_ids",
+        AsyncMock(return_value={81: []}),
+    )
+    update_mock = AsyncMock()
+    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", update_mock)
+    monkeypatch.setattr(
+        workflows,
+        "_attempt_step",
+        AsyncMock(side_effect=workflows.WorkflowStepError("create failed", request_payload={"user": "new.user@example.com"})),
+    )
+
+    result = await workflows._execute_policy_steps(
+        execution_id=81,
+        company_id=9,
+        staff={"id": 703, "email": "new.user@example.com"},
+        direction=workflows.DIRECTION_ONBOARDING,
+        policy_config={},
+        max_retries=0,
+        waiting_external_state=workflows.STATE_WAITING_EXTERNAL,
+    )
+
+    assert result["paused"] is True
+    assert result["pause_reason"] == "step_failure"
+    assert result["create_ticket_on_pause"] is True
+    assert result["step_name"] == "Create user"
+    assert result["request_payload"] == {"user": "new.user@example.com"}
+    assert update_mock.await_args.kwargs["state"] == workflows.STATE_WAITING_EXTERNAL
+
+
+@pytest.mark.anyio
 async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(monkeypatch):
     monkeypatch.setattr(workflows, "_normalise_workflow_steps", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
