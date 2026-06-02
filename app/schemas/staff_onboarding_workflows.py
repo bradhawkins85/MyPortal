@@ -54,7 +54,7 @@ class WorkflowFailurePolicy(BaseModel):
     @classmethod
     def validate_mode(cls, value: Any) -> str:
         text = str(value or "fail_fast").strip().lower()
-        allowed = {"fail_fast", "continue", "retry_then_fail"}
+        allowed = {"continue", "fail_fast", "pause", "retry_then_fail"}
         if text not in allowed:
             raise ValueError(f"Failure policy mode must be one of: {', '.join(sorted(allowed))}.")
         return text

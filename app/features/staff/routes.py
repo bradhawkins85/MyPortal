@@ -79,6 +79,11 @@ router.add_api_route(
     handlers.retry_workflow_execution,
     methods=["POST"],
 )
+router.add_api_route(
+    "/api/staff/workflows/executions/{execution_id}/resume",
+    handlers.resume_workflow_execution,
+    methods=["POST"],
+)
 router.add_api_route("/staff", handlers.create_staff_member, methods=["POST"], response_class=HTMLResponse)
 router.add_api_route("/staff/{staff_id}", handlers.update_staff_member, methods=["PUT"])
 router.add_api_route(
