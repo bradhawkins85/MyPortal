@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services import staff_onboarding_workflows as workflows
-from app.main import _normalise_workflow_config
+from app.features.staff.handlers import _normalise_workflow_config
 
 
 @pytest.fixture
