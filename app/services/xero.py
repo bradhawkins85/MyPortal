@@ -2017,34 +2017,6 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                next_invoice_number = await _fetch_next_xero_invoice_number(
-                    client=client,
-                    api_url=api_url,
-                    request_headers=request_headers,
-                )
-                if next_invoice_number:
-                    invoice_payload["InvoiceNumber"] = next_invoice_number
-                    if next_invoice_number != working_invoice_number:
-                        try:
-                            await invoice_repo.patch_invoice(
-                                invoice_id,
-                                invoice_number=next_invoice_number,
-                            )
-                            await _rename_local_invoice_references(
-                                company_id,
-                                working_invoice_number,
-                                next_invoice_number,
-                            )
-                            working_invoice_number = next_invoice_number
-                        except Exception as exc:
-                            log_warning(
-                                "Failed to align local invoice number before Xero sync",
-                                invoice_id=invoice_id,
-                                company_id=company_id,
-                                invoice_number=next_invoice_number,
-                                error=str(exc),
-                            )
-
                 webhook_payload = {"Invoices": [invoice_payload]}
                 try:
                     event = await webhook_monitor.create_manual_event(
