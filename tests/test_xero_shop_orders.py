@@ -128,6 +128,76 @@ async def test_build_order_invoice_without_user_name():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_build_order_invoice_omits_unit_amount_when_item_price_missing():
+    async def fake_fetch_summary(order_number: str, company_id: int):
+        return {"order_number": order_number, "status": "placed", "po_number": None}
+
+    async def fake_fetch_items(order_number: str, company_id: int):
+        return [
+            {
+                "quantity": 1,
+                "price": None,
+                "product_name": "Managed Services",
+                "sku": "MANAGED-SERVICES",
+            }
+        ]
+
+    async def fake_fetch_company(company_id: int):
+        return {"id": company_id, "name": "Acme Corp", "xero_id": "abc-123"}
+
+    invoice = await xero_service.build_order_invoice(
+        "ORD123",
+        1,
+        account_code="200",
+        tax_type=None,
+        line_amount_type="Exclusive",
+        fetch_summary=fake_fetch_summary,
+        fetch_items=fake_fetch_items,
+        fetch_company=fake_fetch_company,
+    )
+
+    assert invoice is not None
+    line_item = invoice["line_items"][0]
+    assert line_item["ItemCode"] == "MANAGED-SERVICES"
+    assert "UnitAmount" not in line_item
+
+
+@pytest.mark.anyio("asyncio")
+async def test_build_quote_invoice_omits_unit_amount_when_item_price_missing():
+    async def fake_fetch_summary(quote_number: str, company_id: int):
+        return {"quote_number": quote_number, "status": "draft", "po_number": None}
+
+    async def fake_fetch_items(quote_number: str, company_id: int):
+        return [
+            {
+                "quantity": 2,
+                "price": None,
+                "product_name": "Cloud Backup",
+                "sku": "CLOUD-BACKUP",
+            }
+        ]
+
+    async def fake_fetch_company(company_id: int):
+        return {"id": company_id, "name": "Acme Corp", "xero_id": "abc-123"}
+
+    invoice = await xero_service.build_quote_invoice(
+        "QUO123",
+        1,
+        account_code="200",
+        tax_type=None,
+        line_amount_type="Exclusive",
+        fetch_summary=fake_fetch_summary,
+        fetch_items=fake_fetch_items,
+        fetch_company=fake_fetch_company,
+    )
+
+    assert invoice is not None
+    line_item = invoice["line_items"][0]
+    assert line_item["ItemCode"] == "CLOUD-BACKUP"
+    assert "UnitAmount" not in line_item
+
+
+@pytest.mark.anyio("asyncio")
 async def test_send_order_to_xero_success():
     """Test successful order sending to Xero."""
     
