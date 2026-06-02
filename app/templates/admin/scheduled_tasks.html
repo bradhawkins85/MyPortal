@@ -2,6 +2,15 @@
 {% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
 
 {% block header_actions %}
+  <button
+    type="button"
+    class="button button--primary"
+    data-task-create
+    aria-haspopup="dialog"
+    aria-controls="task-editor-modal"
+  >
+    New Task
+  </button>
   <div class="header-menu" data-header-menu>
     <button
       type="button"
@@ -24,9 +33,6 @@
       data-header-menu-panel
       hidden
     >
-      <a class="header-menu__item" role="menuitem" tabindex="0" href="/admin/automation">
-        <span>Manage Tasks</span>
-      </a>
       <button
         type="button"
         class="header-menu__item header-menu__item--danger"
@@ -265,18 +271,19 @@
                       </summary>
                       <ul class="header-title-menu__list" role="menu">
                         <li class="header-title-menu__item" role="none">
+                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-edit>Edit</button>
+                        </li>
+                        <li class="header-title-menu__item" role="none">
                           <button type="button" class="header-title-menu__link" role="menuitem" data-task-run>Run now</button>
                         </li>
                         <li class="header-title-menu__item" role="none">
                           <button type="button" class="header-title-menu__link" role="menuitem" data-task-logs>View logs</button>
                         </li>
+                        {% if task.company_edit_url %}
                         <li class="header-title-menu__item" role="none">
-                          {% if task.company_edit_url %}
-                            <a class="header-title-menu__link" role="menuitem" href="{{ task.company_edit_url }}">Source</a>
-                          {% else %}
-                            <a class="header-title-menu__link" role="menuitem" href="/admin/automation">Source</a>
-                          {% endif %}
+                          <a class="header-title-menu__link" role="menuitem" href="{{ task.company_edit_url }}">Source</a>
                         </li>
+                        {% endif %}
                       </ul>
                     </details>
                   </td>
@@ -298,6 +305,103 @@
       </div>
     </div>
   </section>
+</div>
+
+<div class="modal" id="task-editor-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close task editor</span>
+    </button>
+    <h2 class="modal__title">Scheduled task</h2>
+    <div class="modal__body">
+      <form id="scheduled-task-form" class="form" autocomplete="off">
+        <input type="hidden" name="task_id" id="task-id" />
+        <div class="form-field">
+          <label class="form-label" for="task-name-display">Task name</label>
+          <input
+            class="form-input"
+            id="task-name-display"
+            type="text"
+            value=""
+            readonly
+            aria-readonly="true"
+            tabindex="-1"
+            data-initial-focus
+          />
+          <p class="form-help">Generated automatically from the selected company and command.</p>
+          <input type="hidden" id="task-name" name="name" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-command">Command</label>
+          <select class="form-input" id="task-command" name="command" required>
+            {% for option in command_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-company">Company</label>
+          <select class="form-input" id="task-company" name="companyId">
+            {% for option in company_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <p class="form-help">Choose a company or leave All companies selected to run globally.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="task-cron">Cron expression</label>
+          <input
+            class="form-input"
+            id="task-cron"
+            name="cron"
+            required
+            placeholder="0 2 * * *"
+            pattern="^[^\s]+(\s+[^\s]+){4,5}$"
+          />
+          <p class="form-help">Crontab syntax in UTC. Use five fields for minute through weekday.</p>
+        </div>
+        <div class="form-field" id="task-description-field">
+          <label class="form-label" for="task-description">Description</label>
+          <textarea class="form-input form-input--textarea" id="task-description" name="description" rows="3"></textarea>
+          <p class="form-help" id="task-description-help">Optional description or notes about this task.</p>
+        </div>
+        <div class="form-field" id="task-json-payload-field" style="display: none;">
+          <label class="form-label" for="task-json-payload">JSON Payload</label>
+          <textarea class="form-input form-input--textarea" id="task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
+          <p class="form-help">JSON configuration for ticket creation. Required fields: subject. Optional: description, priority, status, category, requester_id, assigned_user_id.</p>
+        </div>
+        <div class="form-field form-field--inline">
+          <label class="form-label" for="task-max-retries">Max retries</label>
+          <input class="form-input" id="task-max-retries" name="maxRetries" type="number" min="0" value="12" />
+        </div>
+        <div class="form-field form-field--inline">
+          <label class="form-label" for="task-backoff">Retry backoff (seconds)</label>
+          <input class="form-input" id="task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="task-active" name="active" checked />
+            <span>Task active</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <div class="form-actions__group">
+            <button type="submit" class="button">Save task</button>
+            <button type="button" class="button button--ghost" data-task-reset>Clear form</button>
+          </div>
+          <button
+            type="button"
+            class="button button--danger"
+            data-task-delete-modal
+            hidden
+            aria-hidden="true"
+          >
+            Delete task
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="task-logs-modal" role="dialog" aria-modal="true" hidden>
