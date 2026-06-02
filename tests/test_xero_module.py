@@ -803,8 +803,37 @@ async def test_lookup_xero_contact_id_returns_contact_id_on_success():
     assert result == "abc-123"
     mock_client.get.assert_awaited_once()
     call_kwargs = mock_client.get.call_args
-    assert call_kwargs[1]["params"]["where"] == 'Name=="ACME Ltd"'
+    # The where clause should include the contact name and summaryOnly flag
+    assert "ACME Ltd" in call_kwargs[1]["params"]["where"]
     assert call_kwargs[1]["params"]["summaryOnly"] == "true"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_lookup_xero_contact_id_escapes_double_quotes_in_name():
+    """Double quotes in the contact name are escaped in the where clause."""
+    from app.services.xero import _lookup_xero_contact_id
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "Contacts": [{"ContactID": "q-id", "Name": 'Say "Hello" Ltd'}]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+
+    result = await _lookup_xero_contact_id(
+        'Say "Hello" Ltd',
+        client=mock_client,
+        tenant_id="tenant-1",
+        access_token="token-1",
+    )
+
+    assert result == "q-id"
+    call_kwargs = mock_client.get.call_args
+    where_clause = call_kwargs[1]["params"]["where"]
+    # Raw double quotes must not appear unescaped inside the OData string literal
+    assert '\\"' in where_clause
 
 
 @pytest.mark.anyio("asyncio")
