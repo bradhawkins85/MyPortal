@@ -29,6 +29,7 @@ _STATUS_CLASS_MAP = {
     "past due": "status--suspended",
     "void": "status--invited",
     "cancelled": "status--invited",
+    "xero": "status--xero",
 }
 
 
@@ -87,6 +88,10 @@ async def invoices_page(request: Request):
         total_amount += amount_decimal
         status_text_raw = (record.get("status") or "").strip()
         status_slug = status_text_raw.lower()
+        xero_invoice_id = (record.get("xero_invoice_id") or "").strip()
+        if xero_invoice_id and status_slug not in {"paid", "void", "cancelled"}:
+            status_slug = "xero"
+            status_text_raw = "Xero"
         if status_slug == "paid":
             paid_count += 1
         status_class = _STATUS_CLASS_MAP.get(status_slug, "status--invited" if status_slug else "")
@@ -148,6 +153,10 @@ async def invoice_detail_page(request: Request, invoice_id: int):
     amount_decimal = amount_decimal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     status_text_raw = (invoice.get("status") or "").strip()
     status_slug = status_text_raw.lower()
+    xero_invoice_id = (invoice.get("xero_invoice_id") or "").strip()
+    if xero_invoice_id and status_slug not in {"paid", "void", "cancelled"}:
+        status_slug = "xero"
+        status_text_raw = "Xero"
     status_class = _STATUS_CLASS_MAP.get(status_slug, "status--invited" if status_slug else "")
     due_value = invoice.get("due_date")
     if isinstance(due_value, datetime):
