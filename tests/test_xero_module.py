@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -181,6 +181,59 @@ async def test_build_ticket_invoices_respects_status_filters_and_templates():
     assert existing_invoice["context"]["tickets"][-1]["id"] == 1
     assert existing_invoice["context"]["invoice_date"] == invoice_day.isoformat()
     assert existing_invoice["reference"] == "Support — Tickets 100, 1"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_build_ticket_invoices_supports_extended_template_placeholders():
+    created_at = datetime(2024, 5, 1, 9, 0, tzinfo=timezone.utc)
+    closed_at = datetime(2024, 5, 3, 10, 0, tzinfo=timezone.utc)
+
+    async def fake_fetch_ticket(ticket_id: int):
+        return {
+            "id": ticket_id,
+            "company_id": 1,
+            "subject": "Portal issue",
+            "status": "resolved",
+            "requester_id": 99,
+            "created_at": created_at,
+            "closed_at": closed_at,
+        }
+
+    async def fake_fetch_replies(ticket_id: int):
+        return [
+            {"minutes_spent": 60, "is_billable": True},
+            {"minutes_spent": 15, "is_billable": False},
+        ]
+
+    async def fake_fetch_company(company_id: int):
+        return {"id": company_id, "name": "Acme Corp", "xero_id": "abc-123"}
+
+    with patch("app.services.xero.users_repo.get_user_by_id", new=AsyncMock(return_value={
+        "id": 99,
+        "first_name": "Ada",
+        "last_name": "Lovelace",
+        "email": "ada@example.com",
+    })):
+        invoices = await xero_service.build_ticket_invoices(
+            [1],
+            hourly_rate=Decimal("150"),
+            account_code="400",
+            tax_type=None,
+            line_amount_type="Exclusive",
+            reference_prefix="Support",
+            description_template=(
+                "{requester_name}|{requester_email}|{ticket_created_date}|"
+                "{billable_minutes}|{non_billable_minutes}|{duration_days}"
+            ),
+            fetch_ticket=fake_fetch_ticket,
+            fetch_replies=fake_fetch_replies,
+            fetch_company=fake_fetch_company,
+        )
+
+    assert len(invoices) == 1
+    assert invoices[0]["line_items"][0]["Description"] == (
+        "Ada Lovelace|ada@example.com|2024-05-01|60|15|2"
+    )
 
 
 @pytest.mark.anyio("asyncio")
