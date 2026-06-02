@@ -1152,6 +1152,7 @@
       const url = taskId ? `/scheduler/tasks/${taskId}` : '/scheduler/tasks';
       try {
         await requestJson(url, { method, body: JSON.stringify(payload) });
+        saveTaskFilter();
         window.location.reload();
       } catch (error) {
         alert(`Unable to save task: ${error.message}`);
@@ -1190,6 +1191,7 @@
 
         try {
           await requestJson(`/scheduler/tasks/${taskId}`, { method: 'DELETE' });
+          saveTaskFilter();
           window.location.reload();
         } catch (error) {
           deleteButton.dataset.processing = 'false';
@@ -1229,9 +1231,50 @@
     }
   }
 
+  const TASK_FILTER_SESSION_KEY = 'portal.scheduled-tasks.filter';
+
+  function saveTaskFilter() {
+    try {
+      const input = document.querySelector('[data-table-filter="scheduled-tasks-table"]');
+      const value = input ? input.value : '';
+      if (value) {
+        sessionStorage.setItem(TASK_FILTER_SESSION_KEY, value);
+      } else {
+        sessionStorage.removeItem(TASK_FILTER_SESSION_KEY);
+      }
+    } catch (err) {
+      // sessionStorage unavailable — ignore
+    }
+  }
+
+  function restoreTaskFilter() {
+    try {
+      const value = sessionStorage.getItem(TASK_FILTER_SESSION_KEY);
+      if (!value) {
+        return;
+      }
+      sessionStorage.removeItem(TASK_FILTER_SESSION_KEY);
+      const input = document.querySelector('[data-table-filter="scheduled-tasks-table"]');
+      if (input) {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    } catch (err) {
+      // sessionStorage unavailable — ignore
+    }
+  }
+
+  function closeRowDropdown(button) {
+    const menu = button.closest('[data-header-menu]');
+    if (menu) {
+      menu.open = false;
+    }
+  }
+
   function bindTaskActions() {
     document.querySelectorAll('[data-task-edit]').forEach((button) => {
       button.addEventListener('click', () => {
+        closeRowDropdown(button);
         const row = button.closest('tr');
         const task = parseTask(row);
         if (task) {
@@ -1253,6 +1296,8 @@
           return;
         }
 
+        closeRowDropdown(button);
+
         const row = button.closest('tr');
         const task = parseTask(row);
         if (!task || !task.id) {
@@ -1266,6 +1311,7 @@
         try {
           await requestJson(`/scheduler/tasks/${task.id}/run`, { method: 'POST' });
           window.setTimeout(() => {
+            saveTaskFilter();
             window.location.reload();
           }, 250);
         } catch (error) {
@@ -1279,6 +1325,7 @@
 
     document.querySelectorAll('[data-task-logs]').forEach((button) => {
       button.addEventListener('click', () => {
+        closeRowDropdown(button);
         const row = button.closest('tr');
         const task = parseTask(row);
         if (task) {
@@ -2366,6 +2413,7 @@
     bindAutomationDeleteActions();
     setupAutomationForm();
     bindAutomationSectionPagination();
+    restoreTaskFilter();
   }
 
   function dispatchAutomationTableLayoutRefresh() {
