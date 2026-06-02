@@ -18,7 +18,21 @@
     {% set global_tasks = global_tasks | default([], true) %}
     {% set company_tasks = company_tasks | default([], true) %}
     {% set show_inactive_tasks = show_inactive_tasks | default(false, true) %}
+    {% set upgrade_status = upgrade_status | default({}, true) %}
     <div class="card__body card__body--stacked">
+      <div class="alert alert--info" role="status">
+        <strong>Upgrade mode:</strong> {{ upgrade_status.configured_mode | default('graceful') }}
+        {% if upgrade_status.pending %}
+          <br />
+          <strong>Pending upgrade:</strong> {{ upgrade_status.requested_mode | default(upgrade_status.configured_mode | default('graceful')) }}
+          {% if upgrade_status.requested_reason %} ({{ upgrade_status.requested_reason }}){% endif %}
+        {% endif %}
+        {% if upgrade_status.last_status %}
+          <br />
+          <strong>Last upgrade:</strong> {{ upgrade_status.last_status }} via {{ upgrade_status.last_mode | default(upgrade_status.configured_mode | default('graceful')) }}
+          {% if upgrade_status.last_reason %} ({{ upgrade_status.last_reason }}){% endif %}
+        {% endif %}
+      </div>
       <details class="card-collapsible" data-automation-section="global" open>
         <summary class="card__header card__header--collapsible">
           <div>

@@ -43,16 +43,26 @@ def test_system_update_schedules_flag_when_remote_ahead(monkeypatch, tmp_path: P
     async def fake_get_remote_main_ref(self):
         return "remotesha"
 
+    async def fake_list_changed_files(self, base: str, head: str):
+        assert base == "localsha"
+        assert head == "remotesha"
+        return ["app/main.py"]
+
     monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
     monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr(SchedulerService, "_list_changed_files", fake_list_changed_files)
     monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
 
     output = asyncio.run(scheduler._run_system_update(force_restart=True))
 
     assert "Update scheduled" in output
+    assert "restart mode" in output
     assert flag_path.exists()
     contents = flag_path.read_text(encoding="utf-8")
     assert "requested_from_ui=true" in contents
+    assert "requested_mode=restart" in contents
+    assert "requested_reason=manual_restart_requested" in contents
     assert "local_head=localsha" in contents
     assert "remote_head=remotesha" in contents
 
@@ -239,7 +249,11 @@ def test_system_update_falls_back_to_restart_when_changes_outside_packs(
     output = asyncio.run(scheduler._run_system_update())
 
     assert "Update scheduled" in output
+    assert "graceful mode" in output
     assert flag_path.exists()
+    contents = flag_path.read_text(encoding="utf-8")
+    assert "requested_mode=graceful" in contents
+    assert "requested_reason=shared_app_code_changed" in contents
     assert registry.reloaded == []
     assert not any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
@@ -335,6 +349,59 @@ def test_classify_feature_pack_changes():
     assert cls(["app/main.py"]) is None
     assert cls(["app/features/tickets/portal_routes.py", "README.md"]) is None
     assert cls([]) is None
+
+
+def test_resolve_requested_upgrade_mode_defaults_to_graceful(monkeypatch):
+    monkeypatch.delenv("APP_UPGRADE_MODE", raising=False)
+    assert SchedulerService._resolve_requested_upgrade_mode() == "graceful"
+
+
+def test_resolve_requested_upgrade_mode_uses_env(monkeypatch):
+    monkeypatch.setenv("APP_UPGRADE_MODE", "rolling")
+    assert SchedulerService._resolve_requested_upgrade_mode() == "rolling"
+
+
+def test_system_update_schedules_with_env_mode(monkeypatch, tmp_path: Path):
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "var" / "state" / "system_update.flag"
+
+    async def fake_get_git_ref(self, ref: str):
+        return "localsha"
+
+    async def fake_get_remote_main_ref(self):
+        return "remotesha"
+
+    async def fake_list_changed_files(self, base: str, head: str):
+        return ["deploy/nginx/myportal-bluegreen.conf"]
+
+    monkeypatch.setenv("APP_UPGRADE_MODE", "rolling")
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", fake_get_git_ref)
+    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", fake_get_remote_main_ref)
+    monkeypatch.setattr(SchedulerService, "_list_changed_files", fake_list_changed_files)
+    monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
+    monkeypatch.setattr(
+        SchedulerService,
+        "_try_feature_pack_hot_reload",
+        lambda self, *, local_head, remote_head: asyncio.sleep(0, result=None),
+    )
+
+    output = asyncio.run(scheduler._run_system_update())
+
+    assert "rolling mode" in output
+    contents = flag_path.read_text(encoding="utf-8")
+    assert "requested_mode=rolling" in contents
+    assert "requested_reason=deployment_topology_changed" in contents
+
+
+def test_classify_full_upgrade_reason():
+    cls = SchedulerService._classify_full_upgrade_reason
+
+    assert cls(["pyproject.toml"]) == "dependency_manifest_changed"
+    assert cls(["migrations/20260602_add_table.sql"]) == "migrations_changed"
+    assert cls(["deploy/nginx/myportal.conf"]) == "deployment_topology_changed"
+    assert cls(["scripts/upgrade.sh"]) == "upgrade_runtime_changed"
+    assert cls(["app/main.py"]) == "shared_app_code_changed"
 
 
 def test_consume_feature_pack_reload_flag_reloads_and_deletes(monkeypatch, tmp_path: Path):
