@@ -32,7 +32,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           # GITLEAKS_LICENSE is only required for private organisations that
           # use the paid SaaS integration. For public usage this is optional.
