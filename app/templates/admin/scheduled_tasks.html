@@ -326,14 +326,13 @@
             readonly
             aria-readonly="true"
             tabindex="-1"
-            data-initial-focus
           />
           <p class="form-help">Generated automatically from the selected company and command.</p>
           <input type="hidden" id="task-name" name="name" />
         </div>
         <div class="form-field">
           <label class="form-label" for="task-command">Command</label>
-          <select class="form-input" id="task-command" name="command" required>
+          <select class="form-input" id="task-command" name="command" required data-initial-focus>
             {% for option in command_options %}
               <option value="{{ option.value }}">{{ option.label }}</option>
             {% endfor %}
