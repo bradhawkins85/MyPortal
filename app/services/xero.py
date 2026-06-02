@@ -1071,16 +1071,19 @@ async def build_order_invoice(
     context_items: list[dict[str, Any]] = []
     for item in items:
         quantity_decimal = _to_decimal(item.get("quantity")) or Decimal("0")
-        price_decimal = _to_decimal(item.get("price")) or Decimal("0")
         quantity = float(_quantize(quantity_decimal, "0.01"))
-        unit_amount = float(_quantize(price_decimal, "0.01"))
+        price_decimal = _to_decimal(item.get("price"))
+        unit_amount = float(_quantize(price_decimal, "0.01")) if price_decimal is not None else None
+        sku = item.get("sku")
         line_item: dict[str, Any] = {
             "Description": str(item.get("product_name") or "Item").strip(),
             "Quantity": quantity,
-            "UnitAmount": unit_amount,
             "AccountCode": str(account_code or "").strip(),
         }
-        sku = item.get("sku")
+        if unit_amount is not None:
+            line_item["UnitAmount"] = unit_amount
+        elif not sku:
+            line_item["UnitAmount"] = 0.0
         if sku:
             line_item["ItemCode"] = str(sku)
         if tax_type:
@@ -1160,16 +1163,19 @@ async def build_quote_invoice(
     context_items: list[dict[str, Any]] = []
     for item in items:
         quantity_decimal = _to_decimal(item.get("quantity")) or Decimal("0")
-        price_decimal = _to_decimal(item.get("price")) or Decimal("0")
         quantity = float(_quantize(quantity_decimal, "0.01"))
-        unit_amount = float(_quantize(price_decimal, "0.01"))
+        price_decimal = _to_decimal(item.get("price"))
+        unit_amount = float(_quantize(price_decimal, "0.01")) if price_decimal is not None else None
+        sku = item.get("sku")
         line_item: dict[str, Any] = {
             "Description": str(item.get("product_name") or "Item").strip(),
             "Quantity": quantity,
-            "UnitAmount": unit_amount,
             "AccountCode": str(account_code or "").strip(),
         }
-        sku = item.get("sku")
+        if unit_amount is not None:
+            line_item["UnitAmount"] = unit_amount
+        elif not sku:
+            line_item["UnitAmount"] = 0.0
         if sku:
             line_item["ItemCode"] = str(sku)
         if tax_type:
