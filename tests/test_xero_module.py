@@ -544,6 +544,8 @@ async def test_sync_company_creates_webhook_monitor_event():
         assert result["company_id"] == 123
         assert result["synced_count"] == 1
         assert result["failed_count"] == 0
+        assert result["synced_invoices"][0]["previous_invoice_number"] == "INV-LOCAL-001"
+        assert result["synced_invoices"][0]["invoice_number"] == "XERO-1001"
         assert result["synced_invoices"][0]["event_id"] == 456
         assert result["synced_invoices"][0]["response_status"] == 200
         
