@@ -157,7 +157,8 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     header_html, _, _ = header_html.partition("</header>")
     assert 'aria-controls="scheduled-tasks-bulk-actions-menu"' in header_html
     assert 'id="scheduled-tasks-bulk-actions-menu"' in header_html
-    assert ">Manage Tasks<" in header_html
+    assert ">Manage Tasks<" not in header_html
+    assert 'data-task-create' in header_html
 
 
 def test_scheduled_tasks_page_empty(super_admin_context, monkeypatch):
@@ -284,6 +285,52 @@ def test_scheduled_tasks_page_failed_task_status(super_admin_context, monkeypatc
     html = response.text
     assert "Failing task" in html
     assert "failed" in html
+
+
+def test_scheduled_tasks_page_edit_button_and_modal_present(super_admin_context, monkeypatch):
+    """Test that the Edit button and task editor modal are rendered on the page."""
+
+    async def fake_list_tasks(include_inactive=False):
+        return [
+            {
+                "id": 1,
+                "name": "Sync staff",
+                "command": "sync_staff",
+                "cron": "30 3 * * *",
+                "company_id": None,
+                "active": True,
+                "last_run_at": None,
+                "last_status": None,
+                "last_error": None,
+                "description": None,
+                "max_retries": 12,
+                "retry_backoff_seconds": 300,
+            }
+        ]
+
+    async def fake_list_companies():
+        return []
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/scheduled-tasks")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'data-task-edit' in html
+    assert 'id="task-editor-modal"' in html
+    assert 'id="scheduled-task-form"' in html
+
+
+def test_admin_automation_redirects(super_admin_context):
+    """GET /admin/automation should permanently redirect to /admin/scheduled-tasks."""
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get("/admin/automation")
+
+    assert response.status_code == 301
+    assert response.headers["location"] == "/admin/scheduled-tasks"
 
 
 def test_bulk_delete_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
