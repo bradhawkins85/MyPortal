@@ -53,11 +53,11 @@
     return response.json();
   }
 
-  function showMessage(target, message) {
+  function showMessage(config, message) {
     if (!message) {
       return;
     }
-    const variant = target && target.variant ? target.variant : 'info';
+    const variant = config && config.variant ? config.variant : 'info';
     if (window.__portalToast && typeof window.__portalToast.show === 'function') {
       window.__portalToast.show(message, { variant });
       return;

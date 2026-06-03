@@ -214,7 +214,7 @@
   <script>
     function showGlobalToast(message, variant = 'info', options = {}) {
       if (window.__portalToast && typeof window.__portalToast.show === 'function') {
-        window.__portalToast.show(message, { variant, ...(options || {}) });
+        window.__portalToast.show(message, { variant, ...options });
         return;
       }
       window.alert(message);
