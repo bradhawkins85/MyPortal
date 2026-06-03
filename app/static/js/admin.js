@@ -223,7 +223,7 @@
             const message =
               (error && typeof error === 'object' && typeof error.userMessage === 'string' && error.userMessage.trim()) ||
               defaultErrorMessage;
-            detail.showToast(message, { variant: 'error', autoHideMs: 6000 });
+            detail.showToast(message, { variant: 'error' });
           }
           return;
         } finally {
@@ -238,7 +238,7 @@
             (result && typeof result.successMessage === 'string' && result.successMessage.trim()) ||
             defaultSuccessMessage;
           if (message) {
-            detail.showToast(message, { variant: 'success', autoHideMs: 4000 });
+            detail.showToast(message, { variant: 'success' });
           }
         }
       }

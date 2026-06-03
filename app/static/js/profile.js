@@ -53,21 +53,20 @@
     return response.json();
   }
 
-  function showMessage(element, message) {
-    if (!element) {
+  function showMessage(config, message) {
+    if (!message) {
       return;
     }
-    element.textContent = message;
-    element.hidden = !message;
+    const variant = config && config.variant ? config.variant : 'info';
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant });
+      return;
+    }
+    window.alert(message);
   }
 
-  function clearMessages(elements) {
-    elements.forEach((element) => {
-      if (element) {
-        element.hidden = true;
-        element.textContent = '';
-      }
-    });
+  function clearMessages(_elements) {
+    // Intentionally no-op: status messages are surfaced as toast notifications.
   }
 
   const userId = root.dataset.userId;
@@ -85,8 +84,8 @@
   }
 
   const passwordForm = document.getElementById('password-form');
-  const passwordSuccess = document.querySelector('[data-password-success]');
-  const passwordError = document.querySelector('[data-password-error]');
+  const passwordSuccess = { variant: 'success' };
+  const passwordError = { variant: 'error' };
 
   if (passwordForm) {
     passwordForm.addEventListener('submit', async (event) => {
@@ -123,8 +122,8 @@
   }
 
   const mobileForm = document.getElementById('mobile-form');
-  const mobileSuccess = document.querySelector('[data-mobile-success]');
-  const mobileError = document.querySelector('[data-mobile-error]');
+  const mobileSuccess = { variant: 'success' };
+  const mobileError = { variant: 'error' };
 
   if (mobileForm && userId) {
     mobileForm.addEventListener('submit', async (event) => {
@@ -147,8 +146,8 @@
   }
 
   const bookingLinkForm = document.getElementById('booking-link-form');
-  const bookingSuccess = document.querySelector('[data-booking-success]');
-  const bookingError = document.querySelector('[data-booking-error]');
+  const bookingSuccess = { variant: 'success' };
+  const bookingError = { variant: 'error' };
 
   if (bookingLinkForm && userId) {
     bookingLinkForm.addEventListener('submit', async (event) => {
@@ -171,8 +170,8 @@
   }
 
   const emailSignatureForm = document.getElementById('email-signature-form');
-  const signatureSuccess = document.querySelector('[data-signature-success]');
-  const signatureError = document.querySelector('[data-signature-error]');
+  const signatureSuccess = { variant: 'success' };
+  const signatureError = { variant: 'error' };
 
   if (emailSignatureForm && userId) {
     emailSignatureForm.addEventListener('submit', async (event) => {
@@ -201,8 +200,8 @@
   }
 
   const matrixUsernameForm = document.getElementById('matrix-username-form');
-  const matrixUsernameSuccess = document.querySelector('[data-matrix-username-success]');
-  const matrixUsernameError = document.querySelector('[data-matrix-username-error]');
+  const matrixUsernameSuccess = { variant: 'success' };
+  const matrixUsernameError = { variant: 'error' };
 
   if (matrixUsernameForm && userId) {
     matrixUsernameForm.addEventListener('submit', async (event) => {
@@ -230,8 +229,8 @@
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
   const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
-  const sidebarSuccess = root.querySelector('[data-sidebar-success]');
-  const sidebarError = root.querySelector('[data-sidebar-error]');
+  const sidebarSuccess = { variant: 'success' };
+  const sidebarError = { variant: 'error' };
   let sidebarState = [];
   const SIDEBAR_DIVIDER_KEY_PREFIX = '__divider__:';
   const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
@@ -481,8 +480,8 @@
   const verifyForm = document.getElementById('totp-verify-form');
   const verifyName = document.getElementById('totp-name');
   const verifyCode = document.getElementById('totp-code');
-  const verifySuccess = document.querySelector('[data-totp-success]');
-  const verifyError = document.querySelector('[data-totp-error]');
+  const verifySuccess = { variant: 'success' };
+  const verifyError = { variant: 'error' };
   const cancelButton = root.querySelector('[data-totp-cancel]');
 
   function renderTotpDevices() {

@@ -54,10 +54,6 @@
   {%- if ns.params -%}?{{ ns.params | join('&') }}{%- endif -%}
 {%- endmacro %}
 
-{% if cart_error %}
-  <div class="alert alert--error" role="alert">{{ cart_error }}</div>
-{% endif %}
-
 <div class="shop-layout">
   <nav class="shop-categories" aria-label="Product categories">
     <a

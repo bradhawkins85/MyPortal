@@ -5,13 +5,6 @@
 {% block bcp_content %}
 <div class="bcp-page page-container">
   <!-- Success/Error Messages -->
-  {% if request.query_params.get('success') %}
-    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
-  {% endif %}
-  {% if request.query_params.get('error') %}
-    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
-  {% endif %}
-
   <!-- Page Header -->
   <div class="page-header">
     <div>

@@ -4,13 +4,6 @@
 {% block header_title %}BCP — Contacts{% endblock %}
 {% block bcp_content %}
 <div class="bcp-page page-container">
-  {% if request.query_params.get('success') %}
-    <div class="alert alert-success">{{ request.query_params.get('success') }}</div>
-  {% endif %}
-  {% if request.query_params.get('error') %}
-    <div class="alert alert-error">{{ request.query_params.get('error') }}</div>
-  {% endif %}
-
   <div class="page-header">
     <div>
       <h1 class="page-title">Contacts &amp; Claims</h1>
