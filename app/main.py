@@ -2211,6 +2211,7 @@ def _sanitize_message(value: str | None) -> str | None:
 
 
 def _page_flash(message: str | None, variant: str = "info") -> dict[str, str] | None:
+    """Return a normalized toast payload for page-level flash messaging."""
     text = _sanitize_message(message)
     if text is None:
         return None
@@ -2225,6 +2226,7 @@ def _derive_page_flash(
     *,
     template_name: str | None = None,
 ) -> dict[str, str] | None:
+    """Infer a single flash payload from known context keys by precedence."""
     for key, variant in (
         ("error_message", "error"),
         ("cart_error", "error"),
@@ -2240,8 +2242,13 @@ def _derive_page_flash(
 
     errors = context.get("errors")
     if isinstance(errors, Sequence) and not isinstance(errors, (str, bytes, bytearray)):
+        collected: list[str] = []
         for entry in errors:
-            flash = _page_flash(str(entry) if entry is not None else None, "error")
+            message = _sanitize_message(str(entry) if entry is not None else None)
+            if message:
+                collected.append(message)
+        if collected:
+            flash = _page_flash("; ".join(collected), "error")
             if flash:
                 return flash
 

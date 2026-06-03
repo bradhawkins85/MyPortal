@@ -30,6 +30,9 @@
 
   function recordToast(message, variant) {
     if (typeof fetch !== 'function') {
+      if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
+        console.warn('Fetch API unavailable; toast notification was not persisted.');
+      }
       return;
     }
     const text = typeof message === 'string' ? message.trim() : '';
@@ -41,19 +44,29 @@
       targetVariant === 'warning' || targetVariant === 'error'
         ? { toast_variant: targetVariant, severity: targetVariant }
         : { toast_variant: targetVariant };
+    const csrfTokenMeta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : '';
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    };
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
     fetch('/api/notifications', {
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
+      headers,
       credentials: 'same-origin',
       body: JSON.stringify({
         event_type: 'general',
         message: text,
         metadata,
       }),
-    }).catch(() => {});
+    }).catch((error) => {
+      if (typeof console !== 'undefined' && console && typeof console.error === 'function') {
+        console.error('Failed to persist toast notification', error);
+      }
+    });
   }
 
   function createToastController(root) {
@@ -814,8 +827,10 @@
         return;
       }
       toast.show(message, { variant: normaliseToastVariant(payload.variant) });
-    } catch (_error) {
-      // Ignore malformed payloads.
+    } catch (error) {
+      if (typeof console !== 'undefined' && console && typeof console.warn === 'function') {
+        console.warn('Malformed page_flash payload ignored', error);
+      }
     }
   }
 
