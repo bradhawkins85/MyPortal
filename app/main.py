@@ -2006,6 +2006,8 @@ async def _render_template(
     extra: dict[str, Any] | None = None,
 ):
     context = await _build_base_context(request, user, extra=extra)
+    if context.get("page_flash") is None:
+        context["page_flash"] = _derive_page_flash(context, template_name=template_name)
     return templates.TemplateResponse(context["request"], template_name, context)
 
 
@@ -2206,6 +2208,65 @@ def _sanitize_message(value: str | None) -> str | None:
     if not text:
         return None
     return text[:200]
+
+
+def _page_flash(message: str | None, variant: str = "info") -> dict[str, str] | None:
+    """Return a normalized toast payload for page-level flash messaging."""
+    text = _sanitize_message(message)
+    if text is None:
+        return None
+    normalized_variant = str(variant or "info").strip().lower()
+    if normalized_variant not in {"info", "success", "warning", "error"}:
+        normalized_variant = "info"
+    return {"message": text, "variant": normalized_variant}
+
+
+def _derive_page_flash(
+    context: Mapping[str, Any],
+    *,
+    template_name: str | None = None,
+) -> dict[str, str] | None:
+    """Infer a single flash payload from known context keys by precedence."""
+    for key, variant in (
+        ("error_message", "error"),
+        ("cart_error", "error"),
+        ("reply_error", "error"),
+        ("success_message", "success"),
+        ("cart_message", "success"),
+        ("status_message", "info"),
+        ("order_message", "info"),
+    ):
+        flash = _page_flash(context.get(key), variant)
+        if flash:
+            return flash
+
+    errors = context.get("errors")
+    if isinstance(errors, Sequence) and not isinstance(errors, (str, bytes, bytearray)):
+        collected: list[str] = []
+        for entry in errors:
+            message = _sanitize_message(str(entry) if entry is not None else None)
+            if message:
+                collected.append(message)
+        if collected:
+            flash = _page_flash("; ".join(collected), "error")
+            if flash:
+                return flash
+
+    m365_templates = {
+        "m365/index.html",
+        "m365/benchmarks.html",
+        "m365/best_practices_settings.html",
+        "m365/shared_mailboxes.html",
+        "m365/diagnostics.html",
+        "m365/user_mailboxes.html",
+    }
+    if template_name in m365_templates:
+        for key, variant in (("error", "error"), ("success", "success")):
+            flash = _page_flash(context.get(key), variant)
+            if flash:
+                return flash
+
+    return None
 
 
 def _sanitize_local_redirect_target(

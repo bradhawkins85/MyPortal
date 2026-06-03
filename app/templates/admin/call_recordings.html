@@ -212,21 +212,12 @@
   </dialog>
 
   <script>
-    // Show a notification using the global toast element from the base layout
-    function showGlobalToast(message, variant = 'info', autoHideMs = 5000) {
-      const root = document.querySelector('[data-global-toast]');
-      if (!root) return;
-      const messageEl = root.querySelector('[data-notification-toast-message]');
-      if (!messageEl) return;
-      const VARIANTS = { success: 'alert--success', warning: 'alert--warning', error: 'alert--error', info: 'alert--info' };
-      ['alert--info', 'alert--success', 'alert--warning', 'alert--error'].forEach(cls => root.classList.remove(cls));
-      root.classList.add(VARIANTS[variant] || 'alert--info');
-      messageEl.textContent = message;
-      root.hidden = false;
-      root.setAttribute('aria-hidden', 'false');
-      if (autoHideMs) {
-        setTimeout(() => { root.hidden = true; root.setAttribute('aria-hidden', 'true'); }, autoHideMs);
+    function showGlobalToast(message, variant = 'info', options = {}) {
+      if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+        window.__portalToast.show(message, { variant, ...options });
+        return;
       }
+      window.alert(message);
     }
 
     // State
@@ -518,7 +509,7 @@
         modal.showModal();
       } catch (error) {
         console.error('Error viewing transcript:', error);
-        alert('Failed to load transcript');
+        showGlobalToast('Failed to load transcript', 'error');
       }
     }
 
@@ -549,7 +540,7 @@
         modal.showModal();
       } catch (error) {
         console.error('Error loading companies:', error);
-        alert('Failed to load companies');
+        showGlobalToast('Failed to load companies', 'error');
       }
     }
 
@@ -560,7 +551,7 @@
       try {
         const response = await fetch(`/api/call-recordings/${recordingId}`);
         if (!response.ok) {
-          alert('Recording not found');
+          showGlobalToast('Recording not found', 'error');
           return;
         }
         
@@ -573,7 +564,7 @@
         modal.showModal();
       } catch (error) {
         console.error('Error loading recording:', error);
-        alert('Failed to load recording details');
+        showGlobalToast('Failed to load recording details', 'error');
       }
     }
 
@@ -639,13 +630,13 @@
           }
         }
         
-        alert(message);
+        showGlobalToast(message, 'success');
         
         // Reload the recordings list
         loadRecordings();
       } catch (error) {
         console.error(`Error ${force ? 'force syncing' : 'syncing'} recordings:`, error);
-        alert(`Failed to ${force ? 'force sync' : 'sync'} recordings: ${error.message}`);
+        showGlobalToast(`Failed to ${force ? 'force sync' : 'sync'} recordings: ${error.message}`, 'error');
       }
     }
 
@@ -689,7 +680,7 @@
     document.getElementById('link-ticket-btn').addEventListener('click', async () => {
       const ticketNumber = document.getElementById('ticket-number-input').value;
       if (!ticketNumber) {
-        alert('Please enter a ticket number');
+        showGlobalToast('Please enter a ticket number', 'error');
         return;
       }
       
@@ -705,19 +696,19 @@
         
         if (!response.ok) throw new Error('Failed to link recording');
         
-        alert('Recording linked to ticket successfully!');
+        showGlobalToast('Recording linked to ticket successfully!', 'success');
         document.getElementById('link-ticket-modal').close();
         loadRecordings();
       } catch (error) {
         console.error('Error linking recording:', error);
-        alert('Failed to link recording to ticket');
+        showGlobalToast('Failed to link recording to ticket', 'error');
       }
     });
 
     document.getElementById('create-ticket-btn').addEventListener('click', async () => {
       const companyId = document.getElementById('company-select').value;
       if (!companyId) {
-        alert('Please select a company');
+        showGlobalToast('Please select a company', 'error');
         return;
       }
       
@@ -732,12 +723,12 @@
         if (!response.ok) throw new Error('Failed to create ticket');
         
         const result = await response.json();
-        alert(`Ticket #${result.ticket_number} created successfully!`);
+        showGlobalToast(`Ticket #${result.ticket_number} created successfully!`, 'success');
         document.getElementById('create-ticket-modal').close();
         loadRecordings();
       } catch (error) {
         console.error('Error creating ticket:', error);
-        alert('Failed to create ticket');
+        showGlobalToast('Failed to create ticket', 'error');
       }
     });
 

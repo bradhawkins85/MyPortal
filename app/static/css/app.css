@@ -4010,7 +4010,19 @@ button.header-title-menu__link {
   font-weight: 600;
 }
 
+.notification-toast {
+  border-radius: 0.85rem;
+  padding: var(--space-gap-base) var(--space-gap-roomy);
+  font-weight: 600;
+}
+
 .alert--error {
+  background: rgba(248, 113, 113, 0.2);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+}
+
+.notification-toast--error {
   background: rgba(248, 113, 113, 0.2);
   border: 1px solid rgba(248, 113, 113, 0.4);
   color: #fecaca;
@@ -4022,13 +4034,31 @@ button.header-title-menu__link {
   color: #bae6fd;
 }
 
+.notification-toast--info {
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #bae6fd;
+}
+
 .alert--success {
   background: rgba(134, 239, 172, 0.2);
   border: 1px solid rgba(134, 239, 172, 0.45);
   color: #bbf7d0;
 }
 
+.notification-toast--success {
+  background: rgba(134, 239, 172, 0.2);
+  border: 1px solid rgba(134, 239, 172, 0.45);
+  color: #bbf7d0;
+}
+
 .alert--warning {
+  background: rgba(253, 224, 71, 0.18);
+  border: 1px solid rgba(253, 224, 71, 0.4);
+  color: #fef08a;
+}
+
+.notification-toast--warning {
   background: rgba(253, 224, 71, 0.18);
   border: 1px solid rgba(253, 224, 71, 0.4);
   color: #fef08a;

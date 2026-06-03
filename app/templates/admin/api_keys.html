@@ -83,16 +83,6 @@
       </form>
     </header>
 
-    {% if errors %}
-      {% for error in errors %}
-        <div class="alert alert--error">{{ error }}</div>
-      {% endfor %}
-    {% endif %}
-
-    {% if status_message %}
-      <div class="alert alert--info">{{ status_message }}</div>
-    {% endif %}
-
     {% if new_api_key %}
       <section class="secret-card">
         <header class="secret-card__header">

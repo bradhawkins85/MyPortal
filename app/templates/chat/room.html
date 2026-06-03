@@ -136,7 +136,6 @@
       </footer>
     </form>
     <div id="invite-result" class="modal__body" hidden>
-      <p class="alert alert--success">Invite sent successfully!</p>
       <dl class="invite-credentials">
         <dt>Matrix ID</dt><dd id="invite-mxid"></dd>
         <dt>Homeserver</dt><dd id="invite-homeserver"></dd>
@@ -189,6 +188,14 @@
   const input = document.getElementById('chat-message-input');
   const sendBtn = document.getElementById('chat-send-btn');
   const csrfToken = document.getElementById('csrf-token-val')?.value || '';
+
+  function showPortalToast(message, variant = 'info') {
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant });
+      return;
+    }
+    window.alert(message);
+  }
 
   if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 
@@ -320,10 +327,10 @@
         document.getElementById('chat-empty')?.remove();
       } else {
         const err = await resp.json();
-        alert(err.detail || 'Failed to send');
+        showPortalToast(err.detail || 'Failed to send', 'error');
       }
     } catch(err) {
-      alert('Network error: ' + err.message);
+      showPortalToast('Network error: ' + err.message, 'error');
     } finally {
       sendBtn.disabled = false;
       input.focus();
@@ -383,7 +390,7 @@
       const resp = await fetch(`/api/chat/rooms/${roomId}/join`, {
         method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}, body: '{}',
       });
-      if (resp.ok) { this.textContent = 'Joined'; } else { this.disabled = false; alert('Failed to join'); }
+      if (resp.ok) { this.textContent = 'Joined'; } else { this.disabled = false; showPortalToast('Failed to join', 'error'); }
     } catch { this.disabled = false; }
   });
 
@@ -398,7 +405,7 @@
       });
       if (resp.ok) { location.reload(); } else {
         const err = await resp.json();
-        alert(err.detail || 'Failed to assign');
+        showPortalToast(err.detail || 'Failed to assign', 'error');
         this.disabled = false;
       }
     } catch { this.disabled = false; }
@@ -411,7 +418,7 @@
       const resp = await fetch(`/api/chat/rooms/${roomId}/close`, {
         method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}, body: '{}',
       });
-      if (resp.ok) { location.reload(); } else { this.disabled = false; alert('Failed to close chat'); }
+      if (resp.ok) { location.reload(); } else { this.disabled = false; showPortalToast('Failed to close chat', 'error'); }
     } catch { this.disabled = false; }
   });
 
@@ -440,6 +447,7 @@
       });
       if (resp.ok) {
         const data = await resp.json();
+        showPortalToast('Invite sent successfully!', 'success');
         inviteForm.hidden = true;
         const result = document.getElementById('invite-result');
         result.hidden = false;
@@ -450,11 +458,11 @@
         if (dl && data.deep_link) { dl.href = data.deep_link; }
       } else {
         const err = await resp.json();
-        alert(err.detail || 'Failed to send invite');
+        showPortalToast(err.detail || 'Failed to send invite', 'error');
         btn.disabled = false;
       }
     } catch(err) {
-      alert('Network error: ' + err.message);
+      showPortalToast('Network error: ' + err.message, 'error');
       btn.disabled = false;
     }
   });

@@ -21,17 +21,6 @@
       For best results use a portrait image at A4 proportions (e.g. 794&nbsp;×&nbsp;1123&nbsp;px).
     </p>
 
-    {% if request.query_params.get('success') %}
-      <div class="alert alert--success" style="margin-bottom: var(--space-3);">
-        {{ request.query_params.get('success') }}
-      </div>
-    {% endif %}
-    {% if request.query_params.get('error') %}
-      <div class="alert alert--danger" style="margin-bottom: var(--space-3);">
-        {{ request.query_params.get('error') }}
-      </div>
-    {% endif %}
-
     {% if current_image %}
       <div style="margin-bottom: var(--space-4);">
         <p style="font-weight: 600; margin-bottom: var(--space-2);">Current cover image</p>

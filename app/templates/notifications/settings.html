@@ -80,8 +80,6 @@
               autocomplete="off"
             >
               <input type="hidden" data-event-type />
-              <div class="alert alert--success" data-event-settings-success hidden role="status"></div>
-              <div class="alert alert--error" data-event-settings-error hidden role="alert"></div>
               <div class="form__group form__group--columns">
                 <div class="form__field">
                   <label for="event-settings-display-name">Display name</label>
@@ -184,10 +182,6 @@
           data-notification-preferences-form
           data-endpoint="{{ preferences_endpoint }}"
         >
-          <div class="alert alert--success" data-preferences-success hidden role="status">
-            Notification preferences saved successfully.
-          </div>
-          <div class="alert alert--error" data-preferences-error hidden role="alert"></div>
           <div class="table-wrapper">
             <table class="table" id="notification-preferences-table" data-table data-table-id="notification-preferences">
               <thead>
