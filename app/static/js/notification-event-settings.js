@@ -23,8 +23,6 @@
   const form = adminSection.querySelector('[data-event-settings-form]');
   const saveButton = adminSection.querySelector('[data-event-settings-save]');
   const resetButton = adminSection.querySelector('[data-event-settings-reset]');
-  const successAlert = adminSection.querySelector('[data-event-settings-success]');
-  const errorAlert = adminSection.querySelector('[data-event-settings-error]');
   const actionList = adminSection.querySelector('[data-event-action-list]');
   const addActionButton = adminSection.querySelector('[data-event-action-add]');
   const actionTemplate = document.getElementById('notification-event-action-row');
@@ -117,36 +115,29 @@
   }
 
   function clearAlerts() {
-    if (successAlert) {
-      successAlert.hidden = true;
-      successAlert.textContent = '';
-    }
-    if (errorAlert) {
-      errorAlert.hidden = true;
-      errorAlert.textContent = '';
-    }
+    // Intentionally no-op: validation and result messages are shown as toasts.
   }
 
   function showError(message) {
-    if (!errorAlert) {
+    if (!message) {
       return;
     }
-    errorAlert.textContent = message;
-    errorAlert.hidden = false;
-    if (successAlert) {
-      successAlert.hidden = true;
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant: 'error' });
+      return;
     }
+    window.alert(message);
   }
 
   function showSuccess(message) {
-    if (!successAlert) {
+    if (!message) {
       return;
     }
-    successAlert.textContent = message;
-    successAlert.hidden = false;
-    if (errorAlert) {
-      errorAlert.hidden = true;
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant: 'success' });
+      return;
     }
+    window.alert(message);
   }
 
   function buildModuleSelect(value) {

@@ -11,18 +11,6 @@
         <p class="subtitle">Manage customer subscriptions and renewals</p>
     </div>
 
-    {% if error_message %}
-    <div class="alert alert-error">
-        {{ error_message }}
-    </div>
-    {% endif %}
-
-    {% if success_message %}
-    <div class="alert alert-success">
-        {{ success_message }}
-    </div>
-    {% endif %}
-
     <div class="filters">
         <form method="get" action="/admin/subscriptions">
             <div class="filter-row">

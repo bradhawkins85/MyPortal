@@ -332,17 +332,20 @@
 
         if (!response.ok) throw new Error('Failed to save custom fields');
 
-        // Show success message
-        const toast = document.createElement('div');
-        toast.style.cssText = 'position: fixed; bottom: 20px; right: 20px; padding: 16px 24px; background: #10b981; color: white; border-radius: 4px; z-index: 10000;';
-        toast.textContent = 'Custom fields saved successfully';
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 3000);
+        if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+          window.__portalToast.show('Custom fields saved successfully', { variant: 'success' });
+        } else {
+          window.alert('Custom fields saved successfully');
+        }
 
         closeModal();
       } catch (error) {
         console.error('Error saving custom fields:', error);
-        alert('Failed to save custom fields. Please try again.');
+        if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+          window.__portalToast.show('Failed to save custom fields. Please try again.', { variant: 'error' });
+        } else {
+          window.alert('Failed to save custom fields. Please try again.');
+        }
       }
     });
   }

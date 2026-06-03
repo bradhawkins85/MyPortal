@@ -1,7 +1,60 @@
 (function () {
   'use strict';
 
-  const ALERT_VARIANTS = ['alert--info', 'alert--success', 'alert--warning', 'alert--error'];
+  const TOAST_VARIANTS = ['info', 'success', 'warning', 'error'];
+  const TOAST_CLASSES = [
+    'notification-toast--info',
+    'notification-toast--success',
+    'notification-toast--warning',
+    'notification-toast--error',
+  ];
+  const TOAST_SUCCESS_HIDE_MS = 3000;
+  const TOAST_INFO_HIDE_MS = 3000;
+  const TOAST_FAILURE_HIDE_MS = 60000;
+
+  function normaliseToastVariant(variant) {
+    const value = typeof variant === 'string' ? variant.trim().toLowerCase() : '';
+    if (value === 'success' || value === 'warning' || value === 'error') {
+      return value;
+    }
+    return 'info';
+  }
+
+  function defaultAutoHideMsForVariant(variant) {
+    const target = normaliseToastVariant(variant);
+    if (target === 'error' || target === 'warning') {
+      return TOAST_FAILURE_HIDE_MS;
+    }
+    return target === 'success' ? TOAST_SUCCESS_HIDE_MS : TOAST_INFO_HIDE_MS;
+  }
+
+  function recordToast(message, variant) {
+    if (typeof fetch !== 'function') {
+      return;
+    }
+    const text = typeof message === 'string' ? message.trim() : '';
+    if (!text) {
+      return;
+    }
+    const targetVariant = normaliseToastVariant(variant);
+    const metadata =
+      targetVariant === 'warning' || targetVariant === 'error'
+        ? { toast_variant: targetVariant, severity: targetVariant }
+        : { toast_variant: targetVariant };
+    fetch('/api/notifications', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        event_type: 'general',
+        message: text,
+        metadata,
+      }),
+    }).catch(() => {});
+  }
 
   function createToastController(root) {
     if (!root) {
@@ -16,17 +69,9 @@
     let hideTimer = null;
 
     function applyVariant(variant) {
-      const targetClass = variant && typeof variant === 'string' ? variant : 'info';
-      const variantClass =
-        targetClass === 'success'
-          ? 'alert--success'
-          : targetClass === 'warning'
-          ? 'alert--warning'
-          : targetClass === 'error'
-          ? 'alert--error'
-          : 'alert--info';
-
-      ALERT_VARIANTS.forEach((className) => {
+      const targetClass = normaliseToastVariant(variant);
+      const variantClass = `notification-toast--${targetClass}`;
+      TOAST_CLASSES.forEach((className) => {
         if (className !== variantClass) {
           root.classList.remove(className);
         }
@@ -76,6 +121,35 @@
     return { show, hide };
   }
 
+  function getPortalToastApi() {
+    if (typeof window !== 'undefined' && window.__portalToast) {
+      return window.__portalToast;
+    }
+    const controller = createToastController(document.querySelector('[data-global-toast]'));
+    const api = {
+      show(message, options) {
+        const settings = options || {};
+        const variant = normaliseToastVariant(settings.variant);
+        const hasCustomAutoHide = Number.isFinite(settings.autoHideMs);
+        controller.show(message, {
+          ...settings,
+          variant,
+          autoHideMs: hasCustomAutoHide ? settings.autoHideMs : defaultAutoHideMsForVariant(variant),
+        });
+        if (settings.persist !== false) {
+          recordToast(message, variant);
+        }
+      },
+      hide() {
+        controller.hide();
+      },
+    };
+    if (typeof window !== 'undefined') {
+      window.__portalToast = api;
+    }
+    return api;
+  }
+
   function setupAutoRefresh() {
     const body = document.body;
     if (!body) {
@@ -90,7 +164,7 @@
       return;
     }
 
-    const toast = createToastController(document.querySelector('[data-global-toast]'));
+    const toast = getPortalToastApi();
 
     let socket = null;
     let reconnectAttempts = 0;
@@ -112,7 +186,7 @@
       const detail = {
         ...(payload && typeof payload === 'object' ? payload : {}),
         showToast(message, options) {
-          toast.show(message, options || {});
+          toast.show(message, { ...(options || {}), persist: false });
         },
       };
 
@@ -130,7 +204,7 @@
         ? `${reason} Refreshing to apply updates…`
         : 'Updates are available. Refreshing to apply changes…';
 
-      toast.show(message, { variant: 'info' });
+      toast.show(message, { variant: 'info', persist: false });
 
       resetReloadTimer();
       reloadTimer = window.setTimeout(() => {
@@ -270,7 +344,7 @@
       trigger.title = 'Reloads the app to request the latest files';
     }
 
-    const toast = createToastController(document.querySelector('[data-global-toast]'));
+    const toast = getPortalToastApi();
     let busy = false;
 
     async function broadcastRefreshNotice() {
@@ -466,19 +540,19 @@
       let broadcastResult = { attempted: false, success: false };
 
       if (shouldBroadcastRefresh) {
-        toast.show('Notifying connected sessions to refresh…', { variant: 'info' });
+        toast.show('Notifying connected sessions to refresh…', { variant: 'info', persist: false });
         broadcastResult = await broadcastRefreshNotice();
         if (broadcastResult.success) {
           toast.show(
             supportsEnhancedRefresh
               ? 'Refresh notice sent. Clearing cached assets…'
               : 'Refresh notice sent. Reloading with a clean request…',
-            { variant: 'info' },
+            { variant: 'info', persist: false },
           );
         } else {
           toast.show('Could not notify other sessions. Continuing with local refresh…', {
             variant: 'warning',
-            autoHideMs: 6000,
+            persist: false,
           });
         }
       } else {
@@ -488,6 +562,7 @@
             : 'Refreshing the application with a clean request…',
           {
             variant: 'info',
+            persist: false,
           },
         );
       }
@@ -504,12 +579,12 @@
       if (hadError) {
         toast.show('Encountered issues clearing cached assets. Reloading to request the latest files…', {
           variant: 'warning',
-          autoHideMs: 6000,
+          persist: false,
         });
       } else if (supportsEnhancedRefresh) {
         toast.show('Cached assets cleared. Reloading with the latest version…', {
           variant: 'success',
-          autoHideMs: 4000,
+          persist: false,
         });
       } else {
         const message = broadcastResult.success
@@ -517,7 +592,7 @@
           : 'Reloading the application to request the latest files…';
         toast.show(message, {
           variant: 'success',
-          autoHideMs: 4000,
+          persist: false,
         });
       }
 
@@ -707,7 +782,7 @@
   }
 
   function setupAutoAlerts() {
-    const toast = createToastController(document.querySelector('[data-global-toast]'));
+    const toast = getPortalToastApi();
     if (!toast) {
       return;
     }
@@ -717,9 +792,30 @@
     const errorMessage = params.get('error');
 
     if (successMessage) {
-      toast.show(successMessage, { variant: 'success', autoHideMs: 5000 });
-    } else if (errorMessage) {
-      toast.show(errorMessage, { variant: 'error', autoHideMs: 7000 });
+      toast.show(successMessage, { variant: 'success' });
+      return;
+    }
+    if (errorMessage) {
+      toast.show(errorMessage, { variant: 'error' });
+      return;
+    }
+
+    const pageFlashNode = document.getElementById('page-flash-data');
+    if (!pageFlashNode) {
+      return;
+    }
+    try {
+      const payload = JSON.parse(pageFlashNode.textContent || '{}');
+      if (!payload || typeof payload !== 'object') {
+        return;
+      }
+      const message = typeof payload.message === 'string' ? payload.message.trim() : '';
+      if (!message) {
+        return;
+      }
+      toast.show(message, { variant: normaliseToastVariant(payload.variant) });
+    } catch (_error) {
+      // Ignore malformed payloads.
     }
   }
 
@@ -793,6 +889,7 @@
   }
 
   function initialise() {
+    getPortalToastApi();
     setupAutoRefresh();
     setupPullToRefresh();
     setupForceRefresh();
