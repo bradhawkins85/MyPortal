@@ -23,8 +23,6 @@
   const addInput = form.querySelector('[data-preferences-new-event]');
   const addButton = form.querySelector('[data-preferences-add]');
   const resetButton = form.querySelector('[data-preferences-reset]');
-  const successAlert = form.querySelector('[data-preferences-success]');
-  const errorAlert = form.querySelector('[data-preferences-error]');
   const endpoint = form.getAttribute('data-endpoint');
 
   const defaultAttribute = tbody ? tbody.getAttribute('data-defaults') : '[]';
@@ -198,33 +196,30 @@
   }
 
   function hideAlerts() {
-    if (successAlert) {
-      successAlert.hidden = true;
-    }
-    if (errorAlert) {
-      errorAlert.hidden = true;
-      errorAlert.textContent = '';
-    }
+    // Intentionally no-op: preference messages are shown as toasts.
   }
 
   function showSuccess(message) {
     hideAlerts();
-    if (!successAlert) {
+    if (!message) {
       return;
     }
-    successAlert.textContent = message;
-    successAlert.hidden = false;
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant: 'success' });
+      return;
+    }
+    window.alert(message);
   }
 
   function showError(message) {
-    if (!errorAlert) {
+    if (!message) {
       return;
     }
-    errorAlert.textContent = message;
-    errorAlert.hidden = false;
-    if (successAlert) {
-      successAlert.hidden = true;
+    if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+      window.__portalToast.show(message, { variant: 'error' });
+      return;
     }
+    window.alert(message);
   }
 
   let initialState = normalisePreferences(serialisePreferences());

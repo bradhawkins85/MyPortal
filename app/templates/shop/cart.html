@@ -30,18 +30,6 @@
     {% endif %}
   </header>
 
-  {% if cart_error %}
-    <div class="alert alert--error" role="alert">{{ cart_error }}</div>
-  {% endif %}
-
-  {% if cart_message %}
-    <div class="alert alert--success" role="alert">{{ cart_message }}</div>
-  {% endif %}
-
-  {% if order_message %}
-    <div class="alert alert--info" role="alert">{{ order_message }}</div>
-  {% endif %}
-
   {% if cart_items %}
     <form action="/cart/update" method="post" class="cart-items-form">
       {% include "partials/csrf.html" %}
