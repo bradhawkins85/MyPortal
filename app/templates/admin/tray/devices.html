@@ -92,6 +92,11 @@
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
                     </form>
+                  {% else %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/reactivate" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--primary" data-confirm="Reactivate this tray device?">Reactivate</button>
+                    </form>
                   {% endif %}
                 </td>
               </tr>
