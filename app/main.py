@@ -5523,6 +5523,7 @@ async def admin_tray_revoke_device(device_id: int, request: Request):
 async def admin_tray_install_tokens_page(
     request: Request,
     new_token: str | None = None,
+    show_revoked: bool = False,
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5532,10 +5533,16 @@ async def admin_tray_install_tokens_page(
     from app.repositories import companies as companies_repo
 
     tokens = await tray_repo.list_install_tokens()
+    hidden_revoked_count = 0
+    if not show_revoked:
+        hidden_revoked_count = sum(1 for token in tokens if token.get("revoked_at"))
+        tokens = [token for token in tokens if not token.get("revoked_at")]
     companies = await companies_repo.list_companies(include_archived=False)
     extra = {
         "title": "Tray install tokens",
         "tokens": tokens,
+        "show_revoked": show_revoked,
+        "hidden_revoked_count": hidden_revoked_count,
         "companies": companies,
         "new_token": new_token,
         "now_iso": datetime.now(timezone.utc).isoformat(),
