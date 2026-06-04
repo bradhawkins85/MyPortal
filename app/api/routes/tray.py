@@ -14,6 +14,7 @@ The websocket handler ``/ws/tray/{device_uid}`` is registered in
 
 from __future__ import annotations
 
+import html as _html
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -31,6 +32,8 @@ from app.core.logging import log_error, log_info
 from app.repositories import chat as chat_repo
 from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
+from app.repositories import tickets as tickets_repo
+from app.repositories import users as users_repo
 from app.schemas.tray import (
     TrayChatStartRequest,
     TrayChatStartResponse,
@@ -42,9 +45,12 @@ from app.schemas.tray import (
     TrayInstallTokenResponse,
     TrayMenuConfigCreate,
     TrayMenuConfigUpdate,
+    TrayTicketSubmitRequest,
+    TrayTicketSubmitResponse,
 )
 from app.services import audit as audit_service
 from app.services import matrix as matrix_service
+from app.services import tickets as tickets_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -187,6 +193,104 @@ async def heartbeat(
         agent_version=payload.agent_version,
     )
     return JSONResponse({"status": "ok"})
+
+
+@router.post(
+    "/submit-ticket",
+    response_model=TrayTicketSubmitResponse,
+    summary="Submit a support ticket from a tray device",
+)
+async def tray_submit_ticket(
+    payload: TrayTicketSubmitRequest,
+) -> TrayTicketSubmitResponse:
+    """Create a support ticket submitted via the tray icon.
+
+    The ``device_uid`` identifies the device and is used to link the ticket
+    to the corresponding asset and company.  No bearer auth is required —
+    the device_uid is the device identifier.  Name, email, and phone are
+    provided by the user in the tray dialog; email is used to match an
+    existing portal user account when one exists.
+    """
+    device = await tray_repo.get_device_by_uid(payload.device_uid)
+    if not device or device.get("status") == "revoked":
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    company_id: int | None = device.get("company_id")
+    asset_id: int | None = device.get("asset_id")
+
+    # Normalise email once; reused for both lookup and ticket creation.
+    normalised_email = payload.email.strip().lower()
+
+    # Attempt to resolve an existing portal user by email so the ticket
+    # appears under their account and they receive notifications normally.
+    requester_id: int | None = None
+    existing_user = await users_repo.get_user_by_email(normalised_email)
+    if existing_user:
+        requester_id = int(existing_user["id"])
+
+    # Build a description that includes contact details when no portal
+    # account is matched, so technicians can see name and phone.
+    # Values are HTML-escaped before embedding to prevent markdown injection.
+    description_parts: list[str] = []
+    if requester_id is None:
+        safe_name = _html.escape(payload.name)
+        safe_email = _html.escape(normalised_email)
+        contact_line = f"**Name:** {safe_name}"
+        if payload.phone:
+            safe_phone = _html.escape(payload.phone)
+            contact_line += f"  |  **Phone:** {safe_phone}"
+        contact_line += f"  |  **Email:** {safe_email}"
+        description_parts.append(contact_line)
+        description_parts.append("")  # blank line before user content
+
+    if payload.description:
+        description_parts.append(payload.description)
+
+    full_description = "\n".join(description_parts) if description_parts else None
+
+    sanitized = sanitize_rich_text(full_description) if full_description else None
+    description_html = sanitized.html if sanitized else None
+
+    status_value = await tickets_service.resolve_status_or_default(None)
+    ticket = await tickets_service.create_ticket(
+        subject=payload.subject.strip(),
+        description=description_html,
+        requester_id=requester_id,
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status=status_value,
+        category=None,
+        module_slug=None,
+        external_reference=None,
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+        requester_email=normalised_email if requester_id is None else None,
+    )
+
+    # Link to the device's asset when one is known.
+    if asset_id:
+        try:
+            await tickets_repo.replace_ticket_assets(int(ticket["id"]), [int(asset_id)])
+        except Exception as exc:  # pragma: no cover - defensive
+            log_info(
+                "tray_submit_ticket: could not link asset",
+                ticket_id=ticket.get("id"),
+                asset_id=asset_id,
+                error=str(exc),
+            )
+
+    log_info(
+        "Tray ticket submitted",
+        device_uid=payload.device_uid,
+        ticket_id=ticket.get("id"),
+        requester_id=requester_id,
+    )
+
+    return TrayTicketSubmitResponse(
+        ticket_id=int(ticket["id"]),
+        ticket_number=ticket.get("ticket_number"),
+    )
 
 
 # ---------------------------------------------------------------------------
