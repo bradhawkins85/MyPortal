@@ -368,6 +368,9 @@ def test_device_create_update_revoke(tray_db, run):
     assert run(repo.get_device_by_auth_hash(svc.hash_token(new_raw))) is None
     run(repo.reactivate_device(int(device["id"])))
     assert run(repo.get_device_by_auth_hash(svc.hash_token(new_raw))) is not None
+    # Reactivating an already-active device is a no-op.
+    run(repo.reactivate_device(int(device["id"])))
+    assert run(repo.get_device_by_auth_hash(svc.hash_token(new_raw))) is not None
 
 
 def test_resolve_config_default_when_no_configs(tray_db, run):
