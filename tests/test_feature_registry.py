@@ -22,7 +22,7 @@ import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.features import FeaturePack, FeatureRegistry, init_registry
+from app.core.features import FeaturePack, FeatureRegistry, _parse_semver, init_registry
 
 
 @pytest.fixture
@@ -245,3 +245,11 @@ def test_load_external_plugin_slug(tmp_path, app, registry):
             sys.path.remove(str(plugin_root))
         for name in [n for n in list(sys.modules) if n.startswith("demo_external")]:
             sys.modules.pop(name, None)
+
+
+def test_parse_semver_handles_short_and_suffix_versions():
+    assert _parse_semver("") == (0, 0, 0)
+    assert _parse_semver("1") == (1, 0, 0)
+    assert _parse_semver("1.2") == (1, 2, 0)
+    assert _parse_semver("1.2.3-rc1") == (1, 2, 3)
+    assert _parse_semver("v2.5.9+build.7") == (2, 5, 9)

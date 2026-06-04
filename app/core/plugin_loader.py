@@ -16,6 +16,9 @@ from loguru import logger
 from app.core.features import FeaturePack, FeatureRegistry
 from app.repositories import plugin_registry as plugin_registry_repo
 
+_MAX_ZIP_MEMBERS = 2000
+_MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+
 
 @dataclass
 class PluginDiscovery:
@@ -173,13 +176,21 @@ class PluginLoader:
     @staticmethod
     def _extract_zip_safely(zip_path: Path, destination: Path) -> None:
         with zipfile.ZipFile(zip_path) as archive:
+            total_uncompressed = 0
+            if len(archive.infolist()) > _MAX_ZIP_MEMBERS:
+                raise ValueError("Zip contains too many files.")
             for member in archive.infolist():
                 name = member.filename
                 if not name:
                     continue
                 posix_path = PurePosixPath(name)
                 if posix_path.is_absolute() or ".." in posix_path.parts:
-                    raise ValueError("Zip contains unsafe path traversal entries.")
+                    raise ValueError(f"Zip contains unsafe path: {name}")
+                if member.file_size < 0:
+                    raise ValueError(f"Zip contains invalid file size for: {name}")
+                total_uncompressed += member.file_size
+                if total_uncompressed > _MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
+                    raise ValueError("Zip is too large after extraction.")
                 out_path = destination / Path(*posix_path.parts)
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 if member.is_dir():
