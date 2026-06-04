@@ -2138,13 +2138,18 @@ async def admin_company_tray_settings_page(
         raise HTTPException(status_code=404, detail="Company not found")
 
     tokens = await tray_repo.list_install_tokens(company_id=company_id)
+    portal_url = (
+        str(_main().settings.portal_url).rstrip("/")
+        if _main().settings.portal_url
+        else str(request.base_url.replace(scheme="https")).rstrip("/")
+    )
     extra = {
         "title": f"Tray settings — {company.get('name') or 'company'}",
         "company": company,
         "tokens": tokens,
         "new_token": new_token,
         "now_iso": datetime.now(timezone.utc).isoformat(),
-        "portal_url": str(request.base_url).rstrip("/"),
+        "portal_url": portal_url,
         "success_message": _main()._sanitize_message(success),
         "error_message": _main()._sanitize_message(error),
     }
