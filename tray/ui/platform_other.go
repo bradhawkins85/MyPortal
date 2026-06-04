@@ -25,6 +25,10 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	openBrowser(chatURL)
 }
 
+func openNewTicketWindow(_ *api.ConfigResponse) {
+	openBrowser(gPortalURL + "/tickets/new")
+}
+
 func showOSNotification(title, body string) {
 	_ = exec.Command("notify-send", title, body).Start()
 }

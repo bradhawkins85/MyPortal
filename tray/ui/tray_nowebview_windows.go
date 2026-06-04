@@ -228,6 +228,18 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		for _, child := range node.Children {
 			addNode(*child, cfg)
 		}
+
+	case "submit_ticket":
+		label := node.Label
+		if label == "" {
+			label = "Submit Ticket"
+		}
+		item := systray.AddMenuItem(label, "Submit a support ticket")
+		go func() {
+			for range item.ClickedCh {
+				go openNewTicketDialog(cfg)
+			}
+		}()
 	}
 }
 

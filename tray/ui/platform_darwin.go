@@ -34,6 +34,10 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	w.Run()
 }
 
+func openNewTicketWindow(_ *api.ConfigResponse) {
+	_ = exec.Command("open", gPortalURL+"/tickets/new").Start()
+}
+
 func showOSNotification(title, body string) {
 	script := `display notification "` + body + `" with title "` + title + `"`
 	_ = exec.Command("osascript", "-e", script).Start()
