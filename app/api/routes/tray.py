@@ -455,6 +455,18 @@ async def admin_revoke_device(
     return JSONResponse({"status": "revoked"})
 
 
+@router.post(
+    "/admin/devices/{device_id}/reactivate",
+    summary="Reactivate a revoked tray device",
+)
+async def admin_reactivate_device(
+    device_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    await tray_repo.reactivate_device(device_id)
+    return JSONResponse({"status": "active"})
+
+
 # ---------------------------------------------------------------------------
 # Technician chat-start
 # ---------------------------------------------------------------------------

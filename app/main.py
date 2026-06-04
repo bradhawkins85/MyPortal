@@ -5519,6 +5519,17 @@ async def admin_tray_revoke_device(device_id: int, request: Request):
     return RedirectResponse(url="/admin/tray/devices?status=", status_code=303)
 
 
+@app.post("/admin/tray/devices/{device_id}/reactivate", response_class=HTMLResponse)
+async def admin_tray_reactivate_device(device_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    await tray_repo.reactivate_device(device_id)
+    return RedirectResponse(url="/admin/tray/devices?status=", status_code=303)
+
+
 @app.get("/admin/tray/install-tokens", response_class=HTMLResponse)
 async def admin_tray_install_tokens_page(
     request: Request,
