@@ -59,6 +59,8 @@ def test_directory_for_resolves_existing_plugin():
     finally:
         if str(plugins_root) in sys.path:
             sys.path.remove(str(plugins_root))
+        for name in [n for n in list(sys.modules) if n == "hello_world" or n.startswith("hello_world.")]:
+            sys.modules.pop(name, None)
 
 
 @pytest.mark.asyncio

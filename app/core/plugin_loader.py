@@ -175,6 +175,7 @@ class PluginLoader:
 
     @staticmethod
     def _extract_zip_safely(zip_path: Path, destination: Path) -> None:
+        destination_root = destination.resolve()
         with zipfile.ZipFile(zip_path) as archive:
             total_uncompressed = 0
             if len(archive.infolist()) > _MAX_ZIP_MEMBERS:
@@ -192,6 +193,8 @@ class PluginLoader:
                 if total_uncompressed > _MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
                     raise ValueError("Zip is too large after extraction.")
                 out_path = destination / Path(*posix_path.parts)
+                if not out_path.resolve().is_relative_to(destination_root):
+                    raise ValueError(f"Zip contains unsafe path: {name}")
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 if member.is_dir():
                     out_path.mkdir(parents=True, exist_ok=True)
