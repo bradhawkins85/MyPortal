@@ -125,9 +125,6 @@ func (d *daemon) Stop(s service.Service) error {
 }
 
 func (d *daemon) run() {
-	if err := logger.Init("service"); err != nil {
-		logger.Error("logger init: %v", err)
-	}
 	logger.Info("MyPortal Tray Service starting (version %s)", updater.AgentVersion)
 
 	// Start IPC server for the UI agent.
@@ -402,6 +399,10 @@ var _ = fmt.Sprintf
 // -----------------------------------------------------------------
 
 func main() {
+	if err := logger.Init("service"); err != nil {
+		logger.Error("logger init: %v", err)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Fatal("Config load: %v", err)
