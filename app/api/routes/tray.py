@@ -463,6 +463,14 @@ async def admin_reactivate_device(
     device_id: int,
     current_user: dict = Depends(require_super_admin),
 ) -> JSONResponse:
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Tray device not found")
+    if device.get("status") != "revoked":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot reactivate device: device is not in revoked state",
+        )
     await tray_repo.reactivate_device(device_id)
     return JSONResponse({"status": "active"})
 
