@@ -98,6 +98,7 @@ build-msi: build-windows
 	    MINGW*|MSYS*|CYGWIN*|Windows_NT) \
 	        echo "Building Windows MSI installer..."; \
 	        wix build -acceptEula wix7 installer/windows/myportal-tray.wxs \
+	            -arch x64 \
 	            -d BinDir=$(CURDIR)/$(DIST)/windows \
 	            -o $(DIST)/windows/myportal-tray.msi ;; \
 	    *) \
