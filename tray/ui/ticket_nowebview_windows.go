@@ -157,7 +157,14 @@ func openNewTicketDialog(_ *api.ConfigResponse) {
 		return
 	}
 
-	if strings.TrimSpace(result.Name) == "" || strings.TrimSpace(result.Email) == "" || strings.TrimSpace(result.Subject) == "" {
+	// Trim all fields once so subsequent checks are consistent.
+	result.Name = strings.TrimSpace(result.Name)
+	result.Email = strings.TrimSpace(result.Email)
+	result.Phone = strings.TrimSpace(result.Phone)
+	result.Subject = strings.TrimSpace(result.Subject)
+	result.Description = strings.TrimSpace(result.Description)
+
+	if result.Name == "" || result.Email == "" || result.Subject == "" {
 		showOSNotification("Submit Ticket", "Name, email and subject are required.")
 		return
 	}
@@ -173,6 +180,10 @@ func openNewTicketDialog(_ *api.ConfigResponse) {
 
 	showOSNotification("Submit Ticket", "Your ticket has been submitted. We will be in touch soon.")
 }
+
+// ticketHTTPClient is reused across submissions to benefit from connection
+// pooling.  A 15-second timeout is sufficient for a simple JSON POST.
+var ticketHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // submitTicketToPortal posts the ticket to POST /api/tray/submit-ticket.
 func submitTicketToPortal(result ticketFormResult) error {
@@ -198,15 +209,18 @@ func submitTicketToPortal(result ticketFormResult) error {
 	}
 
 	url := strings.TrimRight(gPortalURL, "/") + "/api/tray/submit-ticket"
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := ticketHTTPClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("post: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		msg := strings.TrimSpace(string(b))
+		if len(b) == 512 {
+			msg += "…"
+		}
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
 	}
 	logger.Info("Tray ticket submitted (HTTP %d)", resp.StatusCode)
 	return nil
