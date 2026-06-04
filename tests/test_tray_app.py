@@ -63,7 +63,8 @@ def tray_db(tray_event_loop):
            )""",
         """CREATE TABLE IF NOT EXISTS companies (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
-               tray_chat_enabled INTEGER NOT NULL DEFAULT 0
+              name TEXT NULL,
+              tray_chat_enabled INTEGER NOT NULL DEFAULT 0
            )""",
         """CREATE TABLE IF NOT EXISTS tray_install_tokens (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -285,6 +286,33 @@ def test_install_token_lifecycle(tray_db, run):
     run(repo.revoke_install_token(int(record["id"])))
     revoked = run(repo.get_install_token_by_hash(svc.hash_token(raw)))
     assert revoked["revoked_at"] is not None
+
+
+def test_list_install_tokens_includes_company_name(tray_db, run):
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    company_id = run(
+        tray_db.execute_returning_lastrowid(
+            "INSERT INTO companies (name, tray_chat_enabled) VALUES (?, ?)",
+            ("ACME", 0),
+        )
+    )
+    raw = svc.generate_install_token()
+    run(
+        repo.create_install_token(
+            label="acme-fleet",
+            company_id=int(company_id),
+            token_hash=svc.hash_token(raw),
+            token_prefix=svc.token_prefix(raw),
+            created_by_user_id=None,
+        )
+    )
+
+    rows = run(repo.list_install_tokens(company_id=int(company_id)))
+    assert len(rows) == 1
+    assert rows[0]["company_id"] == int(company_id)
+    assert rows[0]["company_name"] == "ACME"
 
 
 def test_device_create_update_revoke(tray_db, run):
@@ -756,4 +784,3 @@ def test_tray_icon_rejects_invalid_magic_bytes():
     assert not is_valid_ico(b"")
     assert not is_valid_ico(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
     assert not is_valid_ico(b"\x00\x00\x02\x00" + b"\x00" * 20)
-

@@ -54,15 +54,18 @@ async def create_install_token(
 
 
 async def list_install_tokens(*, company_id: int | None = None) -> list[dict[str, Any]]:
+    base_query = (
+        "SELECT t.*, c.name AS company_name "
+        "FROM tray_install_tokens AS t "
+        "LEFT JOIN companies AS c ON c.id = t.company_id"
+    )
     if company_id is None:
-        rows = await db.fetch_all(
-            "SELECT * FROM tray_install_tokens ORDER BY created_at DESC"
-        )
+        rows = await db.fetch_all(f"{base_query} ORDER BY t.created_at DESC")
     else:
         placeholder = "?" if db.is_sqlite() else "%s"
         rows = await db.fetch_all(
-            f"SELECT * FROM tray_install_tokens WHERE company_id = {placeholder} "
-            "ORDER BY created_at DESC",
+            f"{base_query} WHERE t.company_id = {placeholder} "
+            "ORDER BY t.created_at DESC",
             (company_id,),
         )
     return [dict(r) for r in rows]
