@@ -869,16 +869,20 @@ async def push_notification_to_device(
     if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required.")
 
-    payload = {"type": "show_notification", "title": title, "body": notification_body}
+    payload = {
+        "type": "show_notification",
+        "payload": {"title": title, "body": notification_body},
+    }
     delivered = await tray_service.send_to_device(device_uid, payload)
-
-    # Always log the command for the audit trail.
-    import json as _json
     await tray_repo.log_command(
         device_id=int(device["id"]),
         command="show_notification",
-        payload_json=_json.dumps(payload),
+        payload_json=json.dumps(payload),
         initiated_by_user_id=int(current_user["id"]),
         status="delivered" if delivered else "queued",
     )
-    return JSONResponse({"delivered": delivered})
+    return JSONResponse(
+        {
+            "delivered": delivered,
+        }
+    )

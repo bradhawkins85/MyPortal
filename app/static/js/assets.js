@@ -175,6 +175,7 @@
     const form = document.querySelector('[data-asset-fields-form]');
     const assetNameElement = document.querySelector('[data-asset-name]');
     const fieldsContainer = document.querySelector('[data-custom-fields-container]');
+    const trayNotificationCheckbox = document.getElementById('asset-send-tray-notification');
     const noFieldsMessage = document.getElementById('no-fields-message');
     let currentAssetId = null;
     let currentAssetName = '';
@@ -275,6 +276,9 @@
       modal.style.display = 'none';
       currentAssetId = null;
       currentAssetName = '';
+      if (trayNotificationCheckbox instanceof HTMLInputElement) {
+        trayNotificationCheckbox.checked = false;
+      }
     }
 
     // Event listeners for edit buttons
@@ -324,7 +328,11 @@
       });
 
       try {
-        const response = await fetch(`/assets/${currentAssetId}/custom-fields`, {
+        const shouldNotifyTray = trayNotificationCheckbox instanceof HTMLInputElement && trayNotificationCheckbox.checked;
+        const endpoint = shouldNotifyTray
+          ? `/assets/${currentAssetId}/custom-fields?send_tray_notification=1`
+          : `/assets/${currentAssetId}/custom-fields`;
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(fields)
