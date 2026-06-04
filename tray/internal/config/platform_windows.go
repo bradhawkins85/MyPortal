@@ -37,6 +37,8 @@ func loadWindowsFromView(viewFlag uint32) (*Config, bool) {
 	}
 	defer k.Close()
 
+	// Legacy compatibility: older installers/scripts used env-style value
+	// names, so we read both canonical and legacy keys.
 	portalURL := firstRegistryString(k, "PortalURL", "MYPORTAL_URL")
 	enrolToken := firstRegistryString(k, "EnrolToken", "ENROL_TOKEN", "ENROLL_TOKEN")
 	autoUpdateRaw := firstRegistryString(k, "AutoUpdate", "AUTO_UPDATE")
