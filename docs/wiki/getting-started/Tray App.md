@@ -123,12 +123,84 @@ Each entry in `payload_json` is a JSON object:
 | `link` | `label`, `url` | Opens URL in default browser |
 | `submenu` | `label`, `children: [node, …]` | Nested submenu |
 | `display_text` | `label`, `text_id` | Opens a small window with the configuration's `display_text` |
-| `env_var` | `label`, `name`, `mode: 'show' \| 'copy'` | Reads the env var (must be on the allowlist) and shows / copies the value |
+| `env_var` | `label`, `name` | Reads the env var (must be on the allowlist) and shows the value in a popup |
 | `open_chat` | `label` | Opens the helpdesk chat window |
 | `separator` | — | Horizontal divider |
 
 A built-in default menu is returned when no configuration matches a
 device — see `app/services/tray.py::_default_menu()`.
+
+---
+
+### 4.1 Displaying an environment variable in the tray menu
+
+Follow these steps to add a menu item that shows the value of a Windows or macOS environment variable when a user clicks it.
+
+**Step 1 — Identify the variable name**
+
+Decide which environment variable you want to surface. Common examples:
+
+| Variable | Platform | Typical value |
+| --- | --- | --- |
+| `USERNAME` | Windows | `jsmith` |
+| `USERDOMAIN` | Windows | `CORP` |
+| `COMPUTERNAME` | Windows | `LAPTOP-001` |
+| `USER` | macOS | `jsmith` |
+| `HOSTNAME` | macOS | `jsmith-mbp` |
+
+The variable name is **case-insensitive** — `username` and `USERNAME` are treated the same way.
+
+**Step 2 — Add the variable to the configuration allowlist**
+
+The tray client will only read variables that are explicitly listed in the resolved configuration's allowlist. Values are read on the client device and are **never** sent to the server.
+
+1. Go to **Admin → Tray → Configurations** and open (or create) the configuration you want to edit.
+2. In the **Environment variable allowlist** field, enter the variable names as a comma-separated list, for example:
+
+   ```
+   USERNAME,USERDOMAIN,COMPUTERNAME
+   ```
+
+3. Save the configuration.
+
+**Step 3 — Add an `env_var` node to the menu JSON**
+
+In the same configuration, scroll to the **Menu nodes (JSON)** field and add an object with `"type": "env_var"` anywhere in the array. The required fields are:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `type` | string | Must be `"env_var"` |
+| `name` | string | Exact environment variable name, e.g. `"USERNAME"` |
+| `label` | string | Menu item text shown to the user |
+
+Example — showing the logged-in username:
+
+```json
+[
+  {"type": "label", "label": "Device Info"},
+  {"type": "separator"},
+  {"type": "env_var", "name": "USERNAME",    "label": "Logged-in user"},
+  {"type": "env_var", "name": "COMPUTERNAME","label": "Computer name"},
+  {"type": "env_var", "name": "USERDOMAIN",  "label": "Domain"},
+  {"type": "separator"},
+  {"type": "link", "label": "Submit Ticket", "url": "https://portal.example.com/new-ticket"}
+]
+```
+
+**Step 4 — Save and verify**
+
+1. Click **Save configuration** in the admin UI.
+2. The server broadcasts a `config_changed` WebSocket message to all devices that match this configuration's scope. The tray client reloads its menu automatically within a few seconds.
+3. Right-click the tray icon on the target device. You should see the menu items you added.
+4. Click a **"Logged-in user"** (or equivalent) item — a small popup window displays the current value of that variable. If the variable is not set on the device, the popup shows `(not set)`.
+
+**Troubleshooting**
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Menu item shows `(not set)` | The variable is not in the user's environment | Confirm the variable exists by running `echo %USERNAME%` (Windows) or `echo $USERNAME` (macOS) in a terminal logged in as that user |
+| Menu item does not appear at all | The variable name is not in the allowlist | Re-check the **Environment variable allowlist** field in the configuration — names must match exactly (the check is case-insensitive) |
+| Menu does not refresh | Device is offline or WebSocket is disconnected | The client re-fetches config on reconnect; restart the tray service if the issue persists |
 
 ---
 
