@@ -18,6 +18,7 @@ from app.repositories import plugin_registry as plugin_registry_repo
 
 _MAX_ZIP_MEMBERS = 2000
 _MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+_MAX_ZIP_SINGLE_FILE_BYTES = 10 * 1024 * 1024
 
 
 @dataclass
@@ -189,6 +190,8 @@ class PluginLoader:
                     raise ValueError(f"Zip contains unsafe path: {name}")
                 if member.file_size < 0:
                     raise ValueError(f"Zip contains invalid file size for: {name}")
+                if member.file_size > _MAX_ZIP_SINGLE_FILE_BYTES:
+                    raise ValueError(f"Zip member exceeds max file size: {name}")
                 total_uncompressed += member.file_size
                 if total_uncompressed > _MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
                     raise ValueError("Zip is too large after extraction.")
