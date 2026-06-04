@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import AnyHttpUrl
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
@@ -104,3 +105,55 @@ async def test_tray_install_tokens_can_show_revoked(monkeypatch):
     assert [token["id"] for token in captured["extra"]["tokens"]] == [1, 2]
     assert captured["extra"]["show_revoked"] is True
     assert captured["extra"]["hidden_revoked_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_tray_install_tokens_snippet_uses_https_when_request_is_http(monkeypatch):
+    import app.repositories.companies as companies_repo
+    import app.repositories.tray as tray_repo
+
+    monkeypatch.setattr(
+        main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
+    )
+    monkeypatch.setattr(tray_repo, "list_install_tokens", AsyncMock(return_value=[]))
+    monkeypatch.setattr(companies_repo, "list_companies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.settings, "portal_url", None)
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request, user, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    await main.admin_tray_install_tokens_page(_make_request(), new_token="abc")
+
+    assert captured["extra"]["portal_url"] == "https://testserver"
+
+
+@pytest.mark.anyio
+async def test_tray_install_tokens_snippet_prefers_configured_portal_url(monkeypatch):
+    import app.repositories.companies as companies_repo
+    import app.repositories.tray as tray_repo
+
+    monkeypatch.setattr(
+        main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
+    )
+    monkeypatch.setattr(tray_repo, "list_install_tokens", AsyncMock(return_value=[]))
+    monkeypatch.setattr(companies_repo, "list_companies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        main.settings, "portal_url", AnyHttpUrl("https://portal.example.com")
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request, user, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    await main.admin_tray_install_tokens_page(_make_request(), new_token="abc")
+
+    assert captured["extra"]["portal_url"] == "https://portal.example.com"
