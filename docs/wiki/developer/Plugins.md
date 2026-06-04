@@ -58,6 +58,7 @@ Provide an absolute path to a plugin package directory containing `__init__.py`.
 
 Upload a zip containing one or more top-level plugin package directories.
 Zip extraction rejects unsafe paths containing `../` or absolute paths.
+Zip installs are additionally capped at 2000 members and 50 MB total uncompressed size.
 
 ## Writing your first plugin
 

@@ -45,14 +45,24 @@ async def set_enabled(slug: str, enabled: bool) -> None:
     if not db.is_connected():
         return
     await ensure_registered(slug)
-    await db.execute(
-        """
-        UPDATE plugin_registry
-        SET enabled = ?
-        WHERE slug = ?
-        """,
-        (1 if enabled else 0, slug),
-    )
+    if db.is_sqlite():
+        await db.execute(
+            """
+            UPDATE plugin_registry
+            SET enabled = ?
+            WHERE slug = ?
+            """,
+            (1 if enabled else 0, slug),
+        )
+    else:
+        await db.execute(
+            """
+            UPDATE plugin_registry
+            SET enabled = %s
+            WHERE slug = %s
+            """,
+            (1 if enabled else 0, slug),
+        )
 
 
 async def is_enabled(slug: str) -> bool:
