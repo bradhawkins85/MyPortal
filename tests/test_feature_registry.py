@@ -206,3 +206,42 @@ def test_in_flight_counter_increments(tmp_path, app, registry, temp_pack_slug):
         assert state.in_flight == 0
 
     asyncio.run(run())
+
+
+def test_load_external_plugin_slug(tmp_path, app, registry):
+    plugin_root = tmp_path / "plugins"
+    package_dir = plugin_root / "demo_external"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / "__init__.py").write_text(
+        textwrap.dedent(
+            """
+            from fastapi import APIRouter
+            from app.core.features import FeaturePack
+
+            router = APIRouter(prefix="/_plugin_demo", tags=["plugin-test"])
+
+            @router.get("/ping")
+            async def ping() -> dict[str, str]:
+                return {"ok": "plugin"}
+
+            PACK = FeaturePack(
+                slug="plugin.demo_external",
+                version="1.0.0",
+                routers=(router,),
+            )
+            """
+        ).lstrip()
+    )
+
+    sys.path.append(str(plugin_root))
+    try:
+        asyncio.run(registry.load("plugin.demo_external"))
+        with TestClient(app) as client:
+            resp = client.get("/_plugin_demo/ping")
+            assert resp.status_code == 200
+            assert resp.json() == {"ok": "plugin"}
+    finally:
+        if str(plugin_root) in sys.path:
+            sys.path.remove(str(plugin_root))
+        for name in [n for n in list(sys.modules) if n.startswith("demo_external")]:
+            sys.modules.pop(name, None)

@@ -169,6 +169,15 @@ class Settings(BaseSettings):
             "— use the admin UI or the reload API instead."
         ),
     )
+    plugin_dirs: str = Field(
+        default="./plugins",
+        validation_alias="PLUGIN_DIRS",
+        description=(
+            "Comma-separated plugin search directories. Each directory is "
+            "added to ``sys.path`` so out-of-tree plugin packages can be "
+            "discovered and loaded."
+        ),
+    )
     enable_auto_refresh: bool = Field(
         default=False, validation_alias="ENABLE_AUTO_REFRESH"
     )
