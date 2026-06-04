@@ -38,6 +38,7 @@ var (
 	gConfig    *api.ConfigResponse
 	gIPCConn   net.Conn
 	gPortalURL string
+	gDeviceUID string
 
 	// onConfigChanged is set by the platform-specific runUI implementation to
 	// rebuild the tray menu whenever a config_changed IPC message is received.
@@ -83,11 +84,36 @@ func refreshPortalURL() {
 	logger.Debug("refreshPortalURL: no portal URL available from any source")
 }
 
+// refreshDeviceUID reads the device UID from the platform-appropriate source.
+// On Windows: HKLM\Software\MyPortal\Tray\DeviceUID (written by the service
+// after enrolment).  Falls back to tray-state.json when readable.
+func refreshDeviceUID() {
+	if uid := deviceUIDFromRegistry(); uid != "" {
+		gDeviceUID = uid
+		logger.Debug("refreshDeviceUID: using DeviceUID from registry (%s)", uid)
+		return
+	}
+	p := filepath.Join(stateDir(), "tray-state.json")
+	data, err := os.ReadFile(p)
+	if err == nil {
+		var state struct {
+			DeviceUID string `json:"device_uid"`
+		}
+		if jsonErr := json.Unmarshal(data, &state); jsonErr == nil && state.DeviceUID != "" {
+			gDeviceUID = state.DeviceUID
+			logger.Debug("refreshDeviceUID: using device_uid from %s (%s)", p, state.DeviceUID)
+			return
+		}
+	}
+	logger.Debug("refreshDeviceUID: device UID not available yet")
+}
+
 func main() {
 	_ = logger.Init("ui")
 	logger.Info("MyPortal Tray UI starting")
 
 	refreshPortalURL()
+	refreshDeviceUID()
 
 	gConfig = loadCachedConfig()
 	go connectIPC()
@@ -190,6 +216,7 @@ func handleIPCMessages(conn net.Conn) {
 			openBrowser(buildChatURL(payload.RoomID))
 		case "config_changed":
 			refreshPortalURL()
+			refreshDeviceUID()
 			gConfig = loadCachedConfig()
 			if onConfigChanged != nil {
 				onConfigChanged(gConfig)

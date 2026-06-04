@@ -178,3 +178,24 @@ class TrayNotificationRequest(BaseModel):
 
 class TrayNotificationResponse(BaseModel):
     delivered: bool
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 schemas — tray ticket submission
+# ---------------------------------------------------------------------------
+
+
+class TrayTicketSubmitRequest(BaseModel):
+    """Fields submitted by a tray device when the user clicks Submit Ticket."""
+
+    device_uid: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    email: str = Field(min_length=1, max_length=255)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    subject: str = Field(min_length=1, max_length=500)
+    description: Optional[str] = Field(default=None)
+
+
+class TrayTicketSubmitResponse(BaseModel):
+    ticket_id: int
+    ticket_number: Optional[str] = None
