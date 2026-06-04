@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Iterable
 
 from app.core.logging import log_error, log_info
+from app.core.features import module_name_for_slug
 
 try:  # pragma: no cover - import-time guard for environments without watchfiles
     from watchfiles import Change, awatch
@@ -89,7 +90,7 @@ class FeaturePackWatcher:
         try:
             from importlib import import_module
 
-            module = import_module(f"app.features.{slug}")
+            module = import_module(module_name_for_slug(slug))
         except Exception:  # pragma: no cover - defensive
             return None
         spec_file = getattr(module, "__file__", None)
