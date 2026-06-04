@@ -254,6 +254,65 @@ def test_technician_can_initiate_requires_company_toggle():
     assert svc.technician_can_initiate(end_user, {"tray_chat_enabled": True}) is False
 
 
+def test_push_notification_to_company_devices_requires_company_toggle(run, monkeypatch):
+    from app.services import tray as svc
+
+    async def fake_get_company_by_id(company_id: int):
+        return {"id": company_id, "tray_notifications_enabled": False}
+
+    monkeypatch.setattr(svc.companies_repo, "get_company_by_id", fake_get_company_by_id)
+
+    summary = run(
+        svc.push_notification_to_company_devices(
+            company_id=7,
+            title="Your ticket is updated",
+            body="Ticket #1234 has a new reply.",
+        )
+    )
+    assert summary == {"targeted": 0, "delivered": 0, "queued": 0}
+
+
+def test_push_notification_to_company_devices_targets_linked_assets(run, monkeypatch):
+    from app.services import tray as svc
+
+    logged: list[dict[str, object]] = []
+
+    async def fake_get_company_by_id(company_id: int):
+        return {"id": company_id, "tray_notifications_enabled": True}
+
+    async def fake_list_devices(*, company_id: int | None = None, status: str | None = None):
+        return [
+            {"id": 1, "device_uid": "device-1", "asset_id": 10},
+            {"id": 2, "device_uid": "device-2", "asset_id": 20},
+        ]
+
+    async def fake_send_to_device(device_uid: str, payload: dict[str, object]):
+        return device_uid == "device-1"
+
+    async def fake_log_command(**kwargs):
+        logged.append(kwargs)
+        return 1
+
+    monkeypatch.setattr(svc.companies_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(svc.tray_repo, "list_devices", fake_list_devices)
+    monkeypatch.setattr(svc, "send_to_device", fake_send_to_device)
+    monkeypatch.setattr(svc.tray_repo, "log_command", fake_log_command)
+
+    summary = run(
+        svc.push_notification_to_company_devices(
+            company_id=7,
+            title="Asset updated",
+            body="Asset Laptop has been updated.",
+            asset_ids=[10],
+            initiated_by_user_id=99,
+        )
+    )
+    assert summary == {"targeted": 1, "delivered": 1, "queued": 0}
+    assert len(logged) == 1
+    assert logged[0]["command"] == "show_notification"
+    assert logged[0]["initiated_by_user_id"] == 99
+
+
 # ---------------------------------------------------------------------------
 # Repository / config resolution
 # ---------------------------------------------------------------------------

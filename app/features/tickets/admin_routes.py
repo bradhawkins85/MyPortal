@@ -37,6 +37,7 @@ from app.repositories import users as user_repo
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import tickets as tickets_service
+from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
 
 
@@ -660,6 +661,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     }
 
     raw_asset_values = form.getlist("assetIds") if hasattr(form, "getlist") else []
+    notify_tray = str(form.get("sendTrayNotification", "")).lower() in {"1", "true", "on", "yes"}
     selected_asset_ids: list[int] = []
     for raw_value in raw_asset_values:
         try:
@@ -701,6 +703,15 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     )
 
     await tickets_repo.replace_ticket_assets(ticket_id, validated_asset_ids)
+    if notify_tray:
+        ticket_reference = ticket.get("ticket_number") or ticket.get("id") or ticket_id
+        await tray_service.push_notification_to_company_devices(
+            company_id=final_company_id,
+            title="Your ticket is updated",
+            body=f"Ticket #{ticket_reference} has been updated.",
+            asset_ids=validated_asset_ids,
+            initiated_by_user_id=int(current_user["id"]),
+        )
 
     message = quote("Ticket details updated.")
     destination = f"/admin/tickets/{ticket_id}?success={message}"

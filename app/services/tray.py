@@ -24,6 +24,7 @@ from typing import Any, Iterable
 from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import assets as assets_repo
+from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
 
 _settings = get_settings()
@@ -258,6 +259,74 @@ async def send_to_device(
         log_warning("Tray websocket send failed", device_uid=device_uid, error=str(exc))
         unregister_connection(device_uid, websocket)
         return False
+
+
+async def push_notification_to_company_devices(
+    *,
+    company_id: int | None,
+    title: str,
+    body: str,
+    asset_ids: Iterable[int] | None = None,
+    initiated_by_user_id: int | None = None,
+) -> dict[str, int]:
+    """Push a tray notification to active company devices.
+
+    Returns a delivery summary ``{"targeted": n, "delivered": n, "queued": n}``.
+    """
+
+    if company_id is None:
+        return {"targeted": 0, "delivered": 0, "queued": 0}
+    company = await companies_repo.get_company_by_id(int(company_id))
+    if not company or not company.get("tray_notifications_enabled"):
+        return {"targeted": 0, "delivered": 0, "queued": 0}
+
+    active_devices = await tray_repo.list_devices(company_id=int(company_id), status="active")
+    allowed_asset_ids = {
+        int(asset_id)
+        for asset_id in (asset_ids or [])
+        if isinstance(asset_id, int) or str(asset_id).isdigit()
+    }
+    target_devices = [
+        device
+        for device in active_devices
+        if not allowed_asset_ids or int(device.get("asset_id") or 0) in allowed_asset_ids
+    ]
+    if not target_devices:
+        return {"targeted": 0, "delivered": 0, "queued": 0}
+
+    payload = {
+        "type": "show_notification",
+        "payload": {
+            "title": str(title or "MyPortal").strip()[:200],
+            "body": str(body or "").strip()[:1000],
+        },
+    }
+    payload_json = json.dumps(payload)
+
+    delivered_count = 0
+    queued_count = 0
+    for device in target_devices:
+        device_uid = str(device.get("device_uid") or "").strip()
+        if not device_uid:
+            continue
+        delivered = await send_to_device(device_uid, payload)
+        await tray_repo.log_command(
+            device_id=int(device["id"]),
+            command="show_notification",
+            payload_json=payload_json,
+            initiated_by_user_id=initiated_by_user_id,
+            status="delivered" if delivered else "queued",
+        )
+        if delivered:
+            delivered_count += 1
+        else:
+            queued_count += 1
+
+    return {
+        "targeted": delivered_count + queued_count,
+        "delivered": delivered_count,
+        "queued": queued_count,
+    }
 
 
 # ---------------------------------------------------------------------------
