@@ -5538,6 +5538,11 @@ async def admin_tray_install_tokens_page(
         hidden_revoked_count = sum(1 for token in tokens if token.get("revoked_at"))
         tokens = [token for token in tokens if not token.get("revoked_at")]
     companies = await companies_repo.list_companies(include_archived=False)
+    portal_url = (
+        str(settings.portal_url).rstrip("/")
+        if settings.portal_url
+        else str(request.base_url.replace(scheme="https")).rstrip("/")
+    )
     extra = {
         "title": "Tray install tokens",
         "tokens": tokens,
@@ -5546,7 +5551,7 @@ async def admin_tray_install_tokens_page(
         "companies": companies,
         "new_token": new_token,
         "now_iso": datetime.now(timezone.utc).isoformat(),
-        "portal_url": str(request.base_url).rstrip("/"),
+        "portal_url": portal_url,
     }
     return await _render_template(
         "admin/tray/install_tokens.html", request, current_user, extra=extra
