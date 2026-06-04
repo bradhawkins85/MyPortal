@@ -27,6 +27,10 @@ import (
 // events arrive in quick succession.
 var lastRestartAt time.Time
 
+// hasHandledInitialConfigChanged prevents restart loops from the service's
+// IPC onConnect bootstrap replay of config_changed.
+var hasHandledInitialConfigChanged bool
+
 // runUI starts the systray event loop; it blocks until systray.Quit() is called.
 func runUI() {
 	logger.Info("MyPortal Tray UI (Windows) starting systray")
@@ -91,6 +95,15 @@ func fetchAndSetIcon() {
 func handleConfigChanged(cfg *api.ConfigResponse) {
 	// Always refresh the icon — this can be updated without a restart.
 	go fetchAndSetIcon()
+
+	// The service replays one config_changed event on initial IPC connect so
+	// late-starting UI agents can bootstrap state. Skip restart for that first
+	// event to avoid self-restart loops.
+	if !hasHandledInitialConfigChanged {
+		hasHandledInitialConfigChanged = true
+		logger.Debug("config_changed: initial bootstrap event received; restart skipped")
+		return
+	}
 
 	// Restart the process to rebuild the menu from the fresh config cache.
 	if time.Since(lastRestartAt) < 60*time.Second {
@@ -262,4 +275,3 @@ func defaultIconICO() []byte {
 	buf.Write(pngData)
 	return buf.Bytes()
 }
-
