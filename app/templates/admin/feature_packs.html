@@ -106,6 +106,85 @@
       </section>
 
       <section class="card card--panel">
+        <h2>Plugins</h2>
+        <p class="muted">
+          Plugins execute arbitrary Python code with the same privileges as the application.
+          Only install plugins from trusted sources.
+        </p>
+        <form id="plugin-install-form" class="stack stack--sm">
+          <label for="plugin-path"><strong>Install from directory</strong></label>
+          <input id="plugin-path" name="plugin_path" type="text" placeholder="/absolute/path/to/plugin-package" />
+          <label for="plugin-zip"><strong>Or install from ZIP</strong></label>
+          <input id="plugin-zip" name="plugin_zip" type="file" accept=".zip,application/zip" />
+          <div>
+            <button type="submit" class="button button--small">Install plugin</button>
+          </div>
+        </form>
+        {% if not plugins %}
+          <p class="empty-state">No plugins discovered yet.</p>
+        {% else %}
+          <div class="table-wrapper">
+            <table class="table" id="plugins-table" data-table data-table-id="plugins">
+              <thead>
+                <tr>
+                  <th scope="col">Slug</th>
+                  <th scope="col">Author</th>
+                  <th scope="col">Version</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" class="table__actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for plugin in plugins %}
+                  <tr data-plugin-slug="{{ plugin.slug }}">
+                    <td data-label="Slug"><strong>{{ plugin.slug }}</strong></td>
+                    <td data-label="Author">{{ plugin.author or '—' }}</td>
+                    <td data-label="Version"><code>{{ plugin.version or '—' }}</code></td>
+                    <td data-label="Description">
+                      {{ plugin.description or '—' }}
+                      {% if plugin.homepage %}
+                        <div><a href="{{ plugin.homepage }}" target="_blank" rel="noopener">Homepage</a></div>
+                      {% endif %}
+                    </td>
+                    <td data-label="Status">
+                      {% if not plugin.available %}
+                        <span class="status status--danger">Missing</span>
+                      {% elif plugin.enabled %}
+                        <span class="status status--success">Enabled</span>
+                      {% else %}
+                        <span class="status">Disabled</span>
+                      {% endif %}
+                    </td>
+                    <td class="table__actions">
+                      <div class="table__action-buttons">
+                        {% if plugin.enabled %}
+                          <button type="button" class="button button--ghost button--small" data-plugin-disable="{{ plugin.slug }}">Disable</button>
+                        {% else %}
+                          <button type="button" class="button button--ghost button--small" data-plugin-enable="{{ plugin.slug }}">Enable</button>
+                        {% endif %}
+                        <button type="button" class="button button--ghost button--small" data-feature-pack-reload="{{ plugin.slug }}">Reload</button>
+                      </div>
+                    </td>
+                  </tr>
+                  {% if plugin.last_error %}
+                    <tr class="feature-packs__error-row">
+                      <td colspan="6" data-label="Last error">
+                        <details>
+                          <summary>Last error</summary>
+                          <pre class="code-block">{{ plugin.last_error }}</pre>
+                        </details>
+                      </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+
+      <section class="card card--panel">
         <h2>About feature packs</h2>
         <p>
           Each pack lives under <code>app/features/&lt;slug&gt;/</code>
@@ -134,54 +213,134 @@
   <script>
     (function () {
       var table = document.getElementById('feature-packs-table');
-      if (!table) {
+      var pluginTable = document.getElementById('plugins-table');
+      if (!table && !pluginTable) {
         return;
       }
       var csrfToken = {{ csrf_token | tojson if csrf_token else 'null' }};
-      table.addEventListener('click', function (event) {
-        var btn = event.target.closest('[data-feature-pack-reload]');
-        if (!btn) {
-          return;
-        }
-        event.preventDefault();
-        var slug = btn.getAttribute('data-feature-pack-reload');
-        if (!slug) {
-          return;
-        }
-        if (btn.dataset.busy === '1') {
-          return;
-        }
-        btn.dataset.busy = '1';
-        var originalLabel = btn.textContent;
-        btn.textContent = 'Reloading…';
-        btn.disabled = true;
+      var handleReload = function (slug) {
         var headers = { 'Accept': 'application/json' };
         if (csrfToken) {
           headers['X-CSRF-Token'] = csrfToken;
         }
-        fetch('/api/features/' + encodeURIComponent(slug) + '/reload', {
+        return fetch('/api/features/' + encodeURIComponent(slug) + '/reload', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: headers,
+        }).then(function (response) {
+          return response.json().then(function (body) {
+            return { ok: response.ok, body: body };
+          });
+        });
+      };
+
+      var onClick = function (event) {
+        var btn = event.target.closest('[data-feature-pack-reload]');
+        var enableBtn = event.target.closest('[data-plugin-enable]');
+        var disableBtn = event.target.closest('[data-plugin-disable]');
+        if (!btn && !enableBtn && !disableBtn) {
+          return;
+        }
+        event.preventDefault();
+        var headers = { 'Accept': 'application/json' };
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        if (btn) {
+          var slug = btn.getAttribute('data-feature-pack-reload');
+          if (!slug || btn.dataset.busy === '1') {
+            return;
+          }
+          btn.dataset.busy = '1';
+          var originalLabel = btn.textContent;
+          btn.textContent = 'Reloading…';
+          btn.disabled = true;
+          handleReload(slug)
+            .then(function (result) {
+             var query = result.ok ? 'success=Reloaded+' + encodeURIComponent(slug) : 'error=Reload+failed+for+' + encodeURIComponent(slug);
+             window.location.href = '/admin/feature-packs?' + query;
+            })
+            .catch(function () {
+             btn.textContent = originalLabel;
+             btn.disabled = false;
+             delete btn.dataset.busy;
+             window.location.href = '/admin/feature-packs?error=Reload+request+failed';
+            });
+          return;
+        }
+
+        var actionBtn = enableBtn || disableBtn;
+        var actionSlug = actionBtn.getAttribute(enableBtn ? 'data-plugin-enable' : 'data-plugin-disable');
+        if (!actionSlug || actionBtn.dataset.busy === '1') {
+          return;
+        }
+        actionBtn.dataset.busy = '1';
+        actionBtn.disabled = true;
+        var action = enableBtn ? 'enable' : 'disable';
+        fetch('/api/plugins/' + encodeURIComponent(actionSlug) + '/' + action, {
           method: 'POST',
           credentials: 'same-origin',
           headers: headers,
         })
           .then(function (response) {
             return response.json().then(function (body) {
-              return { ok: response.ok, body: body };
+             return { ok: response.ok, body: body };
             });
           })
           .then(function (result) {
-            // Always reload the page so the table reflects the new
-            // version / loaded_at / error state from the server.
-            var query = result.ok ? 'success=Reloaded+' + encodeURIComponent(slug) : 'error=Reload+failed+for+' + encodeURIComponent(slug);
+            var query = result.ok
+             ? 'success=Plugin+' + encodeURIComponent(action) + 'd+' + encodeURIComponent(actionSlug)
+             : 'error=Plugin+' + encodeURIComponent(action) + '+failed+' + encodeURIComponent(actionSlug);
             window.location.href = '/admin/feature-packs?' + query;
           })
           .catch(function () {
-            btn.textContent = originalLabel;
-            btn.disabled = false;
-            delete btn.dataset.busy;
-            window.location.href = '/admin/feature-packs?error=Reload+request+failed';
+            window.location.href = '/admin/feature-packs?error=Plugin+request+failed';
           });
-      });
+      };
+      if (table) {
+        table.addEventListener('click', onClick);
+      }
+      if (pluginTable) {
+        pluginTable.addEventListener('click', onClick);
+      }
+
+      var installForm = document.getElementById('plugin-install-form');
+      if (installForm) {
+        installForm.addEventListener('submit', function (event) {
+          event.preventDefault();
+          var formData = new FormData(installForm);
+          var path = (formData.get('plugin_path') || '').toString().trim();
+          var zipFile = formData.get('plugin_zip');
+          var hasZip = zipFile && typeof zipFile === 'object' && 'name' in zipFile && zipFile.name;
+          if (!path && !hasZip) {
+            window.location.href = '/admin/feature-packs?error=Provide+a+plugin+path+or+ZIP';
+            return;
+          }
+          var headers = { 'Accept': 'application/json' };
+          if (csrfToken) {
+            headers['X-CSRF-Token'] = csrfToken;
+          }
+          fetch('/api/plugins/install', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: headers,
+            body: formData,
+          })
+            .then(function (response) {
+             return response.json().then(function (body) {
+               return { ok: response.ok, body: body };
+             });
+            })
+            .then(function (result) {
+             var query = result.ok ? 'success=Plugin+installed' : 'error=Plugin+install+failed';
+             window.location.href = '/admin/feature-packs?' + query;
+            })
+            .catch(function () {
+             window.location.href = '/admin/feature-packs?error=Plugin+install+failed';
+            });
+        });
+      }
     })();
   </script>
 {% endblock %}

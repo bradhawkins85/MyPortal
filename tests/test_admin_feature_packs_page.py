@@ -24,6 +24,11 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
     # Don't load real packs during these tests.
     monkeypatch.setattr(main_module.settings, "feature_packs", "")
+    class _FakePluginLoader:
+        async def list_admin_rows(self, registry):
+            return []
+
+    monkeypatch.setattr(main_module, "get_plugin_loader", lambda: _FakePluginLoader())
 
 
 @pytest.fixture

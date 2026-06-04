@@ -11,9 +11,11 @@ It does **not** migrate any of the existing inline route handlers from
 Contract
 ========
 
-Each pack lives at ``app.features.<slug>`` and exposes a module-level
-``PACK`` attribute (or a ``get_pack()`` callable returning one) that is
-an instance of :class:`FeaturePack`.
+Core packs live at ``app.features.<slug>``. External plugins use slugs
+prefixed with ``plugin.`` and are imported from directories configured
+via ``PLUGIN_DIRS``. Each module exposes a module-level ``PACK``
+attribute (or a ``get_pack()`` callable returning one) that is an
+instance of :class:`FeaturePack`.
 
 The loader guarantees:
 
@@ -47,6 +49,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.metadata
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -58,6 +62,56 @@ from loguru import logger
 
 
 HookCallable = Callable[[], Awaitable[None] | None]
+
+
+def module_name_for_slug(slug: str) -> str:
+    """Resolve a feature/plugin slug to a Python module import path."""
+
+    if slug.startswith("plugin."):
+        return slug.split(".", 1)[1]
+    return f"app.features.{slug}"
+
+
+def _parse_semver(value: str) -> tuple[int, int, int]:
+    raw = (value or "").strip()
+    if not raw:
+        return (0, 0, 0)
+    if raw.startswith(("v", "V")):
+        raw = raw[1:]
+    # Accept metadata/suffixes (e.g. "1.2.3-rc1"), compare numeric core only.
+    numeric = re.split(r"[-+]", raw, maxsplit=1)[0]
+    parts = [p.strip() for p in numeric.split(".") if p.strip()]
+    nums: list[int] = []
+    for part in parts[:3]:
+        nums.append(int(part) if part.isdigit() else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return nums[0], nums[1], nums[2]
+
+
+def _app_version() -> str:
+    global _app_version_fallback_warned
+    try:
+        return importlib.metadata.version("myportal")
+    except Exception:
+        if not _app_version_fallback_warned:
+            logger.warning(
+                "Unable to resolve installed package version for 'myportal'; "
+                "falling back to 0.1.0 for plugin version checks."
+            )
+            _app_version_fallback_warned = True
+        return "0.1.0"
+
+
+def _validate_min_app_version(pack: "FeaturePack") -> None:
+    required = (pack.min_app_version or "").strip()
+    if not required:
+        return
+    current = _app_version()
+    if _parse_semver(current) < _parse_semver(required):
+        raise RuntimeError(
+            f"Feature/plugin '{pack.slug}' requires app version >= {required}; current is {current}."
+        )
 
 
 def _make_tracking_endpoint(original: Callable[..., Any], state: "FeaturePackState") -> Callable[..., Any]:
@@ -122,6 +176,10 @@ class FeaturePack:
     startup: HookCallable | None = None
     shutdown: HookCallable | None = None
     background_jobs: tuple[Callable[[], Awaitable[None]], ...] = ()
+    author: str = ""
+    description: str = ""
+    homepage: str = ""
+    min_app_version: str = ""
 
 
 @dataclass
@@ -184,7 +242,7 @@ class FeatureRegistry:
 
     @staticmethod
     def _import_pack(slug: str) -> FeaturePack:
-        module_name = f"app.features.{slug}"
+        module_name = module_name_for_slug(slug)
         module = importlib.import_module(module_name)
         pack: FeaturePack | None = getattr(module, "PACK", None)
         if pack is None:
@@ -201,11 +259,12 @@ class FeatureRegistry:
                 f"Feature module '{module_name}' declares slug "
                 f"'{pack.slug}' but was imported as '{slug}'."
             )
+        _validate_min_app_version(pack)
         return pack
 
     @staticmethod
     def _purge_sys_modules(slug: str) -> None:
-        prefix = f"app.features.{slug}"
+        prefix = module_name_for_slug(slug)
         for name in [n for n in list(sys.modules) if n == prefix or n.startswith(prefix + ".")]:
             sys.modules.pop(name, None)
 
@@ -430,6 +489,7 @@ class FeatureRegistry:
 
 
 _registry: FeatureRegistry | None = None
+_app_version_fallback_warned = False
 
 
 def init_registry(app: FastAPI) -> FeatureRegistry:
