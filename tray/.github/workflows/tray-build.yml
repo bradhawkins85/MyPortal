@@ -111,6 +111,7 @@ jobs:
         shell: pwsh
         run: |
           wix build -acceptEula wix7 installer/windows/myportal-tray.wxs `
+            -arch x64 `
             -d BinDir="$(Resolve-Path dist/windows)" `
             -o dist/windows/myportal-tray.msi
       - uses: actions/upload-artifact@v4
@@ -201,4 +202,3 @@ jobs:
             myportal-tray.msi
             myportal-tray.pkg
           generate_release_notes: true
-
