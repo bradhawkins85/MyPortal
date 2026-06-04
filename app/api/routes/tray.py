@@ -14,6 +14,7 @@ The websocket handler ``/ws/tray/{device_uid}`` is registered in
 
 from __future__ import annotations
 
+import html as _html
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -217,21 +218,28 @@ async def tray_submit_ticket(
     company_id: int | None = device.get("company_id")
     asset_id: int | None = device.get("asset_id")
 
+    # Normalise email once; reused for both lookup and ticket creation.
+    normalised_email = payload.email.strip().lower()
+
     # Attempt to resolve an existing portal user by email so the ticket
     # appears under their account and they receive notifications normally.
     requester_id: int | None = None
-    existing_user = await users_repo.get_user_by_email(payload.email.strip().lower())
+    existing_user = await users_repo.get_user_by_email(normalised_email)
     if existing_user:
         requester_id = int(existing_user["id"])
 
     # Build a description that includes contact details when no portal
     # account is matched, so technicians can see name and phone.
+    # Values are HTML-escaped before embedding to prevent markdown injection.
     description_parts: list[str] = []
     if requester_id is None:
-        contact_line = f"**Name:** {payload.name}"
+        safe_name = _html.escape(payload.name)
+        safe_email = _html.escape(normalised_email)
+        contact_line = f"**Name:** {safe_name}"
         if payload.phone:
-            contact_line += f"  |  **Phone:** {payload.phone}"
-        contact_line += f"  |  **Email:** {payload.email}"
+            safe_phone = _html.escape(payload.phone)
+            contact_line += f"  |  **Phone:** {safe_phone}"
+        contact_line += f"  |  **Email:** {safe_email}"
         description_parts.append(contact_line)
         description_parts.append("")  # blank line before user content
 
@@ -257,7 +265,7 @@ async def tray_submit_ticket(
         external_reference=None,
         trigger_automations=True,
         initial_reply_author_id=requester_id,
-        requester_email=payload.email.strip().lower() if requester_id is None else None,
+        requester_email=normalised_email if requester_id is None else None,
     )
 
     # Link to the device's asset when one is known.
