@@ -250,6 +250,14 @@ async def revoke_device(device_id: int) -> None:
     )
 
 
+async def reactivate_device(device_id: int) -> None:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    await db.execute(
+        f"UPDATE tray_devices SET status = 'active' WHERE id = {placeholder}",
+        (device_id,),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Menu configs
 # ---------------------------------------------------------------------------
