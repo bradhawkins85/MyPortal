@@ -1,9 +1,9 @@
-"""Admin API for hot-reloading feature packs.
+"""Admin API for hot-reloading feature packs/plugins.
 
 Endpoints
 ---------
-``GET  /api/features``               – list loaded packs (super-admin)
-``POST /api/features/{slug}/reload`` – reload a single pack (super-admin)
+``GET  /api/features``               – list loaded packs/plugins (super-admin)
+``POST /api/features/{slug}/reload`` – reload a single pack/plugin (super-admin)
 
 The reload endpoint is CSRF-protected by the global
 ``CSRFMiddleware`` in ``app/main.py`` and additionally requires the
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/features", tags=["Feature Packs"])
 
 @router.get("/")
 async def list_features(current_user: dict = Depends(require_super_admin)) -> dict[str, list[dict]]:
-    """Return metadata for every loaded feature pack."""
+    """Return metadata for every loaded feature pack/plugin."""
 
     registry = get_registry()
     return {"features": registry.list()}
@@ -35,7 +35,7 @@ async def reload_feature(
     slug: str,
     current_user: dict = Depends(require_super_admin),
 ) -> dict[str, object]:
-    """Atomically reload a feature pack.
+    """Atomically reload a feature pack or plugin.
 
     On failure the previous version stays mounted; the error is
     surfaced in ``last_error``.
@@ -47,13 +47,13 @@ async def reload_feature(
     except ModuleNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Unknown feature pack '{slug}'",
+            detail=f"Unknown feature pack/plugin '{slug}'",
         ) from exc
     except Exception as exc:  # pragma: no cover - reported via 500
         logger.bind(feature=slug).error("Reload failed: {error}", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Feature pack reload failed; see server logs.",
+            detail="Feature/plugin reload failed; see server logs.",
         ) from exc
     return {
         "slug": state.pack.slug,

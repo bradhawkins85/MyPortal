@@ -81,6 +81,7 @@ from app.api.routes import (
     notifications,
     orders as orders_api,
     ports,
+    plugins as plugins_api,
     quotes as quotes_api,
     scheduler as scheduler_api,
     roles,
@@ -101,6 +102,7 @@ from uuid import uuid4
 from app.core.config import get_settings, get_templates_config
 from app.core.database import db
 from app.core.features import init_registry
+from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
 from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import audit_logs as audit_repo
@@ -1064,6 +1066,7 @@ app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
 app.include_router(features_api.router)
+app.include_router(plugins_api.router)
 
 # Initialise the feature pack registry.  Packs are loaded lazily on
 # startup (see ``on_startup`` below).  The registry remains empty until
@@ -2473,13 +2476,16 @@ async def on_startup() -> None:
     if pack_slugs:
         await feature_registry.load_many(pack_slugs)
 
+    plugin_loader = init_plugin_loader(settings.plugin_dirs)
+    await plugin_loader.load_all(feature_registry)
+
     # Optional dev-only auto-reload: when ``FEATURE_PACK_WATCH=true`` is
     # set we start a per-pack ``watchfiles`` watcher so editing any
     # file under ``app/features/<slug>/`` triggers a debounced reload
     # of just that pack.  Off by default in production.
     global _feature_pack_watcher
     _feature_pack_watcher = None
-    if getattr(settings, "feature_pack_watch", False) and pack_slugs:
+    if getattr(settings, "feature_pack_watch", False) and feature_registry.list():
         from app.core.feature_watcher import FeaturePackWatcher
 
         _feature_pack_watcher = FeaturePackWatcher(feature_registry)
@@ -7849,11 +7855,17 @@ async def admin_feature_packs_page(
     if redirect:
         return redirect
 
-    packs = sorted(feature_registry.list(), key=lambda p: p["slug"])
+    loaded = feature_registry.list()
+    packs = sorted(
+        [item for item in loaded if not str(item.get("slug", "")).startswith("plugin.")],
+        key=lambda p: p["slug"],
+    )
+    plugins = await get_plugin_loader().list_admin_rows(feature_registry)
 
     extra = {
         "title": "Feature packs",
         "packs": packs,
+        "plugins": plugins,
         "success_message": _sanitize_message(success),
         "error_message": _sanitize_message(error),
     }

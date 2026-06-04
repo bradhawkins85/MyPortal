@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,21 @@ def test_directory_for_resolves_existing_pack():
 
 def test_directory_for_missing_pack_returns_none():
     assert FeaturePackWatcher._directory_for("definitely-not-a-real-pack") is None
+
+
+def test_directory_for_resolves_existing_plugin():
+    plugins_root = Path(__file__).resolve().parent.parent / "plugins"
+    sys.path.append(str(plugins_root))
+    try:
+        directory = FeaturePackWatcher._directory_for("plugin.hello_world")
+        assert directory is not None
+        assert directory.name == "hello_world"
+        assert (directory / "__init__.py").exists()
+    finally:
+        if str(plugins_root) in sys.path:
+            sys.path.remove(str(plugins_root))
+        for name in [n for n in list(sys.modules) if n == "hello_world" or n.startswith("hello_world.")]:
+            sys.modules.pop(name, None)
 
 
 @pytest.mark.asyncio
