@@ -67,5 +67,15 @@ def test_plugin_loader_rejects_path_traversal_in_zip(tmp_path):
     with zipfile.ZipFile(payload, "w") as archive:
         archive.writestr("../evil.py", "print('oops')")
 
-    with pytest.raises(ValueError, match="unsafe path traversal"):
+    with pytest.raises(ValueError, match="unsafe path"):
+        asyncio.run(loader.install_from_zip(payload.getvalue()))
+
+
+def test_plugin_loader_rejects_absolute_paths_in_zip(tmp_path):
+    loader = PluginLoader(plugin_dirs=str(tmp_path / "plugins"))
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("/etc/passwd", "x")
+
+    with pytest.raises(ValueError, match="unsafe path"):
         asyncio.run(loader.install_from_zip(payload.getvalue()))
