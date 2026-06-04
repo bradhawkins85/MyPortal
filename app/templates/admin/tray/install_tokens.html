@@ -65,7 +65,22 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
   </section>
 
   <section class="card card--panel admin-grid__full">
-    <header class="card__header"><h2>Existing tokens</h2></header>
+    <header class="card__header">
+      <h2>Existing tokens</h2>
+      <div class="card__controls card__controls--right">
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox" for="show-revoked-tokens">
+            <input
+              id="show-revoked-tokens"
+              type="checkbox"
+              {% if show_revoked %}checked{% endif %}
+              onchange="window.location.href = this.checked ? '/admin/tray/install-tokens?show_revoked=true' : '/admin/tray/install-tokens';"
+            />
+            <span>Show revoked</span>
+          </label>
+        </div>
+      </div>
+    </header>
     <div class="card__body card__body--table">
       {% if tokens %}
         <table class="data-table">
@@ -111,7 +126,13 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
           </tbody>
         </table>
       {% else %}
-        <div class="empty-state"><p>No install tokens yet — create one above.</p></div>
+        <div class="empty-state">
+          {% if not show_revoked and hidden_revoked_count %}
+            <p>No active install tokens. Enable “Show revoked” to review {{ hidden_revoked_count }} revoked token{% if hidden_revoked_count != 1 %}s{% endif %}.</p>
+          {% else %}
+            <p>No install tokens yet — create one above.</p>
+          {% endif %}
+        </div>
       {% endif %}
     </div>
   </section>
