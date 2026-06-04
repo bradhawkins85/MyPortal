@@ -183,6 +183,9 @@ func (d *daemon) ensureEnrolled() error {
 		d.client.SetAuth(s.DeviceUID, s.AuthToken)
 		logger.Info("Restored persisted auth (device_uid=%s)", s.DeviceUID)
 		logger.Debug("ensureEnrolled: persisted state at %s, portal=%s", filepath.Join(stateDir(), stateFileName), s.PortalURL)
+		// Ensure the device UID is present in HKLM for the UI agent and
+		// any external tools that read HKLM\Software\MyPortal\Tray.
+		saveDeviceUIDToRegistry(s.DeviceUID)
 		return nil
 	}
 
@@ -203,6 +206,7 @@ func (d *daemon) ensureEnrolled() error {
 		return err
 	}
 	saveState(persistedState{DeviceUID: resp.DeviceUID, AuthToken: resp.AuthToken, PortalURL: d.cfg.PortalURL})
+	saveDeviceUIDToRegistry(resp.DeviceUID)
 	logger.Info("Enrolled: device_uid=%s", resp.DeviceUID)
 	return nil
 }

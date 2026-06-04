@@ -34,6 +34,11 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	w.Run()
 }
 
+func openNewTicketWindow(_ *api.ConfigResponse) {
+	url := gPortalURL + "/tickets/new"
+	_ = exec.Command("cmd", "/c", "start", url).Start()
+}
+
 func showOSNotification(title, body string) {
 	// Use PowerShell toast for Windows 10+.
 	script := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
