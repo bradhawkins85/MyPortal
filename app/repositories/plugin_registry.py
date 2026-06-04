@@ -68,14 +68,24 @@ async def set_enabled(slug: str, enabled: bool) -> None:
 async def is_enabled(slug: str) -> bool:
     if not db.is_connected():
         return True
-    row = await db.fetch_one(
-        """
-        SELECT enabled
-        FROM plugin_registry
-        WHERE slug = ?
-        """,
-        (slug,),
-    )
+    if db.is_sqlite():
+        row = await db.fetch_one(
+            """
+            SELECT enabled
+            FROM plugin_registry
+            WHERE slug = ?
+            """,
+            (slug,),
+        )
+    else:
+        row = await db.fetch_one(
+            """
+            SELECT enabled
+            FROM plugin_registry
+            WHERE slug = %s
+            """,
+            (slug,),
+        )
     if not row:
         return True
     return bool(row.get("enabled"))

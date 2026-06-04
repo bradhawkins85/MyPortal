@@ -90,9 +90,16 @@ def _parse_semver(value: str) -> tuple[int, int, int]:
 
 
 def _app_version() -> str:
+    global _app_version_fallback_warned
     try:
         return importlib.metadata.version("myportal")
     except Exception:
+        if not _app_version_fallback_warned:
+            logger.warning(
+                "Unable to resolve installed package version for 'myportal'; "
+                "falling back to 0.1.0 for plugin version checks."
+            )
+            _app_version_fallback_warned = True
         return "0.1.0"
 
 
@@ -482,6 +489,7 @@ class FeatureRegistry:
 
 
 _registry: FeatureRegistry | None = None
+_app_version_fallback_warned = False
 
 
 def init_registry(app: FastAPI) -> FeatureRegistry:
