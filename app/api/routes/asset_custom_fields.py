@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
+from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as custom_fields_repo
 from app.schemas.asset_custom_fields import (
     AssetFieldValue,
@@ -82,36 +83,38 @@ async def get_asset_custom_fields(asset_id: int):
 
 
 @router.post("/assets/{asset_id}/custom-fields", response_model=dict[str, str], tags=["Asset Custom Fields"])
-async def set_asset_custom_fields(asset_id: int, fields: list[FieldValueSet]):
+async def set_asset_custom_fields(
+    asset_id: int,
+    fields: list[FieldValueSet],
+    send_tray_notification: bool = False,
+):
     """Set custom field values for an asset."""
     from app.schemas.asset_custom_fields import FieldType
-    
+    from app.services import tray as tray_service
+
     for field in fields:
-        # Get field definition to determine type
         definition = await custom_fields_repo.get_field_definition(field.field_definition_id)
         if not definition:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Field definition {field.field_definition_id} not found"
             )
-        
+
         field_type = FieldType(definition["field_type"])
-        
-        # Set appropriate value based on field type
+
         value_text = None
         value_date = None
         value_boolean = None
-        
+
         if field.value is None:
-            # Clear the value
             pass
         elif field_type == FieldType.CHECKBOX:
             value_boolean = bool(field.value)
         elif field_type == FieldType.DATE:
             value_date = str(field.value) if field.value else None
-        else:  # text, image, url
+        else:
             value_text = str(field.value) if field.value else None
-        
+
         await custom_fields_repo.set_asset_field_value(
             asset_id=asset_id,
             field_definition_id=field.field_definition_id,
@@ -119,7 +122,18 @@ async def set_asset_custom_fields(asset_id: int, fields: list[FieldValueSet]):
             value_date=value_date,
             value_boolean=value_boolean,
         )
-    
+
+    if send_tray_notification:
+        asset = await assets_repo.get_asset_by_id(asset_id)
+        if asset and asset.get("company_id"):
+            asset_name = str(asset.get("name") or f"Asset #{asset_id}").strip()
+            await tray_service.push_notification_to_company_devices(
+                company_id=int(asset["company_id"]),
+                title="Asset updated",
+                body=f"{asset_name} has been updated.",
+                asset_ids=[asset_id],
+            )
+
     return {"message": "Custom fields updated successfully"}
 
 
