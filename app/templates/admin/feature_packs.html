@@ -312,7 +312,8 @@
           var formData = new FormData(installForm);
           var path = (formData.get('plugin_path') || '').toString().trim();
           var zipFile = formData.get('plugin_zip');
-          if (!path && (!zipFile || !zipFile.name)) {
+          var hasZip = zipFile && typeof zipFile === 'object' && 'name' in zipFile && zipFile.name;
+          if (!path && !hasZip) {
             window.location.href = '/admin/feature-packs?error=Provide+a+plugin+path+or+ZIP';
             return;
           }

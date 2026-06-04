@@ -63,3 +63,17 @@ def test_install_plugin_requires_single_input():
             assert response.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+def test_install_plugin_rejects_both_inputs():
+    app.dependency_overrides[require_super_admin] = lambda: {"id": 1, "is_super_admin": True}
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/plugins/install",
+                data={"plugin_path": "/tmp/example-plugin"},
+                files={"plugin_zip": ("demo.zip", b"zip-content", "application/zip")},
+            )
+            assert response.status_code == 400
+    finally:
+        app.dependency_overrides.clear()

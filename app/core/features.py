@@ -86,7 +86,7 @@ def _parse_semver(value: str) -> tuple[int, int, int]:
         nums.append(int(part) if part.isdigit() else 0)
     while len(nums) < 3:
         nums.append(0)
-    return tuple(nums[:3])  # type: ignore[return-value]
+    return nums[0], nums[1], nums[2]
 
 
 def _app_version() -> str:
