@@ -26,22 +26,27 @@ MyPortal combines customer operations, service delivery workflows, and integrati
 
 ## Key UI areas (screenshots)
 
-> Replace the placeholders below with real screenshots from your environment.
-
 ### Dashboard
-Placeholder: add a dashboard screenshot here.
+<img width="1658" height="1235" alt="image" src="https://github.com/user-attachments/assets/266d8362-9183-4b4a-b5af-0e6e895fcd8e" />
 
 ### Tickets
-Placeholder: add a tickets page screenshot here.
+<img width="1389" height="1238" alt="image" src="https://github.com/user-attachments/assets/3b0f0a2e-6a97-466e-9b08-65bf74943897" />
+<img width="1398" height="1242" alt="image" src="https://github.com/user-attachments/assets/d59d9a00-7f1a-4674-8d23-286abc313f6a" />
 
 ### Admin modules
-Placeholder: add an admin modules screenshot here.
+<img width="1393" height="1178" alt="image" src="https://github.com/user-attachments/assets/cd217885-ef19-4ca2-9f14-9feca43122ad" />
 
 ### Reporting
-Placeholder: add a reporting page screenshot here.
+<img width="1392" height="959" alt="image" src="https://github.com/user-attachments/assets/09e75db4-dea7-4eb8-976e-27d96ef54a6f" />
+<img width="1393" height="845" alt="image" src="https://github.com/user-attachments/assets/af6af527-abf7-4370-8897-934ff068052c" />
+<img width="1396" height="829" alt="image" src="https://github.com/user-attachments/assets/d9a2aab6-1fb7-4b1a-ba7e-b6e56fd05a1b" />
 
-### Shop / Orders
-Placeholder: add a shop/orders screenshot here.
+**###BCP**
+<img width="1393" height="1238" alt="image" src="https://github.com/user-attachments/assets/5a768d47-82c9-413b-85b5-427b64ff398d" />
+
+###Essential 8 Compliance
+<img width="1385" height="1053" alt="image" src="https://github.com/user-attachments/assets/3074d95d-e695-4ca8-a096-a9eb152b6bb9" />
+
 
 ## Getting started
 
