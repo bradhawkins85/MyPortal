@@ -12,7 +12,7 @@ import (
 
 func openBrowser(url string) {
 	cmd := exec.Command("cmd", "/c", "start", url)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
 }
 
@@ -40,7 +40,7 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 func openNewTicketWindow(_ *api.ConfigResponse) {
 	url := gPortalURL + "/tickets/new"
 	cmd := exec.Command("cmd", "/c", "start", url)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
 }
 
@@ -52,6 +52,6 @@ $xml.GetElementsByTagName('text')[0].InnerText = '` + title + `'
 $xml.GetElementsByTagName('text')[1].InnerText = '` + body + `'
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyPortal').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
 	cmd := exec.Command("powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
 }

@@ -134,7 +134,7 @@ func openNewTicketDialog(_ *api.ConfigResponse) {
 		"powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
 		"-File", scriptPath,
 	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	cmd.Env = append(os.Environ(),
 		"MP_PREFILL_NAME="+prefillName,
 		"MP_PREFILL_EMAIL="+prefillEmail,
