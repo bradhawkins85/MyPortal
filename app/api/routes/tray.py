@@ -991,6 +991,13 @@ async def issue_chat_token(
             detail="Device has no associated company",
         )
 
+    # When no room was explicitly requested, reconnect to the device's existing
+    # open chat room (if any) so the user continues the same conversation.
+    if room_id is None:
+        existing = await chat_repo.get_open_room_by_device_id(int(device["id"]))
+        if existing:
+            room_id = int(existing["id"])
+
     # Generate the one-time token.
     token = secrets.token_urlsafe(32)
     token_hash = tray_service.hash_token(token)
