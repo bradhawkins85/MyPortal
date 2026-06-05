@@ -243,10 +243,20 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 				requestConfigRefresh()
 			}
 		}()
-	}
-}
 
-// defaultIconICO generates a minimal PNG-in-ICO icon at runtime so that no
+	case "quit":
+		label := node.Label
+		if label == "" {
+			label = "Quit"
+		}
+		item := systray.AddMenuItem(label, "Exit MyPortal tray")
+		go func() {
+			for range item.ClickedCh {
+				systray.Quit()
+			}
+		}()
+	}
+} generates a minimal PNG-in-ICO icon at runtime so that no
 // binary asset file needs to be committed.  A 16×16 solid MyPortal-blue
 // (#0070C0) square is used as the placeholder until branding is loaded.
 func defaultIconICO() []byte {
