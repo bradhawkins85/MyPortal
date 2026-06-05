@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
@@ -30,13 +31,13 @@ func TestResolveEnvVarMenuLabelUsesEnvValueByDefault(t *testing.T) {
 }
 
 func TestResolveEnvVarMenuLabelFallsBackToVarNameWhenUnset(t *testing.T) {
-	t.Setenv("COMPUTERNAME", "")
+	const varName = "MYPORTAL_TEST_UNSET_COMPUTERNAME"
+	_ = os.Unsetenv(varName)
 	label := resolveEnvVarMenuLabel(api.MenuNode{
 		Type: "env_var",
-		Name: "COMPUTERNAME",
+		Name: varName,
 	})
-	if label != "COMPUTERNAME" {
+	if label != varName {
 		t.Fatalf("expected variable name fallback, got %q", label)
 	}
 }
-

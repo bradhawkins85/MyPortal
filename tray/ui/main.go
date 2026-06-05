@@ -186,7 +186,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 				}
 				showTextWindow(varName, val)
 			}
-		}(resolveEnvVarName(node.Name))
+		}(normalizeEnvVarName(node.Name))
 
 	case "submenu":
 		// systray doesn't natively support submenus in all implementations;
