@@ -7,10 +7,14 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
+	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
 func openBrowser(url string) {
@@ -32,6 +36,38 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 		} else {
 			chatURL = buildChatURL(0)
 		}
+	}
+	if chatURL == "" {
+		return
+	}
+	openChatAppWindow(chatURL)
+}
+
+func openChatAppWindow(chatURL string) {
+	edgeArgs := []string{
+		"--app=" + chatURL,
+		"--window-size=920,680",
+		"--disable-dev-tools",
+		"--disable-extensions",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--user-data-dir=" + filepath.Join(os.TempDir(), "MyPortal", "tray-chat-profile"),
+	}
+
+	if gPortalURL != "" {
+		iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+		edgeArgs = append(edgeArgs,
+			"--app-name=MyPortal Chat",
+			"--app-icon-url="+iconURL,
+		)
+	}
+
+	cmd := exec.Command("msedge", edgeArgs...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
+	if err := cmd.Start(); err == nil {
+		return
+	} else {
+		logger.Warn("openChatAppWindow: msedge launch failed (%v), falling back to browser", err)
 	}
 	openBrowser(chatURL)
 }
