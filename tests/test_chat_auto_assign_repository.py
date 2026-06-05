@@ -37,6 +37,7 @@ async def test_list_all_technicians_uses_permission_lookup_not_legacy_column(mon
 
     assert "is_helpdesk_technician" not in captured["sql"]
     assert [row["id"] for row in technicians] == [1, 3, 2]
+    assert 4 not in [row["id"] for row in technicians]
 
 
 @pytest.mark.anyio
