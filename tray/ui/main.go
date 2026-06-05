@@ -176,10 +176,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		}(cfg.DisplayText)
 
 	case "env_var":
-		label := node.Label
-		if label == "" {
-			label = node.Name
-		}
+		label := resolveEnvVarMenuLabel(node)
 		item := systray.AddMenuItem(label, "Click to copy value")
 		go func(varName string) {
 			for range item.ClickedCh {
@@ -189,7 +186,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 				}
 				showTextWindow(varName, val)
 			}
-		}(node.Name)
+		}(normalizeEnvVarName(node.Name))
 
 	case "submenu":
 		// systray doesn't natively support submenus in all implementations;
