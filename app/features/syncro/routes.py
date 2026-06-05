@@ -99,8 +99,6 @@ async def _render_syncro_ticket_import(
 @router.get("/admin/tickets/syncro-import", response_class=HTMLResponse)
 async def admin_syncro_ticket_import_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -109,8 +107,6 @@ async def admin_syncro_ticket_import_page(
     return await _render_syncro_ticket_import(
         request,
         current_user,
-        success_message=main_module._sanitize_message(success),
-        error_message=main_module._sanitize_message(error),
     )
 
 

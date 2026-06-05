@@ -1099,7 +1099,10 @@ def test_admin_update_ticket_description_updates_service(monkeypatch, active_ses
         app.dependency_overrides.clear()
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
-    assert response.headers["location"].startswith("/admin/tickets/42?success=")
+    assert "success=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
     update_mock.assert_awaited_once_with(42, "Line one\nLine two")
     summary_mock.assert_awaited_once_with(42)
     tags_mock.assert_awaited_once_with(42)

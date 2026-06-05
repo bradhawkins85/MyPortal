@@ -4,7 +4,6 @@ BCP (Business Continuity Planning) routes and page handlers.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -13,6 +12,7 @@ from app.api.dependencies.auth import get_current_session
 from app.core.config import get_settings
 from app.repositories import bcp as bcp_repo
 from app.repositories import company_memberships as membership_repo
+from app.security.flash import flash_redirect
 from app.security.session import SessionData
 
 router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
@@ -631,10 +631,7 @@ async def create_contact_page(
         responsibility_or_agency if responsibility_or_agency else None,
     )
 
-    return RedirectResponse(
-        url="/bcp/contacts?success=" + quote("Contact added successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/contacts", "Contact added successfully", "success")
 
 
 @router.post("/contacts/{contact_id}/update", include_in_schema=False)
@@ -662,10 +659,7 @@ async def update_contact_page(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
 
-    return RedirectResponse(
-        url="/bcp/contacts?success=" + quote("Contact updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/contacts", "Contact updated successfully", "success")
 
 
 @router.post("/contacts/{contact_id}/delete", include_in_schema=False)
@@ -677,10 +671,7 @@ async def delete_contact_page(request: Request, contact_id: int):
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
 
-    return RedirectResponse(
-        url="/bcp/contacts?success=" + quote("Contact deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/contacts", "Contact deleted successfully", "success")
 
 
 @router.get("/schedules", response_class=HTMLResponse, include_in_schema=False)
@@ -747,10 +738,7 @@ async def create_training_item_endpoint(
         comments if comments else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/schedules?success=" + quote("Training scheduled successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/schedules", "Training scheduled successfully", "success")
 
 
 @router.post("/training/{training_id}/update", include_in_schema=False)
@@ -784,10 +772,7 @@ async def update_training_item_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training item not found")
     
-    return RedirectResponse(
-        url="/bcp/schedules?success=" + quote("Training updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/schedules", "Training updated successfully", "success")
 
 
 @router.post("/training/{training_id}/delete", include_in_schema=False)
@@ -802,10 +787,7 @@ async def delete_training_item_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training item not found")
     
-    return RedirectResponse(
-        url="/bcp/schedules?success=" + quote("Training deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/schedules", "Training deleted successfully", "success")
 
 
 @router.post("/review", include_in_schema=False)
@@ -839,10 +821,7 @@ async def create_review_item_endpoint(
         changes_made if changes_made else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/schedules?success=" + quote("Review scheduled successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/schedules", "Review scheduled successfully", "success")
 
 
 @router.post("/review/{review_id}/update", include_in_schema=False)
@@ -876,10 +855,7 @@ async def update_review_item_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
     
-    return RedirectResponse(
-        url="/bcp/schedules?success=" + quote("Review updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/schedules", "Review updated successfully", "success")
 
 
 @router.post("/review/{review_id}/delete", include_in_schema=False)
@@ -894,10 +870,7 @@ async def delete_review_item_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found")
     
-    return RedirectResponse(
-        url="/bcp/schedules?success=" + quote("Review deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/schedules", "Review deleted successfully", "success")
 
 
 @router.get("/roles", response_class=HTMLResponse, include_in_schema=False)
@@ -957,10 +930,7 @@ async def create_bcp_role(
     
     await bcp_repo.create_role(plan["id"], title, responsibilities)
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("Role created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "Role created successfully", "success")
 
 
 @router.post("/roles/{role_id}/update", include_in_schema=False)
@@ -977,10 +947,7 @@ async def update_bcp_role(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("Role updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "Role updated successfully", "success")
 
 
 @router.post("/roles/{role_id}/delete", include_in_schema=False)
@@ -995,10 +962,7 @@ async def delete_bcp_role(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("Role deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "Role deleted successfully", "success")
 
 
 @router.post("/roles/{role_id}/assign", include_in_schema=False)
@@ -1014,10 +978,7 @@ async def assign_user_to_role(
     
     await bcp_repo.create_role_assignment(role_id, user_id, is_alternate, contact_info)
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("User assigned to role successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "User assigned to role successfully", "success")
 
 
 @router.post("/roles/assignments/{assignment_id}/update", include_in_schema=False)
@@ -1035,10 +996,7 @@ async def update_role_assignment_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("Assignment updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "Assignment updated successfully", "success")
 
 
 @router.post("/roles/assignments/{assignment_id}/delete", include_in_schema=False)
@@ -1053,10 +1011,7 @@ async def delete_role_assignment_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("Assignment removed successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "Assignment removed successfully", "success")
 
 
 @router.post("/roles/seed", include_in_schema=False)
@@ -1070,10 +1025,7 @@ async def seed_example_role(request: Request):
     
     await bcp_repo.seed_example_team_leader_role(plan["id"])
     
-    return RedirectResponse(
-        url="/bcp/roles?success=" + quote("Example Team Leader role added"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/roles", "Example Team Leader role added", "success")
 
 
 @router.get("/export", response_class=HTMLResponse, include_in_schema=False)
@@ -1269,10 +1221,7 @@ async def update_plan(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp?success=" + quote("Plan updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp", "Plan updated successfully", "success")
 
 
 @router.post("/objectives", include_in_schema=False)
@@ -1299,10 +1248,7 @@ async def add_objective(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp?success=" + quote("Objective added"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp", "Objective added", "success")
 
 
 @router.post("/objectives/{objective_id}/delete", include_in_schema=False)
@@ -1327,10 +1273,7 @@ async def delete_objective(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp?success=" + quote("Objective deleted"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp", "Objective deleted", "success")
 
 
 @router.post("/risks", include_in_schema=False)
@@ -1382,10 +1325,7 @@ async def create_risk(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/risks?success=" + quote("Risk created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/risks", "Risk created successfully", "success")
 
 
 @router.post("/risks/{risk_id}/update", include_in_schema=False)
@@ -1436,10 +1376,7 @@ async def update_risk(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/risks?success=" + quote("Risk updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/risks", "Risk updated successfully", "success")
 
 
 @router.post("/risks/{risk_id}/delete", include_in_schema=False)
@@ -1464,10 +1401,7 @@ async def delete_risk(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/risks?success=" + quote("Risk deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/risks", "Risk deleted successfully", "success")
 
 
 @router.get("/risks/export", include_in_schema=False)
@@ -1552,10 +1486,7 @@ async def seed_risks(request: Request):
     
     await bcp_repo.seed_example_risks(plan["id"])
     
-    return RedirectResponse(
-        url="/bcp/risks?success=" + quote("Example risks added successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/risks", "Example risks added successfully", "success")
 
 
 @router.post("/distribution", include_in_schema=False)
@@ -1574,10 +1505,7 @@ async def add_distribution_entry(
     
     await bcp_repo.create_distribution_entry(plan["id"], copy_number, name, location)
     
-    return RedirectResponse(
-        url="/bcp?success=" + quote("Distribution entry added"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp", "Distribution entry added", "success")
 
 
 @router.post("/distribution/{entry_id}/delete", include_in_schema=False)
@@ -1592,10 +1520,7 @@ async def delete_distribution_entry(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
     
-    return RedirectResponse(
-        url="/bcp?success=" + quote("Distribution entry deleted"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp", "Distribution entry deleted", "success")
 
 
 # ============================================================================
@@ -1672,10 +1597,7 @@ async def create_insurance_policy(
         payment_terms if payment_terms else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/insurance?success=" + quote("Insurance policy created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/insurance", "Insurance policy created successfully", "success")
 
 
 @router.post("/insurance/{policy_id}/update", include_in_schema=False)
@@ -1716,10 +1638,7 @@ async def update_insurance_policy(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
     
-    return RedirectResponse(
-        url="/bcp/insurance?success=" + quote("Insurance policy updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/insurance", "Insurance policy updated successfully", "success")
 
 
 @router.post("/insurance/{policy_id}/delete", include_in_schema=False)
@@ -1734,10 +1653,7 @@ async def delete_insurance_policy(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Policy not found")
     
-    return RedirectResponse(
-        url="/bcp/insurance?success=" + quote("Insurance policy deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/insurance", "Insurance policy deleted successfully", "success")
 
 
 @router.get("/insurance/export", include_in_schema=False)
@@ -1861,10 +1777,7 @@ async def create_backup_item(
         steps if steps else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/backups?success=" + quote("Backup item created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/backups", "Backup item created successfully", "success")
 
 
 @router.post("/backups/{backup_id}/update", include_in_schema=False)
@@ -1892,10 +1805,7 @@ async def update_backup_item(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup item not found")
     
-    return RedirectResponse(
-        url="/bcp/backups?success=" + quote("Backup item updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/backups", "Backup item updated successfully", "success")
 
 
 @router.post("/backups/{backup_id}/delete", include_in_schema=False)
@@ -1910,10 +1820,7 @@ async def delete_backup_item(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup item not found")
     
-    return RedirectResponse(
-        url="/bcp/backups?success=" + quote("Backup item deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/backups", "Backup item deleted successfully", "success")
 
 
 @router.get("/backups/export", include_in_schema=False)
@@ -2109,10 +2016,7 @@ async def create_critical_activity(
             losses_comments if losses_comments else None,
         )
     
-    return RedirectResponse(
-        url="/bcp/bia?success=" + quote("Critical activity created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/bia", "Critical activity created successfully", "success")
 
 
 @router.post("/bia/{activity_id}/update", include_in_schema=False)
@@ -2181,10 +2085,7 @@ async def update_critical_activity_endpoint(
         losses_comments if losses_comments else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/bia?success=" + quote("Critical activity updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/bia", "Critical activity updated successfully", "success")
 
 
 @router.post("/bia/{activity_id}/delete", include_in_schema=False)
@@ -2199,10 +2100,7 @@ async def delete_critical_activity_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
     
-    return RedirectResponse(
-        url="/bcp/bia?success=" + quote("Critical activity deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/bia", "Critical activity deleted successfully", "success")
 
 
 @router.get("/bia/export", include_in_schema=False)
@@ -2297,10 +2195,7 @@ async def start_incident(request: Request):
     # Check if there's already an active incident
     active_incident = await bcp_repo.get_active_incident(plan["id"])
     if active_incident:
-        return RedirectResponse(
-            url="/bcp/incident?error=" + quote("An incident is already active"),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/bcp/incident", "An incident is already active", "error")
     
     # Create new incident
     now = datetime.utcnow()
@@ -2337,10 +2232,7 @@ async def start_incident(request: Request):
     # TODO: Send portal alert to distribution list
     # This would require implementing a notification/alert system
     
-    return RedirectResponse(
-        url="/bcp/incident?success=" + quote("Incident started successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/incident", "Incident started successfully", "success")
 
 
 @router.post("/incident/close", include_in_schema=False)
@@ -2358,10 +2250,7 @@ async def close_incident_endpoint(request: Request):
     # Get active incident
     active_incident = await bcp_repo.get_active_incident(plan["id"])
     if not active_incident:
-        return RedirectResponse(
-            url="/bcp/incident?error=" + quote("No active incident found"),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/bcp/incident", "No active incident found", "error")
     
     # Close the incident
     await bcp_repo.close_incident(active_incident["id"])
@@ -2390,10 +2279,7 @@ async def close_incident_endpoint(request: Request):
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/incident?success=" + quote("Incident closed successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/incident", "Incident closed successfully", "success")
 
 
 @router.post("/incident/checklist/{tick_id}/toggle", include_in_schema=False)
@@ -2461,10 +2347,7 @@ async def create_contact_endpoint(
         responsibility_or_agency if responsibility_or_agency else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/incident?tab=contacts&success=" + quote("Contact added successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/incident?tab=contacts", "Contact added successfully", "success")
 
 
 @router.post("/incident/contacts/{contact_id}/update", include_in_schema=False)
@@ -2492,10 +2375,7 @@ async def update_contact_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     
-    return RedirectResponse(
-        url="/bcp/incident?tab=contacts&success=" + quote("Contact updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/incident?tab=contacts", "Contact updated successfully", "success")
 
 
 @router.post("/incident/contacts/{contact_id}/delete", include_in_schema=False)
@@ -2510,10 +2390,7 @@ async def delete_contact_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     
-    return RedirectResponse(
-        url="/bcp/incident?tab=contacts&success=" + quote("Contact deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/incident?tab=contacts", "Contact deleted successfully", "success")
 
 
 @router.post("/incident/event-log", include_in_schema=False)
@@ -2535,10 +2412,7 @@ async def create_event_log_entry_endpoint(
     # Get active incident
     active_incident = await bcp_repo.get_active_incident(plan["id"])
     if not active_incident:
-        return RedirectResponse(
-            url="/bcp/incident?tab=event-log&error=" + quote("No active incident"),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/bcp/incident?tab=event-log", "No active incident", "error")
     
     # Parse timestamp or use current time
     if happened_at:
@@ -2573,10 +2447,7 @@ async def create_event_log_entry_endpoint(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/incident?tab=event-log&success=" + quote("Event logged successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/incident?tab=event-log", "Event logged successfully", "success")
 
 
 @router.get("/incident/event-log/export", include_in_schema=False)
@@ -2853,10 +2724,7 @@ async def update_evacuation(
         notes=notes if notes else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/evacuation?success=" + quote("Evacuation plan updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/evacuation", "Evacuation plan updated successfully", "success")
 
 
 # ============================================================================
@@ -2927,10 +2795,7 @@ async def create_emergency_kit_item_endpoint(
     
     # Redirect to the appropriate tab
     tab = "documents" if category == "Document" else "equipment"
-    return RedirectResponse(
-        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item added successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/bcp/emergency-kit?tab={tab}", "Item added successfully", "success")
 
 
 @router.post("/emergency-kit/{item_id}/update", include_in_schema=False)
@@ -2956,10 +2821,7 @@ async def update_emergency_kit_item_endpoint(
     
     # Redirect to the appropriate tab
     tab = "documents" if category == "Document" else "equipment"
-    return RedirectResponse(
-        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/bcp/emergency-kit?tab={tab}", "Item updated successfully", "success")
 
 
 @router.post("/emergency-kit/{item_id}/check", include_in_schema=False)
@@ -2982,10 +2844,7 @@ async def mark_emergency_kit_item_checked_endpoint(
     
     # Redirect to the appropriate tab
     tab = "documents" if item["category"] == "Document" else "equipment"
-    return RedirectResponse(
-        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item marked as checked"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/bcp/emergency-kit?tab={tab}", "Item marked as checked", "success")
 
 
 @router.post("/emergency-kit/{item_id}/delete", include_in_schema=False)
@@ -3007,10 +2866,7 @@ async def delete_emergency_kit_item_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     
-    return RedirectResponse(
-        url=f"/bcp/emergency-kit?tab={tab}&success=" + quote("Item deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/bcp/emergency-kit?tab={tab}", "Item deleted successfully", "success")
 
 
 # ============================================================================
@@ -3072,10 +2928,7 @@ async def create_recovery_action_endpoint(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/recovery?success=" + quote("Recovery action created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery", "Recovery action created successfully", "success")
 
 
 @router.post("/recovery/{action_id}/update", include_in_schema=False)
@@ -3132,10 +2985,7 @@ async def update_recovery_action_endpoint(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/recovery?success=" + quote("Recovery action updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery", "Recovery action updated successfully", "success")
 
 
 @router.post("/recovery/{action_id}/complete", include_in_schema=False)
@@ -3163,10 +3013,7 @@ async def mark_recovery_action_complete_endpoint(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/recovery?success=" + quote("Recovery action marked as complete"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery", "Recovery action marked as complete", "success")
 
 
 @router.post("/recovery/{action_id}/delete", include_in_schema=False)
@@ -3192,10 +3039,7 @@ async def delete_recovery_action_endpoint(
         request=request,
     )
     
-    return RedirectResponse(
-        url="/bcp/recovery?success=" + quote("Recovery action deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery", "Recovery action deleted successfully", "success")
 
 
 @router.get("/recovery/export", include_in_schema=False)
@@ -3408,10 +3252,7 @@ async def create_recovery_contact_endpoint(
         phone if phone else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/recovery-contacts?success=" + quote("Recovery contact created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery-contacts", "Recovery contact created successfully", "success")
 
 
 @router.post("/recovery-contacts/{contact_id}/update", include_in_schema=False)
@@ -3437,10 +3278,7 @@ async def update_recovery_contact_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     
-    return RedirectResponse(
-        url="/bcp/recovery-contacts?success=" + quote("Recovery contact updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery-contacts", "Recovery contact updated successfully", "success")
 
 
 @router.post("/recovery-contacts/{contact_id}/delete", include_in_schema=False)
@@ -3455,10 +3293,7 @@ async def delete_recovery_contact_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found")
     
-    return RedirectResponse(
-        url="/bcp/recovery-contacts?success=" + quote("Recovery contact deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/recovery-contacts", "Recovery contact deleted successfully", "success")
 
 
 @router.get("/recovery-contacts/export", include_in_schema=False)
@@ -3583,10 +3418,7 @@ async def create_insurance_claim_endpoint(
         follow_up_actions if follow_up_actions else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/insurance-claims?success=" + quote("Insurance claim created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/insurance-claims", "Insurance claim created successfully", "success")
 
 
 @router.post("/insurance-claims/{claim_id}/update", include_in_schema=False)
@@ -3621,10 +3453,7 @@ async def update_insurance_claim_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
     
-    return RedirectResponse(
-        url="/bcp/insurance-claims?success=" + quote("Insurance claim updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/insurance-claims", "Insurance claim updated successfully", "success")
 
 
 @router.post("/insurance-claims/{claim_id}/delete", include_in_schema=False)
@@ -3639,10 +3468,7 @@ async def delete_insurance_claim_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
     
-    return RedirectResponse(
-        url="/bcp/insurance-claims?success=" + quote("Insurance claim deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/insurance-claims", "Insurance claim deleted successfully", "success")
 
 
 @router.get("/insurance-claims/export", include_in_schema=False)
@@ -3756,10 +3582,7 @@ async def create_market_change_endpoint(
         options if options else None,
     )
     
-    return RedirectResponse(
-        url="/bcp/market-changes?success=" + quote("Market change created successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/market-changes", "Market change created successfully", "success")
 
 
 @router.post("/market-changes/{change_id}/update", include_in_schema=False)
@@ -3783,10 +3606,7 @@ async def update_market_change_endpoint(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Market change not found")
     
-    return RedirectResponse(
-        url="/bcp/market-changes?success=" + quote("Market change updated successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/market-changes", "Market change updated successfully", "success")
 
 
 @router.post("/market-changes/{change_id}/delete", include_in_schema=False)
@@ -3801,10 +3621,7 @@ async def delete_market_change_endpoint(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Market change not found")
     
-    return RedirectResponse(
-        url="/bcp/market-changes?success=" + quote("Market change deleted successfully"),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/market-changes", "Market change deleted successfully", "success")
 
 
 @router.get("/market-changes/export", include_in_schema=False)
@@ -4030,7 +3847,4 @@ async def reseed_bcp_defaults(
         
         message = f"Successfully added: {', '.join(parts)}"
     
-    return RedirectResponse(
-        url="/bcp/admin/seed-info?success=" + quote(message),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/bcp/admin/seed-info", message, "success")

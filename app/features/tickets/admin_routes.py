@@ -21,12 +21,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core.logging import log_error, log_info
+from app.security.flash import flash_redirect
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -65,8 +66,6 @@ def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
 @router.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
     phoneNumber: str | None = Query(default=None),
 ):
     main_module = _main()
@@ -76,8 +75,6 @@ async def admin_tickets_page(
     return await main_module._render_tickets_dashboard(
         request,
         current_user,
-        success_message=main_module._sanitize_message(success),
-        error_message=main_module._sanitize_message(error),
         phone_number=phoneNumber,
     )
 
@@ -86,8 +83,6 @@ async def admin_tickets_page(
 async def admin_ticket_detail(
     ticket_id: int,
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -97,8 +92,6 @@ async def admin_ticket_detail(
         request,
         current_user,
         ticket_id=ticket_id,
-        success_message=main_module._sanitize_message(success),
-        error_message=main_module._sanitize_message(error),
     )
 
 
@@ -192,10 +185,7 @@ async def admin_create_ticket(request: Request):
             error_message=error_detail,
             status_code=status_code_value,
         )
-    return RedirectResponse(
-        url="/admin/tickets?success=" + quote("Ticket created."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/tickets", "Ticket created.", "success")
 
 
 @router.post("/admin/tickets/{ticket_id}/status", response_class=HTMLResponse)
@@ -238,13 +228,12 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
         actor_type="technician",
         actor=current_user,
     )
-    message = quote(f"Ticket {ticket_id} updated.")
-    destination = f"/admin/tickets?success={message}"
+    message = f"Ticket {ticket_id} updated."
+    destination = "/admin/tickets"
     safe_return_url = _safe_local_redirect_target(return_url, fallback="")
     if safe_return_url:
-        separator = "&" if "?" in safe_return_url else "?"
-        destination = f"{safe_return_url}{separator}success={message}"
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+        destination = safe_return_url
+    return flash_redirect(destination, message, "success")
 
 
 def _build_ticket_status_payloads(
@@ -314,10 +303,7 @@ async def admin_replace_ticket_statuses(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    return RedirectResponse(
-        url="/admin/tickets?success=" + quote("Ticket statuses updated."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/tickets", "Ticket statuses updated.", "success")
 
 
 @router.post("/admin/tickets/labour-types", response_class=HTMLResponse)
@@ -370,10 +356,7 @@ async def admin_replace_labour_types(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    return RedirectResponse(
-        url="/admin/tickets?success=" + quote("Labour types updated."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/tickets", "Labour types updated.", "success")
 
 
 @router.post("/admin/tickets/{ticket_id}/description", response_class=HTMLResponse)
@@ -405,14 +388,13 @@ async def admin_update_ticket_description(ticket_id: int, request: Request):
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
 
-    message = quote("Ticket description updated.")
-    destination = f"/admin/tickets/{ticket_id}?success={message}"
+    message = "Ticket description updated."
+    destination = f"/admin/tickets/{ticket_id}"
     safe_return_url = _safe_local_redirect_target(return_url, fallback="")
     if safe_return_url.startswith(f"/admin/tickets/{ticket_id}"):
-        separator = "&" if "?" in safe_return_url else "?"
-        destination = f"{safe_return_url}{separator}success={message}"
+        destination = safe_return_url
 
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect(destination, message, "success")
 
 
 @router.post("/admin/tickets/{ticket_id}/description/replace", response_class=JSONResponse)
@@ -713,14 +695,13 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
             initiated_by_user_id=int(current_user["id"]),
         )
 
-    message = quote("Ticket details updated.")
-    destination = f"/admin/tickets/{ticket_id}?success={message}"
+    message = "Ticket details updated."
+    destination = f"/admin/tickets/{ticket_id}"
     safe_return_url = _safe_local_redirect_target(return_url, fallback="")
     if safe_return_url.startswith(f"/admin/tickets/{ticket_id}"):
-        separator = "&" if "?" in safe_return_url else "?"
-        destination = f"{safe_return_url}{separator}success={message}"
+        destination = safe_return_url
 
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect(destination, message, "success")
 
 
 @router.post("/admin/tickets/{ticket_id}/ai/reprocess", response_class=JSONResponse)
@@ -800,11 +781,8 @@ async def admin_delete_ticket(ticket_id: int, request: Request):
     )
     await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
 
-    message = quote(f"Ticket {ticket_id} deleted.")
-    return RedirectResponse(
-        url=f"/admin/tickets?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Ticket {ticket_id} deleted."
+    return flash_redirect("/admin/tickets", message, "success")
 
 
 @router.post("/admin/tickets/bulk-delete", response_class=HTMLResponse)
@@ -874,18 +852,16 @@ async def admin_bulk_delete_tickets(request: Request):
             f"Deleted {deleted_count} {message_suffix}."
             " Some selected tickets were not found."
         )
-    message = quote(redirect_message)
 
     return_url_raw = form.get("returnUrl")
     return_url = str(return_url_raw) if isinstance(return_url_raw, str) else ""
     safe_return_url = _safe_local_redirect_target(return_url, fallback="")
     if safe_return_url:
-        separator = "&" if "?" in safe_return_url else "?"
-        destination = f"{safe_return_url}{separator}success={message}"
+        destination = safe_return_url
     else:
-        destination = f"/admin/tickets?success={message}"
+        destination = "/admin/tickets"
 
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect(destination, redirect_message, "success")
 
 
 @router.post("/admin/tickets/{ticket_id}/replies", response_class=HTMLResponse)
@@ -1054,10 +1030,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     message_text = "Reply posted."
     if has_failed_attachments:
         message_text = "Reply posted, but some attachments failed to upload."
-    return RedirectResponse(
-        url=f"/admin/tickets/{ticket_id}?success=" + quote(message_text),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/admin/tickets/{ticket_id}", message_text, "success")
 
 
 __all__ = ["router"]
