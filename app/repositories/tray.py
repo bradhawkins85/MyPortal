@@ -259,6 +259,22 @@ async def reactivate_device(device_id: int) -> None:
     )
 
 
+async def delete_device(device_id: int) -> None:
+    placeholder = "?" if db.is_sqlite() else "%s"
+    await db.execute(
+        f"DELETE FROM tray_devices WHERE id = {placeholder}",
+        (device_id,),
+    )
+
+
+async def delete_revoked_devices() -> int:
+    rows = await list_devices(status="revoked")
+    if not rows:
+        return 0
+    await db.execute("DELETE FROM tray_devices WHERE status = 'revoked'")
+    return len(rows)
+
+
 # ---------------------------------------------------------------------------
 # Menu configs
 # ---------------------------------------------------------------------------
