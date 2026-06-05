@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
+from app.repositories import company_memberships as membership_repo
+
+_HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
 
 _LIST_RULES_SELECT = """
@@ -108,25 +111,56 @@ async def delete_rule(rule_id: int) -> None:
 
 async def list_technicians_with_matrix_id() -> list[dict[str, Any]]:
     """Return staff users (super admin or helpdesk) who have a matrix_user_id set."""
-    rows = await db.fetch_all(
-        """SELECT id, email, first_name, last_name, matrix_user_id
-           FROM users
-           WHERE (is_super_admin = 1 OR is_helpdesk_technician = 1)
-             AND matrix_user_id IS NOT NULL AND matrix_user_id != ''
-           ORDER BY first_name, last_name, email""",
-    )
-    return [dict(r) for r in rows]
+    return await _list_technicians(require_matrix_id=True)
 
 
 async def list_all_technicians() -> list[dict[str, Any]]:
     """Return all staff users (super admin or helpdesk)."""
+    return await _list_technicians(require_matrix_id=False)
+
+
+async def _list_technicians(*, require_matrix_id: bool) -> list[dict[str, Any]]:
+    query = """
+        SELECT id, email, first_name, last_name, matrix_user_id, is_super_admin
+        FROM users
+    """
+    if require_matrix_id:
+        query += "WHERE matrix_user_id IS NOT NULL AND matrix_user_id != ''"
     rows = await db.fetch_all(
-        """SELECT id, email, first_name, last_name, matrix_user_id
-           FROM users
-           WHERE is_super_admin = 1 OR is_helpdesk_technician = 1
-           ORDER BY first_name, last_name, email""",
+        query,
     )
-    return [dict(r) for r in rows]
+    users = [dict(row) for row in rows]
+
+    users_with_permission = await membership_repo.list_users_with_permission(_HELPDESK_PERMISSION_KEY)
+    permission_user_ids = set()
+    for user in users_with_permission:
+        try:
+            permission_user_ids.add(int(user.get("id")))
+        except (TypeError, ValueError):
+            continue
+
+    technicians: list[dict[str, Any]] = []
+    for user in users:
+        try:
+            user_id = int(user.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if bool(user.get("is_super_admin")):
+            technicians.append(user)
+            continue
+        if user_id in permission_user_ids:
+            technicians.append(user)
+            continue
+        if await membership_repo.user_has_permission(user_id, _HELPDESK_PERMISSION_KEY):
+            technicians.append(user)
+
+    def _sort_key(record: dict[str, Any]) -> tuple[str, str, str]:
+        first_name = (record.get("first_name") or "").lower()
+        last_name = (record.get("last_name") or "").lower()
+        email = (record.get("email") or "").lower()
+        return (first_name, last_name, email)
+
+    return sorted(technicians, key=_sort_key)
 
 
 def _decode_row(row: dict[str, Any]) -> dict[str, Any]:
