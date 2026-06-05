@@ -100,10 +100,10 @@ func saveState(s persistedState) {
 // -----------------------------------------------------------------
 
 type daemon struct {
-	cfg     *config.Config
-	client  *api.Client
-	ipcSrv  *ipc.Server
-	stopCh  chan struct{}
+	cfg    *config.Config
+	client *api.Client
+	ipcSrv *ipc.Server
+	stopCh chan struct{}
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -135,7 +135,7 @@ func (d *daemon) run() {
 	} else {
 		d.ipcSrv.On("refresh_config", func(msg ipc.Message) {
 			logger.Info("refresh_config received from UI — re-fetching config")
-			go d.refreshConfig()
+			d.refreshConfig()
 			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
 		})
 
@@ -387,7 +387,7 @@ func backoff(attempt int) time.Duration {
 	}
 	base := math.Pow(2, float64(attempt))
 	jitter := rand.Float64() * base * 0.3
-	d := time.Duration((base+jitter)*float64(time.Second))
+	d := time.Duration((base + jitter) * float64(time.Second))
 	if d > 5*time.Minute {
 		d = 5 * time.Minute
 	}
