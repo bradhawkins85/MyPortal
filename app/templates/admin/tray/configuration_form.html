@@ -161,46 +161,71 @@
         row.querySelector('[data-wrap-text]').hidden = type !== 'display_text';
       }
 
-      function createRow(node = {}, level = 0) {
+      function getSummaryText(row) {
+        const type = row.querySelector('[data-node-type]').value;
+        if (type === 'separator') return '— separator —';
+        if (type === 'env_var') {
+          const name = row.querySelector('[data-node-name]').value.trim();
+          return name || '(no name)';
+        }
+        const label = row.querySelector('[data-node-label]').value.trim();
+        return label || '(no label)';
+      }
+
+      function updateSummary(row) {
+        const summaryEl = row.querySelector('[data-node-summary]');
+        const badgeEl = row.querySelector('[data-node-type-badge]');
+        if (summaryEl) summaryEl.textContent = getSummaryText(row);
+        if (badgeEl) badgeEl.textContent = row.querySelector('[data-node-type]').value;
+      }
+
+      function createRow(node = {}, level = 0, expanded = false) {
         const rowId = `menu-node-${rowCounter++}`;
         const row = document.createElement('div');
         row.className = 'card card--panel';
         row.style.padding = '0.75rem';
         row.innerHTML = `
-          <div class="form-row">
-            <div class="form-field" style="max-width:8rem;">
-              <label class="form-label" for="${rowId}-level">Level</label>
-              <input class="form-input" id="${rowId}-level" data-node-level type="number" min="0" max="${MAX_LEVEL}" value="${Math.max(0, Math.min(MAX_LEVEL, Number(level) || 0))}" />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="${rowId}-type">Type</label>
-              <select class="form-input" id="${rowId}-type" data-node-type>
-                ${NODE_TYPES.map((type) => `<option value="${type}">${type}</option>`).join('')}
-              </select>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="${rowId}-label">Label</label>
-              <input class="form-input" id="${rowId}-label" data-node-label maxlength="${LABEL_MAX}" />
-            </div>
+          <div data-node-header style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; user-select:none;">
+            <button type="button" class="button button--ghost" data-collapse-toggle aria-expanded="${expanded}" aria-label="${expanded ? 'Collapse node' : 'Expand node'}" style="padding:0.25rem 0.5rem; min-width:2rem; flex-shrink:0;">${expanded ? '▼' : '▶'}</button>
+            <span data-node-summary style="font-weight:500; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+            <span data-node-type-badge style="font-size:0.75em; opacity:0.6; flex-shrink:0;"></span>
           </div>
-          <div class="form-row">
-            <div class="form-field" data-wrap-url>
-              <label class="form-label" for="${rowId}-url">URL</label>
-              <input class="form-input" id="${rowId}-url" data-node-url maxlength="${URL_MAX}" placeholder="https://..." />
+          <div data-node-body ${expanded ? '' : 'hidden'}>
+            <div class="form-row" style="margin-top:0.5rem;">
+              <div class="form-field" style="max-width:8rem;">
+                <label class="form-label" for="${rowId}-level">Level</label>
+                <input class="form-input" id="${rowId}-level" data-node-level type="number" min="0" max="${MAX_LEVEL}" value="${Math.max(0, Math.min(MAX_LEVEL, Number(level) || 0))}" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="${rowId}-type">Type</label>
+                <select class="form-input" id="${rowId}-type" data-node-type>
+                  ${NODE_TYPES.map((type) => `<option value="${type}">${type}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="${rowId}-label">Label</label>
+                <input class="form-input" id="${rowId}-label" data-node-label maxlength="${LABEL_MAX}" />
+              </div>
             </div>
-            <div class="form-field" data-wrap-name>
-              <label class="form-label" for="${rowId}-name">Env var name</label>
-              <input class="form-input" id="${rowId}-name" data-node-name maxlength="${NAME_MAX}" placeholder="USERNAME" />
+            <div class="form-row">
+              <div class="form-field" data-wrap-url>
+                <label class="form-label" for="${rowId}-url">URL</label>
+                <input class="form-input" id="${rowId}-url" data-node-url maxlength="${URL_MAX}" placeholder="https://..." />
+              </div>
+              <div class="form-field" data-wrap-name>
+                <label class="form-label" for="${rowId}-name">Env var name</label>
+                <input class="form-input" id="${rowId}-name" data-node-name maxlength="${NAME_MAX}" placeholder="USERNAME" />
+              </div>
+              <div class="form-field" data-wrap-text>
+                <label class="form-label" for="${rowId}-text">Display text (HTML)</label>
+                <textarea class="form-input" id="${rowId}-text" data-node-text rows="2"></textarea>
+              </div>
             </div>
-            <div class="form-field" data-wrap-text>
-              <label class="form-label" for="${rowId}-text">Display text (HTML)</label>
-              <textarea class="form-input" id="${rowId}-text" data-node-text rows="2"></textarea>
+            <div class="form-actions" style="justify-content:flex-start; gap:0.5rem;">
+              <button type="button" class="button button--ghost" data-action-up aria-label="Move this node up">Move up</button>
+              <button type="button" class="button button--ghost" data-action-down aria-label="Move this node down">Move down</button>
+              <button type="button" class="button button--danger" data-action-remove aria-label="Remove this node">Remove</button>
             </div>
-          </div>
-          <div class="form-actions" style="justify-content:flex-start; gap:0.5rem;">
-            <button type="button" class="button button--ghost" data-action-up aria-label="Move this node up">Move up</button>
-            <button type="button" class="button button--ghost" data-action-down aria-label="Move this node down">Move down</button>
-            <button type="button" class="button button--danger" data-action-remove aria-label="Remove this node">Remove</button>
           </div>
         `;
 
@@ -211,26 +236,51 @@
         row.querySelector('[data-node-name]').value = node.name || '';
         row.querySelector('[data-node-text]').value = node.text || '';
 
+        updateSummary(row);
+
+        const toggleBtn = row.querySelector('[data-collapse-toggle]');
+        const body = row.querySelector('[data-node-body]');
+        const header = row.querySelector('[data-node-header]');
+
+        function toggleCollapse() {
+          const isExpanded = !body.hidden;
+          body.hidden = isExpanded;
+          toggleBtn.setAttribute('aria-expanded', String(!isExpanded));
+          toggleBtn.setAttribute('aria-label', isExpanded ? 'Expand node' : 'Collapse node');
+          toggleBtn.textContent = isExpanded ? '▶' : '▼';
+        }
+
+        toggleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleCollapse();
+        });
+        header.addEventListener('click', () => toggleCollapse());
+
         row.addEventListener('input', () => {
           setFieldVisibility(row);
+          updateSummary(row);
           scheduleSyncJsonFromRows();
         });
         row.addEventListener('change', () => {
           setFieldVisibility(row);
+          updateSummary(row);
           scheduleSyncJsonFromRows();
         });
-        row.querySelector('[data-action-remove]').addEventListener('click', () => {
+        row.querySelector('[data-action-remove]').addEventListener('click', (e) => {
+          e.stopPropagation();
           row.remove();
           updateMoveButtons();
           syncJsonFromRows();
         });
-        row.querySelector('[data-action-up]').addEventListener('click', () => {
+        row.querySelector('[data-action-up]').addEventListener('click', (e) => {
+          e.stopPropagation();
           const prev = row.previousElementSibling;
           if (prev) listEl.insertBefore(row, prev);
           updateMoveButtons();
           syncJsonFromRows();
         });
-        row.querySelector('[data-action-down]').addEventListener('click', () => {
+        row.querySelector('[data-action-down]').addEventListener('click', (e) => {
+          e.stopPropagation();
           const next = row.nextElementSibling;
           if (next) listEl.insertBefore(next, row);
           updateMoveButtons();
@@ -272,7 +322,7 @@
       }
 
       function appendDefaultRow() {
-        listEl.appendChild(createRow({ type: 'label', label: DEFAULT_MENU_LABEL }, 0));
+        listEl.appendChild(createRow({ type: 'label', label: DEFAULT_MENU_LABEL }, 0, true));
         updateMoveButtons();
       }
 
@@ -352,7 +402,7 @@
       }
 
       addBtn.addEventListener('click', () => {
-        listEl.appendChild(createRow({ type: 'label' }, 0));
+        listEl.appendChild(createRow({ type: 'label' }, 0, true));
         updateMoveButtons();
         syncJsonFromRows();
       });
