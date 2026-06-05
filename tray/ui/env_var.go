@@ -7,7 +7,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
 
-func resolveEnvVarName(name string) string {
+func normalizeEnvVarName(name string) string {
 	return strings.TrimSpace(name)
 }
 
@@ -15,7 +15,7 @@ func resolveEnvVarMenuLabel(node api.MenuNode) string {
 	if node.Label != "" {
 		return node.Label
 	}
-	varName := resolveEnvVarName(node.Name)
+	varName := normalizeEnvVarName(node.Name)
 	if varName == "" {
 		return ""
 	}
