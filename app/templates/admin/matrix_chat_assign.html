@@ -311,13 +311,13 @@
       .querySelectorAll('input, select, button, textarea')
       .forEach((el) => {
         el.disabled = hideConditions;
-      });
-    conditionsFieldset.querySelectorAll('.condition-type-select').forEach((el) => {
-      if (hideConditions) {
-        el.removeAttribute('required');
-      } else {
-        el.setAttribute('required', 'required');
-      }
+        if (el.classList && el.classList.contains('condition-type-select')) {
+          if (hideConditions) {
+            el.removeAttribute('required');
+          } else {
+            el.setAttribute('required', 'required');
+          }
+        }
     });
   }
 
