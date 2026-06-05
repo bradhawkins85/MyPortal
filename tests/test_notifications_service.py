@@ -104,7 +104,7 @@ def test_emit_notification_sends_sms(monkeypatch):
 def test_emit_notification_skips_in_app_for_excluded_event_type(monkeypatch):
     captured: dict[str, object] = {"created": False}
 
-    async def fake_is_event_type_excluded(user_id: int, event_type: str):
+    async def fake_is_notification_excluded(user_id: int, event_type: str, message: str):
         assert user_id == 7
         assert event_type == "order.shipped"
         return True
@@ -120,7 +120,7 @@ def test_emit_notification_skips_in_app_for_excluded_event_type(monkeypatch):
         base["event_type"] = event_type
         return base
 
-    monkeypatch.setattr(notifications.exclusions_repo, "is_event_type_excluded", fake_is_event_type_excluded)
+    monkeypatch.setattr(notifications.exclusions_repo, "is_notification_excluded", fake_is_notification_excluded)
     monkeypatch.setattr(notifications.preferences_repo, "get_preference", fake_get_preference)
     monkeypatch.setattr(notifications.notifications_repo, "create_notification", fake_create_notification)
     monkeypatch.setattr(
