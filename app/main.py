@@ -7664,15 +7664,10 @@ async def _render_modules_dashboard(
 
     module_webhook_urls = {
         "smtp2go": f"{public_base}/api/webhooks/smtp2go/events",
+        "trello": f"{public_base}/api/integration-modules/trello/webhook",
         "uptimekuma": f"{public_base}/api/integration-modules/uptimekuma/alerts",
         "xero": f"{public_base}/api/integration-modules/xero/callback",
     }
-    try:
-        from app.api.routes.trello import _build_public_callback_url
-
-        module_webhook_urls["trello"] = _build_public_callback_url(request)
-    except Exception:
-        module_webhook_urls["trello"] = f"{public_base}/api/integration-modules/trello/webhook"
     extra = {
         "title": "Integration modules",
         "modules": modules,
