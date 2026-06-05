@@ -278,6 +278,20 @@ async def tray_chat_popup(
         except Exception:
             pass
 
+        # Apply auto-assign rules.
+        try:
+            from app.services.chat_auto_assign import apply_auto_assign
+            from app.repositories import companies as companies_repo_inner
+            company_obj = await companies_repo_inner.get_company_by_id(company_id)
+            company_name = (company_obj or {}).get("name") or ""
+            await apply_auto_assign(
+                room_id_new,
+                company_name=company_name,
+                subject=subject,
+            )
+        except Exception as exc:
+            log_error("tray_chat_popup: auto-assign failed", room_id=room_id_new, error=str(exc))
+
         log_info(
             "Tray chat popup: created room",
             room_id=room_id_new,
