@@ -49,6 +49,7 @@ class TrayMenuNode(BaseModel):
     * ``display_text`` — opens a popup with ``text`` (sanitised HTML).
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.
     * ``open_chat`` — opens the chat window.
+    * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.
     """
 

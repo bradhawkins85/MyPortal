@@ -301,3 +301,13 @@ func handleIPCMessages(conn net.Conn) {
 		}
 	}
 }
+
+func requestConfigRefresh() {
+	if gIPCConn == nil {
+		logger.Warn("Refresh requested but IPC is not connected")
+		return
+	}
+	if err := ipc.SendTo(gIPCConn, ipc.Message{Type: "refresh_config"}); err != nil {
+		logger.Warn("Refresh request failed: %v", err)
+	}
+}
