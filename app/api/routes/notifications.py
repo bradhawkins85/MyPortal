@@ -15,6 +15,7 @@ from app.repositories import notification_preferences as preferences_repo
 from app.schemas.notifications import (
     NotificationAcknowledgeRequest,
     NotificationCreate,
+    NotificationExclusionListItem,
     NotificationExclusionResponse,
     NotificationEventSettingResponse,
     NotificationEventSettingUpdate,
@@ -304,8 +305,8 @@ async def delete_notification(
 @router.post(
     "/{notification_id}/exclude",
     response_model=NotificationExclusionResponse,
-    summary="Exclude notifications by event type",
-    response_description="The exclusion state for the target notification event type.",
+    summary="Exclude notifications by message or event type",
+    response_description="The exclusion state for the target notification.",
 )
 async def exclude_notification_event_type(
     notification_id: int,
@@ -327,14 +328,20 @@ async def exclude_notification_event_type(
         user_id = int(current_user.get("id"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
-    return await exclusions_repo.exclude_event_type(user_id, event_type)
+    # For "general" event type, exclude by message so each message can be excluded
+    # independently without affecting other notifications of the same broad event type.
+    # For specific event types, exclude all notifications of that type.
+    message = str(record.get("message") or "").strip()
+    message_pattern = message if event_type == "general" else ""
+    return await exclusions_repo.exclude_notification(user_id, event_type, message_pattern)
 
 
 @router.delete(
     "/{notification_id}/exclude",
     response_model=NotificationExclusionResponse,
-    summary="Undo notification exclusion by event type",
+    summary="Undo notification exclusion by event type (deprecated)",
     response_description="The exclusion state for the target notification event type.",
+    deprecated=True,
 )
 async def undo_exclude_notification_event_type(
     notification_id: int,
@@ -357,6 +364,42 @@ async def undo_exclude_notification_event_type(
     except (TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
     return await exclusions_repo.undo_exclude_event_type(user_id, event_type)
+
+
+@router.get(
+    "/exclusions",
+    response_model=list[NotificationExclusionListItem],
+    summary="List notification exclusion rules",
+    response_description="All exclusion rules configured by the authenticated user.",
+)
+async def list_notification_exclusions(
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+    return await exclusions_repo.list_exclusions(user_id)
+
+
+@router.delete(
+    "/exclusions/{exclusion_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a notification exclusion rule",
+)
+async def delete_notification_exclusion(
+    exclusion_id: int,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+    deleted = await exclusions_repo.delete_exclusion(user_id, exclusion_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exclusion rule not found")
 
 
 @router.post(

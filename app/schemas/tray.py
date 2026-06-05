@@ -60,6 +60,7 @@ class TrayMenuNode(BaseModel):
     url: Optional[str] = Field(default=None, max_length=500)
     name: Optional[str] = Field(default=None, max_length=128)
     text: Optional[str] = Field(default=None)
+    color: Optional[str] = Field(default=None, max_length=32)
     children: Optional[list["TrayMenuNode"]] = None
 
 
