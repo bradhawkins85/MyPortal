@@ -217,9 +217,9 @@
                   type="button"
                   class="button button--ghost button--small"
                   data-notification-exclude="{{ notification.id }}"
-                  data-notification-excluded="{{ 1 if notification.is_excluded else 0 }}"
+                  {% if notification.is_excluded %}disabled title="This message type is already excluded"{% endif %}
                 >
-                  {% if notification.is_excluded %}Undo exclude{% else %}Exclude{% endif %}
+                  Exclude
                 </button>
               </div>
             </td>
