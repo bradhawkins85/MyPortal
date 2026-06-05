@@ -5401,6 +5401,48 @@ async def admin_tray_reactivate_device(device_id: int, request: Request):
     return RedirectResponse(url="/admin/tray/devices?status=", status_code=303)
 
 
+@app.post("/admin/tray/devices/{device_id}/delete", response_class=HTMLResponse)
+async def admin_tray_delete_device(device_id: int, request: Request):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device:
+        return flash_redirect("/admin/tray/devices", "Tray device not found.", "error")
+    if device.get("status") != "revoked":
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Only revoked tray devices can be deleted.",
+            "error",
+        )
+    await tray_repo.delete_device(device_id)
+    return flash_redirect(
+        "/admin/tray/devices",
+        "Deleted revoked tray device.",
+        "success",
+    )
+
+
+@app.post("/admin/tray/devices/bulk-delete-revoked", response_class=HTMLResponse)
+async def admin_tray_bulk_delete_revoked_devices(request: Request):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    deleted_count = await tray_repo.delete_revoked_devices()
+    if deleted_count <= 0:
+        return flash_redirect("/admin/tray/devices", "No revoked tray devices to delete.", "info")
+    suffix = "device" if deleted_count == 1 else "devices"
+    return flash_redirect(
+        "/admin/tray/devices",
+        f"Deleted {deleted_count} revoked tray {suffix}.",
+        "success",
+    )
+
+
 @app.get("/admin/tray/install-tokens", response_class=HTMLResponse)
 async def admin_tray_install_tokens_page(
     request: Request,
