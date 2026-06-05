@@ -188,7 +188,7 @@
       <span class="visually-hidden">Close rule editor</span>
       &times;
     </button>
-    <h2 class="modal__title" id="rule-modal-title">{{ 'Edit rule' if is_editing else 'New rule' }}</h2>
+    <h2 class="modal__title" id="rule-modal-title">Rule editor</h2>
     <p class="management__intro">
       Rules are evaluated in priority order when a new chat room is created. All conditions within a rule must match (AND logic). The default fallback rule applies when no other rule matches.
     </p>
@@ -273,9 +273,7 @@
       </fieldset>
 
       <div class="form-actions">
-        <button type="submit" class="button button--primary" id="rule-submit-btn">
-          {{ 'Update rule' if is_editing else 'Create rule' }}
-        </button>
+        <button type="submit" class="button button--primary" id="rule-submit-btn">Save rule</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
       </div>
     </form>
@@ -356,6 +354,7 @@
   const addConditionButton = document.getElementById('add-condition-btn');
 
   if (!modal || !form || !title || !submitButton || !conditionsList || !template || !addConditionButton) {
+    console.warn('Matrix chat auto-assign rule modal could not initialize: required elements are missing.');
     return;
   }
 
@@ -493,6 +492,7 @@
     try {
       conditions = JSON.parse(button.dataset.ruleConditions || '[]');
     } catch (err) {
+      console.warn('Failed to parse rule conditions from row action payload.', err);
       conditions = [];
     }
     conditions.forEach((condition) => addConditionRow(condition));
@@ -552,6 +552,8 @@
   });
 
   {% if is_editing %}
+    title.textContent = 'Edit rule';
+    submitButton.textContent = 'Update rule';
     openModal();
   {% endif %}
 })();
