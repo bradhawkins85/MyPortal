@@ -36,7 +36,7 @@ def _main():
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_index(
     request: Request,
-    status: str | None = Query(default=None),
+    show_closed: str | None = Query(default=None),
     unattended: str | None = Query(default=None),
     session: SessionData | None = Depends(get_current_session),
 ) -> HTMLResponse:
@@ -64,17 +64,23 @@ async def chat_index(
     user_id = current_user["id"]
     is_staff = is_super_admin or is_helpdesk
     unattended_only = is_staff and unattended == "1"
+    show_closed_filter = show_closed == "1"
+    effective_status = None if show_closed_filter else "open"
 
     if is_staff:
-        rooms = await chat_repo.list_rooms(status=status, unattended_only=unattended_only)
+        rooms = await chat_repo.list_rooms(status=effective_status, unattended_only=unattended_only)
     else:
-        rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
+        rooms = await chat_repo.list_rooms(
+            user_id=user_id,
+            company_id=company_id,
+            status=effective_status,
+        )
 
     main_module = _main()
     extra = {
         "title": "Chat",
         "rooms": rooms,
-        "status_filter": status,
+        "show_closed_filter": show_closed_filter,
         "unattended_filter": unattended,
         "is_staff": is_staff,
     }

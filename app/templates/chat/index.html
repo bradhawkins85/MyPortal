@@ -15,13 +15,18 @@
   <header class="card__header">
     <div class="card__controls">
       <form method="get" autocomplete="off" class="tickets-toolbar__form" id="chat-filter-form">
-        <div class="tickets-toolbar__field">
-          <label class="form-label" for="chat-status-filter">Status</label>
-          <select id="chat-status-filter" name="status" class="form-input" data-auto-filter>
-            <option value="">All</option>
-            <option value="open" {% if status_filter == 'open' %}selected{% endif %}>Open</option>
-            <option value="closed" {% if status_filter == 'closed' %}selected{% endif %}>Closed</option>
-          </select>
+        <div class="tickets-toolbar__field form-field--checkbox">
+          <label class="form-checkbox" for="chat-show-closed-filter">
+            <input
+              id="chat-show-closed-filter"
+              type="checkbox"
+              name="show_closed"
+              value="1"
+              data-auto-filter
+              {% if show_closed_filter %}checked{% endif %}
+            />
+            <span>Show Closed Chats</span>
+          </label>
         </div>
         {% if is_staff %}
         <div class="tickets-toolbar__field">
@@ -199,4 +204,3 @@
 })();
 </script>
 {% endblock %}
-
