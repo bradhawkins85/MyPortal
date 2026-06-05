@@ -31,6 +31,25 @@ def _form_bool(form: Any, key: str) -> bool:
     return bool(value)
 
 
+def _parse_priority(form: Any) -> int:
+    """Parse priority from form data, defaulting to 0."""
+    try:
+        return int(form.get("priority") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_tech_user_id(form: Any) -> int | None:
+    """Parse assigned_tech_user_id from form data."""
+    raw = form.get("assigned_tech_user_id")
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 async def _render_dashboard(
     request: Request,
     user: dict[str, Any],
@@ -128,19 +147,13 @@ async def admin_create_auto_assign_rule(request: Request):
         )
 
     try:
-        priority = int(form.get("priority") or 0)
+        priority = _parse_priority(form)
     except (TypeError, ValueError):
         priority = 0
 
     is_default = _form_bool(form, "is_default")
     is_active = _form_bool(form, "is_active")
-    raw_tech = form.get("assigned_tech_user_id")
-    assigned_tech_user_id: int | None = None
-    try:
-        if raw_tech:
-            assigned_tech_user_id = int(raw_tech)
-    except (TypeError, ValueError):
-        pass
+    assigned_tech_user_id = _parse_tech_user_id(form)
 
     conditions = _parse_conditions(form)
 
@@ -193,19 +206,13 @@ async def admin_update_auto_assign_rule(rule_id: int, request: Request):
         )
 
     try:
-        priority = int(form.get("priority") or 0)
+        priority = _parse_priority(form)
     except (TypeError, ValueError):
         priority = 0
 
     is_default = _form_bool(form, "is_default")
     is_active = _form_bool(form, "is_active")
-    raw_tech = form.get("assigned_tech_user_id")
-    assigned_tech_user_id: int | None = None
-    try:
-        if raw_tech:
-            assigned_tech_user_id = int(raw_tech)
-    except (TypeError, ValueError):
-        pass
+    assigned_tech_user_id = _parse_tech_user_id(form)
 
     conditions = _parse_conditions(form)
 
