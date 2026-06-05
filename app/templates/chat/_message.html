@@ -1,4 +1,4 @@
-<div class="chat-message{% if msg.sender_user_id == current_user_id %} chat-message--self{% endif %}" data-event-id="{{ msg.matrix_event_id | default('') }}">
+<div class="chat-message{% if msg.sender_user_id == current_user_id %} chat-message--self{% endif %}" data-event-id="{{ msg.matrix_event_id | default('') }}" data-msg-id="{{ msg.id | default('') }}">
   <div class="chat-message__meta">
     {{ msg.sender_display_name | default(msg.sender_matrix_id) | e }}
     &bull;
