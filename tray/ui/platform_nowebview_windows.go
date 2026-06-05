@@ -25,7 +25,13 @@ func showTextWindow(title, text string) {
 
 func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 	if chatURL == "" {
-		chatURL = buildChatURL(0)
+		// Try to get an authenticated popup URL; fall back to the plain chat URL.
+		authedURL := requestChatTokenForRoom(0)
+		if authedURL != "" {
+			chatURL = authedURL
+		} else {
+			chatURL = buildChatURL(0)
+		}
 	}
 	openBrowser(chatURL)
 }

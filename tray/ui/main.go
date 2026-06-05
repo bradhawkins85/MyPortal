@@ -48,6 +48,7 @@ var (
 	gConfig    *api.ConfigResponse
 	gIPCConn   net.Conn
 	gPortalURL string
+	gAuthToken string
 )
 
 func main() {
@@ -65,6 +66,17 @@ func main() {
 		}
 	}
 
+	// Load auth token from tray-state.json.
+	if p := filepath.Join(stateDir(), "tray-state.json"); gAuthToken == "" {
+		if data, err := os.ReadFile(p); err == nil {
+			var state struct {
+				AuthToken string `json:"auth_token"`
+			}
+			_ = json.Unmarshal(data, &state)
+			gAuthToken = state.AuthToken
+		}
+	}
+
 	// Load cached config.
 	gConfig = loadCachedConfig()
 
@@ -73,6 +85,40 @@ func main() {
 
 	// systray.Run blocks until Quit is called.
 	systray.Run(onTrayReady, onTrayExit)
+}
+
+// requestChatTokenForRoom calls POST /api/tray/chat-token to obtain a
+// short-lived one-time URL token for the popup chat window.
+// Returns the full chat URL on success, or "" on failure.
+func requestChatTokenForRoom(roomID int) string {
+	if gPortalURL == "" || gAuthToken == "" {
+		return ""
+	}
+	var bodyBytes []byte
+	if roomID > 0 {
+		bodyBytes = []byte(`{"room_id":` + itoa(roomID) + `}`)
+	} else {
+		bodyBytes = []byte(`{}`)
+	}
+	req, err := newHTTPRequest("POST", gPortalURL+"/api/tray/chat-token", bodyBytes)
+	if err != nil {
+		return ""
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	var result struct {
+		ChatURL string `json:"chat_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ""
+	}
+	return result.ChatURL
 }
 
 func loadCachedConfig() *api.ConfigResponse {
@@ -243,7 +289,10 @@ func handleIPCMessages(conn net.Conn) {
 				Subject      string `json:"subject"`
 			}
 			_ = json.Unmarshal(msg.Payload, &payload)
-			chatURL := buildChatURL(payload.RoomID)
+			chatURL := requestChatTokenForRoom(payload.RoomID)
+			if chatURL == "" {
+				chatURL = buildChatURL(payload.RoomID)
+			}
 			openChatWindow(chatURL, gConfig)
 
 		case "config_changed":

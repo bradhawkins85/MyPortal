@@ -39,6 +39,7 @@ var (
 	gIPCConn   net.Conn
 	gPortalURL string
 	gDeviceUID string
+	gAuthToken string
 
 	// onConfigChanged is set by the platform-specific runUI implementation to
 	// rebuild the tray menu whenever a config_changed IPC message is received.
@@ -108,12 +109,76 @@ func refreshDeviceUID() {
 	logger.Debug("refreshDeviceUID: device UID not available yet")
 }
 
+// refreshAuthToken reads the device auth token from tray-state.json so the
+// UI agent can authenticate with the portal when requesting a chat token.
+func refreshAuthToken() {
+	p := filepath.Join(stateDir(), "tray-state.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		logger.Debug("refreshAuthToken: %s not readable (%v)", p, err)
+		return
+	}
+	var state struct {
+		AuthToken string `json:"auth_token"`
+	}
+	if jsonErr := json.Unmarshal(data, &state); jsonErr == nil && state.AuthToken != "" {
+		gAuthToken = state.AuthToken
+		logger.Debug("refreshAuthToken: auth token loaded from %s", p)
+		return
+	}
+	logger.Debug("refreshAuthToken: auth token not available yet")
+}
+
+// requestChatTokenForRoom calls POST /api/tray/chat-token to obtain a
+// short-lived one-time URL token that lets the popup webview open
+// /tray/chat without requiring the end user to log in.
+// Returns the full chat URL on success, or "" on failure.
+func requestChatTokenForRoom(roomID int) string {
+	if gPortalURL == "" || gAuthToken == "" {
+		logger.Debug("requestChatTokenForRoom: portal URL or auth token not available")
+		return ""
+	}
+
+	var bodyBytes []byte
+	if roomID > 0 {
+		bodyBytes = []byte(`{"room_id":` + itoa(roomID) + `}`)
+	} else {
+		bodyBytes = []byte(`{}`)
+	}
+
+	req, err := newHTTPRequest("POST", gPortalURL+"/api/tray/chat-token", bodyBytes)
+	if err != nil {
+		logger.Debug("requestChatTokenForRoom: build request: %v", err)
+		return ""
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		logger.Debug("requestChatTokenForRoom: HTTP error: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		logger.Debug("requestChatTokenForRoom: server returned %d", resp.StatusCode)
+		return ""
+	}
+	var result struct {
+		ChatURL string `json:"chat_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Debug("requestChatTokenForRoom: decode error: %v", err)
+		return ""
+	}
+	logger.Debug("requestChatTokenForRoom: got chat URL")
+	return result.ChatURL
+}
+
 func main() {
 	_ = logger.Init("ui")
 	logger.Info("MyPortal Tray UI starting")
 
 	refreshPortalURL()
 	refreshDeviceUID()
+	refreshAuthToken()
 
 	gConfig = loadCachedConfig()
 	go connectIPC()
@@ -213,10 +278,15 @@ func handleIPCMessages(conn net.Conn) {
 				RoomID int `json:"room_id"`
 			}
 			_ = json.Unmarshal(msg.Payload, &payload)
-			openBrowser(buildChatURL(payload.RoomID))
+			chatURL := requestChatTokenForRoom(payload.RoomID)
+			if chatURL == "" {
+				chatURL = buildChatURL(payload.RoomID)
+			}
+			openBrowser(chatURL)
 		case "config_changed":
 			refreshPortalURL()
 			refreshDeviceUID()
+			refreshAuthToken()
 			gConfig = loadCachedConfig()
 			if onConfigChanged != nil {
 				onConfigChanged(gConfig)
