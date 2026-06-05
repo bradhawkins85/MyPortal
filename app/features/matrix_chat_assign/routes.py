@@ -118,6 +118,13 @@ def _parse_conditions(form: Any) -> list[dict[str, Any]]:
     return result
 
 
+def _normalize_conditions(*, is_default: bool, conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Default fallback rules never persist conditions."""
+    if is_default:
+        return []
+    return conditions
+
+
 @router.get("/admin/modules/matrix-chat-assign", response_class=HTMLResponse)
 async def admin_matrix_chat_assign_page(
     request: Request,
@@ -155,7 +162,10 @@ async def admin_create_auto_assign_rule(request: Request):
     is_active = _form_bool(form, "is_active")
     assigned_tech_user_id = _parse_tech_user_id(form)
 
-    conditions = _parse_conditions(form)
+    conditions = _normalize_conditions(
+        is_default=is_default,
+        conditions=_parse_conditions(form),
+    )
 
     try:
         await assign_repo.create_rule(
@@ -214,7 +224,10 @@ async def admin_update_auto_assign_rule(rule_id: int, request: Request):
     is_active = _form_bool(form, "is_active")
     assigned_tech_user_id = _parse_tech_user_id(form)
 
-    conditions = _parse_conditions(form)
+    conditions = _normalize_conditions(
+        is_default=is_default,
+        conditions=_parse_conditions(form),
+    )
 
     try:
         await assign_repo.update_rule(

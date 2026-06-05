@@ -91,7 +91,7 @@
 
         <label class="form-field form-field--checkbox">
           <input type="hidden" name="is_default" value="0" />
-          <input type="checkbox" name="is_default" value="1"
+          <input type="checkbox" name="is_default" value="1" id="is-default-checkbox"
                  {{ 'checked' if (is_editing and editing_rule.is_default) }} />
           <span class="form-label">Default fallback rule</span>
           <span class="form-help">Catches all rooms that don't match any other rule. Conditions are ignored.</span>
@@ -99,7 +99,7 @@
       </div>
 
       {# ---- Conditions builder ---- #}
-      <fieldset class="form-fieldset">
+      <fieldset class="form-fieldset" id="conditions-fieldset">
         <legend class="form-fieldset__legend">
           Conditions <span class="badge">AND</span>
         </legend>
@@ -300,6 +300,26 @@
   const STRING_OPERATORS = ['contains', 'equals', 'starts_with'];
 
   let nextIndex = document.querySelectorAll('#conditions-list .condition-row').length;
+  const defaultCheckbox = document.getElementById('is-default-checkbox');
+  const conditionsFieldset = document.getElementById('conditions-fieldset');
+
+  function toggleConditionsFieldset() {
+    if (!defaultCheckbox || !conditionsFieldset) return;
+    const hideConditions = defaultCheckbox.checked;
+    conditionsFieldset.hidden = hideConditions;
+    conditionsFieldset
+      .querySelectorAll('input, select, button, textarea')
+      .forEach((el) => {
+        el.disabled = hideConditions;
+      });
+    conditionsFieldset.querySelectorAll('.condition-type-select').forEach((el) => {
+      if (hideConditions) {
+        el.removeAttribute('required');
+      } else {
+        el.setAttribute('required', 'required');
+      }
+    });
+  }
 
   function updateRow(row) {
     const typeSelect = row.querySelector('.condition-type-select');
@@ -357,6 +377,11 @@
     attachRow(row);
     nextIndex++;
   });
+
+  if (defaultCheckbox) {
+    defaultCheckbox.addEventListener('change', toggleConditionsFieldset);
+    toggleConditionsFieldset();
+  }
 })();
 </script>
 {% endblock %}
