@@ -113,3 +113,30 @@ def test_modules_page_renders_manage_button_from_module_manage_url(super_admin_c
     assert 'href="/admin/matrix-chat/auto-assign"' in response.text
     assert ">Manage</a>" in response.text
     assert 'href="https://example.com/manage"' not in response.text
+
+
+def test_modules_page_renders_module_quick_actions_and_helpers(super_admin_context, monkeypatch):
+    async def fake_list_modules():
+        return [
+            {"slug": "syncro", "name": "Syncro", "description": "", "enabled": True, "settings": {}},
+            {"slug": "tacticalrmm", "name": "Tactical RMM", "description": "", "enabled": True, "settings": {}},
+            {"slug": "smtp2go", "name": "SMTP2Go", "description": "", "enabled": True, "settings": {}},
+            {"slug": "trello", "name": "Trello", "description": "", "enabled": True, "settings": {}},
+            {"slug": "uptimekuma", "name": "Uptime Kuma", "description": "", "enabled": True, "settings": {}},
+            {"slug": "xero", "name": "Xero", "description": "", "enabled": True, "settings": {}},
+        ]
+
+    monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/modules")
+
+    assert response.status_code == 200
+    assert 'action="/admin/syncro/import-companies"' in response.text
+    assert 'action="/admin/modules/tacticalrmm/push-companies"' in response.text
+    assert 'action="/admin/modules/tacticalrmm/pull-companies"' in response.text
+    assert "/api/webhooks/smtp2go/events" in response.text
+    assert "/api/integration-modules/trello/webhook" in response.text
+    assert "/api/integration-modules/uptimekuma/alerts" in response.text
+    assert "/api/integration-modules/xero/callback" in response.text
+    assert 'href="/api/integration-modules/xero/tenants"' in response.text
