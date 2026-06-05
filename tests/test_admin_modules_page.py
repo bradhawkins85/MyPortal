@@ -56,7 +56,7 @@ def test_module_enable_checkbox_sets_true(super_admin_context, monkeypatch):
         )
 
     assert response.status_code == 303
-    assert calls == [("ollama", True, {})]
+    assert calls == [("ollama", True, None)]
 
 
 def test_module_enable_checkbox_absent_sets_false(super_admin_context, monkeypatch):
@@ -75,4 +75,4 @@ def test_module_enable_checkbox_absent_sets_false(super_admin_context, monkeypat
         )
 
     assert response.status_code == 303
-    assert calls == [("smtp", False, {})]
+    assert calls == [("smtp", False, None)]
