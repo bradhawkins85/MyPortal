@@ -141,3 +141,12 @@ async def test_refresh_failure_logged(monkeypatch):
 
     await service.stop()
 
+
+def test_build_trigger_supports_last_day_of_month_alias():
+    service = SchedulerService()
+    service._scheduler = SimpleNamespace(timezone=timezone.utc)
+
+    trigger = service._build_trigger({"id": 1, "cron": "0 0 L * *"})
+
+    assert trigger is not None
+    assert "day='last'" in str(trigger)
