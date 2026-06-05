@@ -163,9 +163,9 @@ The tray client will only read variables that are explicitly listed in the resol
 
 3. Save the configuration.
 
-**Step 3 — Add an `env_var` node to the menu JSON**
+**Step 3 — Add an `env_var` menu row**
 
-In the same configuration, scroll to the **Menu nodes (JSON)** field and add an object with `"type": "env_var"` anywhere in the array. The required fields are:
+In the same configuration, use the **Menu nodes** list editor and add a row with type `env_var`. Populate the required fields:
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -173,18 +173,14 @@ In the same configuration, scroll to the **Menu nodes (JSON)** field and add an 
 | `name` | string | Exact environment variable name, e.g. `"USERNAME"` |
 | `label` | string | Menu item text shown to the user |
 
-Example — showing the logged-in username:
+Example values for an `env_var` row:
 
 ```json
-[
-  {"type": "label", "label": "Device Info"},
-  {"type": "separator"},
-  {"type": "env_var", "name": "USERNAME",    "label": "Logged-in user"},
-  {"type": "env_var", "name": "COMPUTERNAME","label": "Computer name"},
-  {"type": "env_var", "name": "USERDOMAIN",  "label": "Domain"},
-  {"type": "separator"},
-  {"type": "link", "label": "Submit Ticket", "url": "https://portal.example.com/new-ticket"}
-]
+Type: `env_var`  
+Name: `USERNAME`  
+Label: `Logged-in user`
+
+If you need advanced nesting, you can still use the **Advanced JSON** toggle to edit raw JSON directly.
 ```
 
 **Step 4 — Save and verify**
