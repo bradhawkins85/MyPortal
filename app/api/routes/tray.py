@@ -478,6 +478,37 @@ async def admin_reactivate_device(
     return JSONResponse({"status": "active"})
 
 
+@router.delete(
+    "/admin/devices/{device_id}",
+    summary="Delete a revoked tray device",
+)
+async def admin_delete_device(
+    device_id: int,
+    _current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Tray device not found")
+    if device.get("status") != "revoked":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete device: device is not in revoked state",
+        )
+    await tray_repo.delete_device(device_id)
+    return JSONResponse({"status": "deleted"})
+
+
+@router.post(
+    "/admin/devices/bulk-delete-revoked",
+    summary="Delete all revoked tray devices",
+)
+async def admin_bulk_delete_revoked_devices(
+    _current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    deleted_count = await tray_repo.delete_revoked_devices()
+    return JSONResponse({"status": "ok", "deleted_count": deleted_count})
+
+
 # ---------------------------------------------------------------------------
 # Technician chat-start
 # ---------------------------------------------------------------------------
