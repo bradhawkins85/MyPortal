@@ -7658,9 +7658,20 @@ async def _render_modules_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
+    public_base = str(settings.public_base_url or "").strip().rstrip("/")
+    if not public_base:
+        public_base = str(request.base_url).rstrip("/")
+
+    module_webhook_urls = {
+        "smtp2go": f"{public_base}/api/webhooks/smtp2go/events",
+        "trello": f"{public_base}/api/integration-modules/trello/webhook",
+        "uptimekuma": f"{public_base}/api/integration-modules/uptimekuma/alerts",
+        "xero": f"{public_base}/api/integration-modules/xero/callback",
+    }
     extra = {
         "title": "Integration modules",
         "modules": modules,
+        "module_webhook_urls": module_webhook_urls,
         "success_message": success_message,
         "error_message": error_message,
     }

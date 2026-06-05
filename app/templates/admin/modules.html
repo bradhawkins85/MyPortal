@@ -72,6 +72,35 @@
                           aria-controls="module-settings-modal-{{ module.slug }}"
                         >Settings</button>
                       {% endif %}
+                      {% if module.slug == "syncro" %}
+                        <form action="/admin/syncro/import-companies" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--ghost button--small">Import companies</button>
+                        </form>
+                      {% endif %}
+                      {% if module.slug == "tacticalrmm" %}
+                        <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--ghost button--small">Push companies</button>
+                        </form>
+                        <form action="/admin/modules/tacticalrmm/pull-companies" method="post" class="inline-form">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="button button--ghost button--small">Pull companies</button>
+                        </form>
+                      {% endif %}
+                      {% set webhook_url = (module_webhook_urls or {}).get(module.slug) %}
+                      {% if webhook_url %}
+                        <a href="{{ webhook_url }}" class="button button--ghost button--small" target="_blank" rel="noopener noreferrer">Webhook URL</a>
+                      {% endif %}
+                      {% if module.slug == "xero" %}
+                        <a href="/api/integration-modules/xero/tenants" class="button button--ghost button--small" target="_blank" rel="noopener noreferrer">Get tenant IDs</a>
+                      {% endif %}
                     </div>
                   </td>
                 </tr>
