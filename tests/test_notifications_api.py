@@ -6,18 +6,23 @@ from copy import deepcopy
 import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.core.database import db
 from app.core.notifications import DEFAULT_NOTIFICATION_EVENTS
 from app.main import app, notifications_repo, scheduler_service
 from app.services import notification_event_settings as event_settings_service
+from app.repositories import notification_exclusions as exclusions_repo
 from app.repositories import notification_preferences as preferences_repo
 from app.security.session import SessionData, session_manager
 
 
 @pytest.fixture(autouse=True)
 def mock_startup(monkeypatch):
+    monkeypatch.setattr(app.router, "on_startup", [])
+    monkeypatch.setattr(app.router, "on_shutdown", [])
+
     async def fake_connect():
         return None
 
@@ -33,11 +38,19 @@ def mock_startup(monkeypatch):
     async def fake_stop():
         return None
 
+    async def fake_run_system_update(*, force_restart: bool = False):
+        return False
+
+    async def fake_preload_cache():
+        return None
+
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(scheduler_service, "run_system_update", fake_run_system_update)
+    monkeypatch.setattr(main_module.message_templates_service, "preload_cache", fake_preload_cache)
 
 
 @pytest.fixture
@@ -364,6 +377,74 @@ def test_mark_notification_read_returns_updated_record(monkeypatch, active_sessi
     data = response.json()
     assert data["id"] == 77
     assert data["read_at"] is not None
+
+
+def test_exclude_notification_event_type(monkeypatch, active_session):
+    calls: dict[str, object] = {}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=active_session.user_id, event_type="system.alert")
+
+    async def fake_exclude_event_type(user_id, event_type):
+        calls["user_id"] = user_id
+        calls["event_type"] = event_type
+        return {"event_type": event_type, "is_excluded": True}
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(exclusions_repo, "exclude_event_type", fake_exclude_event_type)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/notifications/77/exclude",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"event_type": "system.alert", "is_excluded": True}
+    assert calls == {"user_id": active_session.user_id, "event_type": "system.alert"}
+
+
+def test_undo_exclude_notification_event_type(monkeypatch, active_session):
+    calls: dict[str, object] = {}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(id=notification_id, user_id=active_session.user_id, event_type="system.alert")
+
+    async def fake_undo_exclude_event_type(user_id, event_type):
+        calls["user_id"] = user_id
+        calls["event_type"] = event_type
+        return {"event_type": event_type, "is_excluded": False}
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(exclusions_repo, "undo_exclude_event_type", fake_undo_exclude_event_type)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/notifications/77/exclude",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"event_type": "system.alert", "is_excluded": False}
+    assert calls == {"user_id": active_session.user_id, "event_type": "system.alert"}
 
 
 def test_acknowledge_notifications_returns_unique_updates(monkeypatch, active_session):
