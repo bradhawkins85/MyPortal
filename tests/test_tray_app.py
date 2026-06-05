@@ -431,6 +431,67 @@ def test_device_create_update_revoke(tray_db, run):
     run(repo.reactivate_device(int(device["id"])))
     assert run(repo.get_device_by_auth_hash(svc.hash_token(new_raw))) is not None
 
+    run(repo.revoke_device(int(device["id"])))
+    run(repo.delete_device(int(device["id"])))
+    assert run(repo.get_device_by_id(int(device["id"]))) is None
+
+    active = run(
+        repo.create_device(
+            company_id=None,
+            asset_id=None,
+            device_uid=svc.normalise_device_uid("dev-active"),
+            enrolment_token_id=None,
+            auth_token_hash=svc.hash_token(svc.generate_auth_token()),
+            auth_token_prefix="tok_",
+            os="windows",
+            os_version="11.0",
+            hostname="host-active",
+            serial_number=None,
+            agent_version="0.1.0",
+            console_user="carol",
+            status="active",
+        )
+    )
+    revoked_one = run(
+        repo.create_device(
+            company_id=None,
+            asset_id=None,
+            device_uid=svc.normalise_device_uid("dev-revoked-1"),
+            enrolment_token_id=None,
+            auth_token_hash=svc.hash_token(svc.generate_auth_token()),
+            auth_token_prefix="tok_",
+            os="windows",
+            os_version="11.0",
+            hostname="host-revoked-1",
+            serial_number=None,
+            agent_version="0.1.0",
+            console_user="dave",
+            status="revoked",
+        )
+    )
+    revoked_two = run(
+        repo.create_device(
+            company_id=None,
+            asset_id=None,
+            device_uid=svc.normalise_device_uid("dev-revoked-2"),
+            enrolment_token_id=None,
+            auth_token_hash=svc.hash_token(svc.generate_auth_token()),
+            auth_token_prefix="tok_",
+            os="windows",
+            os_version="11.0",
+            hostname="host-revoked-2",
+            serial_number=None,
+            agent_version="0.1.0",
+            console_user="erin",
+            status="revoked",
+        )
+    )
+    assert run(repo.delete_revoked_devices()) == 2
+    assert run(repo.get_device_by_id(int(active["id"]))) is not None
+    assert run(repo.get_device_by_id(int(revoked_one["id"]))) is None
+    assert run(repo.get_device_by_id(int(revoked_two["id"]))) is None
+    assert run(repo.delete_revoked_devices()) == 0
+
 
 def test_resolve_config_default_when_no_configs(tray_db, run):
     from app.services import tray as svc
