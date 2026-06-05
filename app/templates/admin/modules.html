@@ -55,7 +55,7 @@
                         {% endif %}
                       </form>
                       {% set manage_url = module.settings.manage_url if module.settings else None %}
-                      {% if manage_url %}
+                      {% if manage_url and (manage_url | string).startswith('/') %}
                         <a href="{{ manage_url }}" class="button button--ghost button--small">Manage</a>
                       {% endif %}
                     </div>
