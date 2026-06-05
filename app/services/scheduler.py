@@ -106,6 +106,12 @@ def _truncate_output(payload: str | bytes | None) -> str | None:
     return text[: _OUTPUT_PREVIEW_LIMIT - 1] + "\u2026"
 
 
+def _normalise_cron_day_field(day_field: str) -> str:
+    parts = [part.strip() for part in day_field.split(",")]
+    normalised_parts = ["last" if part.upper() == "L" else part for part in parts]
+    return ",".join(normalised_parts)
+
+
 class SchedulerService:
     def __init__(self) -> None:
         settings = get_settings()
@@ -492,7 +498,15 @@ class SchedulerService:
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
-            return CronTrigger.from_crontab(task["cron"], timezone=self._scheduler.timezone)
+            minute, hour, day, month, day_of_week = str(task["cron"]).strip().split()
+            return CronTrigger(
+                minute=minute,
+                hour=hour,
+                day=_normalise_cron_day_field(day),
+                month=month,
+                day_of_week=day_of_week,
+                timezone=self._scheduler.timezone,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
                 "Failed to parse cron expression",
