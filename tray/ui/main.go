@@ -187,7 +187,9 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 
 	case "label":
 		item := systray.AddMenuItem(node.Label, "")
-		item.Disable()
+		if node.Color == "" {
+			item.Disable()
+		}
 
 	case "link":
 		item := systray.AddMenuItem(node.Label, node.URL)

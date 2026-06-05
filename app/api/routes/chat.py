@@ -96,6 +96,27 @@ async def create_room(
     mxid = current_user.get("matrix_user_id") or _settings.matrix_bot_user_id or ""
     await chat_repo.add_participant(room["id"], mxid, role="creator", user_id=user_id)
 
+    # Apply auto-assign rules.
+    try:
+        from app.services.chat_auto_assign import apply_auto_assign
+        from app.repositories import companies as companies_repo
+        contact_name = " ".join(filter(None, [
+            current_user.get("first_name"),
+            current_user.get("last_name"),
+        ])) or current_user.get("email") or ""
+        company_name = ""
+        if company_id:
+            company_obj = await companies_repo.get_company_by_id(int(company_id))
+            company_name = (company_obj or {}).get("name") or ""
+        await apply_auto_assign(
+            room["id"],
+            company_name=company_name,
+            contact_name=contact_name,
+            subject=body.subject,
+        )
+    except Exception as exc:
+        log_error("create_room: auto-assign failed", room_id=room["id"], error=str(exc))
+
     await audit_service.log_action(
         action="create",
         entity_type="chat_room",

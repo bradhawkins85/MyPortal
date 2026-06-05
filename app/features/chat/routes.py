@@ -36,7 +36,7 @@ def _main():
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_index(
     request: Request,
-    status: str | None = Query(default=None),
+    show_closed: str | None = Query(default=None),
     unattended: str | None = Query(default=None),
     session: SessionData | None = Depends(get_current_session),
 ) -> HTMLResponse:
@@ -64,17 +64,23 @@ async def chat_index(
     user_id = current_user["id"]
     is_staff = is_super_admin or is_helpdesk
     unattended_only = is_staff and unattended == "1"
+    show_closed_filter = show_closed == "1"
+    effective_status = None if show_closed_filter else "open"
 
     if is_staff:
-        rooms = await chat_repo.list_rooms(status=status, unattended_only=unattended_only)
+        rooms = await chat_repo.list_rooms(status=effective_status, unattended_only=unattended_only)
     else:
-        rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
+        rooms = await chat_repo.list_rooms(
+            user_id=user_id,
+            company_id=company_id,
+            status=effective_status,
+        )
 
     main_module = _main()
     extra = {
         "title": "Chat",
         "rooms": rooms,
-        "status_filter": status,
+        "show_closed_filter": show_closed_filter,
         "unattended_filter": unattended,
         "is_staff": is_staff,
     }
@@ -244,6 +250,9 @@ async def tray_chat_popup(
     chat_room: dict[str, Any] | None = None
     if resolved_room_id:
         chat_room = await chat_repo.get_room(int(resolved_room_id))
+        # If the resolved room is closed, ignore it and start a fresh one.
+        if chat_room and chat_room.get("status") != "open":
+            chat_room = None
 
     if not chat_room:
         # User-initiated chat: create a fresh room.
@@ -274,6 +283,20 @@ async def tray_chat_popup(
             await _attach(room_id_new, device_id)
         except Exception:
             pass
+
+        # Apply auto-assign rules.
+        try:
+            from app.services.chat_auto_assign import apply_auto_assign
+            from app.repositories import companies as companies_repo_inner
+            company_obj = await companies_repo_inner.get_company_by_id(company_id)
+            company_name = (company_obj or {}).get("name") or ""
+            await apply_auto_assign(
+                room_id_new,
+                company_name=company_name,
+                subject=subject,
+            )
+        except Exception as exc:
+            log_error("tray_chat_popup: auto-assign failed", room_id=room_id_new, error=str(exc))
 
         log_info(
             "Tray chat popup: created room",

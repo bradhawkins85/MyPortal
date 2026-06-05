@@ -269,6 +269,63 @@
           </footer>
         </form>
       </section>
+
+      <section class="card card--panel" data-exclusions-panel>
+        <header class="card__header">
+          <div>
+            <h2 class="card__title">Excluded notifications</h2>
+            <p class="card__subtitle">Messages and event types that will not be shown in your notification feed. Remove an exclusion to start receiving those notifications again.</p>
+          </div>
+        </header>
+        <div class="card__body">
+          {% if exclusion_rules %}
+          <div class="table-wrapper">
+            <table class="table table--exclusions" id="exclusions-table">
+              <thead>
+                <tr>
+                  <th scope="col">Event type</th>
+                  <th scope="col">Excluded message / pattern</th>
+                  <th scope="col">Excluded at</th>
+                  <th scope="col" class="table__actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for rule in exclusion_rules %}
+                <tr data-exclusion-row="{{ rule.id }}">
+                  <td data-label="Event type">{{ rule.event_type }}</td>
+                  <td data-label="Excluded message / pattern">
+                    {% if rule.message_pattern %}
+                      {{ rule.message_pattern }}
+                    {% else %}
+                      <span class="text-muted">All messages of this event type</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Excluded at">
+                    {% if rule.excluded_at %}
+                      <span data-utc="{{ rule.excluded_at.isoformat() }}">{{ rule.excluded_at.isoformat() }}</span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="table__actions">
+                    <button
+                      type="button"
+                      class="button button--ghost button--small button--danger"
+                      data-remove-exclusion="{{ rule.id }}"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted" data-exclusions-empty>No notification exclusions configured. Use the <strong>Exclude</strong> button on individual notifications to hide specific messages from your feed.</p>
+          {% endif %}
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -351,4 +408,7 @@
   <script src="{{ static_url('/static/js/notification-preferences.js') }}" defer></script>
   <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
   <script src="{{ static_url('/static/js/notification-event-settings.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/notification-exclusions.js') }}"
+    data-exclusions-endpoint="{{ exclusions_endpoint }}"
+    defer></script>
 {% endblock %}

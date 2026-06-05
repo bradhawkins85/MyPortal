@@ -30,6 +30,16 @@ async def get_room_by_ticket_id(ticket_id: int) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+async def get_open_room_by_device_id(device_id: int) -> dict[str, Any] | None:
+    """Return the most recent open chat room linked to a tray device, or None."""
+    row = await db.fetch_one(
+        "SELECT * FROM chat_rooms WHERE tray_device_id = %s AND status = 'open' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (device_id,),
+    )
+    return dict(row) if row else None
+
+
 async def list_rooms(
     *,
     company_id: int | None = None,

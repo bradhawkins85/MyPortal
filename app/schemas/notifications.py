@@ -132,4 +132,12 @@ class NotificationSummaryResponse(BaseModel):
 
 class NotificationExclusionResponse(BaseModel):
     event_type: str = Field(..., max_length=150)
+    message_pattern: str = Field("", max_length=500)
     is_excluded: bool
+
+
+class NotificationExclusionListItem(BaseModel):
+    id: int
+    event_type: str = Field(..., max_length=150)
+    message_pattern: str = Field("", max_length=500)
+    excluded_at: Optional[datetime] = None
