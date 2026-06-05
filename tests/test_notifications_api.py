@@ -383,15 +383,21 @@ def test_exclude_notification_event_type(monkeypatch, active_session):
     calls: dict[str, object] = {}
 
     async def fake_get_notification(notification_id):
-        return _make_notification_record(id=notification_id, user_id=active_session.user_id, event_type="system.alert")
+        return _make_notification_record(
+            id=notification_id,
+            user_id=active_session.user_id,
+            event_type="system.alert",
+            message="System alert message",
+        )
 
-    async def fake_exclude_event_type(user_id, event_type):
+    async def fake_exclude_notification(user_id, event_type, message_pattern=""):
         calls["user_id"] = user_id
         calls["event_type"] = event_type
-        return {"event_type": event_type, "is_excluded": True}
+        calls["message_pattern"] = message_pattern
+        return {"event_type": event_type, "message_pattern": message_pattern, "is_excluded": True}
 
     monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
-    monkeypatch.setattr(exclusions_repo, "exclude_event_type", fake_exclude_event_type)
+    monkeypatch.setattr(exclusions_repo, "exclude_notification", fake_exclude_notification)
 
     app.dependency_overrides[database_dependencies.require_database] = lambda: None
     app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
@@ -409,8 +415,52 @@ def test_exclude_notification_event_type(monkeypatch, active_session):
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {"event_type": "system.alert", "is_excluded": True}
-    assert calls == {"user_id": active_session.user_id, "event_type": "system.alert"}
+    data = response.json()
+    assert data["event_type"] == "system.alert"
+    assert data["is_excluded"] is True
+    # Non-general event_type → event-type exclusion (empty message_pattern)
+    assert calls["message_pattern"] == ""
+
+
+def test_exclude_notification_general_uses_message_pattern(monkeypatch, active_session):
+    """Excluding a 'general' notification stores the message as the exclusion pattern."""
+    calls: dict[str, object] = {}
+
+    async def fake_get_notification(notification_id):
+        return _make_notification_record(
+            id=notification_id,
+            user_id=active_session.user_id,
+            event_type="general",
+            message="Left menu preferences saved.",
+        )
+
+    async def fake_exclude_notification(user_id, event_type, message_pattern=""):
+        calls["user_id"] = user_id
+        calls["event_type"] = event_type
+        calls["message_pattern"] = message_pattern
+        return {"event_type": event_type, "message_pattern": message_pattern, "is_excluded": True}
+
+    monkeypatch.setattr(notifications_repo, "get_notification", fake_get_notification)
+    monkeypatch.setattr(exclusions_repo, "exclude_notification", fake_exclude_notification)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/notifications/77/exclude",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    # For general event_type, the message itself is stored as the exclusion pattern
+    assert calls["message_pattern"] == "Left menu preferences saved."
 
 
 def test_undo_exclude_notification_event_type(monkeypatch, active_session):
@@ -443,8 +493,87 @@ def test_undo_exclude_notification_event_type(monkeypatch, active_session):
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {"event_type": "system.alert", "is_excluded": False}
+    assert response.json()["is_excluded"] is False
     assert calls == {"user_id": active_session.user_id, "event_type": "system.alert"}
+
+
+def test_list_notification_exclusions(monkeypatch, active_session):
+    async def fake_list_exclusions(user_id):
+        return [
+            {"id": 1, "event_type": "general", "message_pattern": "Left menu preferences saved.", "excluded_at": None},
+            {"id": 2, "event_type": "system.alert", "message_pattern": "", "excluded_at": None},
+        ]
+
+    monkeypatch.setattr(exclusions_repo, "list_exclusions", fake_list_exclusions)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/notifications/exclusions",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["event_type"] == "general"
+    assert data[0]["message_pattern"] == "Left menu preferences saved."
+
+
+def test_delete_notification_exclusion(monkeypatch, active_session):
+    async def fake_delete_exclusion(user_id, exclusion_id):
+        return True
+
+    monkeypatch.setattr(exclusions_repo, "delete_exclusion", fake_delete_exclusion)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/notifications/exclusions/42",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+
+
+def test_delete_notification_exclusion_not_found(monkeypatch, active_session):
+    async def fake_delete_exclusion(user_id, exclusion_id):
+        return False
+
+    monkeypatch.setattr(exclusions_repo, "delete_exclusion", fake_delete_exclusion)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+    app.dependency_overrides[auth_dependencies.get_current_user] = lambda: {
+        "id": active_session.user_id,
+        "email": "user@example.com",
+    }
+
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/notifications/exclusions/99",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
 
 
 def test_acknowledge_notifications_returns_unique_updates(monkeypatch, active_session):
