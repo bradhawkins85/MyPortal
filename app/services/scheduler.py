@@ -498,7 +498,10 @@ class SchedulerService:
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
-            minute, hour, day, month, day_of_week = str(task["cron"]).strip().split()
+            fields = str(task["cron"]).strip().split()
+            if len(fields) != 5:
+                raise ValueError(f"Wrong number of fields; got {len(fields)}, expected 5")
+            minute, hour, day, month, day_of_week = fields
             return CronTrigger(
                 minute=minute,
                 hour=hour,
