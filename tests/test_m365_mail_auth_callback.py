@@ -127,7 +127,10 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
         )
 
     assert response.status_code == 303
-    assert response.headers["location"].startswith("/admin/modules/m365-mail?success=")
+    assert response.headers["location"] == "/admin/modules/m365-mail"
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
     assert stored["account_id"] == 1
     assert stored["tenant_id"] == "tenant-123"
     assert calls, "Token exchange should be attempted"

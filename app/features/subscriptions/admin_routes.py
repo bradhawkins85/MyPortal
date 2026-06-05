@@ -35,8 +35,6 @@ async def admin_subscriptions_page(
     request: Request,
     status_filter: str | None = Query(default=None, alias="status"),
     category_filter: str | None = Query(default=None, alias="category"),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     """Admin page for viewing and managing subscriptions."""
     current_user, membership, redirect = await _main()._require_administration_access(request)
@@ -80,8 +78,6 @@ async def admin_subscriptions_page(
             "category": category_filter,
         },
         "status_counts": status_counts,
-        "success_message": _main()._sanitize_message(success),
-        "error_message": _main()._sanitize_message(error),
         "is_super_admin": current_user.get("is_super_admin", False),
     }
 

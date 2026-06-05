@@ -381,7 +381,11 @@ def test_bulk_delete_scheduled_tasks(super_admin_context, csrf_session, monkeypa
         )
 
     assert response.status_code == 303
-    assert "success=" in response.headers["location"]
+    assert "success=" not in response.headers["location"]
+    assert "error=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
     assert deleted == [[1, 2]]
 
 
@@ -394,7 +398,10 @@ def test_bulk_delete_scheduled_tasks_no_ids(super_admin_context, csrf_session):
         )
 
     assert response.status_code == 303
-    assert "error=" in response.headers["location"]
+    assert "error=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie
 
 
 @pytest.mark.asyncio
@@ -478,7 +485,11 @@ async def test_bulk_rename_scheduled_tasks(super_admin_context, csrf_session, mo
     response = await main_module.admin_bulk_rename_scheduled_tasks(request)
 
     assert response.status_code == 303
-    assert "success=" in response.headers["location"]
+    assert "success=" not in response.headers["location"]
+    assert "error=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
     assert renamed[1] == "All companies \u2014 Sync staff directory"
     assert renamed[2] == "Acme Corp \u2014 Sync Microsoft 365 licenses"
 
@@ -542,4 +553,7 @@ async def test_bulk_rename_no_ids(super_admin_context, csrf_session, monkeypatch
     response = await main_module.admin_bulk_rename_scheduled_tasks(request)
 
     assert response.status_code == 303
-    assert "error=" in response.headers["location"]
+    assert "error=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie
