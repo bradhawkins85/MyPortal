@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import html as _html
 import json
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -37,6 +38,7 @@ from app.repositories import users as users_repo
 from app.schemas.tray import (
     TrayChatStartRequest,
     TrayChatStartResponse,
+    TrayChatTokenResponse,
     TrayConfigResponse,
     TrayEnrolRequest,
     TrayEnrolResponse,
@@ -53,6 +55,7 @@ from app.services import matrix as matrix_service
 from app.services import tickets as tickets_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
+from app.security.encryption import decrypt_secret, encrypt_secret
 
 router = APIRouter(prefix="/api/tray", tags=["Tray App"])
 
@@ -885,4 +888,267 @@ async def push_notification_to_device(
         {
             "delivered": delivered,
         }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tray chat popup — device-initiated popup chat (Phase 8)
+# ---------------------------------------------------------------------------
+
+_CHAT_TOKEN_TTL_SECONDS = 300  # 5 minutes for the one-time URL token
+_POPUP_SESSION_COOKIE = "tray_popup"
+_POPUP_SESSION_TTL_SECONDS = 7200  # 2-hour session for the popup window
+
+
+def _build_popup_session_payload(
+    *,
+    device_id: int,
+    room_id: int,
+    company_id: int,
+    csrf_token: str,
+) -> str:
+    """Return an encrypted cookie value for the popup chat session."""
+    exp = (
+        datetime.now(timezone.utc) + timedelta(seconds=_POPUP_SESSION_TTL_SECONDS)
+    ).isoformat()
+    raw = json.dumps(
+        {
+            "device_id": device_id,
+            "room_id": room_id,
+            "company_id": company_id,
+            "csrf": csrf_token,
+            "exp": exp,
+        }
+    )
+    return encrypt_secret(raw)
+
+
+def _parse_popup_session(request: Request) -> dict[str, Any] | None:
+    """Decode and validate the ``tray_popup`` cookie.
+
+    Returns the payload dict (device_id, room_id, company_id, csrf) or
+    ``None`` when the cookie is missing, corrupted, or expired.
+    """
+    raw = request.cookies.get(_POPUP_SESSION_COOKIE)
+    if not raw:
+        return None
+    try:
+        decoded = decrypt_secret(raw)
+        payload = json.loads(decoded)
+    except Exception:
+        return None
+    exp_str = payload.get("exp", "")
+    try:
+        exp = datetime.fromisoformat(exp_str)
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            return None
+    except Exception:
+        return None
+    return payload
+
+
+@router.post(
+    "/chat-token",
+    response_model=TrayChatTokenResponse,
+    summary="Issue a one-time popup chat token (device authenticated)",
+)
+async def issue_chat_token(
+    request: Request,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayChatTokenResponse:
+    """Issue a short-lived one-time URL token so the tray client can open
+    ``/tray/chat?token=<token>`` in a popup webview without requiring the end
+    user to log into the portal manually.
+
+    The optional ``room_id`` JSON body field pre-binds the token to an
+    existing chat room (for technician-initiated chats where the room already
+    exists).  When omitted, a new room is created when the popup loads.
+    """
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    room_id: int | None = body.get("room_id") or None
+    if room_id is not None:
+        room_id = int(room_id)
+
+    # Verify chat is enabled for this device's company.
+    company_id: int | None = device.get("company_id")
+    if company_id:
+        company = await companies_repo.get_company_by_id(int(company_id))
+        if not (company and company.get("tray_chat_enabled") and _settings.matrix_enabled):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chat is not enabled for this device",
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Device has no associated company",
+        )
+
+    # Generate the one-time token.
+    token = secrets.token_urlsafe(32)
+    token_hash = tray_service.hash_token(token)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        seconds=_CHAT_TOKEN_TTL_SECONDS
+    )
+    await tray_repo.create_chat_token(
+        device_id=int(device["id"]),
+        token_hash=token_hash,
+        room_id=room_id,
+        expires_at=expires_at,
+    )
+
+    portal_url = (_settings.public_base_url or "").rstrip("/")
+    room_param = f"&room={room_id}" if room_id else ""
+    chat_url = f"{portal_url}/tray/chat?token={token}{room_param}"
+
+    log_info(
+        "Tray chat token issued",
+        device_uid=device.get("device_uid"),
+        device_id=device.get("id"),
+        room_id=room_id,
+    )
+    return TrayChatTokenResponse(
+        token=token,
+        expires_in=_CHAT_TOKEN_TTL_SECONDS,
+        chat_url=chat_url,
+    )
+
+
+@router.get(
+    "/popup-chat/{room_id}",
+    summary="Get chat room state for the popup (popup-session cookie auth)",
+)
+async def popup_chat_get_room(
+    request: Request,
+    room_id: int,
+) -> JSONResponse:
+    """Return the chat room details and messages for the popup window.
+
+    Authenticated by the ``tray_popup`` encrypted session cookie set when
+    ``GET /tray/chat?token=...`` is visited.
+    """
+    from datetime import date
+
+    session = _parse_popup_session(request)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session")
+
+    if session.get("room_id") != room_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch")
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
+
+    messages = await chat_repo.get_messages(room_id, limit=50)
+
+    def _serial(obj: Any) -> Any:
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: _serial(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_serial(item) for item in obj]
+        return obj
+
+    return JSONResponse(
+        {
+            "room": _serial(dict(room)),
+            "messages": _serial(messages),
+            "csrf_token": session.get("csrf"),
+        }
+    )
+
+
+@router.post(
+    "/popup-chat/{room_id}/messages",
+    summary="Send a chat message from the popup (popup-session cookie auth)",
+)
+async def popup_chat_send_message(
+    request: Request,
+    room_id: int,
+) -> JSONResponse:
+    """Send a message from the popup chat window.
+
+    Authenticated by the ``tray_popup`` session cookie and the CSRF token
+    that was embedded in the popup page.
+    """
+    session = _parse_popup_session(request)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session")
+
+    if session.get("room_id") != room_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch")
+
+    # Validate CSRF token from the X-Tray-CSRF header.
+    csrf_header = request.headers.get("X-Tray-CSRF", "")
+    if not secrets.compare_digest(csrf_header, session.get("csrf", "")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+
+    message_body = str(body.get("body", "")).strip()
+    if not message_body:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message body is required")
+    if len(message_body) > 65535:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message too long")
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
+    if room.get("status") != "open":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed")
+
+    device_id: int = int(session["device_id"])
+    device = await tray_repo.get_device_by_id(device_id)
+    hostname = (device or {}).get("hostname") or "Tray Device"
+
+    # Send via Matrix if available.
+    matrix_event_id: str | None = None
+    matrix_room_id = room.get("matrix_room_id") or ""
+    if matrix_room_id and _settings.matrix_enabled:
+        try:
+            event = await matrix_service.send_message(
+                room_id=matrix_room_id,
+                body=message_body,
+                sender_display_name=hostname,
+            )
+            matrix_event_id = event.get("event_id")
+        except Exception as exc:
+            log_error("popup_chat_send_message: Matrix send failed", error=str(exc))
+
+    msg = await chat_repo.add_message(
+        room_id=room_id,
+        matrix_event_id=matrix_event_id,
+        sender_matrix_id=f"@tray-device-{device_id}:tray",
+        body=message_body,
+        sender_user_id=None,
+        sender_display_name=hostname,
+    )
+
+    # Notify portal users of new message.
+    try:
+        from app.services.realtime import refresh_notifier
+
+        await refresh_notifier.notify(
+            f"chat:room:{room_id}",
+            data={"message": {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()}},
+        )
+    except Exception:
+        pass
+
+    return JSONResponse(
+        {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()},
+        status_code=status.HTTP_201_CREATED,
     )
