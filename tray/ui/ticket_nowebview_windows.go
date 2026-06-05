@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
@@ -130,9 +131,10 @@ func openNewTicketDialog(_ *api.ConfigResponse) {
 	prefillName, prefillEmail, prefillPhone := loadTicketPrefill()
 
 	cmd := exec.Command(
-		"powershell", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+		"powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
 		"-File", scriptPath,
 	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	cmd.Env = append(os.Environ(),
 		"MP_PREFILL_NAME="+prefillName,
 		"MP_PREFILL_EMAIL="+prefillEmail,

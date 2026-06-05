@@ -4,13 +4,16 @@ package main
 
 import (
 	"os/exec"
+	"syscall"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/webview/webview_go"
 )
 
 func openBrowser(url string) {
-	_ = exec.Command("cmd", "/c", "start", url).Start()
+	cmd := exec.Command("cmd", "/c", "start", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Start()
 }
 
 func showTextWindow(title, text string) {
@@ -36,7 +39,9 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 
 func openNewTicketWindow(_ *api.ConfigResponse) {
 	url := gPortalURL + "/tickets/new"
-	_ = exec.Command("cmd", "/c", "start", url).Start()
+	cmd := exec.Command("cmd", "/c", "start", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Start()
 }
 
 func showOSNotification(title, body string) {
@@ -46,5 +51,7 @@ $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([
 $xml.GetElementsByTagName('text')[0].InnerText = '` + title + `'
 $xml.GetElementsByTagName('text')[1].InnerText = '` + body + `'
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyPortal').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
-	_ = exec.Command("powershell", "-NonInteractive", "-Command", script).Start()
+	cmd := exec.Command("powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Start()
 }
