@@ -153,10 +153,11 @@ func buildMenu(cfg *api.ConfigResponse) {
 		addNode(node, cfg)
 	}
 	systray.AddSeparator()
-	quitItem := systray.AddMenuItem("Quit", "Quit MyPortal Tray")
+	refreshItem := systray.AddMenuItem("Refresh", "Refresh tray menu from server")
 	go func() {
-		<-quitItem.ClickedCh
-		systray.Quit()
+		for range refreshItem.ClickedCh {
+			requestConfigRefresh()
+		}
 	}()
 }
 

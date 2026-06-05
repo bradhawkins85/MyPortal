@@ -170,11 +170,22 @@ func buildMenu(cfg *api.ConfigResponse) {
 	}
 
 	systray.AddSeparator()
-	quitItem := systray.AddMenuItem("Quit", "Quit MyPortal Tray")
+	refreshItem := systray.AddMenuItem("Refresh", "Refresh tray menu from server")
 	go func() {
-		<-quitItem.ClickedCh
-		systray.Quit()
+		for range refreshItem.ClickedCh {
+			requestConfigRefresh()
+		}
 	}()
+}
+
+func requestConfigRefresh() {
+	if gIPCConn == nil {
+		logger.Warn("Refresh requested but IPC is not connected")
+		return
+	}
+	if err := ipc.SendTo(gIPCConn, ipc.Message{Type: "refresh_config"}); err != nil {
+		logger.Warn("Refresh request failed: %v", err)
+	}
 }
 
 func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
