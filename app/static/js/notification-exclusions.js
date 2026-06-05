@@ -48,11 +48,11 @@
             if (table) {
               const wrapper = table.closest('.table-wrapper');
               if (wrapper) {
-                wrapper.hidden = true;
+                wrapper.setAttribute('hidden', '');
               }
             }
             if (emptyEl) {
-              emptyEl.hidden = false;
+              emptyEl.removeAttribute('hidden');
             }
           }
         } catch (error) {
@@ -76,7 +76,11 @@
     const emptyEl = document.querySelector('[data-exclusions-empty]');
     if (emptyEl) {
       const tbody = document.querySelector('#exclusions-table tbody');
-      emptyEl.hidden = !!(tbody && tbody.children.length > 0);
+      if (tbody && tbody.children.length > 0) {
+        emptyEl.setAttribute('hidden', '');
+      } else {
+        emptyEl.removeAttribute('hidden');
+      }
     }
   }
 
