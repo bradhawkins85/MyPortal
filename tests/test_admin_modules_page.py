@@ -95,6 +95,13 @@ def test_modules_page_renders_manage_button_from_module_manage_url(super_admin_c
                 "enabled": True,
                 "settings": {},
             },
+            {
+                "slug": "external-link-module",
+                "name": "External Link Module",
+                "description": "Should not render external manage link.",
+                "enabled": True,
+                "settings": {"manage_url": "https://example.com/manage"},
+            },
         ]
 
     monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
@@ -105,3 +112,4 @@ def test_modules_page_renders_manage_button_from_module_manage_url(super_admin_c
     assert response.status_code == 200
     assert 'href="/admin/matrix-chat/auto-assign"' in response.text
     assert ">Manage</a>" in response.text
+    assert 'href="https://example.com/manage"' not in response.text
