@@ -102,6 +102,7 @@ type MenuNode struct {
 	URL      string      `json:"url,omitempty"`
 	Name     string      `json:"name,omitempty"`
 	Text     string      `json:"text,omitempty"`
+	Color    string      `json:"color,omitempty"`
 	Children []*MenuNode `json:"children,omitempty"`
 }
 

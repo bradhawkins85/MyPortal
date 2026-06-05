@@ -116,6 +116,7 @@
       const LABEL_MAX = 200;
       const URL_MAX = 500;
       const NAME_MAX = 128;
+      const COLOR_MAX = 32;
       const DEFAULT_MENU_LABEL = 'Menu';
 
       const NODE_TYPES = [
@@ -159,6 +160,7 @@
         row.querySelector('[data-wrap-url]').hidden = type !== 'link';
         row.querySelector('[data-wrap-name]').hidden = type !== 'env_var';
         row.querySelector('[data-wrap-text]').hidden = type !== 'display_text';
+        row.querySelector('[data-wrap-color]').hidden = type === 'separator';
       }
 
       function getSummaryText(row) {
@@ -221,6 +223,16 @@
                 <textarea class="form-input" id="${rowId}-text" data-node-text rows="2"></textarea>
               </div>
             </div>
+            <div class="form-row">
+              <div class="form-field" data-wrap-color style="max-width:12rem;">
+                <label class="form-label" for="${rowId}-color">Text color</label>
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                  <input type="color" id="${rowId}-color" data-node-color style="width:3rem; height:2rem; padding:0.1rem; border:1px solid var(--color-border, #ccc); border-radius:4px; cursor:pointer;" />
+                  <button type="button" class="button button--ghost" data-action-clear-color style="padding:0.25rem 0.5rem; font-size:0.8em;">Clear</button>
+                  <span data-node-color-preview style="font-size:0.8em; opacity:0.7;"></span>
+                </div>
+              </div>
+            </div>
             <div class="form-actions" style="justify-content:flex-start; gap:0.5rem;">
               <button type="button" class="button button--ghost" data-action-up aria-label="Move this node up">Move up</button>
               <button type="button" class="button button--ghost" data-action-down aria-label="Move this node down">Move down</button>
@@ -235,6 +247,39 @@
         row.querySelector('[data-node-url]').value = node.url || '';
         row.querySelector('[data-node-name]').value = node.name || '';
         row.querySelector('[data-node-text]').value = node.text || '';
+
+        const colorEl = row.querySelector('[data-node-color]');
+        const colorPreview = row.querySelector('[data-node-color-preview]');
+        // data-node-color tracks whether a color has been explicitly set.
+        // An empty string means "no color" (use OS default).
+        colorEl.dataset.active = node.color ? '1' : '0';
+        if (node.color) {
+          colorEl.value = node.color;
+          colorPreview.textContent = node.color;
+        } else {
+          colorPreview.textContent = '(default)';
+        }
+
+        function updateColorPreview() {
+          if (colorEl.dataset.active === '1') {
+            colorPreview.textContent = colorEl.value;
+          } else {
+            colorPreview.textContent = '(default)';
+          }
+        }
+
+        colorEl.addEventListener('input', () => {
+          colorEl.dataset.active = '1';
+          updateColorPreview();
+          scheduleSyncJsonFromRows();
+        });
+
+        row.querySelector('[data-action-clear-color]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          colorEl.dataset.active = '0';
+          updateColorPreview();
+          scheduleSyncJsonFromRows();
+        });
 
         updateSummary(row);
 
@@ -300,7 +345,8 @@
             label: typeof candidate.label === 'string' ? candidate.label : '',
             url: typeof candidate.url === 'string' ? candidate.url : '',
             name: typeof candidate.name === 'string' ? candidate.name : '',
-            text: typeof candidate.text === 'string' ? candidate.text : ''
+            text: typeof candidate.text === 'string' ? candidate.text : '',
+            color: typeof candidate.color === 'string' ? candidate.color : ''
           };
           rows.push({ node: rest, level });
           const children = Array.isArray(candidate.children) ? candidate.children : [];
@@ -327,14 +373,18 @@
       }
 
       function readRows() {
-        return Array.from(listEl.children).map((row) => ({
-          level: Math.max(0, Math.min(MAX_LEVEL, Number(row.querySelector('[data-node-level]').value) || 0)),
-          type: row.querySelector('[data-node-type]').value,
-          label: row.querySelector('[data-node-label]').value.trim(),
-          url: row.querySelector('[data-node-url]').value.trim(),
-          name: row.querySelector('[data-node-name]').value.trim(),
-          text: row.querySelector('[data-node-text]').value.trim()
-        }));
+        return Array.from(listEl.children).map((row) => {
+          const colorEl = row.querySelector('[data-node-color]');
+          return {
+            level: Math.max(0, Math.min(MAX_LEVEL, Number(row.querySelector('[data-node-level]').value) || 0)),
+            type: row.querySelector('[data-node-type]').value,
+            label: row.querySelector('[data-node-label]').value.trim(),
+            url: row.querySelector('[data-node-url]').value.trim(),
+            name: row.querySelector('[data-node-name]').value.trim(),
+            text: row.querySelector('[data-node-text]').value.trim(),
+            color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : ''
+          };
+        });
       }
 
       function buildNodesFromRows(rows) {
@@ -347,6 +397,7 @@
           if (row.url) node.url = row.url;
           if (row.name) node.name = row.name;
           if (row.text) node.text = row.text;
+          if (row.color) node.color = row.color;
           let parent = null;
           for (let level = row.level - 1; level >= 0; level -= 1) {
             const candidate = lastAtLevel[level];
