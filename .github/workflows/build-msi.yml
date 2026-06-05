@@ -62,6 +62,7 @@ jobs:
         run: |
           $binDir = (Resolve-Path dist\windows).Path
           wix build -acceptEula wix7 installer\windows\myportal-tray.wxs `
+            -arch x64 `
             -d "BinDir=$binDir" `
             -o dist\windows\myportal-tray.msi
 
