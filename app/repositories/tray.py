@@ -268,7 +268,7 @@ async def delete_device(device_id: int) -> None:
 
 
 async def delete_revoked_devices() -> int:
-    rows = await list_devices(status="revoked")
+    rows = await db.fetch_all("SELECT id FROM tray_devices WHERE status = 'revoked'")
     if not rows:
         return 0
     await db.execute("DELETE FROM tray_devices WHERE status = 'revoked'")

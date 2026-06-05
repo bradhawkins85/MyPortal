@@ -5434,7 +5434,7 @@ async def admin_tray_bulk_delete_revoked_devices(request: Request):
 
     deleted_count = await tray_repo.delete_revoked_devices()
     if deleted_count <= 0:
-        return flash_redirect("/admin/tray/devices", "No revoked tray devices to delete.", "error")
+        return flash_redirect("/admin/tray/devices", "No revoked tray devices to delete.", "info")
     suffix = "device" if deleted_count == 1 else "devices"
     return flash_redirect(
         "/admin/tray/devices",
