@@ -141,3 +141,25 @@ async def test_refresh_failure_logged(monkeypatch):
 
     await service.stop()
 
+
+def test_build_trigger_normalises_last_day_of_month_alias():
+    service = SchedulerService()
+    service._scheduler = SimpleNamespace(timezone=timezone.utc)
+
+    trigger = service._build_trigger({"id": 1, "cron": "0 0 L * *"})
+
+    assert trigger is not None
+    assert "day='last'" in str(trigger)
+
+
+def test_normalise_cron_day_field_handles_list_case_and_whitespace():
+    assert scheduler_module._normalise_cron_day_field("L") == "last"
+    assert scheduler_module._normalise_cron_day_field("1, 15, l, L") == "1,15,last,last"
+
+
+def test_build_trigger_rejects_wrong_cron_field_count():
+    service = SchedulerService()
+    service._scheduler = SimpleNamespace(timezone=timezone.utc)
+
+    assert service._build_trigger({"id": 1, "cron": "0 0 * *"}) is None
+    assert service._build_trigger({"id": 1, "cron": "0 0 * * * *"}) is None
