@@ -8,6 +8,8 @@
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "Configure notifications", "type": "link", "href": "/notifications/settings"},
+    {"label": "Mark all as read", "type": "button",
+     "attrs": {"data-notification-mark-all": ""}},
     {"label": "Mark selected as read", "type": "button",
      "attrs": {"data-notification-mark-selected": "", "disabled": ""}},
     {"label": "Delete selected", "type": "button", "variant": "danger",
@@ -210,6 +212,14 @@
                   data-notification-delete="{{ notification.id }}"
                 >
                   Delete
+                </button>
+                <button
+                  type="button"
+                  class="button button--ghost button--small"
+                  data-notification-exclude="{{ notification.id }}"
+                  data-notification-excluded="{{ 1 if notification.is_excluded else 0 }}"
+                >
+                  {% if notification.is_excluded %}Undo exclude{% else %}Exclude{% endif %}
                 </button>
               </div>
             </td>

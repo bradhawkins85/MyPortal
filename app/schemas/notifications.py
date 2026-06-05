@@ -128,3 +128,8 @@ class NotificationSummaryResponse(BaseModel):
         ge=0,
         description="All unread notifications for the authenticated user regardless of filters.",
     )
+
+
+class NotificationExclusionResponse(BaseModel):
+    event_type: str = Field(..., max_length=150)
+    is_excluded: bool
