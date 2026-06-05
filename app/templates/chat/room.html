@@ -322,7 +322,16 @@
       });
       if (resp.ok) {
         const msg = await resp.json();
-        appendMessage(msg, true, false);
+        // Guard against race: the WebSocket broadcast may have already rendered
+        // this message before the fetch promise resolved.
+        const key = msg.matrix_event_id || String(msg.id || '');
+        const alreadyInDom =
+          (key && messagesEl?.querySelector(`[data-event-id="${CSS.escape(key)}"]`)) ||
+          (msg.id && messagesEl?.querySelector(`[data-msg-id="${msg.id}"]`));
+        if (!alreadyInDom) {
+          appendMessage(msg, true, false);
+        }
+        if (key) lastKnownIds.add(key);
         input.value = '';
         document.getElementById('chat-empty')?.remove();
       } else {
