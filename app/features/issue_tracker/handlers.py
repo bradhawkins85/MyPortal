@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 import aiomysql
 from fastapi import Query, Request, status
 from fastapi.responses import RedirectResponse
+
+from app.security.flash import flash_redirect, set_flash
 
 
 def _main():
@@ -119,8 +120,6 @@ async def admin_issue_tracker(
     issue_status_options = [
         {"value": value, "label": label} for value, label in issues_service.STATUS_OPTIONS
     ]
-    success_message = request.query_params.get("success")
-    error_message = request.query_params.get("error") or edit_error
 
     extra = {
         "title": "Issue tracker",
@@ -132,8 +131,7 @@ async def admin_issue_tracker(
         "search_term": search_term,
         "company_options": company_options,
         "editing_issue": editing_issue,
-        "success_message": success_message,
-        "error_message": error_message,
+        "error_message": edit_error,
     }
 
     response = await _main()._render_template("admin/issues.html", request, current_user, extra=extra)
@@ -156,14 +154,12 @@ async def admin_create_issue(request: Request):
     initial_status = str(form.get("initialStatus", issues_service.DEFAULT_STATUS)).strip()
 
     if not name:
-        url = f"/admin/issues?error={quote('Issue name is required.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/issues", 'Issue name is required.', "error")
 
     try:
         await issues_service.ensure_issue_name_available(name)
     except ValueError as exc:
-        url = f"/admin/issues?error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/issues", str(exc), "error")
 
     user_id = _main()._get_current_user_id(current_user)
     try:
@@ -174,8 +170,7 @@ async def admin_create_issue(request: Request):
         )
     except aiomysql.IntegrityError as exc:
         detail = "Issue name already exists." if exc.args and exc.args[0] == 1062 else "Unable to create issue."
-        url = f"/admin/issues?error={quote(detail)}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/issues", detail, "error")
 
     issue_id = issue_record.get("issue_id")
     try:
@@ -183,8 +178,7 @@ async def admin_create_issue(request: Request):
     except (TypeError, ValueError):
         issue_id_int = None
     if issue_id_int is None:
-        url = f"/admin/issues?error={quote('Issue identifier missing.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/issues", 'Issue identifier missing.', "error")
 
     try:
         status_value = issues_service.normalise_status(initial_status)
@@ -216,8 +210,7 @@ async def admin_create_issue(request: Request):
         name=name,
         created_by=user_id,
     )
-    url = f"/admin/issues?success={quote('Issue created.')}"
-    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect("/admin/issues", 'Issue created.', "success")
 
 
 async def admin_update_issue(issue_id: int, request: Request):
@@ -232,8 +225,7 @@ async def admin_update_issue(issue_id: int, request: Request):
 
     issue = await issues_repo.get_issue_by_id(issue_id)
     if not issue:
-        url = f"/admin/issues?error={quote('Issue not found.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/issues", 'Issue not found.', "error")
 
     form = await request.form()
     name = str(form.get("name", "")).strip()
@@ -241,16 +233,14 @@ async def admin_update_issue(issue_id: int, request: Request):
     new_company_status = str(form.get("newCompanyStatus", issues_service.DEFAULT_STATUS)).strip()
 
     if not name:
-        url = f"/admin/issues?issueId={issue_id}&error={quote('Issue name is required.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/issues?issueId={issue_id}", 'Issue name is required.', "error")
 
     updates: dict[str, Any] = {}
     if name != (issue.get("name") or ""):
         try:
             await issues_service.ensure_issue_name_available(name, exclude_issue_id=issue_id)
         except ValueError as exc:
-            url = f"/admin/issues?issueId={issue_id}&error={quote(str(exc))}"
-            return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+            return flash_redirect(f"/admin/issues?issueId={issue_id}", str(exc), "error")
         updates["name"] = name
 
     if description != (issue.get("description") or None):
@@ -262,8 +252,7 @@ async def admin_update_issue(issue_id: int, request: Request):
             await issues_repo.update_issue(issue_id, **updates)
         except aiomysql.IntegrityError as exc:
             detail = "Issue name already exists." if exc.args and exc.args[0] == 1062 else "Unable to update issue."
-            url = f"/admin/issues?issueId={issue_id}&error={quote(detail)}"
-            return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+            return flash_redirect(f"/admin/issues?issueId={issue_id}", detail, "error")
 
     try:
         status_value = issues_service.normalise_status(new_company_status)
@@ -294,8 +283,8 @@ async def admin_update_issue(issue_id: int, request: Request):
         issue_id=issue_id,
         updated_by=_main()._get_current_user_id(current_user),
     )
-    url = f"/admin/issues?issueId={issue_id}&success={quote('Issue updated.')}"
-    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    url = f"/admin/issues?issueId={issue_id}"
+    return flash_redirect(url, 'Issue updated.', "success")
 
 
 async def admin_update_issue_assignment_status(
@@ -318,8 +307,7 @@ async def admin_update_issue_assignment_status(
     try:
         normalised_status = issues_service.normalise_status(status_value)
     except ValueError:
-        url = f"/admin/issues?issueId={issue_id}&error={quote('Invalid status selection.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/issues?issueId={issue_id}", 'Invalid status selection.', "error")
 
     try:
         await issues_repo.update_assignment_status(
@@ -328,8 +316,7 @@ async def admin_update_issue_assignment_status(
             updated_by=_main()._get_current_user_id(current_user),
         )
     except ValueError:
-        url = f"/admin/issues?issueId={issue_id}&error={quote('Assignment not found.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/issues?issueId={issue_id}", 'Assignment not found.', "error")
 
     log_info(
         "Issue assignment status updated",
@@ -341,13 +328,12 @@ async def admin_update_issue_assignment_status(
 
     destination = _main()._sanitize_local_redirect_target(
         return_url,
-        fallback=f"/admin/issues?issueId={issue_id}&success={quote('Status updated.')}",
+        fallback=f"/admin/issues?issueId={issue_id}",
         allowed_prefixes=("/admin/issues",),
     )
-    if "success=" not in destination:
-        separator = "&" if "?" in destination else "?"
-        destination = f"{destination}{separator}success={quote('Status updated.')}"
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    set_flash(response, "Status updated.", "success")
+    return response
 
 
 async def admin_delete_issue_assignment(
@@ -378,6 +364,6 @@ async def admin_delete_issue_assignment(
         fallback=f"/admin/issues?issueId={issue_id}",
         allowed_prefixes=("/admin/issues",),
     )
-    separator = "&" if "?" in destination else "?"
-    destination = f"{destination}{separator}success={quote('Assignment removed.')}"
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    set_flash(response, "Assignment removed.", "success")
+    return response

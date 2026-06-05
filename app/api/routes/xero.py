@@ -13,6 +13,7 @@ from itsdangerous import BadSignature
 from loguru import logger
 
 from app.core.config import Settings, get_settings
+from app.security.flash import flash_redirect
 from app.core.logging import log_error, log_info
 from app.repositories import users as user_repo
 from app.security.session import session_manager
@@ -250,10 +251,7 @@ async def xero_connect(request: Request):
 
     client_id = credentials.get("client_id", "").strip()
     if not client_id:
-        return RedirectResponse(
-            url="/admin/modules?error=missing+client+id",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "missing client id", "error")
 
     # Generate state token to prevent CSRF
     state = _get_state_serializer().dumps(
@@ -296,41 +294,26 @@ async def xero_callback(
         # URL to avoid URL-redirection vulnerabilities (CodeQL py/url-redirection).
         message = request.query_params.get("error_description", error)
         log_error("Xero OAuth error", error=error, description=str(message)[:200])
-        return RedirectResponse(
-            url="/admin/modules?error=xero+authorization+failed",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "xero authorization failed", "error")
 
     if not code or not state:
-        return RedirectResponse(
-            url="/admin/modules?error=invalid+response",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "invalid response", "error")
 
     # Verify state token
     try:
         state_data = _get_state_serializer().loads(state)
     except BadSignature:
-        return RedirectResponse(
-            url="/admin/modules?error=invalid+state",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "invalid state", "error")
 
     credentials = await modules_service.get_xero_credentials()
     if not credentials:
-        return RedirectResponse(
-            url="/admin/modules?error=missing+credentials",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "missing credentials", "error")
 
     client_id = credentials.get("client_id", "").strip()
     client_secret = credentials.get("client_secret", "").strip()
 
     if not (client_id and client_secret):
-        return RedirectResponse(
-            url="/admin/modules?error=incomplete+credentials",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "incomplete credentials", "error")
 
     # Exchange authorization code for tokens
     token_url = "https://identity.xero.com/connect/token"
@@ -356,16 +339,10 @@ async def xero_callback(
             status=exc.response.status_code if exc.response else None,
             body=exc.response.text if exc.response else None,
         )
-        return RedirectResponse(
-            url="/admin/modules?error=authorization+failed",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "authorization failed", "error")
     except Exception as exc:
         log_error("Xero authorization error", error=str(exc))
-        return RedirectResponse(
-            url="/admin/modules?error=connection+failed",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "connection failed", "error")
 
     payload = response.json()
     access_token = payload.get("access_token")
@@ -376,10 +353,7 @@ async def xero_callback(
         log_error(
             "Xero token response missing tokens", payload_keys=list(payload.keys())
         )
-        return RedirectResponse(
-            url="/admin/modules?error=invalid+token+response",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", "invalid token response", "error")
 
     # Calculate token expiry
     expires_at = None
@@ -420,7 +394,4 @@ async def xero_callback(
         "Xero OAuth callback processed successfully",
         user_id=state_data.get("user_id"),
     )
-    return RedirectResponse(
-        url="/admin/modules?success=xero+authorized",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/modules", "xero authorized", "success")

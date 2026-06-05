@@ -5,11 +5,12 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
 
 from fastapi import HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from starlette.datastructures import FormData
+
+from app.security.flash import flash_redirect
 
 
 _REPORTING_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -137,7 +138,6 @@ def _validate_reporting_input(payload: dict[str, Any]) -> str | None:
 async def reporting_page(
     request: Request,
     report: int | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     from app.repositories import reporting as reporting_repo
     from app.services import audit as audit_service
@@ -301,8 +301,6 @@ async def reporting_export(request: Request, report_id: int, format: str = Query
 
 async def admin_reporting(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     from app.repositories import reporting as reporting_repo
 
@@ -318,13 +316,11 @@ async def admin_reporting(
     extra = {
         "title": "Reporting · Manage reports",
         "reports": reports_payload,
-        "success_message": _reporting_message(success),
-        "error_message": _reporting_message(error),
     }
     return await _main()._render_template("admin/reporting.html", request, user, extra=extra)
 
 
-async def admin_reporting_new(request: Request, error: str | None = Query(default=None)):
+async def admin_reporting_new(request: Request):
     from app.services import reporting as reporting_service
 
     user, redirect = await _main()._require_super_admin_page(request)
@@ -340,13 +336,12 @@ async def admin_reporting_new(request: Request, error: str | None = Query(defaul
         "eligible_users": eligible,
         "granted_user_ids": set(),
         "max_rows": reporting_service.MAX_RESULT_ROWS,
-        "error_message": _reporting_message(error),
     }
     return await _main()._render_template("admin/reporting_form.html", request, user, extra=extra)
 
 
 async def admin_reporting_edit(
-    request: Request, report_id: int, error: str | None = Query(default=None)
+    request: Request, report_id: int
 ):
     from app.repositories import reporting as reporting_repo
     from app.services import reporting as reporting_service
@@ -356,10 +351,7 @@ async def admin_reporting_edit(
         return redirect
     record = await reporting_repo.get_query(int(report_id))
     if not record:
-        return RedirectResponse(
-            url="/admin/reporting?error=Report+not+found",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reporting", "Report not found", "error")
     eligible = await _list_reporting_eligible_users()
     granted_ids = set(await reporting_repo.list_permission_user_ids(int(report_id)))
     extra = {
@@ -371,7 +363,6 @@ async def admin_reporting_edit(
         "eligible_users": eligible,
         "granted_user_ids": granted_ids,
         "max_rows": reporting_service.MAX_RESULT_ROWS,
-        "error_message": _reporting_message(error),
     }
     return await _main()._render_template("admin/reporting_form.html", request, user, extra=extra)
 
@@ -387,18 +378,10 @@ async def admin_reporting_create(request: Request):
     payload = _parse_reporting_form(form)
     error = _validate_reporting_input(payload)
     if error:
-        encoded = urlencode({"error": error})
-        return RedirectResponse(
-            url=f"/admin/reporting/new?{encoded}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reporting/new", error, "error")
     existing = await reporting_repo.get_query_by_slug(payload["slug"])
     if existing:
-        encoded = urlencode({"error": "That slug is already in use."})
-        return RedirectResponse(
-            url=f"/admin/reporting/new?{encoded}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reporting/new", "That slug is already in use.", "error")
     new_id = await reporting_repo.create_query(
         slug=payload["slug"],
         name=payload["name"],
@@ -420,11 +403,7 @@ async def admin_reporting_create(request: Request):
             "permission_user_ids": payload["user_ids"],
         },
     )
-    encoded = urlencode({"success": "Report created."})
-    return RedirectResponse(
-        url=f"/admin/reporting?{encoded}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/reporting", "Report created.", "success")
 
 
 async def admin_reporting_update(request: Request, report_id: int):
@@ -436,27 +415,16 @@ async def admin_reporting_update(request: Request, report_id: int):
         return redirect
     record = await reporting_repo.get_query(int(report_id))
     if not record:
-        return RedirectResponse(
-            url="/admin/reporting?error=Report+not+found",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reporting", "Report not found", "error")
     form = await request.form()
     payload = _parse_reporting_form(form)
     error = _validate_reporting_input(payload)
     if error:
-        encoded = urlencode({"error": error})
-        return RedirectResponse(
-            url=f"/admin/reporting/{int(report_id)}/edit?{encoded}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect(f"/admin/reporting/{int(report_id)}/edit", error, "error")
     if payload["slug"] != record.get("slug"):
         clash = await reporting_repo.get_query_by_slug(payload["slug"])
         if clash and int(clash["id"]) != int(report_id):
-            encoded = urlencode({"error": "That slug is already in use."})
-            return RedirectResponse(
-                url=f"/admin/reporting/{int(report_id)}/edit?{encoded}",
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
+            return flash_redirect(f"/admin/reporting/{int(report_id)}/edit", "That slug is already in use.", "error")
     before_snapshot = {
         "slug": record.get("slug"),
         "name": record.get("name"),
@@ -486,11 +454,7 @@ async def admin_reporting_update(request: Request, report_id: int):
             "permission_user_ids": payload["user_ids"],
         },
     )
-    encoded = urlencode({"success": "Report updated."})
-    return RedirectResponse(
-        url=f"/admin/reporting?{encoded}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/reporting", "Report updated.", "success")
 
 
 async def admin_reporting_delete(request: Request, report_id: int):
@@ -502,10 +466,7 @@ async def admin_reporting_delete(request: Request, report_id: int):
         return redirect
     record = await reporting_repo.get_query(int(report_id))
     if not record:
-        return RedirectResponse(
-            url="/admin/reporting?error=Report+not+found",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reporting", "Report not found", "error")
     await reporting_repo.delete_query(int(report_id))
     await audit_service.record(
         action="reporting.report.delete",
@@ -519,10 +480,10 @@ async def admin_reporting_delete(request: Request, report_id: int):
             "description": record.get("description"),
         },
     )
-    encoded = urlencode({"success": f"Deleted report '{record.get('name')}'."})
-    return RedirectResponse(
-        url=f"/admin/reporting?{encoded}",
-        status_code=status.HTTP_303_SEE_OTHER,
+    return flash_redirect(
+        "/admin/reporting",
+        f"Deleted report '{record.get('name')}'.",
+        "success",
     )
 
 

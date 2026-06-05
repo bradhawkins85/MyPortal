@@ -868,8 +868,6 @@ async def _ensure_company_permission(
 async def admin_companies_page(
     request: Request,
     company_id: int | None = Query(default=None),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
     show_archived: bool = Query(default=False),
 ):
     current_user, redirect = await _main()._require_authenticated_user(request)
@@ -879,8 +877,6 @@ async def admin_companies_page(
         request,
         current_user,
         selected_company_id=company_id,
-        success_message=_main()._sanitize_message(success),
-        error_message=_main()._sanitize_message(error),
         include_archived=show_archived,
     )
 
@@ -888,8 +884,6 @@ async def admin_companies_page(
 async def admin_company_edit_page(
     company_id: int,
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
     show_inactive: bool = Query(default=False),
 ):
     current_user, redirect = await _main()._require_super_admin_page(request)
@@ -899,8 +893,6 @@ async def admin_company_edit_page(
         request,
         current_user,
         company_id=company_id,
-        success_message=_main()._sanitize_message(success),
-        error_message=_main()._sanitize_message(error),
         show_inactive_tasks=show_inactive,
     )
 
@@ -2123,8 +2115,6 @@ async def admin_company_tray_settings_page(
     company_id: int,
     request: Request,
     new_token: str | None = None,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     from app.repositories import companies as companies_repo
     from app.repositories import tray as tray_repo
@@ -2150,8 +2140,6 @@ async def admin_company_tray_settings_page(
         "new_token": new_token,
         "now_iso": datetime.now(timezone.utc).isoformat(),
         "portal_url": portal_url,
-        "success_message": _main()._sanitize_message(success),
-        "error_message": _main()._sanitize_message(error),
     }
     return await _main()._render_template(
         "admin/tray/company_settings.html", request, current_user, extra=extra

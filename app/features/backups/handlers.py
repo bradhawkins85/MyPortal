@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import Request, status
 from fastapi.responses import RedirectResponse
 from starlette.datastructures import FormData
+
+from app.security.flash import flash_redirect
 
 
 def _main():
@@ -184,8 +185,7 @@ async def admin_create_backup_job(request: Request):
             pass_protection=payload["pass_protection"],
         )
     except ValueError as exc:
-        url = f"/admin/backup-jobs?error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/backup-jobs", str(exc), "error")
     await audit_service.log_action(
         action="backup_job.create",
         user_id=user.get("id"),
@@ -194,10 +194,7 @@ async def admin_create_backup_job(request: Request):
         metadata={"company_id": job["company_id"], "name": job["name"]},
         request=request,
     )
-    return RedirectResponse(
-        url=f"/admin/backup-jobs?success={quote('Backup job created.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/backup-jobs", "Backup job created.", "success")
 
 
 async def admin_update_backup_job(request: Request, job_id: int):
@@ -225,11 +222,9 @@ async def admin_update_backup_job(request: Request, job_id: int):
             pass_protection=payload["pass_protection"],
         )
     except ValueError as exc:
-        url = f"/admin/backup-jobs?jobId={int(job_id)}&error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/backup-jobs?jobId={int(job_id)}", str(exc), "error")
     if not updated:
-        url = f"/admin/backup-jobs?error={quote('Backup job not found.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/backup-jobs", "Backup job not found.", "error")
     await audit_service.log_action(
         action="backup_job.update",
         user_id=user.get("id"),
@@ -242,10 +237,7 @@ async def admin_update_backup_job(request: Request, job_id: int):
         },
         request=request,
     )
-    return RedirectResponse(
-        url=f"/admin/backup-jobs?success={quote('Backup job updated.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/backup-jobs", "Backup job updated.", "success")
 
 
 async def admin_delete_backup_job(request: Request, job_id: int):
@@ -258,8 +250,7 @@ async def admin_delete_backup_job(request: Request, job_id: int):
     try:
         await backup_jobs_service.delete_job(job_id)
     except Exception as exc:  # pragma: no cover - defensive
-        url = f"/admin/backup-jobs?error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/backup-jobs", str(exc), "error")
     await audit_service.log_action(
         action="backup_job.delete",
         user_id=user.get("id"),
@@ -267,10 +258,7 @@ async def admin_delete_backup_job(request: Request, job_id: int):
         entity_id=job_id,
         request=request,
     )
-    return RedirectResponse(
-        url=f"/admin/backup-jobs?success={quote('Backup job deleted.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/backup-jobs", "Backup job deleted.", "success")
 
 
 async def admin_regenerate_backup_job_token(request: Request, job_id: int):
@@ -282,8 +270,7 @@ async def admin_regenerate_backup_job_token(request: Request, job_id: int):
         return redirect
     updated = await backup_jobs_service.regenerate_token(job_id)
     if not updated:
-        url = f"/admin/backup-jobs?error={quote('Backup job not found.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/admin/backup-jobs", "Backup job not found.", "error")
     await audit_service.log_action(
         action="backup_job.regenerate_token",
         user_id=user.get("id"),
@@ -291,7 +278,4 @@ async def admin_regenerate_backup_job_token(request: Request, job_id: int):
         entity_id=job_id,
         request=request,
     )
-    return RedirectResponse(
-        url=f"/admin/backup-jobs?jobId={int(job_id)}&success={quote('Token regenerated.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/admin/backup-jobs?jobId={int(job_id)}", "Token regenerated.", "success")

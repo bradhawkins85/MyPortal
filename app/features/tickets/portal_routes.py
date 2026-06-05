@@ -17,12 +17,11 @@ from ``app.main`` and the existing service modules; see the pack
 
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
+from app.security.flash import flash_redirect
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
 from app.services import ticket_attachments as attachments_service
@@ -199,9 +198,7 @@ async def portal_create_ticket(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    message = quote("Ticket created.")
-    destination = f"/tickets/{ticket['id']}?success={message}"
-    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect(f"/tickets/{ticket['id']}", "Ticket created.", "success")
 
 
 @router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
@@ -322,11 +319,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
     )
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
 
-    message = quote("Reply posted.")
-    return RedirectResponse(
-        url=f"/tickets/{ticket_id}?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/tickets/{ticket_id}", "Reply posted.", "success")
 
 
 __all__ = ["router"]

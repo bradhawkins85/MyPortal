@@ -37,8 +37,6 @@ async def admin_message_templates(
     request: Request,
     search: str | None = Query(default=None),
     content_type: str | None = Query(default=None),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -77,8 +75,6 @@ async def admin_message_templates(
             "content_type": content_type_value or "",
         },
         "content_type_options": _content_type_options(),
-        "success_message": main_module._sanitize_message(success),
-        "error_message": main_module._sanitize_message(error),
     }
 
     return await main_module._render_template(
