@@ -249,7 +249,7 @@
         </label>
       </div>
 
-      <fieldset class="form-fieldset">
+      <fieldset class="form-fieldset" id="conditions-fieldset">
         <legend class="form-fieldset__legend">
           Conditions <span class="badge">AND</span>
         </legend>
@@ -359,6 +359,26 @@
   }
 
   let nextIndex = document.querySelectorAll('#conditions-list .condition-row').length;
+  const defaultCheckbox = isDefaultInput;
+  const conditionsFieldset = document.getElementById('conditions-fieldset');
+
+  function toggleConditionsFieldset() {
+    if (!defaultCheckbox || !conditionsFieldset) return;
+    const hideConditions = defaultCheckbox.checked;
+    conditionsFieldset.hidden = hideConditions;
+    conditionsFieldset
+      .querySelectorAll('input, select, button, textarea')
+      .forEach((el) => {
+        el.disabled = hideConditions;
+        if (el.classList && el.classList.contains('condition-type-select')) {
+          if (hideConditions) {
+            el.removeAttribute('required');
+          } else {
+            el.setAttribute('required', 'required');
+          }
+        }
+    });
+  }
 
   function updateRow(row) {
     const typeSelect = row.querySelector('.condition-type-select');
@@ -461,6 +481,7 @@
       assignedTechSelect.value = '';
     }
     clearConditions();
+    toggleConditionsFieldset();
     title.textContent = 'New rule';
     submitButton.textContent = 'Create rule';
   }
@@ -496,6 +517,7 @@
       conditions = [];
     }
     conditions.forEach((condition) => addConditionRow(condition));
+    toggleConditionsFieldset();
 
     title.textContent = 'Edit rule';
     submitButton.textContent = 'Update rule';
@@ -507,6 +529,10 @@
     addConditionRow();
   });
 
+  if (defaultCheckbox) {
+    defaultCheckbox.addEventListener('change', toggleConditionsFieldset);
+    toggleConditionsFieldset();
+  }
   document.querySelectorAll('[data-new-rule-modal-open]').forEach((button) => {
     button.setAttribute('aria-expanded', 'false');
     button.addEventListener('click', (event) => {
