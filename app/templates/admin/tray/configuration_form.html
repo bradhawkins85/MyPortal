@@ -78,7 +78,8 @@
           <p class="form-help" id="menu-node-error" hidden></p>
           <p class="form-help">
             Configure each row with the fields you need. Types: <code>label</code>, <code>link</code>, <code>submenu</code>,
-            <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>refresh_config</code>, <code>separator</code>.
+            <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>,
+            <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
             Use <code>Level</code> to place nodes under the nearest preceding submenu.
           </p>
           <p class="form-help">
@@ -124,8 +125,10 @@
         'display_text',
         'env_var',
         'open_chat',
+        'submit_ticket',
         'refresh_config',
-        'separator'
+        'separator',
+        'quit'
       ];
 
       function showError(message) {
