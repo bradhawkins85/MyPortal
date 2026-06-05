@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+
+{% macro render_condition_row(idx, cond_type, cond_operator, cond_value) %}
+<div class="condition-row" data-condition-index="{{ idx }}">
+  <div class="condition-row__fields">
+    <select name="conditions[{{ idx }}][type]" class="form-input form-select condition-type-select" required>
+      <option value="">— select type —</option>
+      <option value="company_name" {{ 'selected' if cond_type == 'company_name' }}>Customer / company name</option>
+      <option value="contact_name" {{ 'selected' if cond_type == 'contact_name' }}>Contact name</option>
+      <option value="subject" {{ 'selected' if cond_type == 'subject' }}>Subject</option>
+      <option value="time_between" {{ 'selected' if cond_type == 'time_between' }}>Time between (HH:MM–HH:MM UTC)</option>
+      <option value="day_of_week" {{ 'selected' if cond_type == 'day_of_week' }}>Day of week</option>
+    </select>
+    <select name="conditions[{{ idx }}][operator]" class="form-input form-select condition-operator-select">
+      <option value="contains" {{ 'selected' if cond_operator == 'contains' }}>contains</option>
+      <option value="equals" {{ 'selected' if cond_operator == 'equals' }}>equals</option>
+      <option value="starts_with" {{ 'selected' if cond_operator == 'starts_with' }}>starts with</option>
+      <option value="between" {{ 'selected' if cond_operator == 'between' }}>between</option>
+      <option value="in" {{ 'selected' if cond_operator == 'in' }}>is one of</option>
+    </select>
+    <input type="text" name="conditions[{{ idx }}][value]" class="form-input condition-value-input"
+           value="{{ cond_value or '' }}" placeholder="Value" />
+    <button type="button" class="button button--ghost button--small remove-condition-btn" title="Remove condition">✕</button>
+  </div>
+  <p class="form-help condition-hint" style="margin:0.25rem 0 0.5rem"></p>
+</div>
+{% endmacro %}
+
+{% block header_title %}Matrix Chat Auto-Assign{% endblock %}
+
+{% block content %}
+{% set is_editing = editing_rule is not none %}
+{% set form_action = '/admin/modules/matrix-chat-assign/rules' %}
+{% if is_editing %}
+  {% set form_action = '/admin/modules/matrix-chat-assign/rules/' ~ editing_rule.id %}
+{% endif %}
+
+<div class="management" data-layout>
+  <aside class="management__sidebar">
+    <h2 class="management__heading">{{ 'Edit rule' if is_editing else 'New rule' }}</h2>
+    <p class="management__intro">
+      Rules are evaluated in priority order when a new chat room is created. All conditions within a rule must match (AND logic). The default fallback rule applies when no other rule matches.
+    </p>
+
+    <form action="{{ form_action }}" method="post" class="form management__form" id="rule-form">
+      {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+
+      <label class="form-field">
+        <span class="form-label">Rule name</span>
+        <input type="text" name="name" class="form-input"
+               value="{{ editing_rule.name if is_editing else '' }}"
+               maxlength="255" required placeholder="e.g. Acme Corp – weekday hours" />
+      </label>
+
+      <div class="form-grid">
+        <label class="form-field">
+          <span class="form-label">Priority</span>
+          <input type="number" name="priority" class="form-input"
+                 value="{{ editing_rule.priority if is_editing else 10 }}"
+                 min="0" step="1" required />
+          <span class="form-help">Higher numbers are evaluated first. Default fallback ignores this.</span>
+        </label>
+
+        <label class="form-field">
+          <span class="form-label">Assign to technician</span>
+          <select name="assigned_tech_user_id" class="form-input form-select">
+            <option value="">— unassigned —</option>
+            {% for tech in technicians %}
+              {% set selected = is_editing and editing_rule.assigned_tech_user_id == tech.id %}
+              <option value="{{ tech.id }}" {{ 'selected' if selected }}>
+                {{ (tech.first_name or '') ~ ' ' ~ (tech.last_name or '') | trim }}
+                ({{ tech.email }}){% if not tech.matrix_user_id %} ⚠{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <span class="form-help">
+            ⚠ marks technicians without a Matrix username — they will be assigned but cannot be auto-invited to the Matrix room.
+          </span>
+        </label>
+      </div>
+
+      <div class="form-grid">
+        <label class="form-field form-field--checkbox">
+          <input type="hidden" name="is_active" value="0" />
+          <input type="checkbox" name="is_active" value="1"
+                 {{ 'checked' if (not is_editing or editing_rule.is_active) }} />
+          <span class="form-label">Active</span>
+        </label>
+
+        <label class="form-field form-field--checkbox">
+          <input type="hidden" name="is_default" value="0" />
+          <input type="checkbox" name="is_default" value="1"
+                 {{ 'checked' if (is_editing and editing_rule.is_default) }} />
+          <span class="form-label">Default fallback rule</span>
+          <span class="form-help">Catches all rooms that don't match any other rule. Conditions are ignored.</span>
+        </label>
+      </div>
+
+      {# ---- Conditions builder ---- #}
+      <fieldset class="form-fieldset">
+        <legend class="form-fieldset__legend">
+          Conditions <span class="badge">AND</span>
+        </legend>
+        <p class="form-help" style="margin-bottom:0.75rem">
+          All conditions must match for this rule to fire.
+          Leave empty to match all rooms (use together with Default fallback above).
+        </p>
+
+        <div id="conditions-list">
+          {% if is_editing and editing_rule.conditions %}
+            {% for cond in editing_rule.conditions %}
+              {{ render_condition_row(loop.index0, cond.type, cond.operator, cond.value) }}
+            {% endfor %}
+          {% endif %}
+        </div>
+
+        <button type="button" class="button button--ghost button--small" id="add-condition-btn"
+                style="margin-top:0.5rem">
+          + Add condition
+        </button>
+      </fieldset>
+
+      <div class="form-actions">
+        <button type="submit" class="button button--primary">
+          {{ 'Update rule' if is_editing else 'Create rule' }}
+        </button>
+        {% if is_editing %}
+          <a href="/admin/modules/matrix-chat-assign" class="button button--ghost">Cancel</a>
+        {% endif %}
+      </div>
+    </form>
+  </aside>
+
+  <section class="management__content">
+    {% if success_message %}
+      <div class="alert alert--success" role="alert">{{ success_message }}</div>
+    {% endif %}
+    {% if error_message %}
+      <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+    {% endif %}
+
+    {% if technicians_with_matrix | length == 0 %}
+      <div class="alert alert--warning" role="alert">
+        <strong>No technicians have a Matrix username configured.</strong>
+        Rules can still assign chats, but the assigned technician won't be automatically invited to the Matrix room.
+        Set a Matrix user ID on each technician's profile under Staff → Edit User.
+      </div>
+    {% endif %}
+
+    <section class="card card--panel">
+      <div class="table-wrapper">
+        <table class="table" data-table data-table-id="auto-assign-rules">
+          <thead>
+            <tr>
+              <th scope="col" data-sort="number" data-column-key="priority">Priority</th>
+              <th scope="col" data-sort="string" data-column-key="name">Rule name</th>
+              <th scope="col" data-sort="string" data-column-key="tech">Assigned to</th>
+              <th scope="col" data-sort="string" data-mobile-hidden="true" data-column-key="conditions">Conditions</th>
+              <th scope="col" data-sort="string" data-column-key="status">Status</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if not rules %}
+              <tr>
+                <td colspan="6" style="text-align:center;color:var(--color-text-muted)">
+                  No rules configured yet. Use the form on the left to create your first rule.
+                </td>
+              </tr>
+            {% endif %}
+            {% for rule in rules %}
+              <tr>
+                <td data-label="Priority" data-column-key="priority">
+                  {% if rule.is_default %}
+                    <span class="badge">fallback</span>
+                  {% else %}
+                    {{ rule.priority }}
+                  {% endif %}
+                </td>
+                <td data-label="Rule name" data-column-key="name">
+                  <strong>{{ rule.name }}</strong>
+                </td>
+                <td data-label="Assigned to" data-column-key="tech">
+                  {% if rule.assigned_tech_user_id %}
+                    {{ ((rule.first_name or '') ~ ' ' ~ (rule.last_name or '')) | trim or rule.tech_email }}
+                    {% if rule.tech_email and (rule.first_name or rule.last_name) %}
+                      <br><small>{{ rule.tech_email }}</small>
+                    {% endif %}
+                    {% if not rule.tech_matrix_user_id %}
+                      <span title="No Matrix username configured" style="color:var(--color-warning)">⚠</span>
+                    {% endif %}
+                  {% else %}
+                    <span style="color:var(--color-text-muted)">—</span>
+                  {% endif %}
+                </td>
+                <td data-label="Conditions" data-mobile-hidden="true" data-column-key="conditions">
+                  {% if rule.is_default %}
+                    <em style="color:var(--color-text-muted)">Catches all unmatched rooms</em>
+                  {% elif rule.conditions %}
+                    <ul class="condition-summary">
+                      {% for cond in rule.conditions %}
+                        <li>
+                          <code>{{ cond.type }}</code>
+                          <span style="color:var(--color-text-muted)">{{ cond.operator }}</span>
+                          <strong>"{{ cond.value }}"</strong>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <em style="color:var(--color-text-muted)">No conditions</em>
+                  {% endif %}
+                </td>
+                <td data-label="Status" data-column-key="status">
+                  <span class="badge {{ 'badge--success' if rule.is_active else 'badge--danger' }}">
+                    {{ 'Active' if rule.is_active else 'Inactive' }}
+                  </span>
+                </td>
+                <td class="table__actions" data-column-key="actions">
+                  <div class="table__action-buttons">
+                    <a href="/admin/modules/matrix-chat-assign?ruleId={{ rule.id }}"
+                       class="button button--ghost button--small">Edit</a>
+                    <form action="/admin/modules/matrix-chat-assign/rules/{{ rule.id }}/delete"
+                          method="post" class="inline-form"
+                          onsubmit="return confirm('Delete rule \'{{ rule.name | replace("'", "\\'") }}\'?');">
+                      {% if csrf_token %}
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                      {% endif %}
+                      <button type="submit" class="button button--ghost button--small button--danger">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+</div>
+
+{# Hidden template row for JavaScript cloning when adding new conditions #}
+<template id="condition-row-template">
+  <div class="condition-row" data-condition-index="__INDEX__">
+    <div class="condition-row__fields">
+      <select name="conditions[__INDEX__][type]" class="form-input form-select condition-type-select" required>
+        <option value="">— select type —</option>
+        <option value="company_name">Customer / company name</option>
+        <option value="contact_name">Contact name</option>
+        <option value="subject">Subject</option>
+        <option value="time_between">Time between (HH:MM–HH:MM UTC)</option>
+        <option value="day_of_week">Day of week</option>
+      </select>
+      <select name="conditions[__INDEX__][operator]" class="form-input form-select condition-operator-select">
+        <option value="contains">contains</option>
+        <option value="equals">equals</option>
+        <option value="starts_with">starts with</option>
+        <option value="between">between</option>
+        <option value="in">is one of</option>
+      </select>
+      <input type="text" name="conditions[__INDEX__][value]" class="form-input condition-value-input"
+             placeholder="Value" />
+      <button type="button" class="button button--ghost button--small remove-condition-btn"
+              title="Remove condition">✕</button>
+    </div>
+    <p class="form-help condition-hint" style="margin:0.25rem 0 0.5rem"></p>
+  </div>
+</template>
+
+<style>
+  .condition-row { margin-bottom: 0.5rem; }
+  .condition-row__fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr auto;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .condition-hint { color: var(--color-text-muted); font-size: 0.8rem; }
+  .condition-summary { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
+  .condition-summary li { margin-bottom: 0.15rem; }
+  @media (max-width: 640px) {
+    .condition-row__fields { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+(function () {
+  const HINTS = {
+    company_name: 'Match on the customer\'s company name.',
+    contact_name: 'Match on the full name of the user who opened the chat.',
+    subject: 'Match on the chat room subject/title.',
+    time_between: 'Value: HH:MM-HH:MM in UTC, e.g. 09:00-17:00. Wraps midnight when start > end.',
+    day_of_week: 'Comma-separated short day names: mon, tue, wed, thu, fri, sat, sun',
+  };
+  const RESTRICTED_OPERATORS = {
+    time_between: ['between'],
+    day_of_week: ['in'],
+  };
+  const STRING_OPERATORS = ['contains', 'equals', 'starts_with'];
+
+  let nextIndex = document.querySelectorAll('#conditions-list .condition-row').length;
+
+  function updateRow(row) {
+    const typeSelect = row.querySelector('.condition-type-select');
+    const opSelect = row.querySelector('.condition-operator-select');
+    const hint = row.querySelector('.condition-hint');
+    const ctype = typeSelect ? typeSelect.value : '';
+
+    if (hint) hint.textContent = HINTS[ctype] || '';
+
+    if (opSelect) {
+      const allowed = RESTRICTED_OPERATORS[ctype] || STRING_OPERATORS;
+      Array.from(opSelect.options).forEach(opt => {
+        opt.hidden = !allowed.includes(opt.value);
+      });
+      if (!allowed.includes(opSelect.value)) {
+        opSelect.value = allowed[0];
+      }
+    }
+  }
+
+  function attachRow(row) {
+    const typeSelect = row.querySelector('.condition-type-select');
+    if (typeSelect) {
+      typeSelect.addEventListener('change', () => updateRow(row));
+      updateRow(row);
+    }
+    const removeBtn = row.querySelector('.remove-condition-btn');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', () => {
+        row.remove();
+        reindex();
+      });
+    }
+  }
+
+  function reindex() {
+    document.querySelectorAll('#conditions-list .condition-row').forEach((row, idx) => {
+      row.dataset.conditionIndex = idx;
+      row.querySelectorAll('[name]').forEach(el => {
+        el.name = el.name.replace(/conditions\[\d+\]/, 'conditions[' + idx + ']');
+      });
+    });
+    nextIndex = document.querySelectorAll('#conditions-list .condition-row').length;
+  }
+
+  document.querySelectorAll('#conditions-list .condition-row').forEach(row => attachRow(row));
+
+  document.getElementById('add-condition-btn').addEventListener('click', () => {
+    const tmpl = document.getElementById('condition-row-template');
+    const html = tmpl.innerHTML.replace(/__INDEX__/g, nextIndex);
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    const row = wrapper.firstElementChild;
+    document.getElementById('conditions-list').appendChild(row);
+    attachRow(row);
+    nextIndex++;
+  });
+})();
+</script>
+{% endblock %}
