@@ -9,11 +9,13 @@ from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
 from app.core.notifications import DEFAULT_NOTIFICATION_EVENT_TYPES, merge_event_types
+from app.repositories import notification_exclusions as exclusions_repo
 from app.repositories import notifications as notifications_repo
 from app.repositories import notification_preferences as preferences_repo
 from app.schemas.notifications import (
     NotificationAcknowledgeRequest,
     NotificationCreate,
+    NotificationExclusionResponse,
     NotificationEventSettingResponse,
     NotificationEventSettingUpdate,
     NotificationPreferenceResponse,
@@ -297,6 +299,64 @@ async def delete_notification(
     if record.get("user_id") != current_user.get("id"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted to delete this notification")
     await notifications_repo.delete_notification(notification_id)
+
+
+@router.post(
+    "/{notification_id}/exclude",
+    response_model=NotificationExclusionResponse,
+    summary="Exclude notifications by event type",
+    response_description="The exclusion state for the target notification event type.",
+)
+async def exclude_notification_event_type(
+    notification_id: int,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    record = await notifications_repo.get_notification(notification_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    if record.get("user_id") not in (None, current_user.get("id")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted to update this notification")
+    event_type = str(record.get("event_type") or "").strip()
+    if not event_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Notification does not have a valid event type",
+        )
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+    return await exclusions_repo.exclude_event_type(user_id, event_type)
+
+
+@router.delete(
+    "/{notification_id}/exclude",
+    response_model=NotificationExclusionResponse,
+    summary="Undo notification exclusion by event type",
+    response_description="The exclusion state for the target notification event type.",
+)
+async def undo_exclude_notification_event_type(
+    notification_id: int,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+):
+    record = await notifications_repo.get_notification(notification_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    if record.get("user_id") not in (None, current_user.get("id")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted to update this notification")
+    event_type = str(record.get("event_type") or "").strip()
+    if not event_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Notification does not have a valid event type",
+        )
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid")
+    return await exclusions_repo.undo_exclude_event_type(user_id, event_type)
 
 
 @router.post(

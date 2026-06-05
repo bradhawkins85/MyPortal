@@ -18,9 +18,11 @@
     selectAll: '[data-notification-select-all]',
     selection: '[data-notification-select]',
     markButtons: '[data-notification-mark]',
+    markAll: '[data-notification-mark-all]',
     markSelected: '[data-notification-mark-selected]',
     deleteButtons: '[data-notification-delete]',
     deleteSelected: '[data-notification-delete-selected]',
+    excludeButtons: '[data-notification-exclude]',
     filtersForm: '#notification-filters',
     resetButton: '[data-notification-reset]',
     pageField: '[data-notification-page-field]',
@@ -275,6 +277,32 @@
     return response.json();
   }
 
+  async function excludeNotification(notificationId) {
+    const response = await fetch(`/api/notifications/${notificationId}/exclude`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': getCsrfToken() },
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(buildErrorMessage(detail, 'Failed to exclude notification type'));
+    }
+    return response.json();
+  }
+
+  async function undoExcludeNotification(notificationId) {
+    const response = await fetch(`/api/notifications/${notificationId}/exclude`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': getCsrfToken() },
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(buildErrorMessage(detail, 'Failed to undo notification exclusion'));
+    }
+    return response.json();
+  }
+
 
   async function deleteNotification(notificationId) {
     const response = await fetch(`/api/notifications/${notificationId}`, {
@@ -383,6 +411,46 @@
     });
   }
 
+  function bindMarkAllAction() {
+    const actionButton = document.querySelector(notificationSelectors.markAll);
+    if (!actionButton) {
+      return;
+    }
+
+    actionButton.addEventListener('click', async () => {
+      const visibleNotificationIds = Array.from(document.querySelectorAll(notificationSelectors.selection))
+        .filter((checkbox) => !checkbox.disabled)
+        .map((checkbox) => Number(checkbox.value))
+        .filter((value) => !Number.isNaN(value));
+
+      if (!visibleNotificationIds.length) {
+        return;
+      }
+
+      actionButton.disabled = true;
+      const originalText = actionButton.textContent;
+      actionButton.textContent = 'Marking…';
+
+      try {
+        const records = await acknowledgeNotifications(visibleNotificationIds);
+        records.forEach((record) => {
+          applyNotificationUpdate(record);
+        });
+        try {
+          await refreshNotificationSummary();
+        } catch (summaryError) {
+          console.warn(summaryError);
+        }
+      } catch (error) {
+        window.alert(error.message || 'Unable to mark all notifications as read');
+      }
+
+      actionButton.textContent = originalText;
+      actionButton.disabled = false;
+      updateSelectionState();
+    });
+  }
+
   function bindBulkActions() {
     const actionButton = document.querySelector(notificationSelectors.markSelected);
     if (!actionButton) {
@@ -477,6 +545,43 @@
       } catch (error) { window.alert(error.message || 'Unable to delete notifications'); }
       actionButton.textContent = originalText;
       updateSelectionState();
+    });
+  }
+
+  function applyExcludeButtonState(button, isExcluded) {
+    if (!button) {
+      return;
+    }
+    button.setAttribute('data-notification-excluded', isExcluded ? '1' : '0');
+    button.textContent = isExcluded ? 'Undo exclude' : 'Exclude';
+  }
+
+  function bindExcludeActions() {
+    document.querySelectorAll(notificationSelectors.excludeButtons).forEach((button) => {
+      button.addEventListener('click', async () => {
+        const notificationId = button.getAttribute('data-notification-exclude');
+        if (!notificationId) {
+          return;
+        }
+        const currentlyExcluded = button.getAttribute('data-notification-excluded') === '1';
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = currentlyExcluded ? 'Undoing…' : 'Excluding…';
+        try {
+          if (currentlyExcluded) {
+            await undoExcludeNotification(notificationId);
+            applyExcludeButtonState(button, false);
+          } else {
+            await excludeNotification(notificationId);
+            applyExcludeButtonState(button, true);
+          }
+        } catch (error) {
+          button.textContent = originalText;
+          window.alert(error.message || 'Unable to update notification exclusion');
+        } finally {
+          button.disabled = false;
+        }
+      });
     });
   }
 
@@ -810,9 +915,11 @@
     bindFilters();
     bindSelectionControls();
     bindInlineActions();
+    bindMarkAllAction();
     bindBulkActions();
     bindDeleteActions();
     bindBulkDeleteActions();
+    bindExcludeActions();
     bindOnboardingActionButtons();
     bindOffboardingActionButtons();
     updateSelectionState();
