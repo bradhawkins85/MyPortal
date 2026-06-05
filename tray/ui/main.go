@@ -168,14 +168,6 @@ func buildMenu(cfg *api.ConfigResponse) {
 	for _, node := range cfg.Menu {
 		addNode(node, cfg)
 	}
-
-	systray.AddSeparator()
-	refreshItem := systray.AddMenuItem("Refresh", "Refresh tray menu from server")
-	go func() {
-		for range refreshItem.ClickedCh {
-			requestConfigRefresh()
-		}
-	}()
 }
 
 func requestConfigRefresh() {
@@ -265,6 +257,18 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		go func() {
 			for range item.ClickedCh {
 				go openNewTicketWindow(cfg)
+			}
+		}()
+
+	case "refresh_config":
+		label := node.Label
+		if label == "" {
+			label = "Refresh"
+		}
+		item := systray.AddMenuItem(label, "Refresh tray menu from server")
+		go func() {
+			for range item.ClickedCh {
+				requestConfigRefresh()
 			}
 		}()
 	}
