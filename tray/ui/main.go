@@ -271,6 +271,18 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 				requestConfigRefresh()
 			}
 		}()
+
+	case "quit":
+		label := node.Label
+		if label == "" {
+			label = "Quit"
+		}
+		item := systray.AddMenuItem(label, "Exit MyPortal tray")
+		go func() {
+			for range item.ClickedCh {
+				systray.Quit()
+			}
+		}()
 	}
 }
 
