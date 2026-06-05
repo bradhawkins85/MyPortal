@@ -747,6 +747,7 @@ app.add_middleware(
         "/api/integration-modules/trello/webhook",
         "/api/backup-status",
         "/api/tray/enrol",
+        "/api/tray/popup-chat",
     ),
 )
 

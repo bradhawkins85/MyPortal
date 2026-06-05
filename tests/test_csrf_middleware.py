@@ -114,3 +114,15 @@ def test_api_key_header_skips_csrf_validation():
 
     assert response.status_code == 200
     assert response.json() == {"status": "created"}
+
+
+def test_main_app_exempts_tray_popup_chat_path():
+    from app.main import app as main_app
+
+    csrf_middleware = next(
+        (middleware for middleware in main_app.user_middleware if middleware.cls is CSRFMiddleware),
+        None,
+    )
+    assert csrf_middleware is not None
+    exempt_paths = csrf_middleware.kwargs.get("exempt_paths", ())
+    assert "/api/tray/popup-chat" in exempt_paths
