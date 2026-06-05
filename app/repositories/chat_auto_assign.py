@@ -7,25 +7,21 @@ from typing import Any
 from app.core.database import db
 
 
+_LIST_RULES_SELECT = """
+    SELECT r.*, u.first_name, u.last_name, u.email AS tech_email,
+                  u.matrix_user_id AS tech_matrix_user_id
+           FROM chat_auto_assign_rules r
+           LEFT JOIN users u ON u.id = r.assigned_tech_user_id
+"""
+
+
 async def list_rules(*, active_only: bool = False) -> list[dict[str, Any]]:
     """Return all rules ordered by priority descending (highest first), then by id."""
-    if active_only:
-        rows = await db.fetch_all(
-            """SELECT r.*, u.first_name, u.last_name, u.email AS tech_email,
-                      u.matrix_user_id AS tech_matrix_user_id
-               FROM chat_auto_assign_rules r
-               LEFT JOIN users u ON u.id = r.assigned_tech_user_id
-               WHERE r.is_active = 1
-               ORDER BY r.is_default ASC, r.priority DESC, r.id ASC""",
-        )
-    else:
-        rows = await db.fetch_all(
-            """SELECT r.*, u.first_name, u.last_name, u.email AS tech_email,
-                      u.matrix_user_id AS tech_matrix_user_id
-               FROM chat_auto_assign_rules r
-               LEFT JOIN users u ON u.id = r.assigned_tech_user_id
-               ORDER BY r.is_default ASC, r.priority DESC, r.id ASC""",
-        )
+    where = "WHERE r.is_active = 1 " if active_only else ""
+    rows = await db.fetch_all(
+        _LIST_RULES_SELECT + where
+        + "ORDER BY r.is_default ASC, r.priority DESC, r.id ASC",
+    )
     return [_decode_row(dict(r)) for r in rows]
 
 

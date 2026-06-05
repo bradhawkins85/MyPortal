@@ -54,8 +54,10 @@ def _match_time_between(condition_value: str) -> bool:
     """Return True if the current UTC time falls within the HH:MM-HH:MM range."""
     try:
         start_str, end_str = condition_value.split("-", 1)
-        sh, sm = int(start_str.split(":")[0]), int(start_str.split(":")[1])
-        eh, em = int(end_str.split(":")[0]), int(end_str.split(":")[1])
+        start_parts = start_str.split(":")
+        end_parts = end_str.split(":")
+        sh, sm = int(start_parts[0]), int(start_parts[1])
+        eh, em = int(end_parts[0]), int(end_parts[1])
         now = datetime.now(timezone.utc)
         current_minutes = now.hour * 60 + now.minute
         start_minutes = sh * 60 + sm
