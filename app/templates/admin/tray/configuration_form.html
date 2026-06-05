@@ -225,7 +225,7 @@
             </div>
             <div class="form-row">
               <div class="form-field" data-wrap-color style="max-width:12rem;">
-                <label class="form-label" for="${rowId}-color">Text colour</label>
+                <label class="form-label" for="${rowId}-color">Text color</label>
                 <div style="display:flex; align-items:center; gap:0.5rem;">
                   <input type="color" id="${rowId}-color" data-node-color style="width:3rem; height:2rem; padding:0.1rem; border:1px solid var(--color-border, #ccc); border-radius:4px; cursor:pointer;" />
                   <button type="button" class="button button--ghost" data-action-clear-color style="padding:0.25rem 0.5rem; font-size:0.8em;">Clear</button>
@@ -250,8 +250,8 @@
 
         const colorEl = row.querySelector('[data-node-color]');
         const colorPreview = row.querySelector('[data-node-color-preview]');
-        // data-node-color tracks whether a colour has been explicitly set.
-        // An empty string means "no colour" (use OS default).
+        // data-node-color tracks whether a color has been explicitly set.
+        // An empty string means "no color" (use OS default).
         colorEl.dataset.active = node.color ? '1' : '0';
         if (node.color) {
           colorEl.value = node.color;
