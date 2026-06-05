@@ -256,7 +256,9 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 			}
 		}()
 	}
-} generates a minimal PNG-in-ICO icon at runtime so that no
+}
+
+// defaultIconICO generates a minimal PNG-in-ICO icon at runtime so that no
 // binary asset file needs to be committed.  A 16×16 solid MyPortal-blue
 // (#0070C0) square is used as the placeholder until branding is loaded.
 func defaultIconICO() []byte {
