@@ -86,7 +86,7 @@ async def create_room(
     subject: str,
     matrix_room_id: str,
     room_alias: str | None,
-    created_by_user_id: int,
+    created_by_user_id: int | None,
     company_id: int,
     linked_ticket_id: int | None = None,
 ) -> dict[str, Any]:

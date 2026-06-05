@@ -180,6 +180,42 @@ func (c *Client) GetVersion(ctx context.Context) (*VersionResponse, error) {
 	return &out, nil
 }
 
+// ChatTokenResponse mirrors the server's TrayChatTokenResponse schema.
+type ChatTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresIn int    `json:"expires_in"`
+	ChatURL   string `json:"chat_url"`
+}
+
+// RequestChatToken asks the server for a short-lived one-time URL token that
+// lets the popup webview open /tray/chat without requiring the user to log in.
+// roomID may be 0 when the user is starting a new chat (no existing room).
+func (c *Client) RequestChatToken(ctx context.Context, roomID int) (*ChatTokenResponse, error) {
+	var body []byte
+	if roomID > 0 {
+		var err error
+		body, err = json.Marshal(map[string]int{"room_id": roomID})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		body = []byte("{}")
+	}
+	resp, err := c.post(ctx, "/api/tray/chat-token", body, true)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("chat-token: HTTP %d", resp.StatusCode)
+	}
+	var out ChatTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // UploadDiagnostics zips logDir and uploads it to the server.
 func (c *Client) UploadDiagnostics(ctx context.Context, logDir string) error {
 	var buf bytes.Buffer

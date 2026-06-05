@@ -180,6 +180,19 @@ class TrayNotificationResponse(BaseModel):
     delivered: bool
 
 
+class TrayChatTokenResponse(BaseModel):
+    """Response returned by POST /api/tray/chat-token.
+
+    The ``token`` is a one-time URL token valid for ``expires_in`` seconds.
+    The tray client should open ``chat_url`` in the popup webview immediately;
+    the token is consumed on first use.
+    """
+
+    token: str
+    expires_in: int = 300
+    chat_url: str
+
+
 # ---------------------------------------------------------------------------
 # Phase 7 schemas — tray ticket submission
 # ---------------------------------------------------------------------------
