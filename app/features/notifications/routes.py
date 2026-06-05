@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
 from app.core.notifications import DEFAULT_NOTIFICATION_EVENT_TYPES, merge_event_types
+from app.repositories import notification_exclusions as exclusions_repo
 from app.repositories import notification_preferences as notification_preferences_repo
 from app.repositories import notifications as notifications_repo
 from app.services import modules as modules_service
@@ -128,22 +129,28 @@ async def notifications_dashboard(request: Request):
     )
 
     prepared_notifications: list[dict[str, Any]] = []
+    excluded_event_types: set[str] = set()
+    if user_id is not None:
+        excluded_event_types = set(await exclusions_repo.list_excluded_event_types(user_id))
     for record in records:
         metadata_items = main_module._prepare_notification_metadata(record.get("metadata"))
         raw_metadata = record.get("metadata") or {}
         created_iso = main_module._to_iso(record.get("created_at")) or ""
         read_iso = main_module._to_iso(record.get("read_at")) or ""
         is_unread = record.get("read_at") is None
+        event_type = str(record.get("event_type") or "")
+        is_excluded = bool(event_type) and event_type in excluded_event_types
         prepared_notifications.append(
             {
                 "id": record.get("id"),
-                "event_type": record.get("event_type"),
+                "event_type": event_type,
                 "message": record.get("message"),
                 "metadata_items": metadata_items,
                 "raw_metadata": raw_metadata,
                 "created_iso": created_iso,
                 "read_iso": read_iso,
                 "is_unread": is_unread,
+                "is_excluded": is_excluded,
                 "status_label": "Unread" if is_unread else "Read",
                 "status_class": "status status--unread" if is_unread else "status status--read",
                 "metadata_json": json.dumps(
