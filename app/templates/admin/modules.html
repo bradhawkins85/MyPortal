@@ -54,10 +54,9 @@
                           <button type="submit" name="enabled" value="1" class="button button--ghost button--small">Enable</button>
                         {% endif %}
                       </form>
-                      {% if module.slug == 'imap' %}
-                        <a href="/admin/modules/imap" class="button button--ghost button--small">Manage</a>
-                      {% elif module.slug == 'm365-mail' %}
-                        <a href="/admin/modules/m365-mail" class="button button--ghost button--small">Manage</a>
+                      {% set manage_url = module.settings.manage_url if module.settings else None %}
+                      {% if manage_url %}
+                        <a href="{{ manage_url }}" class="button button--ghost button--small">Manage</a>
                       {% endif %}
                     </div>
                   </td>

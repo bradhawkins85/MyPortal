@@ -76,3 +76,32 @@ def test_module_enable_checkbox_absent_sets_false(super_admin_context, monkeypat
 
     assert response.status_code == 303
     assert calls == [("smtp", False, None)]
+
+
+def test_modules_page_renders_manage_button_from_module_manage_url(super_admin_context, monkeypatch):
+    async def fake_list_modules():
+        return [
+            {
+                "slug": "matrix-chat-auto-assign",
+                "name": "Matrix Chat Auto-Assign",
+                "description": "Auto-assign Matrix chat rooms to technicians.",
+                "enabled": True,
+                "settings": {"manage_url": "/admin/matrix-chat/auto-assign"},
+            },
+            {
+                "slug": "smtp",
+                "name": "Send Email",
+                "description": "Send email notifications.",
+                "enabled": True,
+                "settings": {},
+            },
+        ]
+
+    monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/modules")
+
+    assert response.status_code == 200
+    assert 'href="/admin/matrix-chat/auto-assign"' in response.text
+    assert ">Manage</a>" in response.text
