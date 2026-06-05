@@ -43,31 +43,83 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 	openChatAppWindow(chatURL)
 }
 
+// findAppBrowser returns the full path to an Edge or Chrome executable that
+// supports the --app= flag for frameless app-mode windows.  It checks the
+// bare command name first (covers machines where the browser is on PATH), then
+// falls back to the well-known per-machine and per-user install directories.
+// Returns "" when no supported browser is found.
+func findAppBrowser() string {
+	// Candidates in preference order: Edge first, then Chrome.
+	candidates := []string{"msedge", "chrome"}
+
+	// Well-known install-directory suffixes, tried under each of the relevant
+	// environment-variable roots below.
+	relPaths := []string{
+		`Microsoft\Edge\Application\msedge.exe`,
+		`Google\Chrome\Application\chrome.exe`,
+	}
+
+	// Roots to search for per-machine and per-user installs.
+	envRoots := []string{
+		os.Getenv("ProgramFiles(x86)"),
+		os.Getenv("ProgramFiles"),
+		os.Getenv("LocalAppData"),
+	}
+
+	// 1. Check whether the bare name is already on PATH.
+	for _, name := range candidates {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+
+	// 2. Walk the known install roots.
+	for _, root := range envRoots {
+		if root == "" {
+			continue
+		}
+		for _, rel := range relPaths {
+			p := filepath.Join(root, rel)
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+
+	return ""
+}
+
 func openChatAppWindow(chatURL string) {
-	edgeArgs := []string{
-		"--app=" + chatURL,
-		"--window-size=920,680",
-		"--disable-dev-tools",
-		"--disable-extensions",
-		"--no-first-run",
-		"--no-default-browser-check",
-		"--user-data-dir=" + filepath.Join(os.TempDir(), "MyPortal", "tray-chat-profile"),
-	}
+	browserPath := findAppBrowser()
 
-	if gPortalURL != "" {
-		iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
-		edgeArgs = append(edgeArgs,
-			"--app-name=MyPortal Chat",
-			"--app-icon-url="+iconURL,
-		)
-	}
+	if browserPath != "" {
+		edgeArgs := []string{
+			"--app=" + chatURL,
+			"--window-size=920,680",
+			"--disable-dev-tools",
+			"--disable-extensions",
+			"--no-first-run",
+			"--no-default-browser-check",
+			"--user-data-dir=" + filepath.Join(os.TempDir(), "MyPortal", "tray-chat-profile"),
+		}
 
-	cmd := exec.Command("msedge", edgeArgs...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
-	if err := cmd.Start(); err == nil {
-		return
+		if gPortalURL != "" {
+			iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+			edgeArgs = append(edgeArgs,
+				"--app-name=MyPortal Chat",
+				"--app-icon-url="+iconURL,
+			)
+		}
+
+		cmd := exec.Command(browserPath, edgeArgs...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
+		if err := cmd.Start(); err == nil {
+			return
+		} else {
+			logger.Warn("openChatAppWindow: app-mode launch failed (%v), falling back to browser", err)
+		}
 	} else {
-		logger.Warn("openChatAppWindow: msedge launch failed (%v), falling back to browser", err)
+		logger.Warn("openChatAppWindow: no Edge/Chrome found, falling back to browser")
 	}
 	openBrowser(chatURL)
 }
