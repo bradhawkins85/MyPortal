@@ -508,3 +508,46 @@ async def list_tray_versions(limit: int = 20) -> list[dict[str, Any]]:
         (limit,),
     )
     return [dict(r) for r in rows] if rows else []
+
+
+# ---------------------------------------------------------------------------
+# Chat popup tokens — single-use short-lived tokens for tray chat popup auth
+# ---------------------------------------------------------------------------
+
+
+async def create_chat_token(
+    *,
+    device_id: int,
+    token_hash: str,
+    room_id: int | None,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    p = "?" if db.is_sqlite() else "%s"
+    await db.execute(
+        f"INSERT INTO tray_chat_tokens (device_id, token_hash, room_id, expires_at) "
+        f"VALUES ({p}, {p}, {p}, {p})",
+        (device_id, token_hash, room_id, expires_at),
+    )
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_chat_tokens WHERE token_hash = {p}",
+        (token_hash,),
+    )
+    return dict(row) if row else {}
+
+
+async def get_chat_token_by_hash(token_hash: str) -> dict[str, Any] | None:
+    p = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_chat_tokens WHERE token_hash = {p}",
+        (token_hash,),
+    )
+    return dict(row) if row else None
+
+
+async def mark_chat_token_used(token_id: int) -> None:
+    p = "?" if db.is_sqlite() else "%s"
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        f"UPDATE tray_chat_tokens SET used_at = {p} WHERE id = {p}",
+        (now, token_id),
+    )
