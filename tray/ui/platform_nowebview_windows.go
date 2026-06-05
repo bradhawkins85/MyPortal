@@ -1,26 +1,21 @@
-//go:build nowebview && !windows
+//go:build nowebview && windows
 
-// This file provides stubs for UI helper functions when building without
-// the webview/systray libraries (CGO=0 cross-compile mode) on non-Windows
-// platforms.
+// This file provides Windows-specific UI helper stubs for the nowebview
+// (CGO=0) build.  cmd.exe and powershell.exe are started with the
+// CREATE_NO_WINDOW flag so that no console window is ever visible to the user.
 package main
 
 import (
 	"fmt"
 	"os/exec"
-	"runtime"
+	"syscall"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
 
 func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
+	cmd := exec.Command("cmd", "/c", "start", url)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
 }
 
