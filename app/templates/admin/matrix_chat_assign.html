@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_overflow %}
 
 {% macro render_condition_row(idx, cond_type, cond_operator, cond_value) %}
 <div class="condition-row" data-condition-index="{{ idx }}">
@@ -28,6 +29,12 @@
 
 {% block header_title %}Matrix Chat Auto-Assign{% endblock %}
 
+{% block header_actions %}
+  {{ page_header_overflow('matrix-chat-assign-actions', 'Actions', [
+    {"label": "New Rule", "type": "button", "attrs": {"data-new-rule-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "rule-modal"}}
+  ]) }}
+{% endblock %}
+
 {% block content %}
 {% set is_editing = editing_rule is not none %}
 {% set form_action = '/admin/modules/matrix-chat-assign/rules' %}
@@ -35,104 +42,7 @@
   {% set form_action = '/admin/modules/matrix-chat-assign/rules/' ~ editing_rule.id %}
 {% endif %}
 
-<div class="management" data-layout>
-  <aside class="management__sidebar">
-    <h2 class="management__heading">{{ 'Edit rule' if is_editing else 'New rule' }}</h2>
-    <p class="management__intro">
-      Rules are evaluated in priority order when a new chat room is created. All conditions within a rule must match (AND logic). The default fallback rule applies when no other rule matches.
-    </p>
-
-    <form action="{{ form_action }}" method="post" class="form management__form" id="rule-form">
-      {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-      {% endif %}
-
-      <label class="form-field">
-        <span class="form-label">Rule name</span>
-        <input type="text" name="name" class="form-input"
-               value="{{ editing_rule.name if is_editing else '' }}"
-               maxlength="255" required placeholder="e.g. Acme Corp – weekday hours" />
-      </label>
-
-      <div class="form-grid">
-        <label class="form-field">
-          <span class="form-label">Priority</span>
-          <input type="number" name="priority" class="form-input"
-                 value="{{ editing_rule.priority if is_editing else 10 }}"
-                 min="0" step="1" required />
-          <span class="form-help">Higher numbers are evaluated first. Default fallback ignores this.</span>
-        </label>
-
-        <label class="form-field">
-          <span class="form-label">Assign to technician</span>
-          <select name="assigned_tech_user_id" class="form-input form-select">
-            <option value="">— unassigned —</option>
-            {% for tech in technicians %}
-              {% set selected = is_editing and editing_rule.assigned_tech_user_id == tech.id %}
-              <option value="{{ tech.id }}" {{ 'selected' if selected }}>
-                {{ (tech.first_name or '') ~ ' ' ~ (tech.last_name or '') | trim }}
-                ({{ tech.email }}){% if not tech.matrix_user_id %} ⚠{% endif %}
-              </option>
-            {% endfor %}
-          </select>
-          <span class="form-help">
-            ⚠ marks technicians without a Matrix username — they will be assigned but cannot be auto-invited to the Matrix room.
-          </span>
-        </label>
-      </div>
-
-      <div class="form-grid">
-        <label class="form-field form-field--checkbox">
-          <input type="hidden" name="is_active" value="0" />
-          <input type="checkbox" name="is_active" value="1"
-                 {{ 'checked' if (not is_editing or editing_rule.is_active) }} />
-          <span class="form-label">Active</span>
-        </label>
-
-        <label class="form-field form-field--checkbox">
-          <input type="hidden" name="is_default" value="0" />
-          <input type="checkbox" name="is_default" value="1"
-                 {{ 'checked' if (is_editing and editing_rule.is_default) }} />
-          <span class="form-label">Default fallback rule</span>
-          <span class="form-help">Catches all rooms that don't match any other rule. Conditions are ignored.</span>
-        </label>
-      </div>
-
-      {# ---- Conditions builder ---- #}
-      <fieldset class="form-fieldset">
-        <legend class="form-fieldset__legend">
-          Conditions <span class="badge">AND</span>
-        </legend>
-        <p class="form-help" style="margin-bottom:0.75rem">
-          All conditions must match for this rule to fire.
-          Leave empty to match all rooms (use together with Default fallback above).
-        </p>
-
-        <div id="conditions-list">
-          {% if is_editing and editing_rule.conditions %}
-            {% for cond in editing_rule.conditions %}
-              {{ render_condition_row(loop.index0, cond.type, cond.operator, cond.value) }}
-            {% endfor %}
-          {% endif %}
-        </div>
-
-        <button type="button" class="button button--ghost button--small" id="add-condition-btn"
-                style="margin-top:0.5rem">
-          + Add condition
-        </button>
-      </fieldset>
-
-      <div class="form-actions">
-        <button type="submit" class="button button--primary">
-          {{ 'Update rule' if is_editing else 'Create rule' }}
-        </button>
-        {% if is_editing %}
-          <a href="/admin/modules/matrix-chat-assign" class="button button--ghost">Cancel</a>
-        {% endif %}
-      </div>
-    </form>
-  </aside>
-
+<div class="management management--single" data-layout>
   <section class="management__content">
     {% if success_message %}
       <div class="alert alert--success" role="alert">{{ success_message }}</div>
@@ -166,7 +76,7 @@
             {% if not rules %}
               <tr>
                 <td colspan="6" style="text-align:center;color:var(--color-text-muted)">
-                  No rules configured yet. Use the form on the left to create your first rule.
+                  No rules configured yet. Use the New Rule action to create your first rule.
                 </td>
               </tr>
             {% endif %}
@@ -218,18 +128,42 @@
                   </span>
                 </td>
                 <td class="table__actions" data-column-key="actions">
-                  <div class="table__action-buttons">
-                    <a href="/admin/modules/matrix-chat-assign?ruleId={{ rule.id }}"
-                       class="button button--ghost button--small">Edit</a>
-                    <form action="/admin/modules/matrix-chat-assign/rules/{{ rule.id }}/delete"
-                          method="post" class="inline-form"
-                          onsubmit="return confirm('Delete rule \'{{ rule.name | replace("'", "\\'") }}\'?');">
-                      {% if csrf_token %}
-                        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                      {% endif %}
-                      <button type="submit" class="button button--ghost button--small button--danger">Delete</button>
-                    </form>
-                  </div>
+                  <details class="header-title-menu__dropdown" data-header-menu>
+                    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                      Actions
+                      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                        <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                      </svg>
+                      <span class="visually-hidden">Toggle row actions menu</span>
+                    </summary>
+                    <ul class="header-title-menu__list" role="menu">
+                      <li class="header-title-menu__item" role="none">
+                        <button
+                          type="button"
+                          class="header-title-menu__link"
+                          role="menuitem"
+                          data-edit-rule-modal-open
+                          data-rule-id="{{ rule.id }}"
+                          data-rule-name="{{ rule.name | e }}"
+                          data-rule-priority="{{ rule.priority }}"
+                          data-rule-assigned-tech-user-id="{{ rule.assigned_tech_user_id or '' }}"
+                          data-rule-is-active="{{ 1 if rule.is_active else 0 }}"
+                          data-rule-is-default="{{ 1 if rule.is_default else 0 }}"
+                          data-rule-conditions='{{ (rule.conditions or []) | tojson }}'
+                        >Edit</button>
+                      </li>
+                      <li class="header-title-menu__item" role="none">
+                        <form action="/admin/modules/matrix-chat-assign/rules/{{ rule.id }}/delete"
+                              method="post" class="inline-form"
+                              onsubmit="return confirm('Delete rule \'{{ rule.name | replace("'", "\\'") }}\'?');">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <button type="submit" class="header-title-menu__link header-title-menu__link--danger" role="menuitem">Delete</button>
+                        </form>
+                      </li>
+                    </ul>
+                  </details>
                 </td>
               </tr>
             {% endfor %}
@@ -238,6 +172,114 @@
       </div>
     </section>
   </section>
+</div>
+
+<div
+  class="modal"
+  id="rule-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="rule-modal-title"
+  aria-hidden="true"
+  hidden
+>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close rule editor</span>
+      &times;
+    </button>
+    <h2 class="modal__title" id="rule-modal-title">{{ 'Edit rule' if is_editing else 'New rule' }}</h2>
+    <p class="management__intro">
+      Rules are evaluated in priority order when a new chat room is created. All conditions within a rule must match (AND logic). The default fallback rule applies when no other rule matches.
+    </p>
+
+    <form action="{{ form_action }}" method="post" class="form management__form" id="rule-form">
+      {% if csrf_token %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+
+      <label class="form-field">
+        <span class="form-label">Rule name</span>
+        <input type="text" name="name" id="rule-name" class="form-input"
+               value="{{ editing_rule.name if is_editing else '' }}"
+               maxlength="255" required placeholder="e.g. Acme Corp – weekday hours" />
+      </label>
+
+      <div class="form-grid">
+        <label class="form-field">
+          <span class="form-label">Priority</span>
+          <input type="number" name="priority" id="rule-priority" class="form-input"
+                 value="{{ editing_rule.priority if is_editing else 10 }}"
+                 min="0" step="1" required />
+          <span class="form-help">Higher numbers are evaluated first. Default fallback ignores this.</span>
+        </label>
+
+        <label class="form-field">
+          <span class="form-label">Assign to technician</span>
+          <select name="assigned_tech_user_id" id="rule-assigned-tech-user-id" class="form-input form-select">
+            <option value="">— unassigned —</option>
+            {% for tech in technicians %}
+              {% set selected = is_editing and editing_rule.assigned_tech_user_id == tech.id %}
+              <option value="{{ tech.id }}" {{ 'selected' if selected }}>
+                {{ (tech.first_name or '') ~ ' ' ~ (tech.last_name or '') | trim }}
+                ({{ tech.email }}){% if not tech.matrix_user_id %} ⚠{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <span class="form-help">
+            ⚠ marks technicians without a Matrix username — they will be assigned but cannot be auto-invited to the Matrix room.
+          </span>
+        </label>
+      </div>
+
+      <div class="form-grid">
+        <label class="form-field form-field--checkbox">
+          <input type="hidden" name="is_active" value="0" />
+          <input type="checkbox" name="is_active" id="rule-is-active" value="1"
+                 {{ 'checked' if (not is_editing or editing_rule.is_active) }} />
+          <span class="form-label">Active</span>
+        </label>
+
+        <label class="form-field form-field--checkbox">
+          <input type="hidden" name="is_default" value="0" />
+          <input type="checkbox" name="is_default" id="rule-is-default" value="1"
+                 {{ 'checked' if (is_editing and editing_rule.is_default) }} />
+          <span class="form-label">Default fallback rule</span>
+          <span class="form-help">Catches all rooms that don't match any other rule. Conditions are ignored.</span>
+        </label>
+      </div>
+
+      <fieldset class="form-fieldset">
+        <legend class="form-fieldset__legend">
+          Conditions <span class="badge">AND</span>
+        </legend>
+        <p class="form-help" style="margin-bottom:0.75rem">
+          All conditions must match for this rule to fire.
+          Leave empty to match all rooms (use together with Default fallback above).
+        </p>
+
+        <div id="conditions-list">
+          {% if is_editing and editing_rule.conditions %}
+            {% for cond in editing_rule.conditions %}
+              {{ render_condition_row(loop.index0, cond.type, cond.operator, cond.value) }}
+            {% endfor %}
+          {% endif %}
+        </div>
+
+        <button type="button" class="button button--ghost button--small" id="add-condition-btn"
+                style="margin-top:0.5rem">
+          + Add condition
+        </button>
+      </fieldset>
+
+      <div class="form-actions">
+        <button type="submit" class="button button--primary" id="rule-submit-btn">
+          {{ 'Update rule' if is_editing else 'Create rule' }}
+        </button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 {# Hidden template row for JavaScript cloning when adding new conditions #}
@@ -298,6 +340,24 @@
     day_of_week: ['in'],
   };
   const STRING_OPERATORS = ['contains', 'equals', 'starts_with'];
+  const RULES_BASE_PATH = '/admin/modules/matrix-chat-assign/rules';
+
+  const modal = document.getElementById('rule-modal');
+  const form = document.getElementById('rule-form');
+  const title = document.getElementById('rule-modal-title');
+  const submitButton = document.getElementById('rule-submit-btn');
+  const nameInput = document.getElementById('rule-name');
+  const priorityInput = document.getElementById('rule-priority');
+  const assignedTechSelect = document.getElementById('rule-assigned-tech-user-id');
+  const isActiveInput = document.getElementById('rule-is-active');
+  const isDefaultInput = document.getElementById('rule-is-default');
+  const conditionsList = document.getElementById('conditions-list');
+  const template = document.getElementById('condition-row-template');
+  const addConditionButton = document.getElementById('add-condition-btn');
+
+  if (!modal || !form || !title || !submitButton || !conditionsList || !template || !addConditionButton) {
+    return;
+  }
 
   let nextIndex = document.querySelectorAll('#conditions-list .condition-row').length;
 
@@ -345,18 +405,155 @@
     nextIndex = document.querySelectorAll('#conditions-list .condition-row').length;
   }
 
-  document.querySelectorAll('#conditions-list .condition-row').forEach(row => attachRow(row));
-
-  document.getElementById('add-condition-btn').addEventListener('click', () => {
-    const tmpl = document.getElementById('condition-row-template');
-    const html = tmpl.innerHTML.replace(/__INDEX__/g, nextIndex);
+  function addConditionRow(condition) {
+    const html = template.innerHTML.replace(/__INDEX__/g, nextIndex);
     const wrapper = document.createElement('div');
     wrapper.innerHTML = html;
     const row = wrapper.firstElementChild;
-    document.getElementById('conditions-list').appendChild(row);
+    conditionsList.appendChild(row);
+    if (condition) {
+      const type = row.querySelector('.condition-type-select');
+      const operator = row.querySelector('.condition-operator-select');
+      const value = row.querySelector('.condition-value-input');
+      if (type && condition.type) type.value = condition.type;
+      if (operator && condition.operator) operator.value = condition.operator;
+      if (value && condition.value) value.value = condition.value;
+    }
     attachRow(row);
     nextIndex++;
+  }
+
+  function clearConditions() {
+    conditionsList.innerHTML = '';
+    nextIndex = 0;
+  }
+
+  function openModal(trigger) {
+    modal.hidden = false;
+    modal.classList.add('is-visible');
+    modal.setAttribute('aria-hidden', 'false');
+    if (trigger) {
+      trigger.setAttribute('aria-expanded', 'true');
+    }
+    if (nameInput) {
+      nameInput.focus();
+    }
+  }
+
+  function closeModal() {
+    modal.classList.remove('is-visible');
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function setCreateState() {
+    form.action = RULES_BASE_PATH;
+    form.reset();
+    if (priorityInput) {
+      priorityInput.value = '10';
+    }
+    if (isActiveInput) {
+      isActiveInput.checked = true;
+    }
+    if (isDefaultInput) {
+      isDefaultInput.checked = false;
+    }
+    if (assignedTechSelect) {
+      assignedTechSelect.value = '';
+    }
+    clearConditions();
+    title.textContent = 'New rule';
+    submitButton.textContent = 'Create rule';
+  }
+
+  function setEditState(button) {
+    const id = button.dataset.ruleId;
+    if (!id) {
+      return;
+    }
+    form.action = RULES_BASE_PATH + '/' + encodeURIComponent(id);
+    if (nameInput) {
+      nameInput.value = button.dataset.ruleName || '';
+    }
+    if (priorityInput) {
+      priorityInput.value = button.dataset.rulePriority || '0';
+    }
+    if (assignedTechSelect) {
+      assignedTechSelect.value = button.dataset.ruleAssignedTechUserId || '';
+    }
+    if (isActiveInput) {
+      isActiveInput.checked = button.dataset.ruleIsActive === '1';
+    }
+    if (isDefaultInput) {
+      isDefaultInput.checked = button.dataset.ruleIsDefault === '1';
+    }
+
+    clearConditions();
+    let conditions = [];
+    try {
+      conditions = JSON.parse(button.dataset.ruleConditions || '[]');
+    } catch (err) {
+      conditions = [];
+    }
+    conditions.forEach((condition) => addConditionRow(condition));
+
+    title.textContent = 'Edit rule';
+    submitButton.textContent = 'Update rule';
+  }
+
+  document.querySelectorAll('#conditions-list .condition-row').forEach(row => attachRow(row));
+
+  addConditionButton.addEventListener('click', () => {
+    addConditionRow();
   });
+
+  document.querySelectorAll('[data-new-rule-modal-open]').forEach((button) => {
+    button.setAttribute('aria-expanded', 'false');
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      setCreateState();
+      openModal(button);
+    });
+  });
+
+  document.querySelectorAll('[data-edit-rule-modal-open]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      setEditState(button);
+      openModal(button);
+    });
+  });
+
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) {
+      closeModal();
+    }
+  });
+
+  modal.querySelectorAll('[data-modal-close]').forEach((closeButton) => {
+    closeButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeModal();
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !modal.hidden) {
+      closeModal();
+    }
+  });
+
+  document.querySelectorAll('[data-header-menu]').forEach((menu) => {
+    const wrapper = menu.closest('.table-wrapper');
+    if (!wrapper) return;
+    menu.addEventListener('toggle', function () {
+      wrapper.style.overflow = menu.open ? 'visible' : '';
+    });
+  });
+
+  {% if is_editing %}
+    openModal();
+  {% endif %}
 })();
 </script>
 {% endblock %}
