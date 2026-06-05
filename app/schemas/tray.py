@@ -49,8 +49,10 @@ class TrayMenuNode(BaseModel):
     * ``display_text`` — opens a popup with ``text`` (sanitised HTML).
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.
     * ``open_chat`` — opens the chat window.
+    * ``submit_ticket`` — opens the submit-a-ticket dialog.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.
+    * ``quit`` — exits the tray application.
     """
 
     type: str = Field(min_length=1, max_length=32)
