@@ -244,6 +244,9 @@ async def tray_chat_popup(
     chat_room: dict[str, Any] | None = None
     if resolved_room_id:
         chat_room = await chat_repo.get_room(int(resolved_room_id))
+        # If the resolved room is closed, ignore it and start a fresh one.
+        if chat_room and chat_room.get("status") != "open":
+            chat_room = None
 
     if not chat_room:
         # User-initiated chat: create a fresh room.
