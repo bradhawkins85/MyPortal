@@ -57,7 +57,10 @@ async def test_admin_delete_automation_redirects(monkeypatch: pytest.MonkeyPatch
     response = await handlers.admin_delete_automation(1, request)
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
-    assert response.headers["location"] == "/admin/automations?success=Automation%201%20deleted."
+    assert response.headers["location"] == "/admin/automations"
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
     get_mock.assert_awaited_once_with(1)
     delete_mock.assert_awaited_once_with(1)
     assert log_calls == [

@@ -6,10 +6,11 @@ import base64
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
+
+from app.security.flash import flash_redirect
 
 
 def _main():
@@ -280,10 +281,7 @@ async def admin_report_cover_image_upload(request: Request, image: UploadFile = 
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
 
     if image is None or not image.filename:
-        return RedirectResponse(
-            url="/admin/reports/pdf-cover-image?error=No+file+selected",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reports/pdf-cover-image", "No file selected", "error")
 
     private_uploads_path = _main()._private_uploads_path
     try:
@@ -292,10 +290,7 @@ async def admin_report_cover_image_upload(request: Request, image: UploadFile = 
             uploads_root=private_uploads_path,
         )
     except HTTPException as exc:
-        return RedirectResponse(
-            url=f"/admin/reports/pdf-cover-image?error={quote(exc.detail)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/reports/pdf-cover-image", exc.detail, "error")
 
     previous = await site_settings_repo.get_pdf_cover_image()
     if previous:
@@ -310,10 +305,7 @@ async def admin_report_cover_image_upload(request: Request, image: UploadFile = 
         metadata={"path": relative_path},
         request=request,
     )
-    return RedirectResponse(
-        url="/admin/reports/pdf-cover-image?success=Cover+image+updated",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/reports/pdf-cover-image", "Cover image updated", "success")
 
 
 async def admin_report_cover_image_delete(request: Request):
@@ -338,10 +330,7 @@ async def admin_report_cover_image_delete(request: Request):
         metadata={},
         request=request,
     )
-    return RedirectResponse(
-        url="/admin/reports/pdf-cover-image?success=Cover+image+removed",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/reports/pdf-cover-image", "Cover image removed", "success")
 
 
 async def admin_report_cover_image_preview(request: Request):

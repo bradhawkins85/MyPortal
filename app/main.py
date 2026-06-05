@@ -152,6 +152,7 @@ from app.schemas.staff_onboarding_workflows import (
 from app.security.cache_control import CacheControlMiddleware
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.security.flash import flash_redirect, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
 from app.security.rate_limiter import (
     EndpointRateLimiter,
@@ -2008,10 +2009,18 @@ async def _render_template(
     *,
     extra: dict[str, Any] | None = None,
 ):
+    from app.security.flash import clear_flash, pop_flash
+
     context = await _build_base_context(request, user, extra=extra)
     if context.get("page_flash") is None:
         context["page_flash"] = _derive_page_flash(context, template_name=template_name)
-    return templates.TemplateResponse(context["request"], template_name, context)
+    # Fall back to flash cookie when no context-derived flash is present.
+    if context.get("page_flash") is None:
+        context["page_flash"] = pop_flash(request)
+    response = templates.TemplateResponse(context["request"], template_name, context)
+    # Always clear the flash cookie so it is consumed exactly once.
+    clear_flash(response)
+    return response
 
 
 _NOTIFICATION_SORT_CHOICES: list[tuple[str, str]] = [
@@ -2167,10 +2176,6 @@ def _companies_redirect(
     params: dict[str, str] = {}
     if company_id is not None:
         params["company_id"] = str(company_id)
-    if success:
-        params["success"] = success.strip()[:200]
-    if error:
-        params["error"] = error.strip()[:200]
     if extra:
         for key, value in extra.items():
             if value is None:
@@ -2180,7 +2185,12 @@ def _companies_redirect(
     url = "/admin/companies"
     if query:
         url = f"{url}?{query}"
-    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    if success:
+        set_flash(response, success.strip()[:200], "success")
+    elif error:
+        set_flash(response, error.strip()[:200], "error")
+    return response
 
 
 def _company_edit_redirect(
@@ -2189,16 +2199,13 @@ def _company_edit_redirect(
     success: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
-    params: dict[str, str] = {}
-    if success:
-        params["success"] = success.strip()[:200]
-    if error:
-        params["error"] = error.strip()[:200]
-    query = urlencode(params)
     url = f"/admin/companies/{company_id}/edit"
-    if query:
-        url = f"{url}?{query}"
-    return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    if success:
+        set_flash(response, success.strip()[:200], "success")
+    elif error:
+        set_flash(response, error.strip()[:200], "error")
+    return response
 
 
 
@@ -2252,20 +2259,6 @@ def _derive_page_flash(
                 collected.append(message)
         if collected:
             flash = _page_flash("; ".join(collected), "error")
-            if flash:
-                return flash
-
-    m365_templates = {
-        "m365/index.html",
-        "m365/benchmarks.html",
-        "m365/best_practices_settings.html",
-        "m365/shared_mailboxes.html",
-        "m365/diagnostics.html",
-        "m365/user_mailboxes.html",
-    }
-    if template_name in m365_templates:
-        for key, variant in (("error", "error"), ("success", "success")):
-            flash = _page_flash(context.get(key), variant)
             if flash:
                 return flash
 
@@ -2907,7 +2900,7 @@ async def switch_company(
 
 
 @app.get("/m365", response_class=HTMLResponse)
-async def m365_page(request: Request, error: str | None = None, success: str | None = None):
+async def m365_page(request: Request):
     user, membership, company, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
@@ -2950,8 +2943,6 @@ async def m365_page(request: Request, error: str | None = None, success: str | N
         "company": company,
         "credential": credential_view,
         "admin_credential": admin_credential_view,
-        "error": error,
-        "success": success,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
         "has_admin_credentials": bool(admin_credential_view),
@@ -2977,11 +2968,8 @@ async def run_m365_benchmarks(request: Request):
         await cis_benchmark_service.run_benchmarks(company_id)
         log_info("CIS benchmarks run", company_id=company_id, user_id=user.get("id"))
     except m365_service.M365Error as exc:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(url="/m365/best-practices?success=Benchmarks+completed", status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/m365/best-practices", str(exc), "error")
+    return flash_redirect("/m365/best-practices", "Benchmarks completed", "success")
 
 
 @app.post("/m365/benchmarks/exclude", response_class=RedirectResponse)
@@ -2996,7 +2984,7 @@ async def exclude_benchmark_check(
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.add_exclusion(company_id, check_id, reason)
-    return RedirectResponse(url="/m365/best-practices?success=Check+excluded", status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect("/m365/best-practices", "Check excluded", "success")
 
 
 @app.post("/m365/benchmarks/exclude/remove", response_class=RedirectResponse)
@@ -3010,7 +2998,7 @@ async def remove_benchmark_exclusion(
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     await cis_benchmark_service.remove_exclusion(company_id, check_id)
-    return RedirectResponse(url="/m365/best-practices?success=Exclusion+removed", status_code=status.HTTP_303_SEE_OTHER)
+    return flash_redirect("/m365/best-practices", "Exclusion removed", "success")
 
 
 # ---------------------------------------------------------------------------
@@ -3058,7 +3046,7 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
 
 
 @app.get("/m365/best-practices", response_class=HTMLResponse)
-async def m365_best_practices_page(request: Request, error: str | None = None, success: str | None = None):
+async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
     if redirect:
         return redirect
@@ -3074,8 +3062,6 @@ async def m365_best_practices_page(request: Request, error: str | None = None, s
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
-        "error": error,
-        "success": success,
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3119,9 +3105,10 @@ async def run_m365_best_practices(request: Request):
         user_id=user_id,
         reset_to_unknown_count=reset_count,
     )
-    return RedirectResponse(
-        url="/m365/best-practices?success=Best+practice+evaluation+started+in+the+background",
-        status_code=status.HTTP_303_SEE_OTHER,
+    return flash_redirect(
+        "/m365/best-practices",
+        "Best practice evaluation started in the background",
+        "success",
     )
 
 
@@ -3135,10 +3122,7 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
         return redirect
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote('Unknown best-practice check ID')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
     try:
         await m365_best_practices_service.run_single_check(
             company_id=company_id,
@@ -3151,19 +3135,10 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
             user_id=user.get("id"),
         )
     except ValueError as exc:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365/best-practices", str(exc), "error")
     except m365_service.M365Error as exc:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(
-        url="/m365/best-practices?success=Check+evaluated",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/m365/best-practices", str(exc), "error")
+    return flash_redirect("/m365/best-practices", "Check evaluated", "success")
 
 
 @app.post("/m365/best-practices/remediate/{check_id}", response_class=RedirectResponse)
@@ -3177,10 +3152,7 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     # Validate that the check_id is a known best practice to prevent unintended operations
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
-        return RedirectResponse(
-            url=f"/m365/best-practices?error={quote('Unknown best-practice check ID')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
     result = await m365_best_practices_service.remediate_check(
         company_id=company_id,
         check_id=check_id,
@@ -3192,23 +3164,15 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
         user_id=user.get("id"),
         success=result.get("success"),
     )
-    message = quote(result.get("message", "Remediation attempted"))
+    message = result.get("message", "Remediation attempted")
     if result.get("success"):
-        return RedirectResponse(
-            url=f"/m365/best-practices?success={message}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(
-        url=f"/m365/best-practices?error={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/m365/best-practices", message, "success")
+    return flash_redirect("/m365/best-practices", message, "error")
 
 
 @app.get("/m365/best-practices/settings", response_class=HTMLResponse)
 async def m365_best_practices_settings_page(
     request: Request,
-    error: str | None = None,
-    success: str | None = None,
 ):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(
         request, super_admin_only=True,
@@ -3221,8 +3185,6 @@ async def m365_best_practices_settings_page(
         "company": company,
         "catalog": catalog_with_settings,
         "is_super_admin": True,
-        "error": error,
-        "success": success,
     }
     return await _render_template(
         "m365/best_practices_settings.html",
@@ -3252,10 +3214,7 @@ async def save_m365_best_practices_settings(request: Request):
         auto_remediate_count=len(auto_remediate_ids),
         excluded_count=len(excluded_ids),
     )
-    return RedirectResponse(
-        url="/m365/best-practices/settings?success=Settings+saved",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/m365/best-practices/settings", "Settings saved", "success")
 
 
 async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: str):
@@ -3298,7 +3257,7 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
 
 
 @app.get("/m365/mailboxes/users", response_class=HTMLResponse)
-async def m365_user_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
+async def m365_user_mailboxes_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_mailbox_context(
         request, mailbox_permission="can_view_m365_user_mailboxes"
     )
@@ -3313,14 +3272,12 @@ async def m365_user_mailboxes_page(request: Request, error: str | None = None, s
         "mailboxes": mailboxes,
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
-        "error": error,
-        "success": success,
     }
     return await _render_template("m365/user_mailboxes.html", request, user, extra=extra)
 
 
 @app.get("/m365/mailboxes/shared", response_class=HTMLResponse)
-async def m365_shared_mailboxes_page(request: Request, error: str | None = None, success: str | None = None):
+async def m365_shared_mailboxes_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_mailbox_context(
         request, mailbox_permission="can_view_m365_shared_mailboxes"
     )
@@ -3335,8 +3292,6 @@ async def m365_shared_mailboxes_page(request: Request, error: str | None = None,
         "mailboxes": mailboxes,
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
-        "error": error,
-        "success": success,
     }
     return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
 
@@ -3518,10 +3473,7 @@ async def check_m365_report_privacy(request: Request):
     try:
         concealed = await m365_service.check_report_privacy(company_id)
     except m365_service.M365Error as exc:
-        return RedirectResponse(
-            url=f"/m365?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365", str(exc), "error")
     if concealed:
         msg = (
             "Mailbox sync failed because Microsoft 365 reports are concealing mailbox identifiers. "
@@ -3529,14 +3481,8 @@ async def check_m365_report_privacy(request: Request):
             "'Display concealed user, group, and site names in all reports', "
             "then run mailbox sync again."
         )
-        return RedirectResponse(
-            url=f"/m365?error={quote(msg)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(
-        url=f"/m365?success={quote('Mailbox report privacy check passed – identifiers are not concealed')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/m365", msg, "error")
+    return flash_redirect("/m365", "Mailbox report privacy check passed – identifiers are not concealed", "success")
 
 
 @app.post("/m365/permissions/verify")
@@ -3563,7 +3509,7 @@ async def verify_m365_permissions(request: Request):
 
 
 @app.get("/m365/diagnostics", response_class=HTMLResponse)
-async def m365_diagnostics_page(request: Request, error: str | None = None, success: str | None = None):
+async def m365_diagnostics_page(request: Request):
     """Display the enterprise app permission diagnostics page."""
     user, _, company, company_id, redirect = await _load_license_context(request)
     if redirect:
@@ -3580,8 +3526,6 @@ async def m365_diagnostics_page(request: Request, error: str | None = None, succ
         "has_credentials": bool(credentials),
         "catalog": m365_service.ENTERPRISE_APP_CATALOG,
         "results": last_results,
-        "error": error,
-        "success": success,
         "is_super_admin": True,
     }
     return await _render_template("m365/diagnostics.html", request, user, extra=extra)
@@ -3598,14 +3542,8 @@ async def run_m365_diagnostics_check(request: Request):
     try:
         await m365_service.check_enterprise_app_permissions(company_id)
     except m365_service.M365Error as exc:
-        return RedirectResponse(
-            url=f"/m365/diagnostics?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    return RedirectResponse(
-        url="/m365/diagnostics?success=Permission+check+completed",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/m365/diagnostics", str(exc), "error")
+    return flash_redirect("/m365/diagnostics", "Permission check completed", "success")
 
 
 @app.post("/m365/diagnostics/repair", response_class=RedirectResponse)
@@ -3651,25 +3589,16 @@ async def repair_m365_permissions(request: Request):
                 f"/oauth2/v2.0/authorize?{urlencode(params)}"
             )
             return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(
-            url="/m365/diagnostics?error=No+credentials+configured",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365/diagnostics", "No credentials configured", "error")
     except m365_service.M365Error as exc:
-        return RedirectResponse(
-            url=f"/m365/diagnostics?error={quote(str(exc))}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365/diagnostics", str(exc), "error")
 
     if outcome.get("granted"):
         msg = "Missing permissions have been granted successfully."
     else:
         msg = "No new permissions were needed – all permissions are already granted."
 
-    return RedirectResponse(
-        url=f"/m365/diagnostics?success={quote(msg)}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/m365/diagnostics", msg, "success")
 
 
 @app.post("/m365/credentials", response_class=RedirectResponse)
@@ -4134,11 +4063,11 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         encoded = urlencode({"error": message})
         return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     if not code or not state:
-        return RedirectResponse(url="/m365?error=invalid+response", status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/m365", "invalid response", "error")
     try:
         state_data = oauth_state_serializer.loads(state)
     except BadSignature:
-        return RedirectResponse(url="/m365?error=invalid+state", status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/m365", "invalid state", "error")
     company_id_raw = state_data.get("company_id")
     try:
         company_id = int(company_id_raw)
@@ -4604,7 +4533,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     # ── Standard connect/token-refresh flow ────────────────────────────────
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
-        return RedirectResponse(url="/m365?error=missing+credentials", status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/m365", "missing credentials", "error")
     token_endpoint = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
     redirect_uri = _build_m365_redirect_uri(request)
     data = {
@@ -4623,7 +4552,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             status=response.status_code,
             body=response.text,
         )
-        return RedirectResponse(url="/m365?error=authorization+failed", status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect("/m365", "authorization failed", "error")
     payload = response.json()
     refresh_token = payload.get("refresh_token")
     access_token = payload.get("access_token")
@@ -4662,10 +4591,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             await m365_service.check_enterprise_app_permissions(company_id)
         except m365_service.M365Error:
             pass
-        return RedirectResponse(
-            url="/m365/diagnostics?success=Permissions+repaired+and+re-checked",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/m365/diagnostics", "Permissions repaired and re-checked", "success")
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -4724,30 +4650,18 @@ async def search_by_phone_number(request: Request):
             user_id=user.get("id"),
         )
         # On error, redirect to tickets page with error message
-        error_msg = quote("Failed to search tickets by phone number")
-        return RedirectResponse(
-            url=f"/tickets?error={error_msg}",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
+        return flash_redirect("/tickets", "Failed to search tickets by phone number", "error")
     
     if not tickets:
         # No tickets found, redirect to tickets page with a message
-        error_msg = quote(f"No tickets found for phone number {phone_number}")
-        return RedirectResponse(
-            url=f"/tickets?error={error_msg}",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
+        return flash_redirect("/tickets", f"No tickets found for phone number {phone_number}", "error")
     
     if len(tickets) == 1:
         # Exactly one ticket found, redirect directly to it
         ticket_id = tickets[0].get("id")
         if ticket_id is None:
             # Handle case where ticket doesn't have an ID (defensive)
-            error_msg = quote("Invalid ticket data received")
-            return RedirectResponse(
-                url=f"/tickets?error={error_msg}",
-                status_code=status.HTTP_303_SEE_OTHER
-            )
+            return flash_redirect("/tickets", "Invalid ticket data received", "error")
         return RedirectResponse(
             url=f"/tickets/{ticket_id}",
             status_code=status.HTTP_303_SEE_OTHER
@@ -4940,12 +4854,8 @@ async def admin_create_service_status(request: Request):
             updated_by=int(user.get("id")) if user.get("id") else None,
         )
     except ValueError as exc:
-        url = f"/admin/service-status?error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(
-        url=f"/admin/service-status?success={quote('Service created.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/admin/service-status", str(exc), "error")
+    return flash_redirect("/admin/service-status", "Service created.", "success")
 
 
 @app.post("/admin/service-status/{service_id}", response_class=HTMLResponse)
@@ -4963,15 +4873,10 @@ async def admin_update_service_status(request: Request, service_id: int):
             updated_by=int(user.get("id")) if user.get("id") else None,
         )
     except ValueError as exc:
-        url = f"/admin/service-status?serviceId={service_id}&error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/service-status?serviceId={service_id}", str(exc), "error")
     if not updated:
-        url = f"/admin/service-status?error={quote('Service not found.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(
-        url=f"/admin/service-status?success={quote('Service updated.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/admin/service-status", "Service not found.", "error")
+    return flash_redirect("/admin/service-status", "Service updated.", "success")
 
 
 @app.post("/admin/service-status/{service_id}/delete", response_class=HTMLResponse)
@@ -4982,12 +4887,8 @@ async def admin_delete_service_status(request: Request, service_id: int):
     try:
         await service_status_service.delete_service(service_id)
     except Exception as exc:  # pragma: no cover - defensive
-        url = f"/admin/service-status?error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(
-        url=f"/admin/service-status?success={quote('Service deleted.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/admin/service-status", str(exc), "error")
+    return flash_redirect("/admin/service-status", "Service deleted.", "success")
 
 
 @app.post("/admin/service-status/{service_id}/refresh-tags", response_class=HTMLResponse)
@@ -4998,15 +4899,10 @@ async def admin_refresh_service_tags(request: Request, service_id: int):
     try:
         await service_status_service.refresh_service_tags(service_id)
     except ValueError as exc:
-        url = f"/admin/service-status?serviceId={service_id}&error={quote(str(exc))}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/service-status?serviceId={service_id}", str(exc), "error")
     except Exception as exc:  # pragma: no cover - defensive
-        url = f"/admin/service-status?serviceId={service_id}&error={quote('Failed to refresh tags.')}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(
-        url=f"/admin/service-status?serviceId={service_id}&success={quote('Tags refreshed.')}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect(f"/admin/service-status?serviceId={service_id}", "Failed to refresh tags.", "error")
+    return flash_redirect(f"/admin/service-status?serviceId={service_id}", "Tags refreshed.", "success")
 
 
 async def _admin_service_status_check_now_handler(request: Request, service_id: int):
@@ -5021,18 +4917,14 @@ async def _admin_service_status_check_now_handler(request: Request, service_id: 
             service_id=service_id,
             error=str(exc),
         )
-        url = f"/admin/service-status?serviceId={service_id}&error={quote('AI lookup failed unexpectedly. Check server logs for details.')}"
+        url = f"/admin/service-status?serviceId={service_id}"
         return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
     if result.get("error"):
-        url = f"/admin/service-status?serviceId={service_id}&error={quote(result['error'])}"
-        return RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+        return flash_redirect(f"/admin/service-status?serviceId={service_id}", result["error"], "error")
     msg = "AI lookup completed."
     if result.get("changed"):
         msg = "AI lookup completed — status updated."
-    return RedirectResponse(
-        url=f"/admin/service-status?serviceId={service_id}&success={quote(msg)}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect(f"/admin/service-status?serviceId={service_id}", msg, "success")
 
 
 @app.post("/admin/service-status/{service_id}/check-now", response_class=HTMLResponse)
@@ -5091,8 +4983,6 @@ async def admin_profile_page(request: Request):
 @app.get("/admin/impersonation", response_class=HTMLResponse)
 async def admin_impersonation_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5100,8 +4990,6 @@ async def admin_impersonation_page(
     return await _render_impersonation_dashboard(
         request,
         current_user,
-        success_message=_sanitize_message(success),
-        error_message=_sanitize_message(error),
     )
 
 
@@ -5230,8 +5118,6 @@ async def admin_automation(request: Request, show_inactive: bool = Query(default
 async def admin_scheduled_tasks(
     request: Request,
     show_inactive: bool = Query(default=False),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5315,8 +5201,6 @@ async def admin_scheduled_tasks(
         "title": "Scheduled Tasks",
         "tasks": prepared_tasks,
         "show_inactive": show_inactive,
-        "success_message": success,
-        "error_message": error,
         "upgrade_status": system_state_service.get_upgrade_status(),
         "command_options": command_options,
         "company_options": company_options,
@@ -5345,10 +5229,7 @@ async def admin_bulk_delete_scheduled_tasks(request: Request):
         task_ids.append(identifier)
 
     if not task_ids:
-        return RedirectResponse(
-            url="/admin/scheduled-tasks?error=Select+at+least+one+task+to+delete.",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/scheduled-tasks", "Select at least one task to delete.", "error")
 
     try:
         deleted_count = await scheduled_tasks_repo.delete_tasks(task_ids)
@@ -5359,10 +5240,7 @@ async def admin_bulk_delete_scheduled_tasks(request: Request):
             task_ids=task_ids,
             error=str(exc),
         )
-        return RedirectResponse(
-            url="/admin/scheduled-tasks?error=Unable+to+delete+the+selected+tasks.+Please+try+again.",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/scheduled-tasks", "Unable to delete the selected tasks. Please try again.", "error")
 
     log_info(
         "Scheduled tasks bulk deleted",
@@ -5379,16 +5257,10 @@ async def admin_bulk_delete_scheduled_tasks(request: Request):
     show_inactive_raw = form.get("show_inactive")
     show_inactive_param = "1" if show_inactive_raw else ""
     base_url = "/admin/scheduled-tasks"
-    params: list[str] = [f"success={quote(redirect_message)}"]
-    if show_inactive_param:
-        params.append(f"show_inactive={show_inactive_param}")
-    return RedirectResponse(
-        url=f"{base_url}?{'&'.join(params)}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
-
-
-@app.post("/admin/scheduled-tasks/bulk-rename", response_class=HTMLResponse)
+    redirect_url = f"{base_url}?show_inactive={show_inactive_param}" if show_inactive_param else base_url
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    set_flash(response, redirect_message, "success")
+    return response
 async def admin_bulk_rename_scheduled_tasks(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5409,10 +5281,7 @@ async def admin_bulk_rename_scheduled_tasks(request: Request):
         task_ids.append(identifier)
 
     if not task_ids:
-        return RedirectResponse(
-            url="/admin/scheduled-tasks?error=Select+at+least+one+task+to+rename.",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/scheduled-tasks", "Select at least one task to rename.", "error")
 
     companies = await company_repo.list_companies()
     company_lookup: dict[int, str] = {}
@@ -5462,17 +5331,10 @@ async def admin_bulk_rename_scheduled_tasks(request: Request):
     show_inactive_raw = form.get("show_inactive")
     show_inactive_param = "1" if show_inactive_raw else ""
     base_url = "/admin/scheduled-tasks"
-    params: list[str] = [f"success={quote(redirect_message)}"]
-    if show_inactive_param:
-        params.append(f"show_inactive={show_inactive_param}")
-    return RedirectResponse(
-        url=f"{base_url}?{'&'.join(params)}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tray app admin pages
+    redirect_url = f"{base_url}?show_inactive={show_inactive_param}" if show_inactive_param else base_url
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    set_flash(response, redirect_message, "success")
+    return response
 # ---------------------------------------------------------------------------
 
 
@@ -5908,8 +5770,6 @@ async def tray_icon_endpoint() -> Response:
 @app.get("/admin/tray/branding", response_class=HTMLResponse)
 async def admin_tray_branding_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5918,8 +5778,6 @@ async def admin_tray_branding_page(
     extra = {
         "title": "Tray icon",
         "current_path": current_path,
-        "success_message": _sanitize_message(success),
-        "error_message": _sanitize_message(error),
     }
     return await _render_template(
         "admin/tray/branding.html", request, current_user, extra=extra
@@ -5938,22 +5796,13 @@ async def admin_tray_branding_upload(
     from app.services import tray_icon as tray_icon_service
 
     if icon is None or not icon.filename:
-        return RedirectResponse(
-            url="/admin/tray/branding?error=No+file+selected",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/tray/branding", "No file selected", "error")
 
     data = await icon.read(_TRAY_ICON_MAX_BYTES + 1)
     if len(data) > _TRAY_ICON_MAX_BYTES:
-        return RedirectResponse(
-            url="/admin/tray/branding?error=File+too+large+%28max+1+MB%29",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/tray/branding", "File too large (max 1 MB)", "error")
     if not tray_icon_service.is_valid_ico(data):
-        return RedirectResponse(
-            url="/admin/tray/branding?error=Not+a+valid+.ico+file",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/tray/branding", "Not a valid .ico file", "error")
 
     uploads_root = _tray_icon_uploads_root()
     target = _TRAY_ICON_DIR / "tray-icon.ico"
@@ -5961,10 +5810,7 @@ async def admin_tray_branding_upload(
         target.write_bytes(data)
     except OSError as exc:
         log_error(f"Failed to write tray icon: {exc}")
-        return RedirectResponse(
-            url="/admin/tray/branding?error=Failed+to+save+icon",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/tray/branding", "Failed to save icon", "error")
 
     relative_path = str(target.relative_to(uploads_root)).replace("\\", "/")
     await site_settings_repo.set_tray_icon_path(relative_path)
@@ -5976,10 +5822,7 @@ async def admin_tray_branding_upload(
         metadata={"path": relative_path, "bytes": len(data)},
         request=request,
     )
-    return RedirectResponse(
-        url="/admin/tray/branding?success=Tray+icon+updated",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/tray/branding", "Tray icon updated", "success")
 
 
 @app.post("/admin/tray/branding/delete", response_class=HTMLResponse)
@@ -6009,10 +5852,7 @@ async def admin_tray_branding_delete(request: Request):
         metadata={},
         request=request,
     )
-    return RedirectResponse(
-        url="/admin/tray/branding?success=Tray+icon+reset+to+default",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/tray/branding", "Tray icon reset to default", "success")
 
 
 # ---------------------------------------------------------------------------
@@ -6330,8 +6170,6 @@ async def admin_forms_page(request: Request):
 @app.get("/admin/tag-exclusions", response_class=HTMLResponse)
 async def admin_tag_exclusions_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -6341,8 +6179,7 @@ async def admin_tag_exclusions_page(
         request,
         current_user,
         extra={
-            "success_message": _sanitize_message(success),
-            "error_message": _sanitize_message(error),
+
         },
     )
     return templates.TemplateResponse(
@@ -7852,8 +7689,6 @@ async def _render_modules_dashboard(
 @app.get("/admin/modules", response_class=HTMLResponse)
 async def admin_modules_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -7861,16 +7696,12 @@ async def admin_modules_page(
     return await _render_modules_dashboard(
         request,
         current_user,
-        success_message=_sanitize_message(success),
-        error_message=_sanitize_message(error),
     )
 
 
 @app.get("/admin/feature-packs", response_class=HTMLResponse)
 async def admin_feature_packs_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     """Admin UI wrapping the feature pack registry.
 
@@ -7897,8 +7728,6 @@ async def admin_feature_packs_page(
         "title": "Feature packs",
         "packs": packs,
         "plugins": plugins,
-        "success_message": _sanitize_message(success),
-        "error_message": _sanitize_message(error),
     }
     return await _render_template(
         "admin/feature_packs.html", request, current_user, extra=extra
@@ -7941,10 +7770,7 @@ async def admin_update_module(slug: str, request: Request):
             error_message="Unable to update module configuration. Please verify the settings.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    return RedirectResponse(
-        url=f"/admin/modules?success=" + quote(f"Module {slug} updated."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/modules", f"Module {slug} updated.", "success")
 
 
 def _form_bool(form: Mapping[str, Any], key: str) -> bool:
@@ -7961,10 +7787,7 @@ async def admin_test_module(slug: str, request: Request):
         return redirect
     result = await modules_service.test_module(slug)
     if result.get("status") == "error":
-        return RedirectResponse(
-            url=f"/admin/modules?error=" + quote(result.get("error") or "Module test failed."),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules", result.get("error") or "Module test failed.", "error")
     success_message = "Module test succeeded."
     if slug == "xero":
         details = result.get("details")
@@ -7972,10 +7795,7 @@ async def admin_test_module(slug: str, request: Request):
             tenant_id = details.get("discovered_tenant_id") or details.get("tenant_id")
             if tenant_id:
                 success_message += f" Tenant ID: {tenant_id}"
-    return RedirectResponse(
-        url=f"/admin/modules?success=" + quote(success_message),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/modules", success_message, "success")
 
 
 @app.get("/login", response_class=HTMLResponse)

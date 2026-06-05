@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
+from app.security.flash import flash_redirect
 from app.repositories import companies as company_repo
 from app.services import m365 as m365_service
 from app.services import m365_mail as m365_mail_service
@@ -70,8 +71,6 @@ async def _render_m365_mail_dashboard(
 async def admin_m365_mail_accounts_page(
     request: Request,
     account_id: int | None = Query(default=None, alias="accountId"),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -81,8 +80,6 @@ async def admin_m365_mail_accounts_page(
         request,
         current_user,
         editing_account_id=account_id,
-        success_message=main_module._sanitize_message(success),
-        error_message=main_module._sanitize_message(error),
     )
 
 
@@ -148,11 +145,8 @@ async def admin_create_m365_mail_account(request: Request):
             error_message="Unable to create the Office 365 mail account. Please verify the configuration and try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    message = quote(f"Mailbox {account.get('name') or account.get('user_principal_name') or 'created'} added.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {account.get('name') or account.get('user_principal_name') or 'created'} added."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
 @router.post("/admin/modules/m365-mail/accounts/{account_id}", response_class=HTMLResponse)
@@ -232,11 +226,8 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
             error_message="Unable to update the Office 365 mail account. Please review the settings and try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    message = quote(f"Mailbox {account.get('name') or account.get('user_principal_name') or account_id} updated.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {account.get('name') or account.get('user_principal_name') or account_id} updated."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
 @router.post("/admin/modules/m365-mail/accounts/{account_id}/clone", response_class=HTMLResponse)
@@ -272,11 +263,8 @@ async def admin_clone_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     label = account.get("name") or f"Mailbox {account_id} copy"
-    message = quote(f"Mailbox {label} cloned.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {label} cloned."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
 @router.post("/admin/modules/m365-mail/accounts/{account_id}/delete", response_class=HTMLResponse)
@@ -297,11 +285,8 @@ async def admin_delete_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     label = account.get("name") if account else f"#{account_id}"
-    message = quote(f"Mailbox {label} deleted.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {label} deleted."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
 @router.post("/admin/modules/m365-mail/accounts/{account_id}/sync", response_class=HTMLResponse)
@@ -315,29 +300,17 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
     error_count = len(result.get("errors") or [])
     if status_value in {"error"}:
         message = result.get("error") or "Office 365 mail synchronisation failed."
-        return RedirectResponse(
-            url=f"/admin/modules/m365-mail?error={quote(message)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/m365-mail", message, "error")
     if status_value == "skipped":
         message = result.get("reason") or "Office 365 mail synchronisation skipped."
-        return RedirectResponse(
-            url=f"/admin/modules/m365-mail?error={quote(message)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/m365-mail", message, "error")
     if status_value == "completed_with_errors" and error_count:
         first_error = (result.get("errors") or [{}])[0].get("error") or "Office 365 mail sync completed with errors."
         if processed:
             first_error = f"{first_error} ({processed} message{'s' if processed != 1 else ''} imported.)"
-        return RedirectResponse(
-            url=f"/admin/modules/m365-mail?error={quote(first_error)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    message = quote(f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/admin/modules/m365-mail", first_error, "error")
+    message = f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
 @router.get("/admin/modules/m365-mail/accounts/{account_id}/authorize")
@@ -349,10 +322,7 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
         return redirect
     account = await m365_mail_service.get_account(account_id)
     if not account:
-        return RedirectResponse(
-            url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/m365-mail", "Account not found.", "error")
     company_id = account.get("company_id")
     redirect_uri = main_module._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
@@ -393,14 +363,8 @@ async def admin_m365_mail_disconnect(account_id: int, request: Request):
         return redirect
     account = await m365_mail_service.get_account(account_id)
     if not account:
-        return RedirectResponse(
-            url=f"/admin/modules/m365-mail?error={quote('Account not found.')}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/m365-mail", "Account not found.", "error")
     await m365_mail_service.clear_delegated_tokens(account_id)
     label = account.get("name") or f"#{account_id}"
-    message = quote(f"Disconnected user sign-in for {label}.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Disconnected user sign-in for {label}."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")

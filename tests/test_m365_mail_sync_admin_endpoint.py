@@ -1,10 +1,10 @@
 """Tests for the admin /admin/modules/m365-mail/accounts/{id}/sync endpoint.
 
 Covers:
-- 403 errors from sync_account are surfaced as ?error= (not buried in ?success=)
-- Successful sync redirects to ?success= with import count
-- Partial success (some imported, some errored) redirects to ?error= with detail
-- Skipped sync redirects to ?error=
+- 403 errors from sync_account are surfaced as flash error (not buried in success)
+- Successful sync redirects with flash success containing import count
+- Partial success (some imported, some errored) redirects with flash error containing detail
+- Skipped sync redirects with flash error
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def _super_admin_context():
 
 def test_sync_403_error_redirects_to_error_param(monkeypatch):
     """When sync_account returns completed_with_errors due to a 403, the
-    handler must redirect to ?error= so the user sees the actionable message."""
+    handler must emit a flash error cookie so the user sees the actionable message."""
 
     async def fake_sync_account(account_id: int):
         return {
@@ -84,9 +84,12 @@ def test_sync_403_error_redirects_to_error_param(monkeypatch):
 
     assert response.status_code == 303
     location = response.headers["location"]
-    assert "error=" in location
+    assert "error=" not in location
     assert "success=" not in location
-    assert "Mail.ReadWrite" in location
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie
+    assert "Mail.ReadWrite" in flash_cookie
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +98,7 @@ def test_sync_403_error_redirects_to_error_param(monkeypatch):
 
 
 def test_sync_success_redirects_to_success_param(monkeypatch):
-    """A fully successful sync should redirect to ?success= with import count."""
+    """A fully successful sync should emit a flash success cookie with import count."""
 
     async def fake_sync_account(account_id: int):
         return {"status": "succeeded", "processed": 3, "errors": []}
@@ -108,9 +111,12 @@ def test_sync_success_redirects_to_success_param(monkeypatch):
 
     assert response.status_code == 303
     location = response.headers["location"]
-    assert "success=" in location
+    assert "success=" not in location
     assert "error=" not in location
-    assert "3" in location
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
+    assert "3" in flash_cookie
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +126,7 @@ def test_sync_success_redirects_to_success_param(monkeypatch):
 
 def test_sync_partial_success_redirects_to_error_with_count(monkeypatch):
     """When some messages imported but errors also occurred, the redirect should
-    be ?error= and include how many messages were imported."""
+    emit a flash error cookie and include how many messages were imported."""
 
     async def fake_sync_account(account_id: int):
         return {
@@ -137,10 +143,13 @@ def test_sync_partial_success_redirects_to_error_with_count(monkeypatch):
 
     assert response.status_code == 303
     location = response.headers["location"]
-    assert "error=" in location
+    assert "error=" not in location
     assert "success=" not in location
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie
     # Should mention imported count
-    assert "5" in location
+    assert "5" in flash_cookie
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +158,7 @@ def test_sync_partial_success_redirects_to_error_with_count(monkeypatch):
 
 
 def test_sync_skipped_redirects_to_error(monkeypatch):
-    """A skipped sync should redirect to ?error=."""
+    """A skipped sync should emit a flash error cookie."""
 
     async def fake_sync_account(account_id: int):
         return {"status": "skipped", "reason": "Module disabled"}
@@ -162,4 +171,7 @@ def test_sync_skipped_redirects_to_error(monkeypatch):
 
     assert response.status_code == 303
     location = response.headers["location"]
-    assert "error=" in location
+    assert "error=" not in location
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie

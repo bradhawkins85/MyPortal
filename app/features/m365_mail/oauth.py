@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import Request, status
 from fastapi.responses import RedirectResponse
+
+from app.security.flash import flash_redirect
 
 __all__ = ["handle_m365_mail_auth_callback"]
 
@@ -36,10 +37,7 @@ async def handle_m365_mail_auth_callback(
     redirect_uri = main_module._build_m365_redirect_uri(request)
 
     def _mail_auth_error(msg: str) -> RedirectResponse:
-        return RedirectResponse(
-            url=f"/admin/modules/m365-mail?error={quote(msg)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/m365-mail", msg, "error")
 
     if not account_id:
         return _mail_auth_error("Invalid account in OAuth state.")
@@ -103,8 +101,5 @@ async def handle_m365_mail_auth_callback(
 
     account = await main_module.m365_mail_service.get_account(account_id)
     label = account.get("name") if account else f"#{account_id}"
-    message = quote(f"Successfully signed in for mailbox {label}.")
-    return RedirectResponse(
-        url=f"/admin/modules/m365-mail?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Successfully signed in for mailbox {label}."
+    return flash_redirect("/admin/modules/m365-mail", message, "success")

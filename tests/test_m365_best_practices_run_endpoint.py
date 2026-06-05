@@ -88,5 +88,9 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
         response = client.post("/m365/best-practices/run")
 
     assert response.status_code == 303
-    assert "success=Best+practice+evaluation+started+in+the+background" in response.headers["location"]
+    assert "success=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "success" in flash_cookie
+    assert "Best practice evaluation started" in flash_cookie
     assert events == ["reset", "queue"]

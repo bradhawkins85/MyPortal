@@ -7,11 +7,12 @@ from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from starlette.datastructures import FormData
+
+from app.security.flash import flash_redirect
 
 
 def _main():
@@ -386,8 +387,6 @@ async def admin_automations_page(
     request: Request,
     status: str | None = Query(default=None),
     kind: str | None = Query(default=None),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -397,15 +396,11 @@ async def admin_automations_page(
         current_user,
         status_filter=status,
         kind_filter=kind,
-        success_message=_main()._sanitize_message(success),
-        error_message=_main()._sanitize_message(error),
     )
 
 
 async def admin_create_scheduled_automation_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -414,15 +409,11 @@ async def admin_create_scheduled_automation_page(
         request,
         current_user,
         kind="scheduled",
-        success_message=_main()._sanitize_message(success),
-        error_message=_main()._sanitize_message(error),
     )
 
 
 async def admin_create_event_automation_page(
     request: Request,
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -431,8 +422,6 @@ async def admin_create_event_automation_page(
         request,
         current_user,
         kind="event",
-        success_message=_main()._sanitize_message(success),
-        error_message=_main()._sanitize_message(error),
     )
 
 
@@ -474,10 +463,7 @@ async def admin_create_automation(request: Request):
         )
     if record and record.get("status") == "active":
         await automations_service.refresh_schedule(int(record["id"]))
-    return RedirectResponse(
-        url="/admin/automations?success=" + quote("Automation created."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/automations", "Automation created.", "success")
 
 
 async def admin_edit_automation_page(automation_id: int, request: Request):
@@ -488,10 +474,7 @@ async def admin_edit_automation_page(automation_id: int, request: Request):
         return redirect
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        return RedirectResponse(
-            url="/admin/automations?error=" + quote("Automation not found."),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/automations", "Automation not found.", "error")
     kind = str(automation.get("kind") or "scheduled")
     form_defaults = _automation_to_form_values(automation)
     return await _render_automation_form(
@@ -514,10 +497,7 @@ async def admin_update_automation(automation_id: int, request: Request):
         return redirect
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        return RedirectResponse(
-            url="/admin/automations?error=" + quote("Automation not found."),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/automations", "Automation not found.", "error")
     form = await request.form()
     kind = str(automation.get("kind") or "scheduled")
     data, form_state, error_message, error_status = _parse_automation_form_submission(form, kind=kind)
@@ -553,10 +533,7 @@ async def admin_update_automation(automation_id: int, request: Request):
         await automations_service.refresh_schedule(automation_id)
     else:
         await automation_repo.set_next_run(automation_id, None)
-    return RedirectResponse(
-        url="/admin/automations?success=" + quote("Automation updated."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/automations", "Automation updated.", "success")
 
 
 async def admin_update_automation_status(automation_id: int, request: Request):
@@ -580,10 +557,7 @@ async def admin_update_automation_status(automation_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
     await automation_repo.update_automation(automation_id, status=status_value)
     await automations_service.refresh_schedule(automation_id)
-    return RedirectResponse(
-        url="/admin/automations?success=" + quote(f"Automation {automation_id} updated."),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/automations", f"Automation {automation_id} updated.", "success")
 
 
 async def admin_execute_automation(automation_id: int, request: Request):
@@ -597,10 +571,7 @@ async def admin_execute_automation(automation_id: int, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     message = f"Automation {automation_id} executed with status {result.get('status')}."
-    return RedirectResponse(
-        url="/admin/automations?success=" + quote(message),
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    return flash_redirect("/admin/automations", message, "success")
 
 
 async def admin_delete_automation(automation_id: int, request: Request):
@@ -636,8 +607,5 @@ async def admin_delete_automation(automation_id: int, request: Request):
         deleted_by=current_user.get("id") if isinstance(current_user, Mapping) else None,
     )
 
-    message = quote(f"Automation {automation_id} deleted.")
-    return RedirectResponse(
-        url=f"/admin/automations?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Automation {automation_id} deleted."
+    return flash_redirect("/admin/automations", message, "success")

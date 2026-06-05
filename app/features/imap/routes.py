@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
+from app.security.flash import flash_redirect
 from app.repositories import companies as company_repo
 from app.services import imap as imap_service
 
@@ -69,8 +69,6 @@ async def _render_imap_dashboard(
 async def admin_imap_accounts_page(
     request: Request,
     account_id: int | None = Query(default=None, alias="accountId"),
-    success: str | None = Query(default=None),
-    error: str | None = Query(default=None),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -80,8 +78,6 @@ async def admin_imap_accounts_page(
         request,
         current_user,
         editing_account_id=account_id,
-        success_message=main_module._sanitize_message(success),
-        error_message=main_module._sanitize_message(error),
     )
 
 
@@ -148,11 +144,8 @@ async def admin_create_imap_account(request: Request):
             error_message="Unable to create the IMAP account. Please verify the configuration and try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    message = quote(f"Mailbox {account.get('name') or account.get('username') or 'created'} added.")
-    return RedirectResponse(
-        url=f"/admin/modules/imap?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {account.get('name') or account.get('username') or 'created'} added."
+    return flash_redirect("/admin/modules/imap", message, "success")
 
 
 @router.post("/admin/modules/imap/accounts/{account_id}", response_class=HTMLResponse)
@@ -232,11 +225,8 @@ async def admin_update_imap_account(account_id: int, request: Request):
             error_message="Unable to update the IMAP account. Please review the settings and try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    message = quote(f"Mailbox {account.get('name') or account.get('username') or account_id} updated.")
-    return RedirectResponse(
-        url=f"/admin/modules/imap?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {account.get('name') or account.get('username') or account_id} updated."
+    return flash_redirect("/admin/modules/imap", message, "success")
 
 
 @router.post("/admin/modules/imap/accounts/{account_id}/clone", response_class=HTMLResponse)
@@ -273,11 +263,8 @@ async def admin_clone_imap_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     label = account.get("name") or f"Mailbox {account_id} copy"
-    message = quote(f"Mailbox {label} cloned.")
-    return RedirectResponse(
-        url=f"/admin/modules/imap?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {label} cloned."
+    return flash_redirect("/admin/modules/imap", message, "success")
 
 
 @router.post("/admin/modules/imap/accounts/{account_id}/delete", response_class=HTMLResponse)
@@ -299,11 +286,8 @@ async def admin_delete_imap_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     label = account.get("name") if account else f"#{account_id}"
-    message = quote(f"Mailbox {label} deleted.")
-    return RedirectResponse(
-        url=f"/admin/modules/imap?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+    message = f"Mailbox {label} deleted."
+    return flash_redirect("/admin/modules/imap", message, "success")
 
 
 @router.post("/admin/modules/imap/accounts/{account_id}/sync", response_class=HTMLResponse)
@@ -318,26 +302,14 @@ async def admin_sync_imap_account(account_id: int, request: Request):
     error_count = len(result.get("errors") or [])
     if status_value in {"error"}:
         message = result.get("error") or "IMAP synchronisation failed."
-        return RedirectResponse(
-            url=f"/admin/modules/imap?error={quote(message)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/imap", message, "error")
     if status_value == "skipped":
         message = result.get("reason") or "IMAP synchronisation skipped."
-        return RedirectResponse(
-            url=f"/admin/modules/imap?error={quote(message)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return flash_redirect("/admin/modules/imap", message, "error")
     if status_value == "completed_with_errors" and error_count:
-        message = quote(
+        message = (
             f"IMAP sync completed with {error_count} issue{'s' if error_count != 1 else ''}. Imported {processed} messages."
         )
-        return RedirectResponse(
-            url=f"/admin/modules/imap?success={message}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    message = quote(f"IMAP sync imported {processed} message{'s' if processed != 1 else ''}.")
-    return RedirectResponse(
-        url=f"/admin/modules/imap?success={message}",
-        status_code=status.HTTP_303_SEE_OTHER,
-    )
+        return flash_redirect("/admin/modules/imap", message, "success")
+    message = f"IMAP sync imported {processed} message{'s' if processed != 1 else ''}."
+    return flash_redirect("/admin/modules/imap", message, "success")
