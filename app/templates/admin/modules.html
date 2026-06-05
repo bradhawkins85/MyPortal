@@ -43,65 +43,74 @@
                     </span>
                   </td>
                   <td class="table__actions" data-column-key="actions">
-                    <div class="table__action-buttons">
-                      <form action="/admin/modules/{{ module.slug }}" method="post" class="inline-form">
-                        {% if csrf_token %}
-                          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                    <details class="header-title-menu__dropdown" data-header-menu>
+                      <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+                        Actions
+                        <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon">
+                          <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
+                        </svg>
+                        <span class="visually-hidden">Toggle row actions menu</span>
+                      </summary>
+                      <ul class="header-title-menu__list" role="menu">
+                        <li class="header-title-menu__item" role="none">
+                          <form action="/admin/modules/{{ module.slug }}" method="post" class="inline-form">
+                            {% if csrf_token %}
+                              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                            {% endif %}
+                            {% if module.enabled %}
+                              <button type="submit" name="enabled" value="0" class="header-title-menu__link" role="menuitem">Disable</button>
+                            {% else %}
+                              <button type="submit" name="enabled" value="1" class="header-title-menu__link" role="menuitem">Enable</button>
+                            {% endif %}
+                          </form>
+                        </li>
+                        {% set manage_url = module.settings.manage_url if module.settings else None %}
+                        {% if manage_url and (manage_url | string).startswith('/') %}
+                          <li class="header-title-menu__item" role="none">
+                            <a href="{{ manage_url }}" class="header-title-menu__link" role="menuitem">Manage</a>
+                          </li>
                         {% endif %}
-                        {% if module.enabled %}
-                          <button type="submit" name="enabled" value="0" class="button button--ghost button--small">Disable</button>
-                        {% else %}
-                          <button type="submit" name="enabled" value="1" class="button button--ghost button--small">Enable</button>
+                        {% if module.slug == "syncro" %}
+                          <li class="header-title-menu__item" role="none">
+                            <form action="/admin/syncro/import-companies" method="post" class="inline-form">
+                              {% if csrf_token %}
+                                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                              {% endif %}
+                              <button type="submit" class="header-title-menu__link" role="menuitem">Import companies</button>
+                            </form>
+                          </li>
                         {% endif %}
-                      </form>
-                      <form action="/admin/modules/{{ module.slug }}/test" method="post" class="inline-form">
-                        {% if csrf_token %}
-                          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                        {% if module.slug == "tacticalrmm" %}
+                          <li class="header-title-menu__item" role="none">
+                            <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="inline-form">
+                              {% if csrf_token %}
+                                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                              {% endif %}
+                              <button type="submit" class="header-title-menu__link" role="menuitem">Push companies</button>
+                            </form>
+                          </li>
+                          <li class="header-title-menu__item" role="none">
+                            <form action="/admin/modules/tacticalrmm/pull-companies" method="post" class="inline-form">
+                              {% if csrf_token %}
+                                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                              {% endif %}
+                              <button type="submit" class="header-title-menu__link" role="menuitem">Pull companies</button>
+                            </form>
+                          </li>
                         {% endif %}
-                        <button type="submit" class="button button--ghost button--small">Test</button>
-                      </form>
-                      {% set manage_url = module.settings.manage_url if module.settings else None %}
-                      {% if manage_url and (manage_url | string).startswith('/') %}
-                        <a href="{{ manage_url }}" class="button button--ghost button--small">Manage</a>
-                      {% else %}
-                        <button
-                          type="button"
-                          class="button button--ghost button--small"
-                          data-edit-module-open="{{ module.slug }}"
-                          aria-haspopup="dialog"
-                          aria-controls="module-settings-modal-{{ module.slug }}"
-                        >Settings</button>
-                      {% endif %}
-                      {% if module.slug == "syncro" %}
-                        <form action="/admin/syncro/import-companies" method="post" class="inline-form">
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <button type="submit" class="button button--ghost button--small">Import companies</button>
-                        </form>
-                      {% endif %}
-                      {% if module.slug == "tacticalrmm" %}
-                        <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="inline-form">
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <button type="submit" class="button button--ghost button--small">Push companies</button>
-                        </form>
-                        <form action="/admin/modules/tacticalrmm/pull-companies" method="post" class="inline-form">
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <button type="submit" class="button button--ghost button--small">Pull companies</button>
-                        </form>
-                      {% endif %}
-                      {% set webhook_url = (module_webhook_urls or {}).get(module.slug) %}
-                      {% if webhook_url %}
-                        <a href="{{ webhook_url }}" class="button button--ghost button--small" target="_blank" rel="noopener noreferrer">Webhook URL</a>
-                      {% endif %}
-                      {% if module.slug == "xero" %}
-                        <a href="/api/integration-modules/xero/tenants" class="button button--ghost button--small" target="_blank" rel="noopener noreferrer">Get tenant IDs</a>
-                      {% endif %}
-                    </div>
+                        {% set webhook_url = (module_webhook_urls or {}).get(module.slug) %}
+                        {% if webhook_url %}
+                          <li class="header-title-menu__item" role="none">
+                            <a href="{{ webhook_url }}" class="header-title-menu__link" role="menuitem" target="_blank" rel="noopener noreferrer">Webhook URL</a>
+                          </li>
+                        {% endif %}
+                        {% if module.slug == "xero" %}
+                          <li class="header-title-menu__item" role="none">
+                            <a href="/api/integration-modules/xero/tenants" class="header-title-menu__link" role="menuitem" target="_blank" rel="noopener noreferrer">Get tenant IDs</a>
+                          </li>
+                        {% endif %}
+                      </ul>
+                    </details>
                   </td>
                 </tr>
                 {% endif %}
@@ -126,6 +135,17 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script>
+    // Allow row-level action dropdowns to overflow the table wrapper.
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('#modules-table [data-header-menu]').forEach(function (menu) {
+        var wrapper = menu.closest('.table-wrapper');
+        if (!wrapper) return;
+        menu.addEventListener('toggle', function () {
+          wrapper.style.overflow = menu.open ? 'visible' : '';
+        });
+      });
+    });
+
     (function () {
       var btn = document.getElementById('show-disabled-modules');
       if (!btn) return;
