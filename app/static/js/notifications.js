@@ -290,18 +290,6 @@
     return response.json();
   }
 
-  async function undoExcludeNotification(notificationId) {
-    const response = await fetch(`/api/notifications/${notificationId}/exclude`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: { 'X-CSRF-Token': getCsrfToken() },
-    });
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      throw new Error(buildErrorMessage(detail, 'Failed to undo notification exclusion'));
-    }
-    return response.json();
-  }
 
 
   async function deleteNotification(notificationId) {
@@ -548,14 +536,6 @@
     });
   }
 
-  function applyExcludeButtonState(button, isExcluded) {
-    if (!button) {
-      return;
-    }
-    button.setAttribute('data-notification-excluded', isExcluded ? '1' : '0');
-    button.textContent = isExcluded ? 'Undo exclude' : 'Exclude';
-  }
-
   function bindExcludeActions() {
     document.querySelectorAll(notificationSelectors.excludeButtons).forEach((button) => {
       button.addEventListener('click', async () => {
@@ -563,23 +543,17 @@
         if (!notificationId) {
           return;
         }
-        const currentlyExcluded = button.getAttribute('data-notification-excluded') === '1';
         button.disabled = true;
         const originalText = button.textContent;
-        button.textContent = currentlyExcluded ? 'Undoing…' : 'Excluding…';
+        button.textContent = 'Excluding…';
         try {
-          if (currentlyExcluded) {
-            await undoExcludeNotification(notificationId);
-            applyExcludeButtonState(button, false);
-          } else {
-            await excludeNotification(notificationId);
-            applyExcludeButtonState(button, true);
-          }
+          await excludeNotification(notificationId);
+          button.textContent = 'Excluded';
+          button.title = 'Manage exclusions in Notification settings';
         } catch (error) {
           button.textContent = originalText;
-          window.alert(error.message || 'Unable to update notification exclusion');
-        } finally {
           button.disabled = false;
+          window.alert(error.message || 'Unable to exclude notification');
         }
       });
     });

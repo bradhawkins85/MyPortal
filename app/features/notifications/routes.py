@@ -129,9 +129,23 @@ async def notifications_dashboard(request: Request):
     )
 
     prepared_notifications: list[dict[str, Any]] = []
-    excluded_event_types: set[str] = set()
+    exclusion_rules: list[dict[str, Any]] = []
     if user_id is not None:
-        excluded_event_types = set(await exclusions_repo.list_excluded_event_types(user_id))
+        exclusion_rules = await exclusions_repo.list_exclusions(user_id)
+
+    def _is_excluded(event_type: str, message: str) -> bool:
+        """Check if a notification is excluded by any rule."""
+        for rule in exclusion_rules:
+            if rule.get("event_type") != event_type:
+                continue
+            pattern = rule.get("message_pattern") or ""
+            if not pattern:
+                # Event-type-level exclusion applies to all messages
+                return True
+            if message.startswith(pattern):
+                return True
+        return False
+
     for record in records:
         metadata_items = main_module._prepare_notification_metadata(record.get("metadata"))
         raw_metadata = record.get("metadata") or {}
@@ -139,7 +153,8 @@ async def notifications_dashboard(request: Request):
         read_iso = main_module._to_iso(record.get("read_at")) or ""
         is_unread = record.get("read_at") is None
         event_type = str(record.get("event_type") or "")
-        is_excluded = bool(event_type) and event_type in excluded_event_types
+        message = str(record.get("message") or "")
+        is_excluded = bool(event_type) and _is_excluded(event_type, message)
         prepared_notifications.append(
             {
                 "id": record.get("id"),
@@ -322,6 +337,8 @@ async def notification_settings_page(request: Request):
             for item in preferences
         ]
 
+    exclusion_rules = await exclusions_repo.list_exclusions(user_id)
+
     extra = {
         "title": "Notification settings",
         "preferences": preferences,
@@ -337,6 +354,8 @@ async def notification_settings_page(request: Request):
         "event_settings_endpoint": "/api/notifications/events/settings",
         "modules": modules_payload,
         "event_menu": menu_events,
+        "exclusion_rules": exclusion_rules,
+        "exclusions_endpoint": "/api/notifications/exclusions",
     }
 
     return await main_module._render_template("notifications/settings.html", request, user, extra=extra)

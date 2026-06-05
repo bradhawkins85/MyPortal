@@ -70,14 +70,16 @@ async def emit_notification(
     }
 
     if user_id is not None:
-        event_type_excluded = False
+        notification_excluded = False
         try:
-            event_type_excluded = await exclusions_repo.is_event_type_excluded(user_id, event_type)
+            notification_excluded = await exclusions_repo.is_notification_excluded(
+                user_id, event_type, message or ""
+            )
         except Exception as exc:  # pragma: no cover - safety net for unexpected DB issues
             logger.warning(
                 "Failed to load notification exclusion", user_id=user_id, event_type=event_type, error=str(exc)
             )
-            event_type_excluded = False
+            notification_excluded = False
         try:
             preference = await preferences_repo.get_preference(user_id, event_type)
         except Exception as exc:  # pragma: no cover - safety net for unexpected DB issues
@@ -93,7 +95,7 @@ async def emit_notification(
             channels["channel_in_app"] = allow_in_app and default_in_app
             channels["channel_email"] = allow_email and default_email
             channels["channel_sms"] = allow_sms and default_sms
-        if event_type_excluded:
+        if notification_excluded:
             channels["channel_in_app"] = False
     else:
         channels["channel_in_app"] = allow_in_app
