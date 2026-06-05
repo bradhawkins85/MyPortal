@@ -908,12 +908,10 @@ def _build_popup_session_payload(
     csrf_token: str,
 ) -> str:
     """Return an encrypted cookie value for the popup chat session."""
-    import json as _json
-
     exp = (
         datetime.now(timezone.utc) + timedelta(seconds=_POPUP_SESSION_TTL_SECONDS)
     ).isoformat()
-    raw = _json.dumps(
+    raw = json.dumps(
         {
             "device_id": device_id,
             "room_id": room_id,
@@ -931,14 +929,12 @@ def _parse_popup_session(request: Request) -> dict[str, Any] | None:
     Returns the payload dict (device_id, room_id, company_id, csrf) or
     ``None`` when the cookie is missing, corrupted, or expired.
     """
-    import json as _json
-
     raw = request.cookies.get(_POPUP_SESSION_COOKIE)
     if not raw:
         return None
     try:
         decoded = decrypt_secret(raw)
-        payload = _json.loads(decoded)
+        payload = json.loads(decoded)
     except Exception:
         return None
     exp_str = payload.get("exp", "")

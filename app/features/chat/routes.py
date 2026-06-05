@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -160,12 +161,10 @@ def _make_popup_session(
     csrf_token: str,
 ) -> str:
     """Return an encrypted cookie value for the tray popup session."""
-    import json as _json
-
     exp = (
         datetime.now(timezone.utc) + timedelta(seconds=_POPUP_SESSION_TTL_SECONDS)
     ).isoformat()
-    raw = _json.dumps(
+    raw = json.dumps(
         {
             "device_id": device_id,
             "room_id": room_id,
