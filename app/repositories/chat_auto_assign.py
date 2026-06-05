@@ -120,11 +120,14 @@ async def list_all_technicians() -> list[dict[str, Any]]:
 
 
 async def _list_technicians(*, require_matrix_id: bool) -> list[dict[str, Any]]:
-    matrix_filter = "WHERE matrix_user_id IS NOT NULL AND matrix_user_id != ''" if require_matrix_id else ""
+    query = """
+        SELECT id, email, first_name, last_name, matrix_user_id, is_super_admin
+        FROM users
+    """
+    if require_matrix_id:
+        query += "WHERE matrix_user_id IS NOT NULL AND matrix_user_id != ''"
     rows = await db.fetch_all(
-        f"""SELECT id, email, first_name, last_name, matrix_user_id, is_super_admin
-            FROM users
-            {matrix_filter}""",
+        query,
     )
     users = [dict(row) for row in rows]
 
