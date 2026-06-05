@@ -856,6 +856,15 @@ def _coerce_settings(
         model = str(merged.get("model", "")).strip() or defaults.get("model")
         prompt = str(merged.get("prompt", "")).strip()
         merged.update({"base_url": base_url, "model": model, "prompt": prompt})
+        _env = os.getenv("OLLAMA_BASE_URL", "").strip()
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("OLLAMA_MODEL", "").strip()
+        if _env:
+            merged["model"] = _env
+        _env = os.getenv("OLLAMA_PROMPT", "").strip()
+        if _env:
+            merged["prompt"] = _env
     elif slug == "smtp":
         merged.update(
             {
@@ -864,6 +873,15 @@ def _coerce_settings(
                 "subject_prefix": str(merged.get("subject_prefix", "")).strip(),
             }
         )
+        _env = os.getenv("SMTP_FROM_ADDRESS", "").strip()
+        if _env:
+            merged["from_address"] = _env
+        _env = os.getenv("SMTP_DEFAULT_RECIPIENTS", "").strip()
+        if _env:
+            merged["default_recipients"] = [e.strip() for e in _env.split(",") if e.strip()]
+        _env = os.getenv("SMTP_SUBJECT_PREFIX", "").strip()
+        if _env:
+            merged["subject_prefix"] = _env
     elif slug == "smtp2go":
         overrides = payload or {}
         api_key_override = overrides.get("api_key")
@@ -888,6 +906,21 @@ def _coerce_settings(
                 ),
             }
         )
+        _env = os.getenv("SMTP2GO_API_KEY", "").strip()
+        if _env:
+            merged["api_key"] = _env
+        _env = os.getenv("SMTP2GO_ENABLE_TRACKING", "").strip()
+        if _env:
+            merged["enable_tracking"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SMTP2GO_TRACK_OPENS", "").strip()
+        if _env:
+            merged["track_opens"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SMTP2GO_TRACK_CLICKS", "").strip()
+        if _env:
+            merged["track_clicks"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SMTP2GO_DISABLE_WEBHOOK_SIGNATURE_VERIFICATION", "").strip()
+        if _env:
+            merged["disable_webhook_signature_verification"] = _env.lower() not in ("false", "0", "no", "off")
     elif slug == "syncro":
         base_url = str(merged.get("base_url") or "").strip().rstrip("/")
         api_key_override = payload.get("api_key") if payload else None
@@ -905,6 +938,15 @@ def _coerce_settings(
                 "rate_limit_per_minute": rate_limit,
             }
         )
+        _env = os.getenv("SYNCRO_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("SYNCRO_API_KEY", "").strip()
+        if _env:
+            merged["api_key"] = _env
+        _env = os.getenv("SYNCRO_RATE_LIMIT_PER_MINUTE", "").strip()
+        if _env and _env.isdigit():
+            merged["rate_limit_per_minute"] = max(1, min(600, int(_env)))
     elif slug == "tacticalrmm":
         overrides = payload or {}
         api_key_override = overrides.get("api_key")
@@ -924,6 +966,18 @@ def _coerce_settings(
                 "verify_ssl": _ensure_bool(merged.get("verify_ssl"), True),
             }
         )
+        _env = os.getenv("TACTICALRMM_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("TACTICALRMM_BASE_RMM_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_rmm_url"] = _env
+        _env = os.getenv("TACTICALRMM_API_KEY", "").strip()
+        if _env:
+            merged["api_key"] = _env
+        _env = os.getenv("TACTICALRMM_VERIFY_SSL", "").strip()
+        if _env:
+            merged["verify_ssl"] = _env.lower() not in ("false", "0", "no", "off")
     elif slug == "ntfy":
         overrides = payload or {}
         auth_token_override = overrides.get("auth_token")
@@ -944,6 +998,15 @@ def _coerce_settings(
                 "auth_token": auth_token,
             }
         )
+        _env = os.getenv("NTFY_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("NTFY_TOPIC", "").strip()
+        if _env:
+            merged["topic"] = _env
+        _env = os.getenv("NTFY_AUTH_TOKEN", "").strip()
+        if _env:
+            merged["auth_token"] = _env
     elif slug == "apprise":
         raw_urls = merged.get("urls")
         if isinstance(raw_urls, str):
@@ -958,6 +1021,12 @@ def _coerce_settings(
                 "title": str(merged.get("title", "")).strip(),
             }
         )
+        _env = os.getenv("APPRISE_URLS", "").strip()
+        if _env:
+            merged["urls"] = [u.strip() for u in _env.splitlines() if u.strip()]
+        _env = os.getenv("APPRISE_TITLE", "").strip()
+        if _env:
+            merged["title"] = _env
     elif slug == "plausible":
         overrides = payload or {}
         api_key_override = overrides.get("api_key")
@@ -1097,6 +1166,12 @@ def _coerce_settings(
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged.pop("shared_secret", None)
         merged["sync_service_status"] = _ensure_bool(merged.get("sync_service_status"), True)
+        _env = os.getenv("UPTIMEKUMA_SYNC_SERVICE_STATUS", "").strip()
+        if _env:
+            merged["sync_service_status"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("UPTIMEKUMA_SHARED_SECRET", "").strip()
+        if _env and not merged.get("shared_secret_hash"):
+            merged["shared_secret_hash"] = _hash_secret(_env)
     elif slug == "xero":
         overrides = payload or {}
 
@@ -1169,6 +1244,12 @@ def _coerce_settings(
                 "authorization": authorization,
             }
         )
+        _env = os.getenv("SMS_GATEWAY_URL", "").strip()
+        if _env:
+            merged["gateway_url"] = _env
+        _env = os.getenv("SMS_GATEWAY_AUTH", "").strip()
+        if _env:
+            merged["authorization"] = _env
     elif slug == "m365-admin":
         overrides = payload or {}
         client_secret_override = overrides.get("client_secret")
@@ -1210,6 +1291,12 @@ def _coerce_settings(
                 "phone_system_type": phone_system_type,
             }
         )
+        _env = os.getenv("CALL_RECORDINGS_PATH", "").strip()
+        if _env:
+            merged["recordings_path"] = _env
+        _env = os.getenv("CALL_RECORDINGS_PHONE_SYSTEM", "").strip().lower()
+        if _env and _env in CALL_RECORDINGS_PHONE_SYSTEM_TYPES:
+            merged["phone_system_type"] = _env
     elif slug == "unifi-talk":
         overrides = payload or {}
         password_override = overrides.get("password")
@@ -1231,6 +1318,24 @@ def _coerce_settings(
                 "port": _coerce_int(merged.get("port"), minimum=1, maximum=65535) or 22,
             }
         )
+        _env = os.getenv("UNIFI_TALK_REMOTE_HOST", "").strip()
+        if _env:
+            merged["remote_host"] = _env
+        _env = os.getenv("UNIFI_TALK_PORT", "").strip()
+        if _env and _env.isdigit():
+            merged["port"] = max(1, min(65535, int(_env)))
+        _env = os.getenv("UNIFI_TALK_USERNAME", "").strip()
+        if _env:
+            merged["username"] = _env
+        _env = os.getenv("UNIFI_TALK_PASSWORD", "").strip()
+        if _env:
+            merged["password"] = _env
+        _env = os.getenv("UNIFI_TALK_REMOTE_PATH", "").strip()
+        if _env:
+            merged["remote_path"] = _env
+        _env = os.getenv("UNIFI_TALK_LOCAL_PATH", "").strip()
+        if _env:
+            merged["local_path"] = _env
     elif slug == "password-pusher":
         overrides = payload or {}
         api_key_override = overrides.get("api_key")
@@ -1253,6 +1358,27 @@ def _coerce_settings(
                 "retrieval_step": _ensure_bool(merged.get("retrieval_step"), False),
             }
         )
+        _env = os.getenv("PASSWORD_PUSHER_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("PASSWORD_PUSHER_API_KEY", "").strip()
+        if _env:
+            merged["api_key"] = _env
+        _env = os.getenv("PASSWORD_PUSHER_USER_EMAIL", "").strip()
+        if _env:
+            merged["user_email"] = _env
+        _env = os.getenv("PASSWORD_PUSHER_EXPIRE_AFTER_DAYS", "").strip()
+        if _env and _env.isdigit():
+            merged["expire_after_days"] = max(1, min(90, int(_env)))
+        _env = os.getenv("PASSWORD_PUSHER_EXPIRE_AFTER_VIEWS", "").strip()
+        if _env and _env.isdigit():
+            merged["expire_after_views"] = max(1, min(100, int(_env)))
+        _env = os.getenv("PASSWORD_PUSHER_DELETABLE_BY_VIEWER", "").strip()
+        if _env:
+            merged["deletable_by_viewer"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("PASSWORD_PUSHER_RETRIEVAL_STEP", "").strip()
+        if _env:
+            merged["retrieval_step"] = _env.lower() not in ("false", "0", "no", "off")
     elif slug == "hudu":
         overrides = payload or {}
         api_key_override = overrides.get("api_key")
@@ -1270,6 +1396,12 @@ def _coerce_settings(
                 "api_key": api_key,
             }
         )
+        _env = os.getenv("HUDU_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("HUDU_API_KEY", "").strip()
+        if _env:
+            merged["api_key"] = _env
     elif slug == "solidtime":
         overrides = payload or {}
 
@@ -1322,6 +1454,39 @@ def _coerce_settings(
                 or "/admin/modules/solidtime",
             }
         )
+        _env = os.getenv("SOLIDTIME_BASE_URL", "").strip().rstrip("/")
+        if _env:
+            merged["base_url"] = _env
+        _env = os.getenv("SOLIDTIME_API_TOKEN", "").strip()
+        if _env:
+            merged["api_token"] = _env
+        _env = os.getenv("SOLIDTIME_ORGANIZATION_ID", "").strip()
+        if _env:
+            merged["organization_id"] = _env
+        _env = os.getenv("SOLIDTIME_DEFAULT_CLIENT_ID", "").strip()
+        if _env:
+            merged["default_client_id"] = _env
+        _env = os.getenv("SOLIDTIME_SYNC_TICKETS_TO_PROJECTS", "").strip()
+        if _env:
+            merged["sync_tickets_to_projects"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SOLIDTIME_SYNC_PROJECTS_TO_TICKETS", "").strip()
+        if _env:
+            merged["sync_projects_to_tickets"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SOLIDTIME_SYNC_TIME_ENTRIES_TO_SOLIDTIME", "").strip()
+        if _env:
+            merged["sync_time_entries_to_solidtime"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SOLIDTIME_SYNC_TIME_ENTRIES_FROM_SOLIDTIME", "").strip()
+        if _env:
+            merged["sync_time_entries_from_solidtime"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SOLIDTIME_ONLY_BILLABLE_TO_SOLIDTIME", "").strip()
+        if _env:
+            merged["only_billable_to_solidtime"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SOLIDTIME_LABOUR_TYPE_TO_TASK", "").strip()
+        if _env:
+            merged["labour_type_to_task"] = _env.lower() not in ("false", "0", "no", "off")
+        _env = os.getenv("SOLIDTIME_RATE_LIMIT_PER_MINUTE", "").strip()
+        if _env and _env.isdigit():
+            merged["rate_limit_per_minute"] = max(1, min(600, int(_env)))
     return merged
 
 
@@ -3788,15 +3953,6 @@ async def _validate_xero(
         result["tenant_id"] = str(tenant_id)
 
     return result
-
-
-async def test_module(slug: str) -> dict[str, Any]:
-    try:
-        result = await trigger_module(slug, {}, background=False)
-        return {"status": "ok", "details": result}
-    except Exception as exc:  # pragma: no cover - network dependent
-        logger.warning("Module test failed", slug=slug, error=str(exc))
-        return {"status": "error", "error": str(exc)}
 
 
 def _summarise_event_error(result: Mapping[str, Any]) -> str:
