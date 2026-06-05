@@ -282,7 +282,7 @@ func handleIPCMessages(conn net.Conn) {
 			if chatURL == "" {
 				chatURL = buildChatURL(payload.RoomID)
 			}
-			openBrowser(chatURL)
+			openChatWindow(chatURL, gConfig)
 		case "config_changed":
 			refreshPortalURL()
 			refreshDeviceUID()

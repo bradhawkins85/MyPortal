@@ -56,7 +56,7 @@ def test_module_enable_checkbox_sets_true(super_admin_context, monkeypatch):
         )
 
     assert response.status_code == 303
-    assert calls == [("ollama", True, {})]
+    assert calls == [("ollama", True, None)]
 
 
 def test_module_enable_checkbox_absent_sets_false(super_admin_context, monkeypatch):
@@ -75,4 +75,68 @@ def test_module_enable_checkbox_absent_sets_false(super_admin_context, monkeypat
         )
 
     assert response.status_code == 303
-    assert calls == [("smtp", False, {})]
+    assert calls == [("smtp", False, None)]
+
+
+def test_modules_page_renders_manage_button_from_module_manage_url(super_admin_context, monkeypatch):
+    async def fake_list_modules():
+        return [
+            {
+                "slug": "matrix-chat-auto-assign",
+                "name": "Matrix Chat Auto-Assign",
+                "description": "Auto-assign Matrix chat rooms to technicians.",
+                "enabled": True,
+                "settings": {"manage_url": "/admin/matrix-chat/auto-assign"},
+            },
+            {
+                "slug": "smtp",
+                "name": "Send Email",
+                "description": "Send email notifications.",
+                "enabled": True,
+                "settings": {},
+            },
+            {
+                "slug": "external-link-module",
+                "name": "External Link Module",
+                "description": "Should not render external manage link.",
+                "enabled": True,
+                "settings": {"manage_url": "https://example.com/manage"},
+            },
+        ]
+
+    monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/modules")
+
+    assert response.status_code == 200
+    assert 'href="/admin/matrix-chat/auto-assign"' in response.text
+    assert ">Manage</a>" in response.text
+    assert 'href="https://example.com/manage"' not in response.text
+
+
+def test_modules_page_renders_module_quick_actions_and_helpers(super_admin_context, monkeypatch):
+    async def fake_list_modules():
+        return [
+            {"slug": "syncro", "name": "Syncro", "description": "", "enabled": True, "settings": {}},
+            {"slug": "tacticalrmm", "name": "Tactical RMM", "description": "", "enabled": True, "settings": {}},
+            {"slug": "smtp2go", "name": "SMTP2Go", "description": "", "enabled": True, "settings": {}},
+            {"slug": "trello", "name": "Trello", "description": "", "enabled": True, "settings": {}},
+            {"slug": "uptimekuma", "name": "Uptime Kuma", "description": "", "enabled": True, "settings": {}},
+            {"slug": "xero", "name": "Xero", "description": "", "enabled": True, "settings": {}},
+        ]
+
+    monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/modules")
+
+    assert response.status_code == 200
+    assert 'action="/admin/syncro/import-companies"' in response.text
+    assert 'action="/admin/modules/tacticalrmm/push-companies"' in response.text
+    assert 'action="/admin/modules/tacticalrmm/pull-companies"' in response.text
+    assert "/api/webhooks/smtp2go/events" in response.text
+    assert "/api/integration-modules/trello/webhook" in response.text
+    assert "/api/integration-modules/uptimekuma/alerts" in response.text
+    assert "/api/integration-modules/xero/callback" in response.text
+    assert 'href="/api/integration-modules/xero/tenants"' in response.text

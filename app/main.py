@@ -7658,27 +7658,20 @@ async def _render_modules_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
-    uptimekuma_webhook_url = str(request.url_for("uptimekuma_receive_alert").replace(scheme="https"))
-    trello_webhook_url = str(request.url_for("trello_webhook_receive").replace(scheme="https"))
-    # Build the Xero OAuth redirect/callback URL so it matches what the app
-    # actually sends to Xero during the OAuth flow. Prefer the configured
-    # PORTAL_URL (which already includes the correct https scheme) and fall
-    # back to the incoming request URL forced to https so the value shown to
-    # admins is never http when the app is reverse-proxied behind TLS.
-    xero_callback_url = _build_xero_redirect_uri()
-    if xero_callback_url.startswith("/"):
-        xero_callback_url = str(
-            request.url_for("xero_callback").replace(scheme="https")
-        )
-    from app.services import huntress as huntress_service
-    huntress_credentials = huntress_service.credentials_status()
+    public_base = str(settings.public_base_url or "").strip().rstrip("/")
+    if not public_base:
+        public_base = str(request.base_url).rstrip("/")
+
+    module_webhook_urls = {
+        "smtp2go": f"{public_base}/api/webhooks/smtp2go/events",
+        "trello": f"{public_base}/api/integration-modules/trello/webhook",
+        "uptimekuma": f"{public_base}/api/integration-modules/uptimekuma/alerts",
+        "xero": f"{public_base}/api/integration-modules/xero/callback",
+    }
     extra = {
         "title": "Integration modules",
         "modules": modules,
-        "uptimekuma_webhook_url": uptimekuma_webhook_url,
-        "trello_webhook_url": trello_webhook_url,
-        "xero_callback_url": xero_callback_url,
-        "huntress_credentials": huntress_credentials,
+        "module_webhook_urls": module_webhook_urls,
         "success_message": success_message,
         "error_message": error_message,
     }
@@ -7748,27 +7741,14 @@ async def admin_update_module(slug: str, request: Request):
             enabled = raw_enabled.strip().lower() not in {"", "0", "false", "off"}
         else:
             enabled = bool(raw_enabled)
-    settings: dict[str, Any] = {}
-    for key, value in form.multi_items():
-        if not key.startswith("settings."):
-            continue
-        field = key.split(".", 1)[1]
-        if field in settings:
-            existing = settings[field]
-            if isinstance(existing, list):
-                existing.append(value)
-            else:
-                settings[field] = [existing, value]
-        else:
-            settings[field] = value
     try:
-        await modules_service.update_module(slug, enabled=enabled, settings=settings)
+        await modules_service.update_module(slug, enabled=enabled)
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to update integration module", slug=slug, error=str(exc))
         return await _render_modules_dashboard(
             request,
             current_user,
-            error_message="Unable to update module configuration. Please verify the settings.",
+            error_message="Unable to update module. Please try again.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     return flash_redirect("/admin/modules", f"Module {slug} updated.", "success")
@@ -7781,22 +7761,6 @@ def _form_bool(form: Mapping[str, Any], key: str) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "off"}
     return bool(value)
-@app.post("/admin/modules/{slug}/test", response_class=HTMLResponse)
-async def admin_test_module(slug: str, request: Request):
-    current_user, redirect = await _require_super_admin_page(request)
-    if redirect:
-        return redirect
-    result = await modules_service.test_module(slug)
-    if result.get("status") == "error":
-        return flash_redirect("/admin/modules", result.get("error") or "Module test failed.", "error")
-    success_message = "Module test succeeded."
-    if slug == "xero":
-        details = result.get("details")
-        if isinstance(details, Mapping):
-            tenant_id = details.get("discovered_tenant_id") or details.get("tenant_id")
-            if tenant_id:
-                success_message += f" Tenant ID: {tenant_id}"
-    return flash_redirect("/admin/modules", success_message, "success")
 
 
 @app.get("/login", response_class=HTMLResponse)
