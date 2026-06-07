@@ -1077,6 +1077,7 @@ feature_registry = init_registry(app)
 
 HELPDESK_PERMISSION_KEY = tickets_service.HELPDESK_PERMISSION_KEY
 ISSUE_TRACKER_PERMISSION_KEY = issues_service.ISSUE_TRACKER_PERMISSION_KEY
+MARKETING_PERMISSION_KEY = "marketing.access"
 
 # Search configuration
 _PHONE_SEARCH_LIMIT = 100
@@ -1174,6 +1175,33 @@ async def _has_issue_tracker_access(user: Mapping[str, Any], request: Request | 
             result = any(bool(assignment.get("can_manage_issues")) for assignment in assignments)
     if request is not None:
         request.state.has_issue_tracker_access = bool(result)
+    return bool(result)
+
+
+async def _has_marketing_access(user: Mapping[str, Any], request: Request | None = None) -> bool:
+    if user.get("is_super_admin"):
+        if request is not None:
+            request.state.has_marketing_access = True
+        return True
+    if request is not None:
+        cached = getattr(request.state, "has_marketing_access", None)
+        if cached is not None:
+            return bool(cached)
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        result = False
+    else:
+        try:
+            result = await membership_repo.user_has_permission(
+                user_id_int, MARKETING_PERMISSION_KEY
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            log_error("Failed to determine marketing access", error=str(exc))
+            result = False
+    if request is not None:
+        request.state.has_marketing_access = bool(result)
     return bool(result)
 
 
@@ -1749,6 +1777,7 @@ async def _build_base_context(
     staff_permission_level = int(membership_data.get("staff_permission") or 0)
     is_helpdesk_technician = await _is_helpdesk_technician(user, request)
     has_issue_tracker_access = await _has_issue_tracker_access(user, request)
+    has_marketing_access = await _has_marketing_access(user, request)
 
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
@@ -1790,6 +1819,7 @@ async def _build_base_context(
         "can_view_m365_user_mailboxes": is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
         "can_view_m365_shared_mailboxes": is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
         "can_access_chat": is_super_admin or _has_permission("can_access_chat"),
+        "can_access_marketing": has_marketing_access,
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1948,6 +1978,7 @@ async def _build_public_context(
         "can_view_m365_user_mailboxes": False,
         "can_view_m365_shared_mailboxes": False,
         "can_access_chat": False,
+        "can_access_marketing": False,
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,

@@ -147,15 +147,15 @@ class Settings(BaseSettings):
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     feature_packs: str = Field(
-        default="tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,cart,orders,staff,message_templates,plausible,smtp,sms_gateway,imap,password_pusher,solidtime,trello,huntress,hudu,m365_mail,m365_admin,reprocess_ai,xero,tacticalrmm,syncro,uptimekuma,chatgpt_mcp,ollama,ntfy,matrix_chat_assign",
+        default="tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,cart,orders,staff,message_templates,plausible,smtp,sms_gateway,imap,password_pusher,solidtime,trello,huntress,hudu,m365_mail,m365_admin,reprocess_ai,xero,tacticalrmm,syncro,uptimekuma,chatgpt_mcp,ollama,ntfy,matrix_chat_assign,marketing",
         validation_alias="FEATURE_PACKS",
         description=(
             "Comma-separated list of feature pack slugs (subpackages of "
             "``app.features``) to load on startup.  Each pack can be "
             "hot-reloaded via ``POST /api/features/{slug}/reload``.  "
-            "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,cart,orders,staff,message_templates,plausible,smtp,sms_gateway,imap,password_pusher,solidtime,trello,huntress,hudu,m365_mail,m365_admin,reprocess_ai,xero,tacticalrmm,syncro,uptimekuma,chatgpt_mcp,ollama,ntfy,matrix_chat_assign' "
+            "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,cart,orders,staff,message_templates,plausible,smtp,sms_gateway,imap,password_pusher,solidtime,trello,huntress,hudu,m365_mail,m365_admin,reprocess_ai,xero,tacticalrmm,syncro,uptimekuma,chatgpt_mcp,ollama,ntfy,matrix_chat_assign,marketing' "
             "because the ticket, service-status, notifications, knowledge-base, "
-            "chat, assets, automations, reports, reporting, backups, issue-tracker, webhooks, shop, quotes, invoices, compliance, continuity, help, subscriptions, companies, API keys, call recordings, cart, orders, staff, message templates, Plausible, SMTP, SMS Gateway, IMAP, Password Pusher, Solidtime, Trello, Huntress, Hudu, M365 Mail, M365 Admin, Reprocess AI, Xero, TacticalRMM, Syncro, Uptime Kuma, ChatGPT MCP, Ollama, ntfy, and Matrix Chat Auto-Assign integrations all live in those packs; set to an empty string "
+            "chat, assets, automations, reports, reporting, backups, issue-tracker, webhooks, shop, quotes, invoices, compliance, continuity, help, subscriptions, companies, API keys, call recordings, cart, orders, staff, message templates, Plausible, SMTP, SMS Gateway, IMAP, Password Pusher, Solidtime, Trello, Huntress, Hudu, M365 Mail, M365 Admin, Reprocess AI, Xero, TacticalRMM, Syncro, Uptime Kuma, ChatGPT MCP, Ollama, ntfy, Matrix Chat Auto-Assign, and Marketing integrations all live in those packs; set to an empty string "
             "to disable all packs (those routes will then 404)."
         ),
     )
