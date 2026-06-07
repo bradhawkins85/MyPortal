@@ -1057,6 +1057,88 @@ async def place_order(request: Request) -> RedirectResponse:
             error=str(exc),
         )
 
+    try:
+        def _normalize_price(value: Any) -> Decimal:
+            try:
+                return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            except (InvalidOperation, TypeError, ValueError):
+                return Decimal("0.00")
+
+        line_items: list[str] = []
+        order_total = Decimal("0.00")
+        for index, item in enumerate(items, start=1):
+            quantity = int(item.get("quantity") or 0)
+            unit_price = _normalize_price(item.get("unit_price"))
+            line_total = (unit_price * quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            order_total += line_total
+            line_items.append(
+                (
+                    f"{index}. {item.get('product_name') or 'Unnamed product'}"
+                    f" | Product ID: {item.get('product_id')}"
+                    f" | SKU: {item.get('product_sku') or 'N/A'}"
+                    f" | Vendor SKU: {item.get('product_vendor_sku') or 'N/A'}"
+                    f" | Quantity: {quantity}"
+                    f" | Unit price: ${unit_price}"
+                    f" | Line total: ${line_total}"
+                )
+            )
+
+        shipping_label = {
+            "address_on_file": "Address on file",
+            "specific_address": "Specific address",
+            "local_pickup": "Local pickup",
+        }.get(shipping_option, shipping_option)
+
+        description_lines = [
+            "## Cart Order Submitted",
+            "",
+            f"- Order number: {order_number}",
+            f"- Company ID: {company_id}",
+            f"- User ID: {user.get('id')}",
+            f"- PO number: {po_number or 'Not provided'}",
+            f"- Shipping option: {shipping_label}",
+            f"- Order total: ${order_total}",
+            "",
+            "### Items",
+            *line_items,
+        ]
+        if shipping_option == "specific_address":
+            description_lines.extend(
+                [
+                    "",
+                    "### Shipping address",
+                    f"- Street: {shipping_street or ''}",
+                    f"- City: {shipping_city or ''}",
+                    f"- State: {shipping_state or ''}",
+                    f"- Postcode: {shipping_postcode or ''}",
+                    f"- Country: {shipping_country or ''}",
+                ]
+            )
+
+        resolved_ticket_status = await main_module.tickets_service.resolve_status_or_default(None)
+        ticket_description_html = main_module.sanitize_rich_text("\n".join(description_lines)).html
+        await main_module.tickets_service.create_ticket(
+            subject=f"Cart order {order_number} requires processing",
+            description=ticket_description_html,
+            requester_id=int(user["id"]),
+            company_id=company_id,
+            assigned_user_id=None,
+            priority="normal",
+            status=resolved_ticket_status,
+            category="shop-order",
+            module_slug="shop",
+            external_reference=order_number,
+            trigger_automations=True,
+            initial_reply_author_id=int(user["id"]),
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        main_module.log_error(
+            "Order placed but failed to create cart order ticket; review order in shop admin and create follow-up ticket manually",
+            order_number=order_number,
+            company_id=company_id,
+            error=str(exc),
+        )
+
     success = quote("Your order is being processed.")
     return RedirectResponse(
         url=f"{request.url_for('cart_page')}?orderMessage={success}",
