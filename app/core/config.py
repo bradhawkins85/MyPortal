@@ -181,6 +181,9 @@ class Settings(BaseSettings):
     enable_auto_refresh: bool = Field(
         default=False, validation_alias="ENABLE_AUTO_REFRESH"
     )
+    force_env_module_settings: bool = Field(
+        default=False, validation_alias="FORCE_ENV_MODULE_SETTINGS"
+    )
     disable_caching: bool = Field(
         default=True, validation_alias="DISABLE_CACHING"
     )
@@ -402,6 +405,7 @@ class Settings(BaseSettings):
         "smtp_use_tls",
         "enable_csrf",
         "enable_auto_refresh",
+        "force_env_module_settings",
         "disable_caching",
         "bcp_enabled",
         "enable_hsts",

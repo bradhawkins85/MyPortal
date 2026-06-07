@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from time import monotonic
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 from urllib.parse import urlparse
 
 from app.core.logging import log_error, log_info
-from app.repositories import integration_modules as module_repo
 from app.services import modules as modules_service
-from app.services.modules import _coerce_settings
 
 
 class TacticalRMMConfigurationError(RuntimeError):
@@ -47,20 +44,10 @@ async def _load_settings() -> dict[str, Any]:
         now = monotonic()
         if _MODULE_SETTINGS_CACHE and now < _MODULE_SETTINGS_EXPIRY:
             return _MODULE_SETTINGS_CACHE
-        module = await module_repo.get_module("tacticalrmm")
+        module = await modules_service.get_module("tacticalrmm", redact=False)
         if not module:
             raise TacticalRMMConfigurationError("Tactical RMM module is not configured")
-        raw_settings: Mapping[str, Any] | None
-        if isinstance(module.get("settings"), Mapping):
-            raw_settings = module["settings"]  # type: ignore[index]
-        else:
-            raw_settings = None
-            if isinstance(module.get("settings"), str):
-                try:
-                    raw_settings = json.loads(module["settings"])  # type: ignore[index]
-                except json.JSONDecodeError:
-                    raw_settings = None
-        settings = _coerce_settings("tacticalrmm", raw_settings, module)
+        settings = module.get("settings") or {}
         base_url = _clean_text(settings.get("base_url"))
         api_key = _clean_text(settings.get("api_key"))
         if not base_url:

@@ -13,7 +13,7 @@ import httpx
 from loguru import logger
 
 from app.repositories import call_recordings as call_recordings_repo
-from app.repositories import integration_modules as modules_repo
+from app.services import modules as modules_service
 from app.services import webhook_monitor
 
 
@@ -1081,7 +1081,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         return recording
 
     # Get WhisperX module settings
-    module = await modules_repo.get_module("whisperx")
+    module = await modules_service.get_module("whisperx", redact=False)
     if not module or not module.get("enabled"):
         logger.warning("WhisperX module not enabled")
         await call_recordings_repo.update_call_recording(
@@ -1162,7 +1162,9 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         # Grandstream UCM (which records each participant on a separate channel).
         stereo_split = settings.get("stereo_split", False)
         if not stereo_split:
-            call_recordings_module = await modules_repo.get_module("call-recordings")
+            call_recordings_module = await modules_service.get_module(
+                "call-recordings", redact=False
+            )
             if call_recordings_module:
                 cr_settings = call_recordings_module.get("settings", {})
                 if _normalize_phone_system_type(cr_settings.get("phone_system_type")) == PHONE_SYSTEM_GRANDSTREAM_UCM:
@@ -1466,7 +1468,7 @@ async def summarize_transcription(transcription: str) -> str:
         return "No transcription available to summarize."
 
     # Get Ollama module settings
-    module = await modules_repo.get_module("ollama")
+    module = await modules_service.get_module("ollama", redact=False)
     if not module or not module.get("enabled"):
         logger.warning("Ollama module not enabled for summarization")
         return transcription[:500] + ("..." if len(transcription) > 500 else "")

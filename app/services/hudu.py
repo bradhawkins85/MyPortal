@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from app.core.logging import log_error, log_info
-from app.repositories import integration_modules as module_repo
+from app.services import modules as modules_service
 
 
 class HuduConfigurationError(Exception):
@@ -16,7 +16,7 @@ class HuduConfigurationError(Exception):
 
 async def _load_settings() -> dict[str, Any]:
     """Load and validate Hudu module settings."""
-    module = await module_repo.get_module("hudu")
+    module = await modules_service.get_module("hudu", redact=False)
     if not module:
         raise HuduConfigurationError("Hudu module is not configured")
     if not module.get("enabled"):
