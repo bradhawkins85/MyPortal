@@ -657,6 +657,7 @@ async def view_cart(
         "low_stock_threshold": main_module.SHOP_LOW_STOCK_THRESHOLD,
         "payment_method": (company.get("payment_method") or "invoice_prepay") if company else "invoice_prepay",
         "require_po": bool(company.get("require_po")) if company else False,
+        "company_address": (company.get("address") or "").strip() if company else "",
     }
     response = await main_module._render_template("shop/cart.html", request, user, extra=extra)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -906,6 +907,37 @@ async def place_order(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    _valid_shipping_options = {"address_on_file", "specific_address", "local_pickup"}
+    shipping_option_raw = form.get("shippingOption")
+    shipping_option = str(shipping_option_raw).strip() if shipping_option_raw else "address_on_file"
+    if shipping_option not in _valid_shipping_options:
+        shipping_option = "address_on_file"
+
+    shipping_street: str | None = None
+    shipping_city: str | None = None
+    shipping_state: str | None = None
+    shipping_postcode: str | None = None
+    shipping_country: str | None = None
+
+    if shipping_option == "specific_address":
+        def _get_field(name: str, max_len: int) -> str | None:
+            raw = form.get(name)
+            value = str(raw).strip() if raw is not None else ""
+            return value[:max_len] if value else None
+
+        shipping_street = _get_field("shippingStreet", 255)
+        shipping_city = _get_field("shippingCity", 100)
+        shipping_state = _get_field("shippingState", 100)
+        shipping_postcode = _get_field("shippingPostcode", 20)
+        shipping_country = _get_field("shippingCountry", 100)
+
+        if not shipping_street:
+            message = quote("A street address is required for the shipping address.")
+            return RedirectResponse(
+                url=f"{request.url_for('cart_page')}?orderMessage={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
     items = await main_module.cart_repo.list_items(session.id)
     if not items:
         return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
@@ -914,6 +946,17 @@ async def place_order(request: Request) -> RedirectResponse:
 
     if main_module.settings.shop_webhook_url and main_module.settings.shop_webhook_api_key:
         try:
+            shipping_payload: dict[str, Any] = {"option": shipping_option}
+            if shipping_option == "specific_address":
+                shipping_payload.update(
+                    {
+                        "street": shipping_street,
+                        "city": shipping_city,
+                        "state": shipping_state,
+                        "postcode": shipping_postcode,
+                        "country": shipping_country,
+                    }
+                )
             await main_module.webhook_monitor.enqueue_event(
                 name="shop-order",
                 target_url=str(main_module.settings.shop_webhook_url),
@@ -932,6 +975,7 @@ async def place_order(request: Request) -> RedirectResponse:
                     "poNumber": po_number,
                     "orderNumber": order_number,
                     "companyId": company_id,
+                    "shipping": shipping_payload,
                 },
                 headers={
                     "x-api-key": main_module.settings.shop_webhook_api_key,
@@ -954,6 +998,12 @@ async def place_order(request: Request) -> RedirectResponse:
                 order_number=order_number,
                 status="pending",
                 po_number=po_number,
+                shipping_option=shipping_option,
+                shipping_street=shipping_street,
+                shipping_city=shipping_city,
+                shipping_state=shipping_state,
+                shipping_postcode=shipping_postcode,
+                shipping_country=shipping_country,
             )
         except ValueError as exc:
             message = quote(str(exc))

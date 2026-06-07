@@ -114,15 +114,15 @@
           <dl class="cart-summary__totals">
             <div>
               <dt>Subtotal</dt>
-              <dd>${{ '%.2f'|format(cart_subtotal) }}</dd>
+              <dd id="cart-subtotal-amount" data-value="{{ cart_subtotal }}">${{ '%.2f'|format(cart_subtotal) }}</dd>
             </div>
-            <div>
+            <div data-freight-row>
               <dt>Freight</dt>
-              <dd>${{ '%.2f'|format(freight_total) }}</dd>
+              <dd><span data-freight-amount>${{ '%.2f'|format(freight_total) }}</span></dd>
             </div>
             <div>
               <dt>Total</dt>
-              <dd>${{ '%.2f'|format(cart_total) }}</dd>
+              <dd id="cart-total-amount">${{ '%.2f'|format(cart_total) }}</dd>
             </div>
           </dl>
         </div>
@@ -140,6 +140,96 @@
             <p class="form-help">A purchase order number is required to place an order.</p>
           {% endif %}
         </div>
+        <fieldset class="form__fieldset" id="shipping-option-fieldset">
+          <legend class="form-label">Shipping</legend>
+          <div class="form-field form-field--radio">
+            <label class="radio-label">
+              <input
+                type="radio"
+                name="shippingOption"
+                value="address_on_file"
+                checked
+                data-shipping-option
+              />
+              Ship to address on file{% if company_address %}: <span class="text-muted">{{ company_address }}</span>{% else %} <span class="text-muted">(no address on file)</span>{% endif %}
+            </label>
+          </div>
+          <div class="form-field form-field--radio">
+            <label class="radio-label">
+              <input
+                type="radio"
+                name="shippingOption"
+                value="specific_address"
+                data-shipping-option
+              />
+              Ship to a specific address
+            </label>
+          </div>
+          <div class="form-field form-field--radio">
+            <label class="radio-label">
+              <input
+                type="radio"
+                name="shippingOption"
+                value="local_pickup"
+                data-shipping-option
+              />
+              Local pickup <span class="text-muted">(no freight charge)</span>
+            </label>
+          </div>
+          <div id="specific-address-fields" class="form__fieldset-body" hidden>
+            <div class="form-field">
+              <label class="form-label" for="shipping-street">Street address <span class="text-danger">*</span></label>
+              <input
+                class="form-input"
+                id="shipping-street"
+                name="shippingStreet"
+                maxlength="255"
+                placeholder="Street address"
+                data-specific-address-required
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="shipping-city">City / suburb</label>
+              <input
+                class="form-input"
+                id="shipping-city"
+                name="shippingCity"
+                maxlength="100"
+                placeholder="City or suburb"
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="shipping-state">State</label>
+              <input
+                class="form-input"
+                id="shipping-state"
+                name="shippingState"
+                maxlength="100"
+                placeholder="State"
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="shipping-postcode">Postcode</label>
+              <input
+                class="form-input"
+                id="shipping-postcode"
+                name="shippingPostcode"
+                maxlength="20"
+                placeholder="Postcode"
+              />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="shipping-country">Country</label>
+              <input
+                class="form-input"
+                id="shipping-country"
+                name="shippingCountry"
+                maxlength="100"
+                placeholder="Country"
+              />
+            </div>
+          </div>
+        </fieldset>
         <div class="form-actions">
           {% if 'stripe' in payment_methods %}
             <button type="button" class="button" disabled title="Stripe payments are not yet configured">Pay with Stripe (coming soon)</button>
@@ -302,4 +392,57 @@
   <script type="application/json" id="cart-items-data">{{ cart_items_payload | tojson }}</script>
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/cart.js') }}" defer></script>
+  <script>
+    (function () {
+      var freightTotal = {{ freight_total | tojson }};
+      var subtotalEl = document.getElementById('cart-subtotal-amount');
+      var cartSubtotal = subtotalEl ? parseFloat(subtotalEl.dataset.value || '0') : 0;
+
+      function updateShippingUI() {
+        var selected = document.querySelector('[data-shipping-option]:checked');
+        if (!selected) return;
+        var option = selected.value;
+
+        var specificFields = document.getElementById('specific-address-fields');
+        var requiredInputs = document.querySelectorAll('[data-specific-address-required]');
+        var freightRows = document.querySelectorAll('[data-freight-row]');
+        var totalEl = document.getElementById('cart-total-amount');
+
+        if (specificFields) {
+          specificFields.hidden = option !== 'specific_address';
+          requiredInputs.forEach(function (input) {
+            if (option === 'specific_address') {
+              input.setAttribute('required', '');
+            } else {
+              input.removeAttribute('required');
+            }
+          });
+        }
+
+        if (freightRows.length) {
+          freightRows.forEach(function (row) {
+            var amountEl = row.querySelector('[data-freight-amount]');
+            if (option === 'local_pickup') {
+              row.classList.add('text-muted');
+              if (amountEl) amountEl.textContent = '$0.00';
+            } else {
+              row.classList.remove('text-muted');
+              if (amountEl) amountEl.textContent = '$' + freightTotal.toFixed(2);
+            }
+          });
+        }
+
+        if (totalEl) {
+          var freight = option === 'local_pickup' ? 0 : freightTotal;
+          totalEl.textContent = '$' + (cartSubtotal + freight).toFixed(2);
+        }
+      }
+
+      document.querySelectorAll('[data-shipping-option]').forEach(function (radio) {
+        radio.addEventListener('change', updateShippingUI);
+      });
+
+      updateShippingUI();
+    })();
+  </script>
 {% endblock %}
