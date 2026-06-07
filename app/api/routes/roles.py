@@ -142,6 +142,7 @@ async def list_available_permissions(
         "m365_best_practices.access",
         "m365_shared_mailboxes.access",
         "m365_user_mailboxes.access",
+        "marketing.access",
         "membership.manage",
         "office_groups.manage",
         "orders.access",

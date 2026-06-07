@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ marketing_page.title }}</title>
+  <link rel="stylesheet" href="{{ static_url('/static/css/app.css') }}" />
+  <style>
+    .marketing-shell { max-width: 1100px; margin: 0 auto; padding: 2rem 1rem 3rem; }
+    .marketing-header { margin-bottom: 1.5rem; }
+    .marketing-title { margin: 0; font-size: clamp(1.8rem, 3vw, 2.6rem); }
+    .marketing-subtitle { margin: .5rem 0 0; color: var(--muted-foreground); }
+    .marketing-intro { margin-top: 1rem; max-width: 80ch; }
+    .marketing-menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin: 1.5rem 0 2rem; }
+    .marketing-menu__card { display: block; border: 1px solid var(--border-color); border-radius: 12px; padding: .85rem 1rem; text-decoration: none; color: inherit; background: var(--surface-secondary); transition: border-color .15s ease, transform .15s ease; }
+    .marketing-menu__card:hover { border-color: var(--accent-color); transform: translateY(-1px); }
+    .marketing-section { border: 1px solid var(--border-color); border-radius: 12px; padding: 1.1rem; background: var(--surface-primary); margin-top: 1rem; }
+    .marketing-section h2 { margin-top: 0; }
+    .marketing-form { margin-top: 2rem; }
+    .marketing-form .form-grid { gap: .9rem; }
+    .marketing-form .form-actions { margin-top: .5rem; }
+    .marketing-form__secondary { margin-top: .5rem; display: none; }
+    .marketing-form__secondary.is-visible { display: block; }
+  </style>
+</head>
+<body>
+  <main class="marketing-shell">
+    <header class="marketing-header">
+      <h1 class="marketing-title">{{ marketing_page.title }}</h1>
+      {% if marketing_page.subtitle %}
+        <p class="marketing-subtitle">{{ marketing_page.subtitle }}</p>
+      {% endif %}
+      {% if marketing_page.intro_text %}
+        <p class="marketing-intro">{{ marketing_page.intro_text }}</p>
+      {% endif %}
+    </header>
+
+    {% if success_message %}
+      <div class="alert alert--success" role="status">{{ success_message }}</div>
+    {% endif %}
+    {% if error_message %}
+      <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+    {% endif %}
+
+    {% if marketing_page.sections %}
+      <nav class="marketing-menu" aria-label="Page sections">
+        {% for section in marketing_page.sections %}
+          <a class="marketing-menu__card" href="#{{ section.anchor_slug }}">{{ section.title }}</a>
+        {% endfor %}
+      </nav>
+
+      {% for section in marketing_page.sections %}
+        <section id="{{ section.anchor_slug }}" class="marketing-section">
+          <h2>{{ section.title }}</h2>
+          <p>{{ section.content_text }}</p>
+        </section>
+      {% endfor %}
+    {% endif %}
+
+    <section class="marketing-section marketing-form" id="contact">
+      <h2>Contact us</h2>
+      <p class="text-muted">Tell us what you need and our technicians will reach out.</p>
+      <form method="post" action="/marketing/{{ marketing_page.slug }}/contact" class="form-grid">
+        <div class="form-field">
+          <label class="form-label" for="marketing-name">Name</label>
+          <input id="marketing-name" class="form-input" name="name" value="{{ form_values.name }}" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="marketing-email">Email</label>
+          <input id="marketing-email" class="form-input" type="email" name="email" value="{{ form_values.email }}" required />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="marketing-phone">Phone</label>
+          <input id="marketing-phone" class="form-input" name="phone" value="{{ form_values.phone }}" />
+        </div>
+        <label class="checkbox">
+          <input type="checkbox" id="allow-marketing" name="allow_marketing" value="1" {% if form_values.allow_marketing %}checked{% endif %} />
+          <span>I agree to receiving marketing materials.</span>
+        </label>
+        <label class="checkbox marketing-form__secondary{% if form_values.allow_marketing %} is-visible{% endif %}" id="allow-other-services-wrap">
+          <input type="checkbox" id="allow-other-services" name="allow_other_services" value="1" {% if form_values.allow_other_services %}checked{% endif %} />
+          <span>I also want details about other products or services.</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="button">Submit</button>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const marketingToggle = document.getElementById('allow-marketing');
+      const otherWrap = document.getElementById('allow-other-services-wrap');
+      const otherBox = document.getElementById('allow-other-services');
+      if (!marketingToggle || !otherWrap || !otherBox) return;
+      const sync = () => {
+        const enabled = !!marketingToggle.checked;
+        otherWrap.classList.toggle('is-visible', enabled);
+        if (!enabled) otherBox.checked = false;
+      };
+      marketingToggle.addEventListener('change', sync);
+      sync();
+    })();
+  </script>
+</body>
+</html>
