@@ -175,5 +175,37 @@ _add(
     response_class=HTMLResponse,
 )
 
+# Per-company ticket intake questions
+_add(
+    "/admin/companies/{company_id}/tray/ticket-questions/new",
+    handlers.admin_company_ticket_question_new_page,
+    ["GET"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/tray/ticket-questions/new",
+    handlers.admin_company_ticket_question_create,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/tray/ticket-questions/{question_id}/edit",
+    handlers.admin_company_ticket_question_edit_page,
+    ["GET"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/tray/ticket-questions/{question_id}/edit",
+    handlers.admin_company_ticket_question_update,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/tray/ticket-questions/{question_id}/delete",
+    handlers.admin_company_ticket_question_delete,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+
 
 __all__ = ["router"]

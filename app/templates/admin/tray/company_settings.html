@@ -159,5 +159,73 @@ sudo installer -pkg /tmp/myportal-tray.pkg -target /</code></pre>
     </div>
   </section>
 
+  {# ── Ticket intake questions ─────────────────────────────────────── #}
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header">
+      <h2 class="card__title">Ticket intake questions</h2>
+      <p class="card__subtitle">
+        Questions shown only to devices enrolled under <strong>{{ company.name }}</strong>
+        when they submit a ticket via the tray icon. Global questions are managed separately
+        under <a href="/admin/tray/ticket-questions">Tray → Ticket questions</a>.
+      </p>
+    </header>
+    <div class="card__body card__body--stacked">
+      <div class="card__body--table">
+        {% if company_questions %}
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Label</th><th>Type</th><th>Required</th><th>Order</th><th>Status</th>
+                <th class="data-table__col--actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for q in company_questions %}
+                <tr>
+                  <td><strong>{{ q.label }}</strong></td>
+                  <td>{{ q.field_type | capitalize }}</td>
+                  <td>
+                    {% if q.is_required %}
+                      <span class="status status--danger">Required</span>
+                    {% else %}
+                      <span class="status status--neutral">Optional</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ q.sort_order }}</td>
+                  <td>
+                    {% if q.is_active %}
+                      <span class="status status--success">Active</span>
+                    {% else %}
+                      <span class="status status--neutral">Inactive</span>
+                    {% endif %}
+                  </td>
+                  <td class="data-table__col--actions">
+                    <a href="/admin/companies/{{ company.id }}/tray/ticket-questions/{{ q.id }}/edit"
+                       class="button button--small">Edit</a>
+                    <form method="post"
+                          action="/admin/companies/{{ company.id }}/tray/ticket-questions/{{ q.id }}/delete"
+                          class="inline-form">
+                      {% include "partials/csrf.html" %}
+                      <button type="submit" class="button button--small button--danger"
+                              data-confirm="Delete this question?">Delete</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty-state">
+            <p>No company-specific questions yet.</p>
+          </div>
+        {% endif %}
+      </div>
+      <div class="card__footer">
+        <a href="/admin/companies/{{ company.id }}/tray/ticket-questions/new"
+           class="button button--primary">Add question</a>
+      </div>
+    </div>
+  </section>
+
 </div>
 {% endblock %}
