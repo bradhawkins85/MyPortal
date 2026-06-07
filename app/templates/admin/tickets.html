@@ -98,92 +98,106 @@
       <div class="management__body" data-ticket-view-manager>
         <div class="ticket-dashboard__overview">
           <!-- Filters and Controls Container -->
-          <div class="ticket-filters">
-            <!-- View Management Section -->
-            <div class="ticket-filters__section">
-              <h3 class="ticket-filters__section-title">Saved Views</h3>
-              <div class="ticket-filters__view-controls">
-                <div class="ticket-filters__view-selector">
-                  <label class="form-label" for="ticket-view-select">Select saved view</label>
-                  <select id="ticket-view-select" class="form-input" data-view-select>
-                    <option value="">Select a view...</option>
+          <aside class="ticket-filters-panel" data-ticket-filters-panel>
+            <button
+              type="button"
+              class="button button--ghost button--compact ticket-filters-panel__toggle"
+              data-ticket-filters-toggle
+              aria-expanded="true"
+              aria-controls="ticket-filters"
+              aria-label="Collapse filters panel"
+              title="Collapse filters panel"
+            >
+              <span class="ticket-filters-panel__toggle-icon" aria-hidden="true"></span>
+              <span data-ticket-filters-toggle-text>Hide filters</span>
+            </button>
+            <div class="ticket-filters" id="ticket-filters">
+              <!-- View Management Section -->
+              <div class="ticket-filters__section">
+                <h3 class="ticket-filters__section-title">Saved Views</h3>
+                <div class="ticket-filters__view-controls">
+                  <div class="ticket-filters__view-selector">
+                    <label class="form-label" for="ticket-view-select">Select saved view</label>
+                    <select id="ticket-view-select" class="form-input" data-view-select>
+                      <option value="">Select a view...</option>
+                    </select>
+                  </div>
+                  <div class="ticket-filters__view-actions">
+                    <button type="button" class="button button--ghost button--compact" data-save-view title="Save current view">
+                      Save View
+                    </button>
+                    <button type="button" class="button button--ghost button--compact" data-delete-view title="Delete current view">
+                      Delete View
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Filters Section -->
+              <div class="ticket-filters__section">
+                <h3 class="ticket-filters__section-title">Filter by Status</h3>
+                <div class="ticket-filters__status-grid">
+                  {% for status_option in ticket_status_definitions %}
+                    <label class="ticket-filters__status-item">
+                      <input 
+                        type="checkbox" 
+                        value="{{ status_option.tech_status }}"
+                        data-status-filter
+                        checked
+                      />
+                      <span class="ticket-filters__status-label">{{ status_option.tech_label }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </div>
+
+              <!-- Grouping and Search Section -->
+              <div class="ticket-filters__section ticket-filters__section--horizontal">
+                <div class="ticket-filters__group-control">
+                  <label class="form-label" for="ticket-grouping">Group by</label>
+                  <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
+                    <option value="">No grouping</option>
+                    <option value="status">Status</option>
+                    <option value="priority">Priority</option>
+                    <option value="company">Company</option>
+                    <option value="assigned">Assigned user</option>
                   </select>
                 </div>
-                <div class="ticket-filters__view-actions">
-                  <button type="button" class="button button--ghost button--compact" data-save-view title="Save current view">
-                    Save View
-                  </button>
-                  <button type="button" class="button button--ghost button--compact" data-delete-view title="Delete current view">
-                    Delete View
-                  </button>
+                <div class="ticket-filters__search-control">
+                  <label class="form-label" for="ticket-quick-filter">Quick search</label>
+                  <input 
+                    id="ticket-quick-filter"
+                    type="search" 
+                    class="form-input" 
+                    placeholder="Filter tickets" 
+                    aria-label="Filter tickets" 
+                    data-table-filter="tickets-table" data-ticket-dashboard-search 
+                  />
                 </div>
               </div>
-            </div>
 
-            <!-- Filters Section -->
-            <div class="ticket-filters__section">
-              <h3 class="ticket-filters__section-title">Filter by Status</h3>
-              <div class="ticket-filters__status-grid">
-                {% for status_option in ticket_status_definitions %}
-                  <label class="ticket-filters__status-item">
-                    <input 
-                      type="checkbox" 
-                      value="{{ status_option.tech_status }}"
-                      data-status-filter
-                      checked
-                    />
-                    <span class="ticket-filters__status-label">{{ status_option.tech_label }}</span>
-                  </label>
-                {% endfor %}
+              <!-- Phone Number Search Section -->
+              <div class="ticket-filters__section">
+                <h3 class="ticket-filters__section-title">Search by Phone Number</h3>
+                <form method="get" action="/admin/tickets" class="ticket-filters__phone-search">
+                  <input 
+                    type="search" 
+                    name="phoneNumber" 
+                    class="form-input" 
+                    placeholder="Search by phone number" 
+                    aria-label="Search by phone number"
+                    value="{{ request.query_params.get('phoneNumber', '') }}"
+                  />
+                  <div class="ticket-filters__phone-search-actions">
+                    <button type="submit" class="button button--primary button--compact">Search Phone</button>
+                    {% if request.query_params.get('phoneNumber') %}
+                      <a href="/admin/tickets" class="button button--ghost button--compact">Clear</a>
+                    {% endif %}
+                  </div>
+                </form>
               </div>
             </div>
-
-            <!-- Grouping and Search Section -->
-            <div class="ticket-filters__section ticket-filters__section--horizontal">
-              <div class="ticket-filters__group-control">
-                <label class="form-label" for="ticket-grouping">Group by</label>
-                <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
-                  <option value="">No grouping</option>
-                  <option value="status">Status</option>
-                  <option value="priority">Priority</option>
-                  <option value="company">Company</option>
-                  <option value="assigned">Assigned user</option>
-                </select>
-              </div>
-              <div class="ticket-filters__search-control">
-                <label class="form-label" for="ticket-quick-filter">Quick search</label>
-                <input 
-                  id="ticket-quick-filter"
-                  type="search" 
-                  class="form-input" 
-                  placeholder="Filter tickets" 
-                  aria-label="Filter tickets" 
-                  data-table-filter="tickets-table" data-ticket-dashboard-search 
-                />
-              </div>
-            </div>
-
-            <!-- Phone Number Search Section -->
-            <div class="ticket-filters__section">
-              <h3 class="ticket-filters__section-title">Search by Phone Number</h3>
-              <form method="get" action="/admin/tickets" class="ticket-filters__phone-search">
-                <input 
-                  type="search" 
-                  name="phoneNumber" 
-                  class="form-input" 
-                  placeholder="Search by phone number" 
-                  aria-label="Search by phone number"
-                  value="{{ request.query_params.get('phoneNumber', '') }}"
-                />
-                <div class="ticket-filters__phone-search-actions">
-                  <button type="submit" class="button button--primary button--compact">Search Phone</button>
-                  {% if request.query_params.get('phoneNumber') %}
-                    <a href="/admin/tickets" class="button button--ghost button--compact">Clear</a>
-                  {% endif %}
-                </div>
-              </form>
-            </div>
-          </div>
+          </aside>
 
           <div class="ticket-dashboard__right-column">
             <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
