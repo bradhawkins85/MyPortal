@@ -26,8 +26,8 @@ from loguru import logger
 
 from app.core.config import get_settings as _get_app_settings
 from app.repositories import audit_logs as audit_logs_repo
-from app.repositories import integration_modules as module_repo
 from app.repositories import tickets as tickets_repo
+from app.services import modules as modules_service
 from app.services import tickets as tickets_service
 
 from ._common import (
@@ -181,7 +181,7 @@ def _resolve_token(authorization_header: str | None) -> str:
 
 
 async def _load_settings() -> dict[str, Any]:
-    module = await module_repo.get_module(MODULE_SLUG)
+    module = await modules_service.get_module(MODULE_SLUG, redact=False)
     if not module or not module.get("enabled"):
         raise OllamaMCPError(
             status.HTTP_503_SERVICE_UNAVAILABLE,

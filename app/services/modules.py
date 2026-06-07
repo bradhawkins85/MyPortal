@@ -118,7 +118,7 @@ async def get_xero_credentials() -> dict[str, Any] | None:
     Returns:
         Dictionary with decrypted credentials or None if module not found
     """
-    module = await module_repo.get_module(XERO_MODULE_SLUG)
+    module = await get_module(XERO_MODULE_SLUG, redact=False)
     if not module:
         return None
     
@@ -838,6 +838,134 @@ def _default_module_setting(slug: str, key: str, fallback: str) -> str:
 
 _DEFAULT_OLLAMA_MODEL = _default_module_setting("ollama", "model", "llama3")
 _DEFAULT_OLLAMA_BASE_URL = _default_module_setting("ollama", "base_url", "http://127.0.0.1:11434")
+
+_ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
+    "apprise": ("urls", "title"),
+    "call-recordings": ("recordings_path", "phone_system_type"),
+    "chatgpt-mcp": (
+        "shared_secret_hash",
+        "allowed_actions",
+        "max_results",
+        "allow_ticket_updates",
+        "allowed_statuses",
+        "system_user_id",
+    ),
+    "hudu": ("base_url", "api_key"),
+    "m365-admin": ("client_id", "client_secret"),
+    "ntfy": ("base_url", "topic", "auth_token"),
+    "ollama": ("base_url", "model", "prompt"),
+    "ollama-mcp": (
+        "shared_secret_hash",
+        "allowed_actions",
+        "max_results",
+        "allow_ticket_replies",
+        "allow_ticket_updates",
+        "allowed_statuses",
+        "system_user_id",
+        "include_internal_replies",
+        "server_name",
+        "server_version",
+    ),
+    "password-pusher": (
+        "base_url",
+        "api_key",
+        "user_email",
+        "expire_after_days",
+        "expire_after_views",
+        "deletable_by_viewer",
+        "retrieval_step",
+    ),
+    "sms-gateway": ("gateway_url", "authorization"),
+    "smtp": ("from_address", "default_recipients", "subject_prefix"),
+    "smtp2go": (
+        "api_key",
+        "enable_tracking",
+        "track_opens",
+        "track_clicks",
+        "webhook_secret",
+        "disable_webhook_signature_verification",
+    ),
+    "solidtime": (
+        "base_url",
+        "api_token",
+        "organization_id",
+        "default_client_id",
+        "sync_tickets_to_projects",
+        "sync_projects_to_tickets",
+        "sync_time_entries_to_solidtime",
+        "sync_time_entries_from_solidtime",
+        "only_billable_to_solidtime",
+        "labour_type_to_task",
+        "webhook_secret",
+        "rate_limit_per_minute",
+    ),
+    "syncro": ("base_url", "api_key", "rate_limit_per_minute"),
+    "tacticalrmm": ("base_url", "base_rmm_url", "api_key", "verify_ssl"),
+    "unifi-talk": (
+        "remote_host",
+        "remote_path",
+        "username",
+        "password",
+        "local_path",
+        "port",
+    ),
+    "uptimekuma": ("shared_secret_hash", "sync_service_status"),
+    "xero": (
+        "client_id",
+        "client_secret",
+        "company_name",
+        "default_hourly_rate",
+        "account_code",
+        "tax_type",
+        "line_amount_type",
+        "reference_prefix",
+        "billable_statuses",
+        "line_item_description_template",
+        "auto_create_products",
+    ),
+}
+
+
+def _force_env_module_settings() -> bool:
+    return _ensure_bool(os.getenv("FORCE_ENV_MODULE_SETTINGS"), False)
+
+
+def _parse_module_settings(value: Any) -> Mapping[str, Any] | None:
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, Mapping) else None
+    return None
+
+
+def _resolve_module_settings_for_runtime(
+    slug: str,
+    module: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    raw_settings = _parse_module_settings((module or {}).get("settings"))
+    resolved = _coerce_settings(slug, raw_settings, module)
+    if not _force_env_module_settings():
+        return resolved
+    env_only = _coerce_settings(slug, {}, None)
+    for field in _ENV_BACKED_MODULE_FIELDS.get(slug, ()):
+        if field in env_only:
+            resolved[field] = env_only[field]
+        else:
+            resolved.pop(field, None)
+    return resolved
+
+
+def _resolve_module_for_runtime(module: Mapping[str, Any]) -> dict[str, Any]:
+    resolved = dict(module)
+    resolved["settings"] = _resolve_module_settings_for_runtime(
+        str(module.get("slug") or ""),
+        module,
+    )
+    return resolved
 
 
 def _coerce_settings(
@@ -1568,7 +1696,7 @@ async def ensure_default_modules() -> None:
 async def list_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
     return [
-        _redact_module_settings(module)
+        _redact_module_settings(_resolve_module_for_runtime(module))
         for module in modules
         if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
     ]
@@ -1578,14 +1706,7 @@ async def get_module_settings(slug: str) -> dict[str, Any] | None:
     module = await module_repo.get_module(slug)
     if not module:
         return None
-    raw_settings = module.get("settings")
-    if isinstance(raw_settings, Mapping):
-        return _coerce_settings(slug, raw_settings, module)
-    try:
-        parsed = json.loads(raw_settings) if isinstance(raw_settings, str) else None
-    except json.JSONDecodeError:
-        parsed = None
-    return _coerce_settings(slug, parsed, module)
+    return _resolve_module_settings_for_runtime(slug, module)
 
 
 # Modules that are only ingesters or interfaces and cannot trigger actions
@@ -1792,7 +1913,8 @@ async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None
     module = await module_repo.get_module(slug)
     if not module:
         return None
-    return _redact_module_settings(module) if redact else module
+    resolved = _resolve_module_for_runtime(module)
+    return _redact_module_settings(resolved) if redact else resolved
 
 
 async def update_module(
@@ -1831,15 +1953,7 @@ async def trigger_module(
             raise ValueError(f"Module {slug} is not configured")
         if not module.get("enabled"):
             return {"status": "skipped", "reason": "Module disabled", "module": slug}
-    raw_settings = module.get("settings")
-    if isinstance(raw_settings, Mapping):
-        settings = _coerce_settings(slug, raw_settings)
-    else:
-        try:
-            parsed = json.loads(raw_settings) if isinstance(raw_settings, str) else None
-        except json.JSONDecodeError:
-            parsed = None
-        settings = _coerce_settings(slug, parsed)
+    settings = _resolve_module_settings_for_runtime(slug, module)
     handler_map: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
         "syncro": _validate_syncro,
         "ollama": _invoke_ollama,
