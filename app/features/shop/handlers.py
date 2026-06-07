@@ -15,11 +15,67 @@ import aiomysql
 from fastapi import File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.security.flash import flash_redirect
+
 
 def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _form_bool(form: Any, key: str) -> bool:
+    if hasattr(form, "getlist"):
+        values = form.getlist(key)
+        if values:
+            for value in values:
+                if isinstance(value, str):
+                    if value.strip().lower() not in {"", "0", "false", "off"}:
+                        return True
+                elif bool(value):
+                    return True
+            return False
+    value = form.get(key)
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "0", "false", "off"}
+    return bool(value)
+
+
+def _parse_freight_conditions(form: Any) -> list[dict[str, Any]]:
+    conditions: dict[int, dict[str, str]] = {}
+    for key, val in form.multi_items():
+        if not key.startswith("conditions["):
+            continue
+        try:
+            idx_end = key.index("]")
+            idx = int(key[len("conditions["):idx_end])
+            field_start = key.index("[", idx_end) + 1
+            field_end = key.index("]", field_start)
+            field = key[field_start:field_end]
+        except (ValueError, IndexError):
+            continue
+        conditions.setdefault(idx, {})[field] = str(val)
+
+    result: list[dict[str, Any]] = []
+    for _, cond in sorted(conditions.items()):
+        condition_type = cond.get("type", "").strip()
+        operator = cond.get("operator", "equals").strip()
+        value = cond.get("value", "").strip()
+        if condition_type:
+            result.append(
+                {"type": condition_type, "operator": operator, "value": value}
+            )
+    return result
+
+
+def _normalise_freight_conditions(
+    *, is_default: bool, conditions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if is_default:
+        return []
+    return conditions
 
 
 async def _validate_recommendation_product_ids(
@@ -1114,6 +1170,168 @@ async def admin_shop_page(
         "total_pages": max(1, math.ceil(total_count / page_size)) if page_size else 1,
     }
     return await _main()._render_template("admin/shop.html", request, current_user, extra=extra)
+
+
+async def admin_shop_freight_rules_page(
+    request: Request,
+    rule_id: int | None = Query(default=None, alias="ruleId"),
+):
+    from app.repositories import freight_rules as freight_rules_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    rules = await freight_rules_repo.list_rules()
+    editing_rule = None
+    if rule_id is not None:
+        editing_rule = await freight_rules_repo.get_rule(rule_id)
+
+    extra = {
+        "title": "Freight rules",
+        "rules": rules,
+        "editing_rule": editing_rule,
+    }
+    return await _main()._render_template(
+        "admin/shop_freight_rules.html",
+        request,
+        current_user,
+        extra=extra,
+    )
+
+
+async def admin_create_shop_freight_rule(request: Request):
+    from app.repositories import freight_rules as freight_rules_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    if not name:
+        return flash_redirect(
+            "/admin/shop/freight-rules",
+            "Rule name is required.",
+            "error",
+        )
+
+    try:
+        priority = int(form.get("priority") or 0)
+    except (TypeError, ValueError):
+        priority = 0
+    try:
+        freight_amount = Decimal(str(form.get("freight_amount") or "0")).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+    except (InvalidOperation, ValueError):
+        return flash_redirect(
+            "/admin/shop/freight-rules",
+            "Freight amount must be a valid number.",
+            "error",
+        )
+    is_default = _form_bool(form, "is_default")
+    stop_processing = _form_bool(form, "stop_processing")
+    is_active = _form_bool(form, "is_active")
+    conditions = _normalise_freight_conditions(
+        is_default=is_default,
+        conditions=_parse_freight_conditions(form),
+    )
+
+    await freight_rules_repo.create_rule(
+        name=name,
+        priority=priority,
+        is_default=is_default,
+        stop_processing=stop_processing,
+        freight_amount=freight_amount,
+        conditions=conditions,
+        is_active=is_active,
+    )
+    return flash_redirect(
+        "/admin/shop/freight-rules",
+        "Freight rule created.",
+        "success",
+    )
+
+
+async def admin_update_shop_freight_rule(request: Request, rule_id: int):
+    from app.repositories import freight_rules as freight_rules_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    existing = await freight_rules_repo.get_rule(rule_id)
+    if not existing:
+        return flash_redirect(
+            "/admin/shop/freight-rules",
+            "Rule not found.",
+            "error",
+        )
+
+    form = await request.form()
+    name = str(form.get("name", "")).strip()
+    if not name:
+        return flash_redirect(
+            f"/admin/shop/freight-rules?ruleId={rule_id}",
+            "Rule name is required.",
+            "error",
+        )
+
+    try:
+        priority = int(form.get("priority") or 0)
+    except (TypeError, ValueError):
+        priority = 0
+    try:
+        freight_amount = Decimal(str(form.get("freight_amount") or "0")).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+    except (InvalidOperation, ValueError):
+        return flash_redirect(
+            f"/admin/shop/freight-rules?ruleId={rule_id}",
+            "Freight amount must be a valid number.",
+            "error",
+        )
+    is_default = _form_bool(form, "is_default")
+    stop_processing = _form_bool(form, "stop_processing")
+    is_active = _form_bool(form, "is_active")
+    conditions = _normalise_freight_conditions(
+        is_default=is_default,
+        conditions=_parse_freight_conditions(form),
+    )
+
+    await freight_rules_repo.update_rule(
+        rule_id,
+        name=name,
+        priority=priority,
+        is_default=is_default,
+        stop_processing=stop_processing,
+        freight_amount=freight_amount,
+        conditions=conditions,
+        is_active=is_active,
+    )
+    return flash_redirect(
+        "/admin/shop/freight-rules",
+        "Freight rule updated.",
+        "success",
+    )
+
+
+async def admin_delete_shop_freight_rule(request: Request, rule_id: int):
+    from app.repositories import freight_rules as freight_rules_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    await freight_rules_repo.delete_rule(rule_id)
+    return flash_redirect(
+        "/admin/shop/freight-rules",
+        "Freight rule deleted.",
+        "success",
+    )
 
 
 async def admin_shop_optional_accessories_page(
