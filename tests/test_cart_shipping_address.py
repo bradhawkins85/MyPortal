@@ -162,7 +162,7 @@ def _place_order_test(
     async def fake_stock_notification(product_id, previous_stock, new_stock):
         return None
 
-    async def fake_resolve_ticket_status(_status):
+    async def fake_resolve_ticket_status(status):
         return "open"
 
     async def fake_create_ticket(**kwargs):
@@ -353,6 +353,8 @@ def test_place_order_specific_address_allowed_with_street(monkeypatch, active_se
     created_ticket = captured_tickets[0]
     assert created_ticket["subject"].startswith("Cart order ORD")
     assert created_ticket["external_reference"].startswith("ORD")
+    order_number = created_ticket["external_reference"]
+    assert created_ticket["subject"] == f"Cart order {order_number} requires processing"
     assert created_ticket["requester_id"] == 10
     assert created_ticket["company_id"] == 1
     assert created_ticket["category"] == "shop-order"

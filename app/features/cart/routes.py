@@ -1058,7 +1058,7 @@ async def place_order(request: Request) -> RedirectResponse:
         )
 
     try:
-        def _normalise_price(value: Any) -> Decimal:
+        def _normalize_price(value: Any) -> Decimal:
             try:
                 return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             except (InvalidOperation, TypeError, ValueError):
@@ -1068,7 +1068,7 @@ async def place_order(request: Request) -> RedirectResponse:
         order_total = Decimal("0.00")
         for index, item in enumerate(items, start=1):
             quantity = int(item.get("quantity") or 0)
-            unit_price = _normalise_price(item.get("unit_price"))
+            unit_price = _normalize_price(item.get("unit_price"))
             line_total = (unit_price * quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             order_total += line_total
             line_items.append(
@@ -1097,7 +1097,7 @@ async def place_order(request: Request) -> RedirectResponse:
             f"- User ID: {user.get('id')}",
             f"- PO number: {po_number or 'Not provided'}",
             f"- Shipping option: {shipping_label}",
-            f"- Order total: ${order_total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}",
+            f"- Order total: ${order_total}",
             "",
             "### Items",
             *line_items,
@@ -1115,16 +1115,16 @@ async def place_order(request: Request) -> RedirectResponse:
                 ]
             )
 
-        ticket_status = await main_module.tickets_service.resolve_status_or_default(None)
-        ticket_description = main_module.sanitize_rich_text("\n".join(description_lines)).html
+        resolved_ticket_status = await main_module.tickets_service.resolve_status_or_default(None)
+        ticket_description_html = main_module.sanitize_rich_text("\n".join(description_lines)).html
         await main_module.tickets_service.create_ticket(
             subject=f"Cart order {order_number} requires processing",
-            description=ticket_description,
+            description=ticket_description_html,
             requester_id=int(user["id"]),
             company_id=company_id,
             assigned_user_id=None,
             priority="normal",
-            status=ticket_status,
+            status=resolved_ticket_status,
             category="shop-order",
             module_slug="shop",
             external_reference=order_number,
@@ -1133,7 +1133,7 @@ async def place_order(request: Request) -> RedirectResponse:
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         main_module.log_error(
-            "Failed to create cart order ticket",
+            "Order placed but failed to create cart order ticket; review order in shop admin and create follow-up ticket manually",
             order_number=order_number,
             company_id=company_id,
             error=str(exc),
