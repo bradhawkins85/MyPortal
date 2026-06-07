@@ -118,6 +118,11 @@
             <span class="form-help">Access the global ticketing workspace to triage, assign, and update tickets</span>
           </label>
           <label class="form-checkbox">
+            <input type="checkbox" name="permission" value="marketing.access" data-permission-checkbox />
+            <span>Marketing Access</span>
+            <span class="form-help">Access marketing page administration and collected marketing contacts</span>
+          </label>
+          <label class="form-checkbox">
             <input type="checkbox" name="permission" value="licenses.manage" data-permission-checkbox />
             <span>Manage Licenses</span>
             <span class="form-help">Manage company licenses and subscriptions</span>
@@ -286,6 +291,10 @@
         <div class="definition-list__item">
           <dt><code>helpdesk.technician</code></dt>
           <dd>Grant designated staff access to the global ticketing workspace so they can triage, assign, and update tickets without broader administrative privileges.</dd>
+        </div>
+        <div class="definition-list__item">
+          <dt><code>marketing.access</code></dt>
+          <dd>Allow designated technicians to manage marketing landing pages and review submitted marketing contacts.</dd>
         </div>
         <div class="definition-list__item">
           <dt><code>compliance.access</code></dt>
