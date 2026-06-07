@@ -6210,15 +6210,17 @@ dialog.modal:not([open]) {
   margin-bottom: 0.75rem;
 }
 
-.ticket-filters-panel__toggle-icon::before {
-  content: '◀';
-  display: inline-block;
-  font-size: 0.75rem;
-  line-height: 1;
+.ticket-filters-panel__toggle-icon {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(135deg);
+  transition: transform 0.2s ease;
 }
 
-.ticket-filters-panel--collapsed .ticket-filters-panel__toggle-icon::before {
-  content: '▶';
+.ticket-filters-panel--collapsed .ticket-filters-panel__toggle-icon {
+  transform: rotate(-45deg);
 }
 
 .ticket-filters-panel--collapsed .ticket-filters {
