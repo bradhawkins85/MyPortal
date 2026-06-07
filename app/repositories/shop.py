@@ -1429,6 +1429,12 @@ async def create_order(
     order_number: str,
     status: str,
     po_number: str | None,
+    shipping_option: str = "address_on_file",
+    shipping_street: str | None = None,
+    shipping_city: str | None = None,
+    shipping_state: str | None = None,
+    shipping_postcode: str | None = None,
+    shipping_country: str | None = None,
 ) -> tuple[int | None, int | None]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1456,8 +1462,14 @@ async def create_order(
                         order_number,
                         status,
                         notes,
-                        po_number
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        po_number,
+                        shipping_option,
+                        shipping_street,
+                        shipping_city,
+                        shipping_state,
+                        shipping_postcode,
+                        shipping_country
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         user_id,
@@ -1468,6 +1480,12 @@ async def create_order(
                         status,
                         None,
                         po_number,
+                        shipping_option,
+                        shipping_street,
+                        shipping_city,
+                        shipping_state,
+                        shipping_postcode,
+                        shipping_country,
                     ),
                 )
                 await cursor.execute(
