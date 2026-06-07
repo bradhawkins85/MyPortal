@@ -138,14 +138,18 @@
   }
 
   function initialiseFiltersPanel() {
-    const overview = document.querySelector('.ticket-dashboard__overview');
     const panel = document.querySelector('[data-ticket-filters-panel]');
-    const toggle = panel ? panel.querySelector('[data-ticket-filters-toggle]') : null;
-    const toggleText = toggle ? toggle.querySelector('[data-ticket-filters-toggle-text]') : null;
-
-    if (!overview || !panel || !toggle) {
+    if (!panel) {
       return;
     }
+
+    const overview = panel.closest('.ticket-dashboard__overview');
+    const toggle = panel.querySelector('[data-ticket-filters-toggle]');
+
+    if (!overview || !toggle) {
+      return;
+    }
+    const toggleText = toggle.querySelector('[data-ticket-filters-toggle-text]');
 
     const setCollapsedState = (collapsed) => {
       panel.classList.toggle('ticket-filters-panel--collapsed', collapsed);
@@ -161,9 +165,9 @@
     setCollapsedState(loadFiltersCollapsedState());
 
     toggle.addEventListener('click', () => {
-      const collapsed = !panel.classList.contains('ticket-filters-panel--collapsed');
-      setCollapsedState(collapsed);
-      saveFiltersCollapsedState(collapsed);
+      const nextCollapsedState = !panel.classList.contains('ticket-filters-panel--collapsed');
+      setCollapsedState(nextCollapsedState);
+      saveFiltersCollapsedState(nextCollapsedState);
     });
   }
 
