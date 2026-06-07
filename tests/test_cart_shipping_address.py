@@ -117,6 +117,7 @@ def _place_order_test(
     form_data: dict,
     *,
     capture_create_order_kwargs: list | None = None,
+    capture_create_ticket_kwargs: list | None = None,
 ) -> str:
     """Returns the redirect location after placing (or attempting) an order."""
 
@@ -161,6 +162,14 @@ def _place_order_test(
     async def fake_stock_notification(product_id, previous_stock, new_stock):
         return None
 
+    async def fake_resolve_ticket_status(_status):
+        return "open"
+
+    async def fake_create_ticket(**kwargs):
+        if capture_create_ticket_kwargs is not None:
+            capture_create_ticket_kwargs.append(kwargs)
+        return {"id": 123}
+
     monkeypatch.setattr(main, "_load_company_section_context", fake_ctx)
     monkeypatch.setattr(main.cart_repo, "list_items", fake_list_items)
     monkeypatch.setattr(main.shop_repo, "create_order", fake_create_order)
@@ -175,6 +184,8 @@ def _place_order_test(
     monkeypatch.setattr(
         main.shop_service, "maybe_send_stock_notification_by_id", fake_stock_notification
     )
+    monkeypatch.setattr(main.tickets_service, "resolve_status_or_default", fake_resolve_ticket_status)
+    monkeypatch.setattr(main.tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(main.settings, "shop_webhook_url", None)
 
     with TestClient(main.app, follow_redirects=False) as client:
@@ -312,10 +323,12 @@ def test_place_order_specific_address_blocked_without_street(monkeypatch, active
 
 def test_place_order_specific_address_allowed_with_street(monkeypatch, active_session):
     captured: list = []
+    captured_tickets: list = []
     location = _place_order_test(
         monkeypatch,
         active_session,
         form_data={
+            "poNumber": "PO-12345",
             "shippingOption": "specific_address",
             "shippingStreet": "99 Test Lane",
             "shippingCity": "Melbourne",
@@ -324,6 +337,7 @@ def test_place_order_specific_address_allowed_with_street(monkeypatch, active_se
             "shippingCountry": "Australia",
         },
         capture_create_order_kwargs=captured,
+        capture_create_ticket_kwargs=captured_tickets,
     )
     # Order should succeed (success message, not a street validation error)
     assert "orderMessage" in location
@@ -335,6 +349,17 @@ def test_place_order_specific_address_allowed_with_street(monkeypatch, active_se
     assert captured[0]["shipping_state"] == "VIC"
     assert captured[0]["shipping_postcode"] == "3000"
     assert captured[0]["shipping_country"] == "Australia"
+    assert captured_tickets
+    created_ticket = captured_tickets[0]
+    assert created_ticket["subject"].startswith("Cart order ORD")
+    assert created_ticket["external_reference"].startswith("ORD")
+    assert created_ticket["requester_id"] == 10
+    assert created_ticket["company_id"] == 1
+    assert created_ticket["category"] == "shop-order"
+    description = created_ticket["description"]
+    assert "PO-12345" in description
+    assert "Widget" in description
+    assert "99 Test Lane" in description
 
 
 def test_place_order_invalid_shipping_option_falls_back(monkeypatch, active_session):
