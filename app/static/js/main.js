@@ -720,7 +720,7 @@
   function setupModalCloseBehaviour() {
     const modalSelector = '.modal';
     const headerSelector = '.modal__header, .modal-header';
-    const headerCloseSelector = [
+    const closeControlSelector = [
       '.modal__close',
       '.modal-close',
       '.btn-close',
@@ -730,6 +730,10 @@
       '[data-email-recipients-close]',
       '[data-auto-modal-close]',
     ].join(', ');
+    const headerCloseSelector = closeControlSelector
+      .split(', ')
+      .map((selector) => `${headerSelector} ${selector}`)
+      .join(', ');
     const contentSelector = '.modal__content, .modal__panel, .modal__inner, .modal-content';
 
     function isModalOpen(modal) {
@@ -760,6 +764,12 @@
       return button;
     }
 
+    function suppressEvent(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    }
+
     document.querySelectorAll(modalSelector).forEach((modal) => {
       const header = modal.querySelector(headerSelector);
       const content = modal.querySelector(contentSelector);
@@ -785,9 +795,7 @@
         if (!isBackdropClick) {
           return;
         }
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        suppressEvent(event);
       },
       true,
     );
@@ -803,38 +811,15 @@
           return;
         }
         const modal = openModals[openModals.length - 1];
-        const closeButton = modal.querySelector(
-          [
-            `${headerSelector} .modal__close`,
-            `${headerSelector} .modal-close`,
-            `${headerSelector} .btn-close`,
-            `${headerSelector} [data-modal-close]`,
-            `${headerSelector} [data-close-modal]`,
-            `${headerSelector} [data-asset-modal-close]`,
-            `${headerSelector} [data-email-recipients-close]`,
-            `${headerSelector} [data-auto-modal-close]`,
-            '.modal__close',
-            '.modal-close',
-            '.btn-close',
-            '[data-modal-close]',
-            '[data-close-modal]',
-            '[data-asset-modal-close]',
-            '[data-email-recipients-close]',
-            '[data-auto-modal-close]',
-          ].join(', '),
-        );
+        const closeButton = modal.querySelector(`${headerCloseSelector}, ${closeControlSelector}`);
 
         if (closeButton instanceof HTMLElement) {
-          event.preventDefault();
-          event.stopPropagation();
-          event.stopImmediatePropagation();
+          suppressEvent(event);
           closeButton.click();
           return;
         }
 
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
+        suppressEvent(event);
         if (modal instanceof HTMLDialogElement) {
           modal.close();
           return;
