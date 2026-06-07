@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}
+  <span class="header__title-text">
+    {% if question %}Edit question{% else %}New question{% endif %}
+  </span>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "All questions", "type": "link", "variant": "ghost", "href": "/admin/tray/ticket-questions"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header">
+      <h2 class="card__title">{% if question %}Edit{% else %}New{% endif %} ticket intake question</h2>
+    </header>
+    <div class="card__body card__body--stacked">
+
+      {% if error_message %}
+        <div class="callout callout--danger"><p>{{ error_message }}</p></div>
+      {% endif %}
+
+      <form method="post"
+            action="{% if question %}/admin/tray/ticket-questions/{{ question.id }}/edit{% else %}/admin/tray/ticket-questions/new{% endif %}"
+            class="form" id="question-form">
+        {% include "partials/csrf.html" %}
+
+        {# ── Scope ─────────────────────────────────────────────────────── #}
+        <div class="form-field">
+          <label class="form-label" for="q-scope">Scope</label>
+          <select class="form-select" id="q-scope" name="scope" onchange="toggleCompanyField()">
+            <option value="global" {% if not question or question.scope == 'global' %}selected{% endif %}>Global (all companies)</option>
+            <option value="company" {% if question and question.scope == 'company' %}selected{% endif %}>Company-specific</option>
+          </select>
+          <p class="form-helper">Global questions appear for every enrolled company. Company-specific questions are only shown for the selected company.</p>
+        </div>
+
+        <div class="form-field" id="company-field" style="{% if not question or question.scope != 'company' %}display:none{% endif %}">
+          <label class="form-label" for="q-company">Company</label>
+          <select class="form-select" id="q-company" name="company_id">
+            <option value="">— Select company —</option>
+            {% for c in companies %}
+              <option value="{{ c.id }}" {% if question and question.company_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        {# ── Label & placeholder ───────────────────────────────────────── #}
+        <div class="form-field">
+          <label class="form-label" for="q-label">Label <span class="form-required">*</span></label>
+          <input class="form-input" id="q-label" name="label" required maxlength="255"
+                 value="{{ question.label if question else '' }}" placeholder="e.g. Site address" />
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="q-placeholder">Placeholder text</label>
+          <input class="form-input" id="q-placeholder" name="placeholder" maxlength="255"
+                 value="{{ question.placeholder if question else '' }}"
+                 placeholder="e.g. Enter the building or floor" />
+          <p class="form-helper">Optional hint shown inside the input field.</p>
+        </div>
+
+        {# ── Field type ───────────────────────────────────────────────── #}
+        <div class="form-field">
+          <label class="form-label" for="q-type">Field type</label>
+          <select class="form-select" id="q-type" name="field_type" onchange="toggleOptionsField()">
+            <option value="text" {% if not question or question.field_type == 'text' %}selected{% endif %}>Text (free-form)</option>
+            <option value="select" {% if question and question.field_type == 'select' %}selected{% endif %}>Select (dropdown)</option>
+            <option value="boolean" {% if question and question.field_type == 'boolean' %}selected{% endif %}>Boolean (Yes / No)</option>
+          </select>
+        </div>
+
+        <div class="form-field" id="options-field" style="{% if not question or question.field_type != 'select' %}display:none{% endif %}">
+          <label class="form-label" for="q-options">Options (one per line)</label>
+          <textarea class="form-textarea" id="q-options" name="options_text" rows="5"
+                    placeholder="e.g.&#10;Hardware issue&#10;Software issue&#10;Network issue">{% if question and question.options %}{{ question.options | join('\n') }}{% endif %}</textarea>
+          <p class="form-helper">Each non-blank line becomes a selectable option.</p>
+        </div>
+
+        {# ── Flags ─────────────────────────────────────────────────────── #}
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input type="checkbox" name="is_required" value="1"
+                   {% if question and question.is_required %}checked{% endif %} />
+            Required — user must provide an answer before submitting
+          </label>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input type="checkbox" name="is_active" value="1"
+                   {% if not question or question.is_active %}checked{% endif %} />
+            Active — show this question in the dialog
+          </label>
+        </div>
+
+        {# ── Sort order ───────────────────────────────────────────────── #}
+        <div class="form-field">
+          <label class="form-label" for="q-order">Sort order</label>
+          <input class="form-input form-input--narrow" id="q-order" name="sort_order" type="number"
+                 value="{{ question.sort_order if question else 0 }}" min="0" max="9999" />
+          <p class="form-helper">Lower numbers appear first. Global questions are always shown before company questions.</p>
+        </div>
+
+        {# ── Conditions ───────────────────────────────────────────────── #}
+        <fieldset class="fieldset">
+          <legend class="fieldset__legend">Conditional visibility</legend>
+          <p class="form-helper">This question will only appear when <em>all</em> of the conditions below are true. Leave empty to always show this question.</p>
+
+          <div id="conditions-list">
+            {% for cond in (question.conditions if question else []) %}
+              <div class="conditions-row form-row" data-index="{{ loop.index0 }}">
+                <div class="form-field">
+                  <label class="form-label">Parent question</label>
+                  <select class="form-select" name="cond_parent_id[]">
+                    <option value="">— Select —</option>
+                    {% for pq in all_questions %}
+                      {% if not question or pq.id != question.id %}
+                        <option value="{{ pq.id }}" {% if cond.parent_question_id == pq.id %}selected{% endif %}>{{ pq.label }}</option>
+                      {% endif %}
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label class="form-label">Operator</label>
+                  <select class="form-select" name="cond_operator[]">
+                    <option value="equals" {% if cond.operator == 'equals' %}selected{% endif %}>equals</option>
+                    <option value="not_equals" {% if cond.operator == 'not_equals' %}selected{% endif %}>not equals</option>
+                    <option value="contains" {% if cond.operator == 'contains' %}selected{% endif %}>contains</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label class="form-label">Expected value</label>
+                  <input class="form-input" name="cond_expected[]" maxlength="255"
+                         value="{{ cond.expected_value }}" />
+                </div>
+                <div class="form-field form-field--actions">
+                  <button type="button" class="button button--small button--danger" onclick="removeCondition(this)">Remove</button>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <button type="button" class="button button--small" onclick="addCondition()">+ Add condition</button>
+        </fieldset>
+
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">{% if question %}Save changes{% else %}Create question{% endif %}</button>
+          <a href="/admin/tray/ticket-questions" class="button button--ghost">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+
+<template id="condition-template">
+  <div class="conditions-row form-row">
+    <div class="form-field">
+      <label class="form-label">Parent question</label>
+      <select class="form-select" name="cond_parent_id[]">
+        <option value="">— Select —</option>
+        {% for pq in all_questions %}
+          {% if not question or pq.id != question.id %}
+            <option value="{{ pq.id }}">{{ pq.label }}</option>
+          {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Operator</label>
+      <select class="form-select" name="cond_operator[]">
+        <option value="equals">equals</option>
+        <option value="not_equals">not equals</option>
+        <option value="contains">contains</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label class="form-label">Expected value</label>
+      <input class="form-input" name="cond_expected[]" maxlength="255" />
+    </div>
+    <div class="form-field form-field--actions">
+      <button type="button" class="button button--small button--danger" onclick="removeCondition(this)">Remove</button>
+    </div>
+  </div>
+</template>
+
+<script>
+function toggleCompanyField() {
+  const scope = document.getElementById('q-scope').value;
+  document.getElementById('company-field').style.display = scope === 'company' ? '' : 'none';
+}
+function toggleOptionsField() {
+  const type = document.getElementById('q-type').value;
+  document.getElementById('options-field').style.display = type === 'select' ? '' : 'none';
+}
+function addCondition() {
+  const tmpl = document.getElementById('condition-template');
+  const clone = tmpl.content.cloneNode(true);
+  document.getElementById('conditions-list').appendChild(clone);
+}
+function removeCondition(btn) {
+  btn.closest('.conditions-row').remove();
+}
+</script>
+{% endblock %}

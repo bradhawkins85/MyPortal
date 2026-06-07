@@ -47,6 +47,9 @@ from app.schemas.tray import (
     TrayInstallTokenResponse,
     TrayMenuConfigCreate,
     TrayMenuConfigUpdate,
+    TrayTicketQuestionCreate,
+    TrayTicketQuestionsResponse,
+    TrayTicketQuestionUpdate,
     TrayTicketSubmitRequest,
     TrayTicketSubmitResponse,
 )
@@ -54,8 +57,10 @@ from app.services import audit as audit_service
 from app.services import matrix as matrix_service
 from app.services import tickets as tickets_service
 from app.services import tray as tray_service
+from app.services import tray_ticket_questions as tq_service
 from app.services.sanitization import sanitize_rich_text
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.repositories import tray_ticket_questions as tq_repo
 
 router = APIRouter(prefix="/api/tray", tags=["Tray App"])
 
@@ -198,6 +203,25 @@ async def heartbeat(
     return JSONResponse({"status": "ok"})
 
 
+@router.get(
+    "/ticket-questions",
+    response_model=TrayTicketQuestionsResponse,
+    summary="Fetch dynamic intake questions for the Submit Ticket dialog",
+)
+async def get_ticket_questions(
+    device: dict = Depends(get_current_tray_device),
+) -> TrayTicketQuestionsResponse:
+    """Return the ordered list of dynamic intake questions for this device.
+
+    Global questions are returned first, followed by company-scoped questions.
+    Each question includes its conditional visibility rules so the client can
+    show or hide follow-up questions based on earlier answers.
+    """
+    company_id: int | None = device.get("company_id")
+    questions = await tq_service.get_questions_for_company(company_id)
+    return TrayTicketQuestionsResponse(questions=questions)
+
+
 @router.post(
     "/submit-ticket",
     response_model=TrayTicketSubmitResponse,
@@ -213,6 +237,10 @@ async def tray_submit_ticket(
     the device_uid is the device identifier.  Name, email, and phone are
     provided by the user in the tray dialog; email is used to match an
     existing portal user account when one exists.
+
+    Dynamic question answers are validated server-side against the current
+    question definitions.  Required visible questions must have a non-empty
+    value; select questions must use a declared option.
     """
     device = await tray_repo.get_device_by_uid(payload.device_uid)
     if not device or device.get("status") == "revoked":
@@ -231,8 +259,23 @@ async def tray_submit_ticket(
     if existing_user:
         requester_id = int(existing_user["id"])
 
-    # Build a description that includes contact details when no portal
-    # account is matched, so technicians can see name and phone.
+    # ---------------------------------------------------------------------------
+    # Validate dynamic answers (if any questions are configured)
+    # ---------------------------------------------------------------------------
+    submitted_answers = [
+        {"question_id": a.question_id, "value": a.value}
+        for a in (payload.answers or [])
+    ]
+    questions = await tq_service.get_questions_for_company(company_id)
+    if questions:
+        errors = tq_service.validate_answers(questions, submitted_answers)
+        if errors:
+            raise HTTPException(status_code=422, detail="; ".join(errors))
+
+    # ---------------------------------------------------------------------------
+    # Build description
+    # ---------------------------------------------------------------------------
+    # Contact block: include when no portal account is matched.
     # Values are HTML-escaped before embedding to prevent markdown injection.
     description_parts: list[str] = []
     if requester_id is None:
@@ -248,6 +291,14 @@ async def tray_submit_ticket(
 
     if payload.description:
         description_parts.append(payload.description)
+
+    # Append additional details block from dynamic answers.
+    if questions and submitted_answers:
+        additional = tq_service.build_additional_details(questions, submitted_answers)
+        if additional:
+            if description_parts:
+                description_parts.append("")
+            description_parts.append(additional)
 
     full_description = "\n".join(description_parts) if description_parts else None
 
@@ -280,6 +331,19 @@ async def tray_submit_ticket(
                 "tray_submit_ticket: could not link asset",
                 ticket_id=ticket.get("id"),
                 asset_id=asset_id,
+                error=str(exc),
+            )
+
+    # Persist answer snapshots for audit.
+    if questions and submitted_answers:
+        try:
+            snapshots = tq_service.build_answer_snapshots(questions, submitted_answers)
+            if snapshots:
+                await tq_repo.create_answers(int(ticket["id"]), snapshots)
+        except Exception as exc:  # pragma: no cover - defensive
+            log_info(
+                "tray_submit_ticket: could not persist answer snapshots",
+                ticket_id=ticket.get("id"),
                 error=str(exc),
             )
 
@@ -600,8 +664,130 @@ async def start_device_chat(
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Admin — ticket question management
 # ---------------------------------------------------------------------------
+
+
+def _serialise_question(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "scope": row.get("scope"),
+        "company_id": row.get("company_id"),
+        "field_type": row.get("field_type"),
+        "label": row.get("label"),
+        "placeholder": row.get("placeholder"),
+        "is_required": bool(row.get("is_required")),
+        "options": row.get("options") or [],
+        "sort_order": int(row.get("sort_order") or 0),
+        "is_active": bool(row.get("is_active")),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+@router.get(
+    "/admin/ticket-questions",
+    summary="List ticket intake question definitions (admin)",
+)
+async def admin_list_ticket_questions(
+    scope: str | None = None,
+    company_id: int | None = None,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    rows = await tq_repo.list_questions(scope=scope, company_id=company_id)
+    all_ids = [int(r["id"]) for r in rows]
+    cond_rows = await tq_repo.list_conditions_for_questions(all_ids)
+    cond_index: dict[int, list[dict[str, Any]]] = {}
+    for cond in cond_rows:
+        cond_index.setdefault(int(cond["question_id"]), []).append(dict(cond))
+    out = []
+    for r in rows:
+        q = _serialise_question(r)
+        q["conditions"] = cond_index.get(int(r["id"]), [])
+        out.append(q)
+    return JSONResponse(out)
+
+
+@router.post(
+    "/admin/ticket-questions",
+    summary="Create a ticket intake question definition (admin)",
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_create_ticket_question(
+    payload: TrayTicketQuestionCreate,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    if payload.scope == "company" and payload.company_id is None:
+        raise HTTPException(
+            status_code=422, detail="company_id is required for company-scoped questions"
+        )
+    record = await tq_repo.create_question(
+        scope=payload.scope,
+        company_id=payload.company_id,
+        field_type=payload.field_type,
+        label=payload.label,
+        placeholder=payload.placeholder,
+        is_required=payload.is_required,
+        options=payload.options,
+        sort_order=payload.sort_order,
+        is_active=payload.is_active,
+        created_by_user_id=int(current_user["id"]),
+    )
+    if payload.conditions:
+        await tq_repo.replace_conditions_for_question(
+            int(record["id"]),
+            [c.model_dump() for c in payload.conditions],
+        )
+    record["conditions"] = [c.model_dump() for c in payload.conditions]
+    return JSONResponse(_serialise_question(record) | {"conditions": record["conditions"]})
+
+
+@router.put(
+    "/admin/ticket-questions/{question_id}",
+    summary="Update a ticket intake question definition (admin)",
+)
+async def admin_update_ticket_question(
+    question_id: int,
+    payload: TrayTicketQuestionUpdate,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    existing = await tq_repo.get_question(question_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Question not found")
+    updated = await tq_repo.update_question(
+        question_id,
+        field_type=payload.field_type,
+        label=payload.label,
+        placeholder=payload.placeholder,
+        is_required=payload.is_required,
+        options=payload.options,
+        sort_order=payload.sort_order,
+        is_active=payload.is_active,
+    )
+    if payload.conditions is not None:
+        await tq_repo.replace_conditions_for_question(
+            question_id,
+            [c.model_dump() for c in payload.conditions],
+        )
+    conditions = await tq_repo.list_conditions_for_question(question_id)
+    out = _serialise_question(updated or existing)
+    out["conditions"] = conditions
+    return JSONResponse(out)
+
+
+@router.delete(
+    "/admin/ticket-questions/{question_id}",
+    summary="Delete a ticket intake question definition (admin)",
+)
+async def admin_delete_ticket_question(
+    question_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    existing = await tq_repo.get_question(question_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Question not found")
+    await tq_repo.delete_question(question_id)
+    return JSONResponse({"status": "deleted"})
 
 
 def _sanitise_display_text(value: str | None) -> str | None:
