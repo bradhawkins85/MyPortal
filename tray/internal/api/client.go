@@ -188,6 +188,49 @@ type ChatTokenResponse struct {
 	ChatURL   string `json:"chat_url"`
 }
 
+// TicketQuestionCondition mirrors one conditional visibility rule.
+type TicketQuestionCondition struct {
+	ParentQuestionID int    `json:"parent_question_id"`
+	Operator         string `json:"operator"`
+	ExpectedValue    string `json:"expected_value"`
+}
+
+// TicketQuestion mirrors one dynamic intake question returned by
+// GET /api/tray/ticket-questions.
+type TicketQuestion struct {
+	ID          int                       `json:"id"`
+	Scope       string                    `json:"scope"`
+	FieldType   string                    `json:"field_type"`
+	Label       string                    `json:"label"`
+	Placeholder string                    `json:"placeholder,omitempty"`
+	IsRequired  bool                      `json:"is_required"`
+	Options     []string                  `json:"options"`
+	SortOrder   int                       `json:"sort_order"`
+	Conditions  []TicketQuestionCondition `json:"conditions"`
+}
+
+// TicketQuestionsResponse mirrors TrayTicketQuestionsResponse.
+type TicketQuestionsResponse struct {
+	Questions []TicketQuestion `json:"questions"`
+}
+
+// GetTicketQuestions fetches the dynamic intake questions for this device.
+func (c *Client) GetTicketQuestions(ctx context.Context) (*TicketQuestionsResponse, error) {
+	resp, err := c.get(ctx, "/api/tray/ticket-questions")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ticket-questions: HTTP %d", resp.StatusCode)
+	}
+	var out TicketQuestionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // RequestChatToken asks the server for a short-lived one-time URL token that
 // lets the popup webview open /tray/chat without requiring the user to log in.
 // roomID may be 0 when the user is starting a new chat (no existing room).
