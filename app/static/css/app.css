@@ -6199,6 +6199,36 @@ dialog.modal:not([open]) {
 }
 
 /* Ticket Filters - Redesigned Layout */
+.ticket-filters-panel {
+  min-width: 0;
+}
+
+.ticket-filters-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.ticket-filters-panel__toggle-icon::before {
+  content: '◀';
+  display: inline-block;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.ticket-filters-panel--collapsed .ticket-filters-panel__toggle-icon::before {
+  content: '▶';
+}
+
+.ticket-filters-panel--collapsed .ticket-filters {
+  display: none;
+}
+
+.ticket-filters-panel--collapsed .ticket-filters-panel__toggle {
+  margin-bottom: 0;
+}
+
 .ticket-filters {
   display: flex;
   flex-direction: column;
@@ -6337,6 +6367,23 @@ dialog.modal:not([open]) {
 
 .ticket-dashboard__right-column .table-wrapper {
   margin-top: 0;
+}
+
+@media (min-width: 960px) {
+  .ticket-dashboard__overview--filters-collapsed {
+    grid-template-columns: minmax(0, 3rem) minmax(0, 1fr);
+  }
+
+  .ticket-dashboard__overview--filters-collapsed .ticket-filters-panel__toggle {
+    width: 100%;
+    justify-content: center;
+    padding-inline: 0.35rem;
+    min-height: 2.5rem;
+  }
+
+  .ticket-dashboard__overview--filters-collapsed [data-ticket-filters-toggle-text] {
+    display: none;
+  }
 }
 
 .help {
