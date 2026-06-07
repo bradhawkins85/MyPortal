@@ -139,4 +139,7 @@ def test_modules_page_renders_module_quick_actions_and_helpers(super_admin_conte
     assert "/api/integration-modules/trello/webhook" in response.text
     assert "/api/integration-modules/uptimekuma/alerts" in response.text
     assert "/api/integration-modules/xero/callback" in response.text
+    assert "data-webhook-url-open" in response.text
+    assert 'id="webhook-url-modal"' in response.text
+    assert '>Webhook URL</a>' not in response.text
     assert 'href="/api/integration-modules/xero/tenants"' in response.text
