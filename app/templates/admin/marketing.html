@@ -164,7 +164,7 @@
         <tbody>
           {% for lead in marketing_leads %}
             <tr>
-              <td data-label="When">{{ lead.created_at.strftime('%Y-%m-%d %H:%M') if lead.created_at and lead.created_at.__class__.__name__ == 'datetime' else (lead.created_at or '-') }}</td>
+              <td data-label="When">{{ lead.created_at.strftime('%Y-%m-%d %H:%M') if lead.created_at and lead.created_at.strftime is defined else (lead.created_at or '-') }}</td>
               <td data-label="Page">{{ lead.page_title or lead.page_slug }}</td>
               <td data-label="Name">{{ lead.name }}</td>
               <td data-label="Email">{{ lead.email }}</td>
