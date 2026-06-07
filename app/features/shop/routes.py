@@ -76,6 +76,12 @@ _add(
     ["GET"],
     response_class=HTMLResponse,
 )
+_add(
+    "/admin/shop/freight-rules",
+    handlers.admin_shop_freight_rules_page,
+    ["GET"],
+    response_class=HTMLResponse,
+)
 
 # Admin actions.
 _add("/shop/admin/package", handlers.admin_create_shop_package, ["POST"], status_code=303)
@@ -185,6 +191,24 @@ _add(
 _add(
     "/shop/admin/subscription-category/{category_id}/update",
     handlers.admin_update_subscription_category,
+    ["POST"],
+    status_code=303,
+)
+_add(
+    "/admin/shop/freight-rules",
+    handlers.admin_create_shop_freight_rule,
+    ["POST"],
+    status_code=303,
+)
+_add(
+    "/admin/shop/freight-rules/{rule_id}",
+    handlers.admin_update_shop_freight_rule,
+    ["POST"],
+    status_code=303,
+)
+_add(
+    "/admin/shop/freight-rules/{rule_id}/delete",
+    handlers.admin_delete_shop_freight_rule,
     ["POST"],
     status_code=303,
 )
