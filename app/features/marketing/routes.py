@@ -18,12 +18,16 @@ from app.services import tickets as tickets_service
 router = APIRouter(tags=["Marketing"])
 
 _MARKETING_PERMISSION = "marketing.access"
+_MAIN_MODULE = None
 
 
 def _main():
-    from app import main as main_module
+    global _MAIN_MODULE
+    if _MAIN_MODULE is None:
+        from app import main as main_module
 
-    return main_module
+        _MAIN_MODULE = main_module
+    return _MAIN_MODULE
 
 
 def _form_bool(form: Mapping[str, Any], key: str) -> bool:
