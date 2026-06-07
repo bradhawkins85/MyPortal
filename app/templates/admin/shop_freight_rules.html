@@ -5,7 +5,7 @@
 <div class="condition-row" data-condition-index="{{ idx }}">
   <div class="condition-row__fields">
     <select name="conditions[{{ idx }}][type]" class="form-input form-select condition-type-select" required>
-      <option value="">— select type —</option>
+      <option value="" disabled {{ 'selected' if not cond_type }}>— select type —</option>
       <option value="product_id" {{ 'selected' if cond_type == 'product_id' }}>Product</option>
       <option value="cart_total" {{ 'selected' if cond_type == 'cart_total' }}>Cart total</option>
       <option value="item_size" {{ 'selected' if cond_type == 'item_size' }}>Item size</option>
@@ -126,8 +126,10 @@
                       </li>
                       <li class="header-title-menu__item" role="none">
                         <form action="/admin/shop/freight-rules/{{ rule.id }}/delete"
-                              method="post" class="inline-form"
-                              onsubmit="return confirm('Delete rule \'{{ rule.name | replace("'", "\\'") }}\'?');">
+                              method="post"
+                              class="inline-form"
+                              data-delete-confirm
+                              data-confirm-message="Delete rule '{{ rule.name }}'?">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                           {% endif %}
@@ -230,7 +232,7 @@
   <div class="condition-row" data-condition-index="__INDEX__">
     <div class="condition-row__fields">
       <select name="conditions[__INDEX__][type]" class="form-input form-select condition-type-select" required>
-        <option value="">— select type —</option>
+        <option value="" disabled selected>— select type —</option>
         <option value="product_id">Product</option>
         <option value="cart_total">Cart total</option>
         <option value="item_size">Item size</option>
@@ -274,11 +276,11 @@
 (function () {
   const HINTS = {
     product_id: 'Comma-separated product IDs.',
-    cart_total: 'Use between (e.g. 0,500), gte, lte, or equals.',
+    cart_total: 'Use dollar values, e.g. between 0,500 for $0.00-$500.00.',
     item_size: 'Allowed values: small, medium, large.',
-    item_weight: 'Match max item weight in the shipment.',
+    item_weight: 'Match max item weight in kilograms for the shipment.',
     quantity: 'Match shipment quantity.',
-    dispatch_warehouse: 'Warehouse code: NSW, QLD, VIC, SA.',
+    dispatch_warehouse: 'Warehouse code: NSW, QLD, VIC, SA, or UNALLOCATED.',
   };
   const RESTRICTED_OPERATORS = {
     product_id: ['in', 'equals'],
@@ -472,6 +474,14 @@
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !modal.hidden) closeModal();
+  });
+  document.querySelectorAll('form[data-delete-confirm]').forEach((deleteForm) => {
+    deleteForm.addEventListener('submit', (event) => {
+      const message = deleteForm.dataset.confirmMessage || 'Delete this rule?';
+      if (!window.confirm(message)) {
+        event.preventDefault();
+      }
+    });
   });
 
   {% if is_editing %}

@@ -113,10 +113,9 @@ def _decode_row(row: dict[str, Any]) -> dict[str, Any]:
         row["conditions"] = []
 
     raw_amount = row.get("freight_amount")
-    if isinstance(raw_amount, Decimal):
-        row["freight_amount"] = raw_amount
-    else:
-        row["freight_amount"] = Decimal(str(raw_amount or 0))
+    row["freight_amount"] = (
+        raw_amount if isinstance(raw_amount, Decimal) else Decimal(str(raw_amount or 0))
+    )
 
     row["is_default"] = bool(row.get("is_default"))
     row["is_active"] = bool(row.get("is_active"))

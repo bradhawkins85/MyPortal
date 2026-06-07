@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 import aiomysql
 from fastapi import File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import JSONResponse, RedirectResponse
+
 from app.security.flash import flash_redirect
 
 
@@ -24,6 +25,16 @@ def _main():
 
 
 def _form_bool(form: Any, key: str) -> bool:
+    if hasattr(form, "getlist"):
+        values = form.getlist(key)
+        if values:
+            for value in values:
+                if isinstance(value, str):
+                    if value.strip().lower() not in {"", "0", "false", "off"}:
+                        return True
+                elif bool(value):
+                    return True
+            return False
     value = form.get(key)
     if value is None:
         return False
