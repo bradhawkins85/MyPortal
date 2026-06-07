@@ -717,6 +717,137 @@
     });
   }
 
+  function setupModalCloseBehaviour() {
+    const modalSelector = '.modal';
+    const headerSelector = '.modal__header, .modal-header';
+    const headerCloseSelector = [
+      '.modal__close',
+      '.modal-close',
+      '.btn-close',
+      '[data-modal-close]',
+      '[data-close-modal]',
+      '[data-asset-modal-close]',
+      '[data-email-recipients-close]',
+      '[data-auto-modal-close]',
+    ].join(', ');
+    const contentSelector = '.modal__content, .modal__panel, .modal__inner, .modal-content';
+
+    function isModalOpen(modal) {
+      if (!(modal instanceof HTMLElement)) {
+        return false;
+      }
+      if (modal instanceof HTMLDialogElement) {
+        return modal.open;
+      }
+      if (modal.hidden) {
+        return false;
+      }
+      const computed = window.getComputedStyle(modal);
+      return computed.display !== 'none' && computed.visibility !== 'hidden';
+    }
+
+    function getOpenModals() {
+      return Array.from(document.querySelectorAll(modalSelector)).filter(isModalOpen);
+    }
+
+    function createAutoCloseButton() {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'modal__close modal-close';
+      button.setAttribute('aria-label', 'Close');
+      button.setAttribute('data-auto-modal-close', 'true');
+      button.innerHTML = '&times;';
+      return button;
+    }
+
+    document.querySelectorAll(modalSelector).forEach((modal) => {
+      const header = modal.querySelector(headerSelector);
+      const content = modal.querySelector(contentSelector);
+      if (!header || !content || header.querySelector(headerCloseSelector)) {
+        return;
+      }
+      header.append(createAutoCloseButton());
+    });
+
+    document.addEventListener(
+      'click',
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const modal = target.closest(modalSelector);
+        if (!modal || !isModalOpen(modal)) {
+          return;
+        }
+        const isBackdropClick =
+          target === modal || target.matches('.modal__overlay, .modal__backdrop');
+        if (!isBackdropClick) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      },
+      true,
+    );
+
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key !== 'Escape' && event.key !== 'Esc') {
+          return;
+        }
+        const openModals = getOpenModals();
+        if (!openModals.length) {
+          return;
+        }
+        const modal = openModals[openModals.length - 1];
+        const closeButton = modal.querySelector(
+          [
+            `${headerSelector} .modal__close`,
+            `${headerSelector} .modal-close`,
+            `${headerSelector} .btn-close`,
+            `${headerSelector} [data-modal-close]`,
+            `${headerSelector} [data-close-modal]`,
+            `${headerSelector} [data-asset-modal-close]`,
+            `${headerSelector} [data-email-recipients-close]`,
+            `${headerSelector} [data-auto-modal-close]`,
+            '.modal__close',
+            '.modal-close',
+            '.btn-close',
+            '[data-modal-close]',
+            '[data-close-modal]',
+            '[data-asset-modal-close]',
+            '[data-email-recipients-close]',
+            '[data-auto-modal-close]',
+          ].join(', '),
+        );
+
+        if (closeButton instanceof HTMLElement) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          closeButton.click();
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (modal instanceof HTMLDialogElement) {
+          modal.close();
+          return;
+        }
+        modal.classList.remove('is-visible');
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+        modal.style.display = 'none';
+      },
+      true,
+    );
+  }
+
   function setupHeaderMenus() {
     const menus = Array.from(document.querySelectorAll('[data-header-menu]'));
     if (!menus.length) {
@@ -910,6 +1041,7 @@
     setupForceRefresh();
     setupUpdateBanner();
     setupHeaderMenus();
+    setupModalCloseBehaviour();
     setupAutoAlerts();
   }
 
