@@ -2,6 +2,7 @@
   'use strict';
 
   const STORAGE_KEY = 'portal.tickets.columns';
+  const FILTERS_COLLAPSED_STORAGE_KEY = 'portal.tickets.filtersCollapsed';
 
   function loadVisibleColumns(defaultColumns) {
     try {
@@ -119,8 +120,56 @@
     });
   }
 
+  function loadFiltersCollapsedState() {
+    try {
+      return localStorage.getItem(FILTERS_COLLAPSED_STORAGE_KEY) === '1';
+    } catch (err) {
+      console.warn('Failed to read ticket filter panel preference', err);
+      return false;
+    }
+  }
+
+  function saveFiltersCollapsedState(collapsed) {
+    try {
+      localStorage.setItem(FILTERS_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
+    } catch (err) {
+      console.warn('Failed to persist ticket filter panel preference', err);
+    }
+  }
+
+  function initialiseFiltersPanel() {
+    const overview = document.querySelector('.ticket-dashboard__overview');
+    const panel = document.querySelector('[data-ticket-filters-panel]');
+    const toggle = panel ? panel.querySelector('[data-ticket-filters-toggle]') : null;
+    const toggleText = toggle ? toggle.querySelector('[data-ticket-filters-toggle-text]') : null;
+
+    if (!overview || !panel || !toggle) {
+      return;
+    }
+
+    const setCollapsedState = (collapsed) => {
+      panel.classList.toggle('ticket-filters-panel--collapsed', collapsed);
+      overview.classList.toggle('ticket-dashboard__overview--filters-collapsed', collapsed);
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.setAttribute('aria-label', collapsed ? 'Expand filters panel' : 'Collapse filters panel');
+      toggle.setAttribute('title', collapsed ? 'Expand filters panel' : 'Collapse filters panel');
+      if (toggleText) {
+        toggleText.textContent = collapsed ? 'Show filters' : 'Hide filters';
+      }
+    };
+
+    setCollapsedState(loadFiltersCollapsedState());
+
+    toggle.addEventListener('click', () => {
+      const collapsed = !panel.classList.contains('ticket-filters-panel--collapsed');
+      setCollapsedState(collapsed);
+      saveFiltersCollapsedState(collapsed);
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const table = document.getElementById('tickets-table');
     initialiseColumnControls(table);
+    initialiseFiltersPanel();
   });
 })();
