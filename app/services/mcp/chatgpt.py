@@ -7,8 +7,8 @@ from typing import Any, Mapping
 
 from fastapi import status
 
-from app.repositories import integration_modules as module_repo
 from app.repositories import tickets as tickets_repo
+from app.services import modules as modules_service
 from app.services import tickets as tickets_service
 
 DEFAULT_TOOLS = [
@@ -108,7 +108,7 @@ def _resolve_token(body: Mapping[str, Any], authorization_header: str | None) ->
 
 
 async def _load_settings() -> dict[str, Any]:
-    module = await module_repo.get_module("chatgpt-mcp")
+    module = await modules_service.get_module("chatgpt-mcp", redact=False)
     if not module or not module.get("enabled"):
         raise ChatGPTMCPError(status.HTTP_503_SERVICE_UNAVAILABLE, "ChatGPT MCP module is disabled")
     settings = module.get("settings") or {}

@@ -28,6 +28,7 @@ from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import staff as staff_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.services import modules as modules_service
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
@@ -1910,7 +1911,7 @@ async def get_admin_m365_credentials() -> dict[str, Any] | None:
     field is decrypted if it was stored as ciphertext or
     returned as-is if it is already plain text (manually configured).
     """
-    module = await modules_repo.get_module(_M365_ADMIN_MODULE_SLUG)
+    module = await modules_service.get_module(_M365_ADMIN_MODULE_SLUG, redact=False)
     if not module:
         return None
     settings = module.get("settings") or {}

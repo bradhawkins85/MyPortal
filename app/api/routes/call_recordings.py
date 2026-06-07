@@ -81,9 +81,9 @@ async def sync_call_recordings(
     """Sync call recordings from filesystem (super admin only)."""
     # Look up the call-recordings module once so we can fall back to the
     # configured path and read the phone system type without repeating work.
-    from app.repositories import integration_modules as modules_repo
+    from app.services import modules as modules_service
 
-    module = await modules_repo.get_module("call-recordings")
+    module = await modules_service.get_module("call-recordings", redact=False)
     module_settings = (module or {}).get("settings") or {}
     phone_system_type = module_settings.get("phone_system_type")
     if not recordings_path:
@@ -125,9 +125,9 @@ async def force_sync_call_recordings(
     __: dict = Depends(require_super_admin),
 ):
     """Force sync call recordings from filesystem, reloading all details while preserving ticket linkages and transcriptions (super admin only)."""
-    from app.repositories import integration_modules as modules_repo
+    from app.services import modules as modules_service
 
-    module = await modules_repo.get_module("call-recordings")
+    module = await modules_service.get_module("call-recordings", redact=False)
     module_settings = (module or {}).get("settings") or {}
     phone_system_type = module_settings.get("phone_system_type")
     if not recordings_path:
