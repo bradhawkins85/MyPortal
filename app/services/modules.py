@@ -839,8 +839,9 @@ def _default_module_setting(slug: str, key: str, fallback: str) -> str:
 _DEFAULT_OLLAMA_MODEL = _default_module_setting("ollama", "model", "llama3")
 _DEFAULT_OLLAMA_BASE_URL = _default_module_setting("ollama", "base_url", "http://127.0.0.1:11434")
 
-# Settings listed here can be provided via environment variables and should
-# ignore database-backed values when FORCE_ENV_MODULE_SETTINGS=true.
+# Map module slugs to the setting fields that can be sourced from environment
+# variables. When FORCE_ENV_MODULE_SETTINGS=true, these fields are resolved from
+# env/default values instead of the database while non-env-backed fields remain.
 _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
     "apprise": ("urls", "title"),
     "call-recordings": ("recordings_path", "phone_system_type"),
@@ -929,10 +930,14 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
 
 
 def _force_env_module_settings() -> bool:
+    """Return whether env-backed module fields should ignore database values."""
+
     return _ensure_bool(os.getenv("FORCE_ENV_MODULE_SETTINGS"), False)
 
 
 def _parse_module_settings(value: Any) -> Mapping[str, Any] | None:
+    """Return module settings as a mapping when the stored value is parseable."""
+
     if isinstance(value, Mapping):
         return value
     if isinstance(value, str):
@@ -948,6 +953,13 @@ def _resolve_module_settings_for_runtime(
     slug: str,
     module: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    """Resolve effective runtime settings for a module.
+
+    This merges stored settings with the usual defaults/env overrides. When
+    FORCE_ENV_MODULE_SETTINGS=true, env-backed fields are replaced with their
+    env/default values while DB-only fields are preserved.
+    """
+
     raw_settings = _parse_module_settings((module or {}).get("settings"))
     resolved = _coerce_settings(slug, raw_settings, module)
     if not _force_env_module_settings():
@@ -962,6 +974,8 @@ def _resolve_module_settings_for_runtime(
 
 
 def _resolve_module_for_runtime(module: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a module record with runtime-resolved settings applied."""
+
     resolved = dict(module)
     resolved["settings"] = _resolve_module_settings_for_runtime(
         str(module.get("slug") or ""),
