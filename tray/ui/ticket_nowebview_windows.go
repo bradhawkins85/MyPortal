@@ -288,7 +288,7 @@ $btnSubmit.add_Click({
 		default:
 			valExpr = fmt.Sprintf("%s.Text.Trim() -eq ''", m.varName)
 		}
-		labelQ := strings.TrimSuffix(questions[indexOfQID(questions, m.qID)].Label, "")
+		labelQ := questions[indexOfQID(questions, m.qID)].Label
 		if visCheck != "" {
 			sb.WriteString(fmt.Sprintf("    %sif (%s) { $errs += '%s is required.' } }\n",
 				visCheck, valExpr, strings.ReplaceAll(labelQ, "'", "''")))
