@@ -839,6 +839,8 @@ def _default_module_setting(slug: str, key: str, fallback: str) -> str:
 _DEFAULT_OLLAMA_MODEL = _default_module_setting("ollama", "model", "llama3")
 _DEFAULT_OLLAMA_BASE_URL = _default_module_setting("ollama", "base_url", "http://127.0.0.1:11434")
 
+# Settings listed here can be provided via environment variables and should
+# ignore database-backed values when FORCE_ENV_MODULE_SETTINGS=true.
 _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
     "apprise": ("urls", "title"),
     "call-recordings": ("recordings_path", "phone_system_type"),
