@@ -4173,6 +4173,13 @@ dialog.modal:not([open]) {
   box-shadow: 0 24px 50px -20px rgba(15, 23, 42, 0.85);
 }
 
+.modal__content--compact {
+  width: min(90vw, 34rem);
+  max-width: 34rem;
+  height: auto;
+  max-height: calc(100vh - 4rem);
+}
+
 .modal__close {
   position: absolute;
   top: var(--space-gap-tight);
@@ -4213,6 +4220,22 @@ dialog.modal:not([open]) {
 
 .modal__text {
   margin: var(--space-compact) 0;
+}
+
+.webhook-url-modal__input {
+  width: 100%;
+}
+
+.webhook-url-modal__status {
+  min-height: 1.25rem;
+  margin: 0;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.webhook-url-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-gap-tight);
 }
 
 .modal__content--staff {
