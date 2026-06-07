@@ -2118,6 +2118,7 @@ async def admin_company_tray_settings_page(
 ):
     from app.repositories import companies as companies_repo
     from app.repositories import tray as tray_repo
+    from app.repositories import tray_ticket_questions as tq_repo
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -2128,6 +2129,9 @@ async def admin_company_tray_settings_page(
         raise HTTPException(status_code=404, detail="Company not found")
 
     tokens = await tray_repo.list_install_tokens(company_id=company_id)
+    company_questions = await tq_repo.list_questions(
+        scope="company", company_id=company_id, active_only=False
+    )
     portal_url = (
         str(_main().settings.portal_url).rstrip("/")
         if _main().settings.portal_url
@@ -2140,6 +2144,7 @@ async def admin_company_tray_settings_page(
         "new_token": new_token,
         "now_iso": datetime.now(timezone.utc).isoformat(),
         "portal_url": portal_url,
+        "company_questions": company_questions,
     }
     return await _main()._render_template(
         "admin/tray/company_settings.html", request, current_user, extra=extra
@@ -2222,5 +2227,215 @@ async def admin_company_tray_revoke_token(
     return RedirectResponse(
         url=f"/admin/companies/{cid}/tray?"
         + urlencode({"success": "Token revoked."}),
+        status_code=303,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-company ticket question handlers
+# ---------------------------------------------------------------------------
+
+
+async def _get_company_or_404(company_id: int):
+    from app.repositories import companies as companies_repo
+
+    company = await companies_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return company
+
+
+async def admin_company_ticket_question_new_page(company_id: int, request: Request):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await _get_company_or_404(company_id)
+    from app.repositories import tray_ticket_questions as tq_repo
+
+    # All questions available as parent candidates for conditions
+    all_questions = await tq_repo.list_questions(active_only=False)
+    extra = {
+        "title": f"New question — {company.get('name')}",
+        "company": company,
+        "question": None,
+        "all_questions": all_questions,
+        "error_message": None,
+    }
+    return await _main()._render_template(
+        "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+    )
+
+
+async def admin_company_ticket_question_create(company_id: int, request: Request):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await _get_company_or_404(company_id)
+    from app.repositories import tray_ticket_questions as tq_repo
+
+    form = await request.form()
+    field_type = str(form.get("field_type") or "text").strip()
+    label = str(form.get("label") or "").strip()
+    placeholder = str(form.get("placeholder") or "").strip() or None
+    is_required = bool(form.get("is_required"))
+    is_active = bool(form.get("is_active"))
+    sort_order = int(form.get("sort_order") or 0)
+    options_text = str(form.get("options_text") or "")
+    options = [o.strip() for o in options_text.splitlines() if o.strip()]
+
+    if not label:
+        all_questions = await tq_repo.list_questions(active_only=False)
+        extra = {
+            "title": f"New question — {company.get('name')}",
+            "company": company,
+            "question": None,
+            "all_questions": all_questions,
+            "error_message": "Label is required.",
+        }
+        return await _main()._render_template(
+            "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+        )
+
+    record = await tq_repo.create_question(
+        scope="company",
+        company_id=int(company_id),
+        field_type=field_type,
+        label=label,
+        placeholder=placeholder,
+        is_required=is_required,
+        options=options,
+        sort_order=sort_order,
+        is_active=is_active,
+        created_by_user_id=int(current_user["id"]),
+    )
+
+    parent_ids = form.getlist("cond_parent_id[]")
+    operators = form.getlist("cond_operator[]")
+    expected_vals = form.getlist("cond_expected[]")
+    conditions = [
+        {"parent_question_id": int(p), "operator": o, "expected_value": e}
+        for p, o, e in zip(parent_ids, operators, expected_vals)
+        if p
+    ]
+    if conditions:
+        await tq_repo.replace_conditions_for_question(int(record["id"]), conditions)
+
+    cid = int(company_id)
+    return RedirectResponse(
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Question created."}),
+        status_code=303,
+    )
+
+
+async def admin_company_ticket_question_edit_page(
+    company_id: int, question_id: int, request: Request
+):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await _get_company_or_404(company_id)
+    from app.repositories import tray_ticket_questions as tq_repo
+
+    question = await tq_repo.get_question(question_id)
+    if not question or question.get("company_id") != company_id:
+        return RedirectResponse(
+            url=f"/admin/companies/{company_id}/tray", status_code=303
+        )
+    question["conditions"] = await tq_repo.list_conditions_for_question(question_id)
+    all_questions = await tq_repo.list_questions(active_only=False)
+    extra = {
+        "title": f"Edit question — {company.get('name')}",
+        "company": company,
+        "question": question,
+        "all_questions": all_questions,
+        "error_message": None,
+    }
+    return await _main()._render_template(
+        "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+    )
+
+
+async def admin_company_ticket_question_update(
+    company_id: int, question_id: int, request: Request
+):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await _get_company_or_404(company_id)
+    from app.repositories import tray_ticket_questions as tq_repo
+
+    question = await tq_repo.get_question(question_id)
+    if not question or question.get("company_id") != company_id:
+        return RedirectResponse(
+            url=f"/admin/companies/{company_id}/tray", status_code=303
+        )
+
+    form = await request.form()
+    field_type = str(form.get("field_type") or "text").strip()
+    label = str(form.get("label") or "").strip()
+    placeholder = str(form.get("placeholder") or "").strip() or None
+    is_required = bool(form.get("is_required"))
+    is_active = bool(form.get("is_active"))
+    sort_order = int(form.get("sort_order") or 0)
+    options_text = str(form.get("options_text") or "")
+    options = [o.strip() for o in options_text.splitlines() if o.strip()]
+
+    if not label:
+        question["conditions"] = await tq_repo.list_conditions_for_question(question_id)
+        all_questions = await tq_repo.list_questions(active_only=False)
+        extra = {
+            "title": f"Edit question — {company.get('name')}",
+            "company": company,
+            "question": question,
+            "all_questions": all_questions,
+            "error_message": "Label is required.",
+        }
+        return await _main()._render_template(
+            "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+        )
+
+    await tq_repo.update_question(
+        question_id,
+        field_type=field_type,
+        label=label,
+        placeholder=placeholder,
+        is_required=is_required,
+        options=options,
+        sort_order=sort_order,
+        is_active=is_active,
+    )
+
+    parent_ids = form.getlist("cond_parent_id[]")
+    operators = form.getlist("cond_operator[]")
+    expected_vals = form.getlist("cond_expected[]")
+    conditions = [
+        {"parent_question_id": int(p), "operator": o, "expected_value": e}
+        for p, o, e in zip(parent_ids, operators, expected_vals)
+        if p
+    ]
+    await tq_repo.replace_conditions_for_question(question_id, conditions)
+
+    cid = int(company_id)
+    return RedirectResponse(
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Question updated."}),
+        status_code=303,
+    )
+
+
+async def admin_company_ticket_question_delete(
+    company_id: int, question_id: int, request: Request
+):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray_ticket_questions as tq_repo
+
+    question = await tq_repo.get_question(question_id)
+    if question and question.get("company_id") == company_id:
+        await tq_repo.delete_question(question_id)
+
+    cid = int(company_id)
+    return RedirectResponse(
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Question deleted."}),
         status_code=303,
     )

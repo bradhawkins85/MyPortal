@@ -211,8 +211,79 @@ class TrayTicketSubmitRequest(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=50)
     subject: str = Field(min_length=1, max_length=500)
     description: Optional[str] = Field(default=None)
+    answers: Optional[list["TrayTicketAnswer"]] = Field(default=None)
+
+
+class TrayTicketAnswer(BaseModel):
+    """A single dynamic question answer submitted with a ticket."""
+
+    question_id: int
+    value: Optional[str] = Field(default=None, max_length=2000)
 
 
 class TrayTicketSubmitResponse(BaseModel):
     ticket_id: int
     ticket_number: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Dynamic ticket question schemas
+# ---------------------------------------------------------------------------
+
+
+class TrayTicketQuestionCondition(BaseModel):
+    """A conditional visibility rule for a ticket question."""
+
+    id: Optional[int] = None
+    parent_question_id: int
+    operator: str = Field(default="equals", max_length=16)
+    expected_value: str = Field(default="", max_length=255)
+
+
+class TrayTicketQuestion(BaseModel):
+    """A single dynamic intake question returned by the ticket-questions endpoint."""
+
+    id: int
+    scope: str
+    company_id: Optional[int] = None
+    field_type: str
+    label: str
+    placeholder: Optional[str] = None
+    is_required: bool
+    options: list[str] = Field(default_factory=list)
+    sort_order: int
+    conditions: list[TrayTicketQuestionCondition] = Field(default_factory=list)
+
+
+class TrayTicketQuestionsResponse(BaseModel):
+    """Response returned by GET /api/tray/ticket-questions."""
+
+    questions: list[TrayTicketQuestion] = Field(default_factory=list)
+
+
+class TrayTicketQuestionCreate(BaseModel):
+    """Admin payload to create a ticket question definition."""
+
+    scope: str = Field(default="global", pattern=r"^(global|company)$")
+    company_id: Optional[int] = None
+    field_type: str = Field(default="text", pattern=r"^(text|select|boolean)$")
+    label: str = Field(min_length=1, max_length=255)
+    placeholder: Optional[str] = Field(default=None, max_length=255)
+    is_required: bool = False
+    options: list[str] = Field(default_factory=list)
+    sort_order: int = 0
+    is_active: bool = True
+    conditions: list[TrayTicketQuestionCondition] = Field(default_factory=list)
+
+
+class TrayTicketQuestionUpdate(BaseModel):
+    """Admin payload to update a ticket question definition."""
+
+    field_type: Optional[str] = Field(default=None, pattern=r"^(text|select|boolean)$")
+    label: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    placeholder: Optional[str] = Field(default=None, max_length=255)
+    is_required: Optional[bool] = None
+    options: Optional[list[str]] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    conditions: Optional[list[TrayTicketQuestionCondition]] = None
