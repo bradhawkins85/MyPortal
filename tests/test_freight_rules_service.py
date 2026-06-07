@@ -42,6 +42,7 @@ def test_calculate_cart_freight_applies_default_rule_per_dispatch_warehouse():
     assert sorted(
         [entry["dispatch_warehouse"] for entry in result["breakdown"]]
     ) == ["NSW", "QLD"]
+    assert all(entry["amount"] == Decimal("15.00") for entry in result["breakdown"])
 
 
 def test_calculate_cart_freight_prefers_matching_non_default_rule():

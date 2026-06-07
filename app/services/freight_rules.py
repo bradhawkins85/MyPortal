@@ -34,6 +34,13 @@ def _quantize_money(amount: Decimal) -> Decimal:
 
 
 def _classify_item_size(product: Mapping[str, Any]) -> str:
+    """Classify size from product dimensions using coarse freight tiers.
+
+    Thresholds are intentionally broad defaults so rules can target
+    small/medium/large groupings without requiring strict dimension units.
+    Product dimensions are treated as centimeters and volume as cubic
+    centimeters to align with existing stock-feed product fields.
+    """
     length = _to_decimal(product.get("length"))
     width = _to_decimal(product.get("width"))
     height = _to_decimal(product.get("height"))
@@ -69,6 +76,7 @@ def _allocate_quantity_by_warehouse(
             allocations.append((warehouse, allocated))
             remaining -= allocated
     if remaining > 0:
+        # Keep remaining items as a pseudo-shipment so fallback freight can still apply.
         allocations.append(("UNALLOCATED", remaining))
     return allocations
 
