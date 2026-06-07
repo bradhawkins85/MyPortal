@@ -342,6 +342,9 @@ async def view_cart(
     cart_message: str | None = Query(None, alias="cartMessage"),
 ):
     main_module = _main()
+    from app.repositories import freight_rules as freight_rules_repo
+    from app.services import freight_rules as freight_rules_service
+
     (
         user,
         membership,
@@ -363,7 +366,7 @@ async def view_cart(
     cart_items: list[dict[str, Any]] = []
     cart_items_payload: list[dict[str, Any]] = []
     cart_product_ids: list[int] = []
-    total = Decimal("0")
+    subtotal = Decimal("0")
     removed_product_ids: list[int] = []
     price_updates = 0
     cart_message_parts = [cart_message] if cart_message else []
@@ -433,7 +436,7 @@ async def view_cart(
         description = product.get("description")
         image_url = product.get("image_url")
         line_total = current_price * quantity
-        total += line_total
+        subtotal += line_total
 
         cart_product_ids.append(resolved_product_id)
 
@@ -494,6 +497,24 @@ async def view_cart(
 
     if price_updates:
         cart_message_parts.append("Prices updated to reflect the latest catalog.")
+
+    freight_total = Decimal("0.00")
+    freight_breakdown: list[dict[str, Any]] = []
+    if cart_items:
+        active_freight_rules = await freight_rules_repo.list_rules(active_only=True)
+        freight_summary = freight_rules_service.calculate_cart_freight(
+            cart_items,
+            product_lookup,
+            active_freight_rules,
+        )
+        freight_total = freight_summary["freight_total"]
+        freight_breakdown = freight_summary["breakdown"]
+
+    cart_subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    cart_total = (cart_subtotal + freight_total).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
 
     recommendations: dict[str, list[dict[str, Any]]] = {"cross_sell": [], "upsell": []}
     if cart_product_ids:
@@ -624,7 +645,10 @@ async def view_cart(
     extra = {
         "title": "Cart",
         "cart_items": cart_items,
-        "cart_total": total,
+        "cart_subtotal": cart_subtotal,
+        "freight_total": freight_total,
+        "freight_breakdown": freight_breakdown,
+        "cart_total": cart_total,
         "order_message": order_message,
         "cart_error": normalised_cart_error,
         "cart_message": normalised_cart_message,

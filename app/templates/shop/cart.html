@@ -113,6 +113,14 @@
         <div class="cart-summary">
           <dl class="cart-summary__totals">
             <div>
+              <dt>Subtotal</dt>
+              <dd>${{ '%.2f'|format(cart_subtotal) }}</dd>
+            </div>
+            <div>
+              <dt>Freight</dt>
+              <dd>${{ '%.2f'|format(freight_total) }}</dd>
+            </div>
+            <div>
               <dt>Total</dt>
               <dd>${{ '%.2f'|format(cart_total) }}</dd>
             </div>
