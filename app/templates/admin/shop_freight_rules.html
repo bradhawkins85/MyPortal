@@ -54,6 +54,7 @@
               <th scope="col" data-sort="string">Rule name</th>
               <th scope="col" data-sort="number">Freight</th>
               <th scope="col" data-sort="string" data-mobile-hidden="true">Conditions</th>
+              <th scope="col" data-sort="string" data-mobile-hidden="true">Flow</th>
               <th scope="col" data-sort="string">Status</th>
               <th scope="col" class="table__actions">Actions</th>
             </tr>
@@ -61,7 +62,7 @@
           <tbody>
             {% if not rules %}
               <tr>
-                <td colspan="6" style="text-align:center;color:var(--color-text-muted)">
+                <td colspan="7" style="text-align:center;color:var(--color-text-muted)">
                   No freight rules configured yet.
                 </td>
               </tr>
@@ -94,6 +95,13 @@
                     <em style="color:var(--color-text-muted)">No conditions</em>
                   {% endif %}
                 </td>
+                <td data-label="Flow" data-mobile-hidden="true">
+                  {% if rule.stop_processing %}
+                    <span class="badge">Stop after match</span>
+                  {% else %}
+                    <em style="color:var(--color-text-muted)">Continue</em>
+                  {% endif %}
+                </td>
                 <td data-label="Status">
                   <span class="badge {{ 'badge--success' if rule.is_active else 'badge--danger' }}">
                     {{ 'Active' if rule.is_active else 'Inactive' }}
@@ -121,6 +129,7 @@
                           data-rule-freight-amount="{{ rule.freight_amount }}"
                           data-rule-is-active="{{ 1 if rule.is_active else 0 }}"
                           data-rule-is-default="{{ 1 if rule.is_default else 0 }}"
+                          data-rule-stop-processing="{{ 1 if rule.stop_processing else 0 }}"
                           data-rule-conditions='{{ (rule.conditions or []) | tojson }}'
                         >Edit</button>
                       </li>
@@ -202,6 +211,12 @@
           <input type="checkbox" name="is_default" id="rule-is-default" value="1"
                  {{ 'checked' if (is_editing and editing_rule.is_default) }} />
           <span class="form-label">Default fallback rule</span>
+        </label>
+        <label class="form-field form-field--checkbox">
+          <input type="hidden" name="stop_processing" value="0" />
+          <input type="checkbox" name="stop_processing" id="rule-stop-processing" value="1"
+                 {{ 'checked' if (is_editing and editing_rule.stop_processing) }} />
+          <span class="form-label">Stop processing more rules after this rule</span>
         </label>
       </div>
       <fieldset class="form-fieldset" id="conditions-fieldset">
@@ -301,6 +316,7 @@
   const freightAmountInput = document.getElementById('rule-freight-amount');
   const isActiveInput = document.getElementById('rule-is-active');
   const isDefaultInput = document.getElementById('rule-is-default');
+  const stopProcessingInput = document.getElementById('rule-stop-processing');
   const conditionsList = document.getElementById('conditions-list');
   const template = document.getElementById('condition-row-template');
   const addConditionButton = document.getElementById('add-condition-btn');
@@ -415,6 +431,7 @@
     if (freightAmountInput) freightAmountInput.value = '0.00';
     if (isActiveInput) isActiveInput.checked = true;
     if (isDefaultInput) isDefaultInput.checked = false;
+    if (stopProcessingInput) stopProcessingInput.checked = false;
     clearConditions();
     toggleConditionsFieldset();
     title.textContent = 'New rule';
@@ -430,6 +447,7 @@
     if (freightAmountInput) freightAmountInput.value = button.dataset.ruleFreightAmount || '0.00';
     if (isActiveInput) isActiveInput.checked = button.dataset.ruleIsActive === '1';
     if (isDefaultInput) isDefaultInput.checked = button.dataset.ruleIsDefault === '1';
+    if (stopProcessingInput) stopProcessingInput.checked = button.dataset.ruleStopProcessing === '1';
     clearConditions();
     let conditions = [];
     try {

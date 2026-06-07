@@ -1232,6 +1232,7 @@ async def admin_create_shop_freight_rule(request: Request):
             "error",
         )
     is_default = _form_bool(form, "is_default")
+    stop_processing = _form_bool(form, "stop_processing")
     is_active = _form_bool(form, "is_active")
     conditions = _normalise_freight_conditions(
         is_default=is_default,
@@ -1242,6 +1243,7 @@ async def admin_create_shop_freight_rule(request: Request):
         name=name,
         priority=priority,
         is_default=is_default,
+        stop_processing=stop_processing,
         freight_amount=freight_amount,
         conditions=conditions,
         is_active=is_active,
@@ -1293,6 +1295,7 @@ async def admin_update_shop_freight_rule(request: Request, rule_id: int):
             "error",
         )
     is_default = _form_bool(form, "is_default")
+    stop_processing = _form_bool(form, "stop_processing")
     is_active = _form_bool(form, "is_active")
     conditions = _normalise_freight_conditions(
         is_default=is_default,
@@ -1304,6 +1307,7 @@ async def admin_update_shop_freight_rule(request: Request, rule_id: int):
         name=name,
         priority=priority,
         is_default=is_default,
+        stop_processing=stop_processing,
         freight_amount=freight_amount,
         conditions=conditions,
         is_active=is_active,

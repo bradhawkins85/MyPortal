@@ -186,20 +186,27 @@ def _matches_rule(
     )
 
 
-def _select_rule_for_shipment(
+def _select_rules_for_shipment(
     rules: Sequence[Mapping[str, Any]],
     *,
     cart_total: Decimal,
     shipment: Mapping[str, Any],
-) -> Mapping[str, Any] | None:
+) -> list[Mapping[str, Any]]:
     default_rule: Mapping[str, Any] | None = None
+    matched_rules: list[Mapping[str, Any]] = []
     for rule in rules:
         if rule.get("is_default"):
             default_rule = rule
             continue
         if _matches_rule(rule, cart_total=cart_total, shipment=shipment):
-            return rule
-    return default_rule
+            matched_rules.append(rule)
+            if bool(rule.get("stop_processing")):
+                break
+    if matched_rules:
+        return matched_rules
+    if default_rule:
+        return [default_rule]
+    return []
 
 
 def _build_shipments(
@@ -255,14 +262,34 @@ def calculate_cart_freight(
     freight_total = Decimal("0")
     breakdown: list[dict[str, Any]] = []
     for shipment in shipments:
-        rule = _select_rule_for_shipment(rules, cart_total=cart_subtotal, shipment=shipment)
-        freight_amount = _quantize_money(_to_decimal((rule or {}).get("freight_amount")))
+        applied_rules = _select_rules_for_shipment(
+            rules,
+            cart_total=cart_subtotal,
+            shipment=shipment,
+        )
+        freight_amount = _quantize_money(
+            sum(
+                _to_decimal(rule.get("freight_amount"))
+                for rule in applied_rules
+            )
+        )
         freight_total += freight_amount
+        first_rule = applied_rules[0] if applied_rules else {}
         breakdown.append(
             {
                 "dispatch_warehouse": shipment.get("dispatch_warehouse"),
-                "rule_id": rule.get("id") if rule else None,
-                "rule_name": rule.get("name") if rule else None,
+                "rule_id": first_rule.get("id"),
+                "rule_name": first_rule.get("name"),
+                "applied_rule_ids": [
+                    rule.get("id")
+                    for rule in applied_rules
+                    if rule.get("id") is not None
+                ],
+                "applied_rule_names": [
+                    str(rule.get("name"))
+                    for rule in applied_rules
+                    if rule.get("name")
+                ],
                 "amount": freight_amount,
             }
         )
