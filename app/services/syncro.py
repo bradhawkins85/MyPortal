@@ -12,8 +12,8 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.core.logging import log_error, log_info, log_warning
-from app.repositories import integration_modules as module_repo
 from app.services import webhook_monitor
+from app.services import modules as modules_service
 from app.services import rate_limit_store
 from app.services.redis import get_redis_client
 
@@ -60,7 +60,7 @@ async def _load_module_settings() -> dict[str, Any] | None:
         if _MODULE_SETTINGS_CACHE is not None and now < _MODULE_SETTINGS_EXPIRY:
             return _MODULE_SETTINGS_CACHE
         try:
-            module = await module_repo.get_module("syncro")
+            module = await modules_service.get_module("syncro", redact=False)
         except RuntimeError as exc:  # pragma: no cover - database may be unavailable during tests
             log_error("Unable to load Syncro module configuration", error=str(exc))
             module = None

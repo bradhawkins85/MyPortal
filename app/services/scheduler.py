@@ -892,10 +892,12 @@ class SchedulerService:
                     log_info("Scheduled price changes applied", **result)
                 elif command == "sync_recordings":
                     from app.services import call_recordings as call_recordings_service
-                    from app.repositories import integration_modules as modules_repo
+                    from app.services import modules as modules_service
                     
                     # Get recordings path from module settings
-                    module = await modules_repo.get_module("call-recordings")
+                    module = await modules_service.get_module(
+                        "call-recordings", redact=False
+                    )
                     if module and module.get("settings"):
                         recordings_path = module["settings"].get("recordings_path")
                         phone_system_type = module["settings"].get("phone_system_type")

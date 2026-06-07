@@ -42,10 +42,10 @@ from redis.exceptions import RedisError
 
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
-from app.repositories import integration_modules as module_repo
 from app.repositories import solidtime_links as links_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
+from app.services import modules as modules_service
 from app.services import rate_limit_store
 from app.services import webhook_monitor
 from app.services.redis import get_redis_client
@@ -125,7 +125,9 @@ async def _load_module_settings() -> dict[str, Any] | None:
         if _MODULE_SETTINGS_CACHE is not None and now < _MODULE_SETTINGS_EXPIRY:
             return _MODULE_SETTINGS_CACHE
         try:
-            module = await module_repo.get_module(SOLIDTIME_MODULE_SLUG)
+            module = await modules_service.get_module(
+                SOLIDTIME_MODULE_SLUG, redact=False
+            )
         except RuntimeError as exc:  # pragma: no cover - defensive
             log_error("Unable to load Solidtime module configuration", error=str(exc))
             module = None
