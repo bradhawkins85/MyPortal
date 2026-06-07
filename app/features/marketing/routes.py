@@ -18,6 +18,7 @@ from app.services import tickets as tickets_service
 router = APIRouter(tags=["Marketing"])
 
 _MARKETING_PERMISSION = "marketing.access"
+_MARKETING_TAG = "marketing"
 _MAIN_MODULE = None
 
 
@@ -133,7 +134,7 @@ async def marketing_submit_contact(request: Request, slug: str):
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    status_slug = await tickets_service.resolve_status_or_default(None)
+    ticket_status = await tickets_service.resolve_status_or_default(None)
     ticket_subject = f"Marketing enquiry: {page['title']}"
     ticket_description = (
         f"Marketing page: {page['slug']}\n"
@@ -152,9 +153,9 @@ async def marketing_submit_contact(request: Request, slug: str):
             company_id=None,
             assigned_user_id=None,
             priority="normal",
-            status=status_slug,
-            category="marketing",
-            module_slug="marketing",
+            status=ticket_status,
+            category=_MARKETING_TAG,
+            module_slug=_MARKETING_TAG,
             external_reference=page["slug"],
             trigger_automations=True,
             initial_reply_author_id=None,
