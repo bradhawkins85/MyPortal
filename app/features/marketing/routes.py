@@ -81,7 +81,7 @@ def _coerce_title(raw_title: str) -> str:
 
 @router.get("/marketing/{slug}", response_class=HTMLResponse)
 async def marketing_landing_page(request: Request, slug: str):
-    page = await marketing_repo.get_page_by_slug(marketing_repo.slugify(slug))
+    page = await marketing_repo.get_page_by_slug(marketing_repo.slugify(slug), published_only=True)
     if not page:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marketing page not found")
 
@@ -105,7 +105,7 @@ async def marketing_landing_page(request: Request, slug: str):
 
 @router.post("/marketing/{slug}/contact", response_class=HTMLResponse)
 async def marketing_submit_contact(request: Request, slug: str):
-    page = await marketing_repo.get_page_by_slug(marketing_repo.slugify(slug))
+    page = await marketing_repo.get_page_by_slug(marketing_repo.slugify(slug), published_only=True)
     if not page:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marketing page not found")
 
@@ -204,6 +204,25 @@ async def admin_marketing_dashboard(request: Request):
     )
 
 
+@router.get("/admin/marketing/pages/{page_id}/edit", response_class=HTMLResponse)
+async def admin_marketing_edit_page(page_id: int, request: Request):
+    current_user, redirect = await _require_marketing_access(request)
+    if redirect:
+        return redirect
+    page = await marketing_repo.get_page_by_id(page_id)
+    if not page:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marketing page not found")
+    return await _main()._render_template(
+        "admin/marketing_page_edit.html",
+        request,
+        current_user,
+        extra={
+            "title": f"Edit — {page['title']}",
+            "marketing_page": page,
+        },
+    )
+
+
 @router.post("/admin/marketing/pages", response_class=HTMLResponse)
 async def admin_marketing_create_page(request: Request):
     current_user, redirect = await _require_marketing_access(request)
@@ -215,11 +234,13 @@ async def admin_marketing_create_page(request: Request):
         title = _coerce_title(str(form.get("title") or ""))
         subtitle = str(form.get("subtitle") or "").strip() or None
         intro_text = str(form.get("intro_text") or "").strip() or None
+        is_published = _form_bool(form, "is_published")
         await marketing_repo.create_page(
             slug=slug,
             title=title,
             subtitle=subtitle,
             intro_text=intro_text,
+            is_published=is_published,
         )
     except ValueError as exc:
         return await _main()._render_template(
@@ -247,26 +268,30 @@ async def admin_marketing_update_page(page_id: int, request: Request):
         title = _coerce_title(str(form.get("title") or ""))
         subtitle = str(form.get("subtitle") or "").strip() or None
         intro_text = str(form.get("intro_text") or "").strip() or None
+        is_published = _form_bool(form, "is_published")
         await marketing_repo.update_page(
             page_id,
             slug=slug,
             title=title,
             subtitle=subtitle,
             intro_text=intro_text,
+            is_published=is_published,
         )
     except ValueError as exc:
+        page = await marketing_repo.get_page_by_id(page_id)
+        if not page:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marketing page not found") from exc
         return await _main()._render_template(
-            "admin/marketing.html",
+            "admin/marketing_page_edit.html",
             request,
             current_user,
             extra={
-                "title": "Marketing pages",
-                "marketing_pages": await marketing_repo.list_pages(),
-                "marketing_leads": await marketing_repo.list_leads(),
+                "title": f"Edit — {page['title']}",
+                "marketing_page": page,
                 "error_message": str(exc),
             },
         )
-    return flash_redirect("/admin/marketing", "Marketing page updated.", "success")
+    return flash_redirect(f"/admin/marketing/pages/{page_id}/edit", "Marketing page updated.", "success")
 
 
 @router.post("/admin/marketing/pages/{page_id}/delete", response_class=HTMLResponse)
@@ -293,14 +318,16 @@ async def admin_marketing_create_section(page_id: int, request: Request):
     except ValueError:
         sort_order = 0
     if not title or not content_text:
+        page = await marketing_repo.get_page_by_id(page_id)
+        if not page:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marketing page not found")
         return await _main()._render_template(
-            "admin/marketing.html",
+            "admin/marketing_page_edit.html",
             request,
             current_user,
             extra={
-                "title": "Marketing pages",
-                "marketing_pages": await marketing_repo.list_pages(),
-                "marketing_leads": await marketing_repo.list_leads(),
+                "title": f"Edit — {page['title']}",
+                "marketing_page": page,
                 "error_message": "Section title and content are required.",
             },
         )
@@ -314,7 +341,7 @@ async def admin_marketing_create_section(page_id: int, request: Request):
         content_text=content_text,
         sort_order=sort_order,
     )
-    return flash_redirect("/admin/marketing", "Section added.", "success")
+    return flash_redirect(f"/admin/marketing/pages/{page_id}/edit", "Section added.", "success")
 
 
 @router.post("/admin/marketing/sections/{section_id}/delete", response_class=HTMLResponse)
@@ -322,7 +349,10 @@ async def admin_marketing_delete_section(section_id: int, request: Request):
     _, redirect = await _require_marketing_access(request)
     if redirect:
         return redirect
+    section = await marketing_repo.get_section_by_id(section_id)
     await marketing_repo.delete_section(section_id)
+    if section:
+        return flash_redirect(f"/admin/marketing/pages/{section['page_id']}/edit", "Section deleted.", "success")
     return flash_redirect("/admin/marketing", "Section deleted.", "success")
 
 
