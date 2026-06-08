@@ -251,6 +251,19 @@ async def assets_page(request: Request):
     return await main_module._render_template("assets/index.html", request, user, extra=extra)
 
 
+@router.get("/assets/{asset_id}", response_class=RedirectResponse)
+async def asset_detail_page(request: Request, asset_id: int):
+    user, _membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id", 0) or 0) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    return RedirectResponse(url=f"/assets#asset-{asset_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.get("/assets/settings", response_class=HTMLResponse)
 async def assets_settings_page(request: Request):
     main_module = _main()
