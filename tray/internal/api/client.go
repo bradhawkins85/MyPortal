@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -172,8 +173,17 @@ type VersionResponse struct {
 }
 
 // GetVersion checks if a newer installer version is available.
+// The current OS is sent in the X-Tray-OS header so the server can return
+// a platform-specific installer, and the device auth token is included so
+// the server can apply per-device rollout bucketing.
 func (c *Client) GetVersion(ctx context.Context) (*VersionResponse, error) {
-	resp, err := c.get(ctx, "/api/tray/version")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/tray/version", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Tray-OS", runtime.GOOS)
+	c.setAuthHeader(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}

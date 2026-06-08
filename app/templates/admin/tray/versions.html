@@ -14,7 +14,7 @@
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header">
-      <p class="card__lede">Manage installer versions served by the auto-update endpoint (<code>GET /api/tray/version</code>). The most recently published enabled entry wins per platform.</p>
+      <p class="card__lede">Manage installer versions served by the auto-update endpoint (<code>GET /api/tray/version</code>). The most recently published enabled entry wins per platform. Use <strong>Rollout %</strong> to stage a rollout — only the set percentage of devices will receive the new version per poll.</p>
     </header>
     <div class="card__body">
       <form method="post" action="/admin/tray/versions" class="form-stack">
@@ -36,6 +36,11 @@
             <label class="form-label" for="ver-url">Download URL</label>
             <input class="form-input" id="ver-url" name="download_url" type="url" required maxlength="500" placeholder="https://…/myportal-tray.msi" />
           </div>
+          <div class="form-field">
+            <label class="form-label" for="ver-rollout">Rollout %</label>
+            <input class="form-input" id="ver-rollout" name="rollout_percent" type="number"
+                   min="1" max="100" value="100" style="width:5rem" />
+          </div>
           <div class="form-field form-field--checkbox">
             <label>
               <input type="checkbox" name="required" value="1" />
@@ -56,7 +61,15 @@
       {% if versions %}
         <table class="data-table">
           <thead>
-            <tr><th>Version</th><th>Platform</th><th>Download URL</th><th>Required</th><th>Published</th></tr>
+            <tr>
+              <th>Version</th>
+              <th>Platform</th>
+              <th>Download URL</th>
+              <th>Required</th>
+              <th>Rollout</th>
+              <th>Published</th>
+              <th>Actions</th>
+            </tr>
           </thead>
           <tbody>
             {% for v in versions %}
@@ -65,7 +78,27 @@
                 <td>{{ v.platform }}</td>
                 <td><a href="{{ v.download_url }}" target="_blank" rel="noopener">{{ v.download_url | truncate(60) }}</a></td>
                 <td>{% if v.required %}<span class="status status--warning">Yes</span>{% else %}—{% endif %}</td>
+                <td>
+                  {% set rp = v.rollout_percent | default(100) | int %}
+                  {% set total = v.total_devices | default(0) | int %}
+                  {% set on_ver = v.devices_on_version | default(0) | int %}
+                  <span class="rollout-info">
+                    <strong>{{ rp }}%</strong> eligible
+                    {% if total > 0 %}
+                      &nbsp;·&nbsp;{{ on_ver }}/{{ total }} updated
+                    {% endif %}
+                  </span>
+                  {% if rp < 100 %}
+                  <form method="post" action="/admin/tray/versions/{{ v.id }}/rollout" class="form-inline" style="display:inline-flex;gap:.25rem;margin-left:.5rem">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="number" name="rollout_percent" value="{{ rp }}" min="1" max="100"
+                           style="width:4.5rem" class="form-input form-input--sm" />
+                    <button type="submit" class="button button--ghost button--sm">Update</button>
+                  </form>
+                  {% endif %}
+                </td>
                 <td><span data-utc="{{ v.published_at }}">{{ v.published_at }}</span></td>
+                <td>—</td>
               </tr>
             {% endfor %}
           </tbody>

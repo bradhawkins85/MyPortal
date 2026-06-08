@@ -497,6 +497,61 @@ async def get_latest_tray_version(platform: str = "all") -> dict[str, Any] | Non
     return dict(row) if row else None
 
 
+async def get_stable_tray_version(platform: str = "all") -> dict[str, Any] | None:
+    """Return the most recent fully-rolled-out (rollout_percent = 100) version.
+
+    Used as the fallback when a device's rollout bucket exceeds the
+    ``rollout_percent`` of the newest version record.
+    """
+    p = "?" if db.is_sqlite() else "%s"
+    row = await db.fetch_one(
+        f"SELECT * FROM tray_versions "
+        f"WHERE enabled = 1 AND rollout_percent = 100 "
+        f"AND (platform = {p} OR platform = 'all') "
+        f"ORDER BY published_at DESC LIMIT 1",
+        (platform,),
+    )
+    return dict(row) if row else None
+
+
+async def count_devices_on_version(version: str, platform: str) -> int:
+    """Count enrolled (active) devices currently reporting *version*.
+
+    Used in the admin UI to show rollout progress.  When *platform* is
+    ``'all'`` every active device is included; otherwise only devices
+    whose ``os`` column matches *platform* are counted.
+    """
+    p = "?" if db.is_sqlite() else "%s"
+    if platform == "all":
+        row = await db.fetch_one(
+            f"SELECT COUNT(*) AS n FROM tray_devices "
+            f"WHERE status = 'active' AND agent_version = {p}",
+            (version,),
+        )
+    else:
+        row = await db.fetch_one(
+            f"SELECT COUNT(*) AS n FROM tray_devices "
+            f"WHERE status = 'active' AND agent_version = {p} AND os = {p}",
+            (version, platform),
+        )
+    return int(row["n"]) if row else 0
+
+
+async def count_active_devices(platform: str = "all") -> int:
+    """Count all active enrolled devices, optionally filtered by platform."""
+    p = "?" if db.is_sqlite() else "%s"
+    if platform == "all":
+        row = await db.fetch_one(
+            "SELECT COUNT(*) AS n FROM tray_devices WHERE status = 'active'"
+        )
+    else:
+        row = await db.fetch_one(
+            f"SELECT COUNT(*) AS n FROM tray_devices WHERE status = 'active' AND os = {p}",
+            (platform,),
+        )
+    return int(row["n"]) if row else 0
+
+
 async def publish_tray_version(
     *,
     version: str,
@@ -505,14 +560,19 @@ async def publish_tray_version(
     required: bool,
     release_notes: str | None,
     published_by_user_id: int | None,
+    rollout_percent: int = 100,
+    rollout_start_at: datetime | None = None,
 ) -> int:
     p = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rollout_start = rollout_start_at or (now if rollout_percent < 100 else None)
     last_id = await db.execute_returning_lastrowid(
         f"INSERT INTO tray_versions "
-        f"(version, platform, download_url, required, release_notes, published_by_user_id, published_at) "
-        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})",
-        (version, platform, download_url, int(required), release_notes, published_by_user_id, now),
+        f"(version, platform, download_url, required, release_notes, published_by_user_id, "
+        f"published_at, rollout_percent, rollout_start_at) "
+        f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})",
+        (version, platform, download_url, int(required), release_notes, published_by_user_id,
+         now, rollout_percent, rollout_start),
     )
     return int(last_id) if last_id else 0
 
@@ -524,6 +584,23 @@ async def list_tray_versions(limit: int = 20) -> list[dict[str, Any]]:
         (limit,),
     )
     return [dict(r) for r in rows] if rows else []
+
+
+async def update_tray_version_rollout(
+    version_id: int,
+    *,
+    rollout_percent: int,
+) -> None:
+    """Update the rollout percentage for an existing version record.
+
+    Used by the admin UI to gradually widen a staged rollout
+    (e.g. 10 % → 25 % → 50 % → 100 %).
+    """
+    p = "?" if db.is_sqlite() else "%s"
+    await db.execute(
+        f"UPDATE tray_versions SET rollout_percent = {p} WHERE id = {p}",
+        (rollout_percent, version_id),
+    )
 
 
 # ---------------------------------------------------------------------------
