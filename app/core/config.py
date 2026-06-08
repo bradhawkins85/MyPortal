@@ -260,9 +260,11 @@ class Settings(BaseSettings):
         default="/marketing/essential8",
         validation_alias="ESSENTIAL8_COMPLIANCE_MARKETING_URL",
         description=(
-            "Customer-facing help page URL for Essential 8 compliance upsell CTAs. "
+            "Customer-facing base URL for Essential 8 compliance upsell CTAs. "
             "Accepts either a relative path (e.g. '/marketing/essential8') "
-            "or an absolute HTTP(S) URL."
+            "or an absolute HTTP(S) URL. MyPortal appends '?element=<slug>' "
+            "per control by default; optional '{element}' placeholders are "
+            "also supported in the configured URL."
         ),
     )
     bcp_compliance_marketing_url: str = Field(
@@ -523,8 +525,9 @@ class Settings(BaseSettings):
         if normalised.startswith("/"):
             return normalised
 
+        candidate = normalised.replace("{element}", "element")
         try:
-            TypeAdapter(AnyHttpUrl).validate_python(normalised)
+            TypeAdapter(AnyHttpUrl).validate_python(candidate)
         except ValidationError as exc:
             raise ValueError(
                 "Marketing URL must be a relative path or absolute HTTP(S) URL."
