@@ -256,6 +256,14 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="BCP_ENABLED",
     )
+    essential8_compliance_marketing_url: str = Field(
+        default="/marketing/essential8",
+        validation_alias="ESSENTIAL8_COMPLIANCE_MARKETING_URL",
+    )
+    bcp_compliance_marketing_url: str = Field(
+        default="/marketing/bcp",
+        validation_alias="BCP_COMPLIANCE_MARKETING_URL",
+    )
     enable_hsts: bool = Field(
         default=False,
         validation_alias="ENABLE_HSTS",
