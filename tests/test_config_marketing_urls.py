@@ -70,8 +70,9 @@ def test_marketing_urls_reject_unsafe_or_invalid_values(
         },
         clear=True,
     ):
-        with pytest.raises(ValidationError, match="Marketing URL") as excinfo:
+        with pytest.raises(ValidationError) as excinfo:
             Settings()
 
         error_text = str(excinfo.value)
+        assert "Marketing URL" in error_text
         assert expected_loc in error_text or field in error_text

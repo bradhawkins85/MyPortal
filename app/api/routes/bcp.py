@@ -192,7 +192,7 @@ async def bcp_overview(request: Request):
     # Get objectives and distribution list
     objectives = await bcp_repo.list_objectives(plan["id"])
     distribution_list = await bcp_repo.list_distribution_list(plan["id"])
-    has_bcp_planning_gaps = bool(
+    has_bcp_planning_gaps = (
         plan.get("last_reviewed") is None
         or len(objectives) == 0
         or len(distribution_list) == 0
