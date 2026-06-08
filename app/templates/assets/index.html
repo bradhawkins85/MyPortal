@@ -97,7 +97,7 @@
         </thead>
         <tbody>
           {% for asset in assets %}
-            <tr data-asset-id="{{ asset.id }}">
+            <tr id="asset-{{ asset.id }}" data-asset-id="{{ asset.id }}">
               {% for column in columns %}
                 {% set key = column.key %}
                 {% set value = asset.get(key) %}

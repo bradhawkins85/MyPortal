@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import AsyncMock
+
 from fastapi import FastAPI
+import pytest
+from starlette.requests import Request
 
 import app.main as main_module
 from app.core.features import init_registry
@@ -12,9 +17,27 @@ from app.features.assets import routes as assets_routes
 
 EXPECTED = {
     ("GET", "/assets"),
+    ("GET", "/assets/{asset_id}"),
     ("GET", "/assets/settings"),
     ("DELETE", "/assets/{asset_id}"),
 }
+
+
+async def _dummy_receive() -> dict[str, Any]:
+    return {"type": "http.request", "body": b"", "more_body": False}
+
+
+def _make_request(path: str, method: str = "GET") -> Request:
+    scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "query_string": b"",
+        "headers": [],
+        "scheme": "http",
+        "server": ("testserver", 80),
+    }
+    return Request(scope, _dummy_receive)
 
 
 def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
@@ -98,3 +121,45 @@ def test_assets_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+@pytest.mark.anyio
+async def test_asset_detail_page_redirects_to_assets_anchor(monkeypatch):
+    import app.repositories.assets as asset_repo
+
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7}, None, {"id": 3}, 3, None)),
+    )
+    monkeypatch.setattr(
+        asset_repo,
+        "get_asset_by_id",
+        AsyncMock(return_value={"id": 42, "company_id": 3}),
+    )
+
+    response = await assets_routes.asset_detail_page(_make_request("/assets/42"), 42)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/assets#asset-42"
+
+
+@pytest.mark.anyio
+async def test_asset_detail_page_rejects_assets_from_other_companies(monkeypatch):
+    import app.repositories.assets as asset_repo
+
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7}, None, {"id": 3}, 3, None)),
+    )
+    monkeypatch.setattr(
+        asset_repo,
+        "get_asset_by_id",
+        AsyncMock(return_value={"id": 42, "company_id": 9}),
+    )
+
+    with pytest.raises(assets_routes.HTTPException) as excinfo:
+        await assets_routes.asset_detail_page(_make_request("/assets/42"), 42)
+
+    assert excinfo.value.status_code == 404
