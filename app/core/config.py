@@ -481,6 +481,40 @@ class Settings(BaseSettings):
 
         return value
 
+    @field_validator(
+        "essential8_compliance_marketing_url",
+        "bcp_compliance_marketing_url",
+        mode="before",
+    )
+    @classmethod
+    def _validate_marketing_help_url(cls, value: str) -> str:
+        """Allow only safe relative paths or absolute HTTP(S) marketing URLs."""
+
+        if not isinstance(value, str):
+            raise ValueError("Marketing URL must be a string.")
+
+        normalised = value.strip()
+        if not normalised:
+            raise ValueError("Marketing URL cannot be empty.")
+
+        lowered = normalised.lower()
+        if lowered.startswith(("javascript:", "data:", "vbscript:")):
+            raise ValueError("Marketing URL must not use script/data schemes.")
+
+        if normalised.startswith("//"):
+            raise ValueError("Marketing URL must not be protocol-relative.")
+
+        if normalised.startswith("/"):
+            return normalised
+
+        try:
+            TypeAdapter(AnyHttpUrl).validate_python(normalised)
+        except ValidationError as exc:  # pragma: no cover - exercised in settings construction
+            raise ValueError(
+                "Marketing URL must be a relative path or absolute HTTP(S) URL."
+            ) from exc
+        return normalised
+
     def is_production(self) -> bool:
         """Return True when the application is running in production mode."""
 
