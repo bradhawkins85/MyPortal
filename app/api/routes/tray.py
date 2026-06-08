@@ -17,6 +17,7 @@ from __future__ import annotations
 import html as _html
 import json
 import secrets
+import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -879,6 +880,11 @@ async def _attach_room_to_device(room_id: int, device_id: int) -> None:
 # Phase 5 – Auto-update version endpoint
 # ---------------------------------------------------------------------------
 
+# _rollout_bucket returns a deterministic integer in [0, 100) for a given
+# device identifier, used to assign a device to a rollout cohort.
+def _rollout_bucket(device_uid: str) -> int:
+    return zlib.crc32(device_uid.encode("utf-8")) % 100
+
 
 @router.get(
     "/version",
@@ -886,21 +892,53 @@ async def _attach_room_to_device(room_id: int, device_id: int) -> None:
     tags=["Tray App"],
 )
 async def get_tray_version(request: Request) -> JSONResponse:
-    """Public endpoint; devices poll this on a 6-hour timer.
+    """Device-facing endpoint; polled on a jittered ~6-hour timer.
 
-    Returns the latest enabled version record so the service can
-    compare against ``AgentVersion`` and download the signed installer
-    if a newer version is available.
+    Returns the version the calling device should install.  When the
+    newest published version has ``rollout_percent < 100`` (a staged
+    rollout) the server uses the device's auth token to look up its
+    ``device_uid`` and places it in a deterministic bucket
+    ``crc32(device_uid) % 100``.  Devices whose bucket ≥
+    ``rollout_percent`` are held back and receive the previous fully-
+    rolled-out (``rollout_percent = 100``) version instead, spreading
+    downloads across the fleet and avoiding a thundering-herd effect.
+
+    Devices that are not authenticated (no Authorization header) are always
+    served the latest version.
     """
-    import platform as _platform
-
     agent_os = request.headers.get("X-Tray-OS", "all").lower()
     row = await tray_repo.get_latest_tray_version(agent_os)
     if not row:
-        # Fall back to 'all' platform.
         row = await tray_repo.get_latest_tray_version("all")
     if not row:
         return JSONResponse({"version": "0.0.0", "download_url": None, "required": False})
+
+    rollout_percent = int(row.get("rollout_percent") or 100)
+
+    # When the newest version is not fully rolled out, check whether this
+    # device falls within the rollout cohort.
+    if rollout_percent < 100:
+        device_uid: str | None = None
+
+        # Attempt to identify the device from its auth token.
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            raw_token = auth_header.split(" ", 1)[1].strip()
+            if raw_token:
+                token_hash = tray_service.hash_token(raw_token)
+                device = await tray_repo.get_device_by_auth_hash(token_hash)
+                if device:
+                    device_uid = str(device.get("device_uid", ""))
+
+        if device_uid and _rollout_bucket(device_uid) >= rollout_percent:
+            # This device is outside the current rollout window — serve the
+            # most recent fully-rolled-out version instead.
+            fallback = await tray_repo.get_stable_tray_version(agent_os)
+            if not fallback:
+                fallback = await tray_repo.get_stable_tray_version("all")
+            if fallback:
+                row = fallback
+
     return JSONResponse({
         "version": row["version"],
         "download_url": row.get("download_url"),
@@ -1015,6 +1053,8 @@ async def admin_publish_version(
     download_url = str(body.get("download_url", "")).strip()
     required = bool(body.get("required", False))
     release_notes = body.get("release_notes")
+    rollout_percent = int(body.get("rollout_percent", 100))
+    rollout_percent = max(1, min(100, rollout_percent))
 
     if not version or not download_url:
         raise HTTPException(
@@ -1029,8 +1069,30 @@ async def admin_publish_version(
         required=required,
         release_notes=release_notes,
         published_by_user_id=int(current_user["id"]),
+        rollout_percent=rollout_percent,
     )
-    return JSONResponse({"published": True, "version": version})
+    return JSONResponse({"published": True, "version": version, "rollout_percent": rollout_percent})
+
+
+@router.patch(
+    "/admin/versions/{version_id}/rollout",
+    summary="Update the rollout percentage for a published tray version",
+)
+async def admin_update_version_rollout(
+    version_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    """Incrementally widen (or reduce) the staged rollout for a version.
+
+    Send ``{"rollout_percent": <1–100>}`` to update the percentage of
+    the device fleet that will receive this version on their next poll.
+    """
+    body = await request.json()
+    rollout_percent = int(body.get("rollout_percent", 100))
+    rollout_percent = max(1, min(100, rollout_percent))
+    await tray_repo.update_tray_version_rollout(version_id, rollout_percent=rollout_percent)
+    return JSONResponse({"updated": True, "version_id": version_id, "rollout_percent": rollout_percent})
 
 
 @router.get(
@@ -1041,18 +1103,35 @@ async def admin_list_versions(
     current_user: dict = Depends(require_super_admin),
 ) -> JSONResponse:
     rows = await tray_repo.list_tray_versions()
-    return JSONResponse([
-        {
+    total_devices = await tray_repo.count_active_devices()
+    result = []
+    for r in rows:
+        devices_on_version = await tray_repo.count_devices_on_version(
+            r["version"], r["platform"]
+        )
+        rollout_start = r.get("rollout_start_at")
+        result.append({
             "id": int(r["id"]),
             "version": r["version"],
             "platform": r["platform"],
             "download_url": r["download_url"],
             "required": bool(r.get("required")),
             "enabled": bool(r.get("enabled")),
-            "published_at": r["published_at"].isoformat() if hasattr(r.get("published_at"), "isoformat") else str(r.get("published_at")),
-        }
-        for r in rows
-    ])
+            "rollout_percent": int(r.get("rollout_percent") or 100),
+            "rollout_start_at": (
+                rollout_start.isoformat()
+                if hasattr(rollout_start, "isoformat")
+                else str(rollout_start) if rollout_start else None
+            ),
+            "devices_on_version": devices_on_version,
+            "total_devices": total_devices,
+            "published_at": (
+                r["published_at"].isoformat()
+                if hasattr(r.get("published_at"), "isoformat")
+                else str(r.get("published_at"))
+            ),
+        })
+    return JSONResponse(result)
 
 
 # ---------------------------------------------------------------------------

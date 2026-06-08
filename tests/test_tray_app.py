@@ -148,7 +148,9 @@ def tray_db(tray_event_loop):
                enabled INTEGER NOT NULL DEFAULT 1,
                release_notes TEXT NULL,
                published_by_user_id INTEGER NULL,
-               published_at TEXT DEFAULT (datetime('now'))
+               published_at TEXT DEFAULT (datetime('now')),
+               rollout_percent INTEGER NOT NULL DEFAULT 100,
+               rollout_start_at TEXT NULL
            )""",
     ]
 
@@ -760,6 +762,200 @@ def test_get_version_platform_filter(http_client, tray_db, run):
     assert resp.status_code == 200
     body = resp.json()
     assert body["version"] == "2.1.0"
+
+
+def test_get_version_full_rollout(http_client, tray_db, run):
+    """A version with rollout_percent=100 is served to all devices."""
+    from app.repositories import tray as repo
+
+    run(
+        repo.publish_tray_version(
+            version="3.0.0",
+            platform="all",
+            download_url="https://example.com/3.0.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=100,
+        )
+    )
+    resp = http_client.get("/api/tray/version")
+    assert resp.status_code == 200
+    assert resp.json()["version"] == "3.0.0"
+
+
+def test_get_version_staged_rollout_enrolled_device(http_client, tray_db, run):
+    """A device inside the rollout window receives the new version."""
+    import zlib
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    # Publish a stable base version (100 %).
+    run(
+        repo.publish_tray_version(
+            version="4.0.0",
+            platform="all",
+            download_url="https://example.com/4.0.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=100,
+        )
+    )
+
+    # Publish the new version at 10 % rollout.
+    run(
+        repo.publish_tray_version(
+            version="4.1.0",
+            platform="all",
+            download_url="https://example.com/4.1.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=10,
+        )
+    )
+
+    # Create an enrolled device whose bucket falls *inside* the rollout (< 10).
+    token_raw = svc.generate_install_token()
+    run(
+        repo.create_install_token(
+            label="rollout-in-token",
+            company_id=None,
+            token_hash=svc.hash_token(token_raw),
+            token_prefix=svc.token_prefix(token_raw),
+            created_by_user_id=None,
+        )
+    )
+    # Pick a device_uid whose bucket is < 10.
+    device_uid_in = "uid-bucket-in"
+    while zlib.crc32(device_uid_in.encode()) % 100 >= 10:
+        device_uid_in += "x"
+
+    auth_token = svc.generate_install_token()
+    run(
+        repo.create_device(
+            company_id=None,
+            asset_id=None,
+            device_uid=device_uid_in,
+            enrolment_token_id=None,
+            auth_token_hash=svc.hash_token(auth_token),
+            auth_token_prefix=svc.token_prefix(auth_token),
+            os="windows",
+            os_version=None,
+            hostname="in-rollout",
+            serial_number=None,
+            agent_version="4.0.0",
+            console_user=None,
+        )
+    )
+    resp = http_client.get(
+        "/api/tray/version",
+        headers={"Authorization": f"******"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["version"] == "4.1.0", "device inside rollout should get new version"
+
+
+def test_get_version_staged_rollout_excluded_device(http_client, tray_db, run):
+    """A device outside the rollout window falls back to the stable version."""
+    import zlib
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    # Publish stable base.
+    run(
+        repo.publish_tray_version(
+            version="5.0.0",
+            platform="all",
+            download_url="https://example.com/5.0.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=100,
+        )
+    )
+    # Publish new version at 10 % rollout.
+    run(
+        repo.publish_tray_version(
+            version="5.1.0",
+            platform="all",
+            download_url="https://example.com/5.1.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=10,
+        )
+    )
+
+    # Pick a device_uid whose bucket is >= 10 (outside the rollout).
+    device_uid_out = "uid-bucket-out"
+    while zlib.crc32(device_uid_out.encode()) % 100 < 10:
+        device_uid_out += "x"
+
+    auth_token = svc.generate_install_token()
+    run(
+        repo.create_device(
+            company_id=None,
+            asset_id=None,
+            device_uid=device_uid_out,
+            enrolment_token_id=None,
+            auth_token_hash=svc.hash_token(auth_token),
+            auth_token_prefix=svc.token_prefix(auth_token),
+            os="windows",
+            os_version=None,
+            hostname="out-rollout",
+            serial_number=None,
+            agent_version="5.0.0",
+            console_user=None,
+        )
+    )
+    resp = http_client.get(
+        "/api/tray/version",
+        headers={"Authorization": f"******"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["version"] == "5.0.0", "device outside rollout should get stable version"
+
+
+def test_rollout_bucket_deterministic():
+    """_rollout_bucket is deterministic for the same device_uid."""
+    from app.api.routes.tray import _rollout_bucket
+
+    uid = "test-device-uid-abc123"
+    assert _rollout_bucket(uid) == _rollout_bucket(uid)
+    assert 0 <= _rollout_bucket(uid) < 100
+
+
+def test_rollout_bucket_distribution():
+    """_rollout_bucket covers the full [0, 100) range across many distinct UIDs."""
+    from app.api.routes.tray import _rollout_bucket
+
+    buckets = {_rollout_bucket(f"device-uid-{i:06d}") for i in range(500)}
+    # With 500 samples we should see at least 90 distinct buckets out of 100.
+    assert len(buckets) >= 90
+
+
+def test_update_rollout_repo(tray_db, run):
+    """update_tray_version_rollout persists a new rollout_percent."""
+    from app.repositories import tray as repo
+
+    version_id = run(
+        repo.publish_tray_version(
+            version="6.0.0",
+            platform="all",
+            download_url="https://example.com/6.0.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=10,
+        )
+    )
+    run(repo.update_tray_version_rollout(version_id, rollout_percent=50))
+    rows = run(repo.list_tray_versions())
+    matching = [r for r in rows if r["version"] == "6.0.0"]
+    assert matching, "version 6.0.0 not found"
+    assert int(matching[0]["rollout_percent"]) == 50
 
 
 # ---------------------------------------------------------------------------
