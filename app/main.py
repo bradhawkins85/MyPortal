@@ -5793,6 +5793,10 @@ async def admin_tray_versions_publish(request: Request):
     platform = str(form.get("platform", "all")).strip().lower()
     download_url = str(form.get("download_url", "")).strip()
     required = bool(form.get("required"))
+    try:
+        rollout_percent = max(1, min(100, int(form.get("rollout_percent") or 100)))
+    except (TypeError, ValueError):
+        rollout_percent = 100
     if version and download_url:
         await tray_repo.publish_tray_version(
             version=version,
@@ -5801,7 +5805,24 @@ async def admin_tray_versions_publish(request: Request):
             required=required,
             release_notes=None,
             published_by_user_id=int(current_user["id"]),
+            rollout_percent=rollout_percent,
         )
+    return RedirectResponse(url="/admin/tray/versions", status_code=303)
+
+
+@app.post("/admin/tray/versions/{version_id}/rollout", response_class=HTMLResponse)
+async def admin_tray_version_rollout_update(version_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    form = await request.form()
+    try:
+        rollout_percent = max(1, min(100, int(form.get("rollout_percent") or 100)))
+    except (TypeError, ValueError):
+        rollout_percent = 100
+    await tray_repo.update_tray_version_rollout(version_id, rollout_percent=rollout_percent)
     return RedirectResponse(url="/admin/tray/versions", status_code=303)
 
 

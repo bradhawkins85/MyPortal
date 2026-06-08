@@ -54,9 +54,12 @@ func newStubServer(t *testing.T) *httptest.Server {
 	})
 
 	mux.HandleFunc("/api/tray/version", func(w http.ResponseWriter, r *http.Request) {
+		// Echo the X-Tray-OS header back so tests can assert it was sent.
+		osHeader := r.Header.Get("X-Tray-OS")
 		resp := api.VersionResponse{
-			Version:  "0.1.0",
-			Required: false,
+			Version:     "0.1.0",
+			Required:    false,
+			DownloadURL: osHeader, // repurposed for test assertion
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	})
@@ -146,6 +149,21 @@ func TestGetVersion(t *testing.T) {
 	}
 	if ver.Version == "" {
 		t.Error("expected non-empty version")
+	}
+}
+
+func TestGetVersionSendsOSHeader(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	ver, err := client.GetVersion(context.Background())
+	if err != nil {
+		t.Fatalf("GetVersion: %v", err)
+	}
+	// The stub echoes the X-Tray-OS header back in the DownloadURL field.
+	if ver.DownloadURL == "" {
+		t.Error("expected X-Tray-OS header to be non-empty (echoed in download_url by stub)")
 	}
 }
 
