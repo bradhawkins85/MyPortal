@@ -36,6 +36,13 @@ jobs:
           go-version-file: tray/go.mod
           cache-dependency-path: tray/go.sum
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: tray/chat-shell/package-lock.json
+
       - name: Install WiX v7
         shell: pwsh
         run: dotnet tool install --global wix --version "7.*"
@@ -56,6 +63,15 @@ jobs:
           # -H windowsgui hides the console window so the tray UI runs silently
           $uiLdflags = "$ldflags -H windowsgui"
           go build -ldflags $uiLdflags -o dist\windows\myportal-tray-ui.exe     .\ui
+
+      - name: Build Windows chat shell
+        shell: pwsh
+        run: |
+          Push-Location chat-shell
+          npm ci
+          npm run build:win
+          Pop-Location
+          Copy-Item chat-shell\dist\myportal-tray-chat.exe dist\windows\myportal-tray-chat.exe -Force
 
       - name: Build MSI
         shell: pwsh
