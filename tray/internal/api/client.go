@@ -114,6 +114,13 @@ type ConfigResponse struct {
 	BrandingIconURL  string     `json:"branding_icon_url,omitempty"`
 	EnvAllowlist     []string   `json:"env_allowlist"`
 	ChatEnabled      bool       `json:"chat_enabled"`
+	// ChatClientMode controls how the tray opens chat windows.
+	// "" or "app" (default): try dedicated chat shell, then browser app-mode, then
+	// fall back to the default browser.
+	// "browser": always open in the default system browser (legacy behaviour).
+	// "shell": require the dedicated chat shell; log a warning if absent rather
+	// than falling back to the browser.
+	ChatClientMode   string     `json:"chat_client_mode,omitempty"`
 }
 
 // GetConfig fetches the resolved menu configuration for this device.
