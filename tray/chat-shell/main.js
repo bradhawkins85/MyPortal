@@ -33,21 +33,6 @@ function getChatURL() {
 }
 
 const chatURL = getChatURL();
-if (!chatURL) {
-  console.error('[MyPortal Chat] Error: --url=<chat-url> argument is required.');
-  app.quit();
-  process.exit(1);
-}
-
-// Validate that the URL is well-formed before handing it to Electron.
-let parsedURL;
-try {
-  parsedURL = new URL(chatURL);
-} catch {
-  console.error('[MyPortal Chat] Error: --url value is not a valid URL.');
-  app.quit();
-  process.exit(1);
-}
 
 // ---------------------------------------------------------------------------
 // Session isolation
@@ -65,7 +50,7 @@ const CHAT_PARTITION = 'persist:myportal-tray-chat';
 // instance is launched with a different URL, focus the existing window and
 // navigate it to the new URL.
 
-const gotLock = app.requestSingleInstanceLock({ chatURL });
+const gotLock = app.requestSingleInstanceLock({ chatURL: chatURL || '' });
 if (!gotLock) {
   app.quit();
   process.exit(0);
@@ -79,7 +64,9 @@ app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
     mainWindow.focus();
     // Navigate to the new chat URL provided by the second instance.
     const newURL = (additionalData && additionalData.chatURL) || chatURL;
-    mainWindow.loadURL(newURL).catch(() => {});
+    if (newURL) {
+      mainWindow.loadURL(newURL).catch(() => {});
+    }
   }
 });
 
@@ -88,6 +75,49 @@ app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
+  // When no --url= argument is supplied (e.g. the user ran the EXE manually),
+  // show a brief informational window instead of silently exiting, so the
+  // user understands how the app is intended to be launched.
+  if (!chatURL) {
+    const infoWindow = new BrowserWindow({
+      width: 480,
+      height: 220,
+      title: 'MyPortal Chat',
+      autoHideMenuBar: true,
+      resizable: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    infoWindow.setMenu(null);
+    infoWindow.loadURL(
+      'data:text/html,' +
+        encodeURIComponent(
+          '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;margin:0">' +
+            '<h3 style="margin-top:0">MyPortal Chat</h3>' +
+            '<p>This application opens automatically when you click ' +
+            '<strong>Support Chat</strong> in the MyPortal tray menu.</p>' +
+            '<p style="color:#888;font-size:0.9em">This window will close in a few seconds.</p>' +
+            '</body></html>'
+        )
+    );
+    // Auto-close after 8 seconds so it does not linger.
+    setTimeout(() => app.quit(), 8000);
+    return;
+  }
+
+  // Validate that the URL is well-formed before handing it to Electron.
+  let parsedURL;
+  try {
+    parsedURL = new URL(chatURL);
+  } catch {
+    console.error('[MyPortal Chat] Error: --url value is not a valid URL.');
+    app.quit();
+    return;
+  }
+
   const ses = require('electron').session.fromPartition(CHAT_PARTITION);
 
   // Block non-chat navigation to prevent accidental browsing within the shell.
