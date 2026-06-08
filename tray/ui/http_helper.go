@@ -9,9 +9,11 @@ import (
 	"time"
 )
 
-// httpClient is a shared HTTP client with a reasonable timeout for API calls
-// made from within the UI process.
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+// httpClient is a shared HTTP client used for API calls from within the UI
+// process.  The timeout is kept short (5 s) so that user-facing actions such
+// as opening the chat window do not stall for a long time when the portal is
+// temporarily unreachable.
+var httpClient = &http.Client{Timeout: 5 * time.Second}
 
 // newHTTPRequest creates a POST request with the device auth token in the
 // Authorization header and a JSON body.

@@ -36,13 +36,16 @@ func showTextWindow(title, text string) {
 
 func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 	if chatURL == "" {
-		// Try to get an authenticated popup URL; fall back to the plain chat URL.
+		// Request a short-lived one-time auth token from the portal.  If the
+		// request fails (portal unreachable, device not enrolled, etc.) we do
+		// not fall back to an unauthenticated URL: the /chat staff endpoint
+		// requires a portal login and is not useful for tray end-users.
 		authedURL := requestChatTokenForRoom(0)
-		if authedURL != "" {
-			chatURL = authedURL
-		} else {
-			chatURL = buildChatURL(0)
+		if authedURL == "" {
+			logger.Warn("openChatWindow: could not obtain chat token — portal may be unreachable or device not enrolled")
+			return
 		}
+		chatURL = authedURL
 	}
 	if chatURL == "" {
 		return
