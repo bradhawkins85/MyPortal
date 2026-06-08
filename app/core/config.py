@@ -33,6 +33,7 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
 
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
+_MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
 
 
 def _is_weak_secret(value: str | None) -> tuple[bool, str]:
@@ -525,7 +526,7 @@ class Settings(BaseSettings):
         if normalised.startswith("/"):
             return normalised
 
-        candidate = normalised.replace("{element}", "element")
+        candidate = normalised.replace("{element}", _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE)
         try:
             TypeAdapter(AnyHttpUrl).validate_python(candidate)
         except ValidationError as exc:
