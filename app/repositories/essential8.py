@@ -420,6 +420,57 @@ async def get_essential8_requirement(requirement_id: int) -> Optional[dict[str, 
     return item
 
 
+async def list_requirement_marketing_page_links() -> list[dict[str, Any]]:
+    """List Essential 8 requirement help-page mappings."""
+    rows = await db.fetch_all(
+        """
+        SELECT
+            link.requirement_id,
+            link.marketing_page_id,
+            page.slug AS marketing_page_slug,
+            page.title AS marketing_page_title,
+            page.is_published AS marketing_page_is_published
+        FROM essential8_requirement_marketing_pages AS link
+        INNER JOIN marketing_pages AS page ON page.id = link.marketing_page_id
+        ORDER BY link.requirement_id
+        """
+    )
+    return [
+        {
+            "requirement_id": int(row["requirement_id"]),
+            "marketing_page_id": int(row["marketing_page_id"]),
+            "marketing_page_slug": str(row.get("marketing_page_slug") or "").strip(),
+            "marketing_page_title": str(row.get("marketing_page_title") or "").strip(),
+            "marketing_page_is_published": bool(int(row.get("marketing_page_is_published") or 0)),
+        }
+        for row in rows
+    ]
+
+
+async def replace_requirement_marketing_page_links(
+    requirement_to_page: dict[int, int | None],
+) -> None:
+    """Replace Essential 8 requirement help-page mappings for the provided requirements."""
+    for requirement_id, marketing_page_id in requirement_to_page.items():
+        requirement_id = int(requirement_id)
+        await db.execute(
+            "DELETE FROM essential8_requirement_marketing_pages WHERE requirement_id = %(requirement_id)s",
+            {"requirement_id": requirement_id},
+        )
+        if marketing_page_id:
+            await db.execute(
+                """
+                INSERT INTO essential8_requirement_marketing_pages
+                (requirement_id, marketing_page_id)
+                VALUES (%(requirement_id)s, %(marketing_page_id)s)
+                """,
+                {
+                    "requirement_id": requirement_id,
+                    "marketing_page_id": int(marketing_page_id),
+                },
+            )
+
+
 async def get_control_with_requirements(
     control_id: int,
     company_id: Optional[int] = None,
