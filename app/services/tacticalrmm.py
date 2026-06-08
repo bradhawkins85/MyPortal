@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 from time import monotonic
+from collections.abc import Mapping
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
