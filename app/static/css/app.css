@@ -4209,7 +4209,7 @@ dialog.modal:not([open]) {
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.96);
   color: #f8fafc;
-  font-size: 1.5rem;
+  font-size: 0;
   line-height: 1;
   cursor: pointer;
   box-shadow: 0 12px 24px -16px rgba(15, 23, 42, 0.95);
@@ -4244,6 +4244,24 @@ dialog.modal:not([open]) {
   width: 1.25rem;
   height: 1.25rem;
   pointer-events: none;
+}
+
+/* Show a × character when no SVG icon is present */
+.modal .modal__close::before,
+.modal .modal-close::before,
+.modal .btn-close::before,
+.modal [data-auto-modal-close]::before {
+  content: "×";
+  font-size: 1.25rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.modal .modal__close:has(svg)::before,
+.modal .modal-close:has(svg)::before,
+.modal .btn-close:has(svg)::before,
+.modal [data-auto-modal-close]:has(svg)::before {
+  display: none;
 }
 
 .modal__title {
