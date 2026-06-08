@@ -121,7 +121,7 @@ def test_csp_header_configuration(test_app):
     assert "form-action 'self'" in csp
     # Check that unpkg.com is allowed for loading htmx in script-src directive
     assert (
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cal.com https://app.cal.com"
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cal.com https://app.cal.com https://static.cloudflareinsights.com"
         in csp
     )
 
