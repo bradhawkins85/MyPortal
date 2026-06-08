@@ -65,6 +65,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "https://unpkg.com",
             "https://cal.com",
             "https://app.cal.com",
+            "https://static.cloudflareinsights.com",
         ]
 
         # Add extra script sources (e.g., Plausible analytics)
