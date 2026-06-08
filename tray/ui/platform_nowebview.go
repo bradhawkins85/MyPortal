@@ -1,8 +1,8 @@
-//go:build nowebview && !windows
+//go:build nowebview && !windows && !darwin
 
 // This file provides stubs for UI helper functions when building without
-// the webview/systray libraries (CGO=0 cross-compile mode) on non-Windows
-// platforms.
+// the webview/systray libraries (CGO=0 cross-compile mode) on non-Windows,
+// non-macOS platforms (Linux / other).
 package main
 
 import (

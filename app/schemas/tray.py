@@ -74,6 +74,11 @@ class TrayConfigResponse(BaseModel):
     branding_icon_url: Optional[str] = None
     env_allowlist: list[str] = Field(default_factory=list)
     chat_enabled: bool = False
+    # Controls how the tray client opens chat windows.
+    # "" or "app" (default) = dedicated chat shell / browser app-mode.
+    # "browser" = always open in the default system browser.
+    # "shell"   = require the dedicated chat shell; no browser fallback.
+    chat_client_mode: Optional[str] = None
 
 
 class TrayMenuConfigCreate(BaseModel):

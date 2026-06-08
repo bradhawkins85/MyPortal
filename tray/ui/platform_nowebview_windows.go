@@ -1,8 +1,15 @@
 //go:build nowebview && windows
 
 // This file provides Windows-specific UI helper stubs for the nowebview
-// (CGO=0) build.  cmd.exe and powershell.exe are started with the
-// CREATE_NO_WINDOW flag so that no console window is ever visible to the user.
+// (CGO=0) build.  Chat is opened in a dedicated app window rather than the
+// default browser using a three-tier strategy:
+//
+//  1. Dedicated chat shell (myportal-tray-chat.exe) — best isolation.
+//  2. Edge or Chrome in --app= mode with an isolated --user-data-dir.
+//  3. Default browser — emergency fallback only.
+//
+// cmd.exe and powershell.exe are started with the CREATE_NO_WINDOW flag so
+// that no console window is ever visible to the user.
 package main
 
 import (
@@ -40,6 +47,14 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 	if chatURL == "" {
 		return
 	}
+
+	// "browser" mode: skip the dedicated client and open directly.
+	if chatClientMode() == "browser" {
+		logger.Debug("openChatWindow: browser mode — opening in default browser")
+		openBrowser(chatURL)
+		return
+	}
+
 	openChatAppWindow(chatURL)
 }
 
@@ -90,37 +105,54 @@ func findAppBrowser() string {
 }
 
 func openChatAppWindow(chatURL string) {
-	browserPath := findAppBrowser()
+	mode := chatClientMode()
 
-	if browserPath != "" {
-		edgeArgs := []string{
-			"--app=" + chatURL,
-			"--window-size=920,680",
-			"--disable-dev-tools",
-			"--disable-extensions",
-			"--no-first-run",
-			"--no-default-browser-check",
-			"--user-data-dir=" + filepath.Join(os.TempDir(), "MyPortal", "tray-chat-profile"),
-		}
-
-		if gPortalURL != "" {
-			iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
-			edgeArgs = append(edgeArgs,
-				"--app-name=MyPortal Chat",
-				"--app-icon-url="+iconURL,
-			)
-		}
-
-		cmd := exec.Command(browserPath, edgeArgs...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
-		if err := cmd.Start(); err == nil {
+	// Tier 1: dedicated Electron chat shell.
+	if mode != "browser" {
+		if openWithChatShell(chatURL) {
 			return
-		} else {
-			logger.Warn("openChatAppWindow: app-mode launch failed (%v), falling back to browser", err)
 		}
-	} else {
-		logger.Warn("openChatAppWindow: no Edge/Chrome found, falling back to browser")
+		if mode == "shell" {
+			logger.Warn("openChatAppWindow: chat shell not found and mode=shell; cannot open chat")
+			return
+		}
 	}
+
+	// Tier 2: Edge or Chrome in --app= mode with an isolated profile.
+	if mode != "browser" {
+		browserPath := findAppBrowser()
+		if browserPath != "" {
+			edgeArgs := []string{
+				"--app=" + chatURL,
+				"--window-size=920,680",
+				"--disable-dev-tools",
+				"--disable-extensions",
+				"--no-first-run",
+				"--no-default-browser-check",
+				"--user-data-dir=" + filepath.Join(os.TempDir(), "MyPortal", "tray-chat-profile"),
+			}
+
+			if gPortalURL != "" {
+				iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+				edgeArgs = append(edgeArgs,
+					"--app-name=MyPortal Chat",
+					"--app-icon-url="+iconURL,
+				)
+			}
+
+			cmd := exec.Command(browserPath, edgeArgs...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
+			if err := cmd.Start(); err == nil {
+				logger.Info("openChatAppWindow: launched browser app-mode (pid=%d)", cmd.Process.Pid)
+				return
+			}
+			logger.Warn("openChatAppWindow: app-mode launch failed, falling back to browser")
+		} else {
+			logger.Warn("openChatAppWindow: no Edge/Chrome found, falling back to browser")
+		}
+	}
+
+	// Tier 3: default system browser.
 	openBrowser(chatURL)
 }
 
