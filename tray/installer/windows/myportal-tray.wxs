@@ -94,6 +94,17 @@
           Type="string"
           Value="&quot;[INSTALLDIR]myportal-tray-ui.exe&quot;" />
       </Component>
+      <!--
+        Dedicated chat shell: a minimal Electron app that opens the MyPortal
+        support chat in an isolated window, completely separate from the
+        user's default browser profile.
+      -->
+      <Component Id="ChatShellComponent" Guid="E4F5A6B7-C8D9-0123-EF01-234567890123">
+        <File Id="ChatShellExe"
+              Name="myportal-tray-chat.exe"
+              Source="$(var.BinDir)\myportal-tray-chat.exe"
+              KeyPath="yes" />
+      </Component>
     </ComponentGroup>
 
     <Feature Id="ProductFeature" Title="MyPortal Tray" Level="1">

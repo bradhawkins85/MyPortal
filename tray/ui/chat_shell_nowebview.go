@@ -35,15 +35,28 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// findChatShellInDir returns the full path to the chat shell binary inside dir,
-// or "" if it is not present.  Exported as a separate function so tests can
+// findChatShellInDir returns the full path to the chat shell executable inside
+// dir, or "" if it is not present.  Kept as a separate function so tests can
 // exercise the discovery logic without relying on the location of the test binary.
+//
+// Platform details:
+//   - Windows:  looks for chatShellBinaryName + ".exe".
+//   - macOS:    looks for chatShellBinaryName + ".app/Contents/MacOS/" + chatShellBinaryName
+//     (the binary inside the Electron app bundle).
+//   - Other:    looks for chatShellBinaryName as a plain file.
 func findChatShellInDir(dir string) string {
-	name := chatShellBinaryName
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+	var p string
+	switch runtime.GOOS {
+	case "windows":
+		p = filepath.Join(dir, chatShellBinaryName+".exe")
+	case "darwin":
+		// On macOS the chat shell ships as an Electron .app bundle.  The main
+		// executable is the Mach-O binary inside Contents/MacOS/ and can be
+		// executed directly (no `open -a` required).
+		p = filepath.Join(dir, chatShellBinaryName+".app", "Contents", "MacOS", chatShellBinaryName)
+	default:
+		p = filepath.Join(dir, chatShellBinaryName)
 	}
-	p := filepath.Join(dir, name)
 	if fileExists(p) {
 		return p
 	}
