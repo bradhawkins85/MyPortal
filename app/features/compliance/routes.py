@@ -82,7 +82,7 @@ async def compliance_page(request: Request):
 
     summary = await essential8_repo.get_company_compliance_summary(company_id)
     has_compliance_gaps = bool(
-        (summary.get("not_started") or 0) > 0 or (summary.get("in_progress") or 0) > 0
+        summary.get("not_started", 0) > 0 or summary.get("in_progress", 0) > 0
     )
 
     extra = {

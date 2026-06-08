@@ -259,10 +259,20 @@ class Settings(BaseSettings):
     essential8_compliance_marketing_url: str = Field(
         default="/marketing/essential8",
         validation_alias="ESSENTIAL8_COMPLIANCE_MARKETING_URL",
+        description=(
+            "Customer-facing help page URL for Essential 8 compliance upsell CTAs. "
+            "Accepts either a relative path (e.g. '/marketing/essential8') "
+            "or an absolute HTTP(S) URL."
+        ),
     )
     bcp_compliance_marketing_url: str = Field(
         default="/marketing/bcp",
         validation_alias="BCP_COMPLIANCE_MARKETING_URL",
+        description=(
+            "Customer-facing help page URL for BCP compliance upsell CTAs. "
+            "Accepts either a relative path (e.g. '/marketing/bcp') "
+            "or an absolute HTTP(S) URL."
+        ),
     )
     enable_hsts: bool = Field(
         default=False,
