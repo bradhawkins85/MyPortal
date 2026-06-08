@@ -42,8 +42,8 @@
       </div>
     </div>
   </section>
-  {% set has_bcp_gaps = (not plan.last_reviewed) or (objectives | length == 0) or (distribution_list | length == 0) %}
-  {% if has_bcp_gaps and bcp_compliance_help_url %}
+  {% set has_bcp_planning_gaps = (not plan.last_reviewed) or (objectives | length == 0) or (distribution_list | length == 0) %}
+  {% if has_bcp_planning_gaps and bcp_compliance_help_url %}
   <section class="card card--panel">
     <div class="card__body">
       <h2 class="card__title">Need help strengthening BCP compliance?</h2>
