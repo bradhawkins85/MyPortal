@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Edit — {{ marketing_page.title }}{% endblock %}
+
+{% block header_actions %}
+  {% set edit_actions = [
+    {"label": "Back to pages", "type": "link", "href": "/admin/marketing"}
+  ] %}
+  {% if marketing_page.slug %}
+    {% set _ = edit_actions.append({
+      "label": "View page",
+      "type": "link",
+      "href": "/marketing/" ~ marketing_page.slug,
+      "attrs": {"target": "_blank", "rel": "noopener noreferrer"}
+    }) %}
+  {% endif %}
+  {{ page_header_actions(edit_actions) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Page details</h2>
+        <p class="card__subtitle">Update the page title, slug, and content.</p>
+      </div>
+    </header>
+    <form action="/admin/marketing/pages/{{ marketing_page.id }}" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label">Slug</label>
+        <input class="form-input" name="slug" value="{{ marketing_page.slug }}" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label">Title</label>
+        <input class="form-input" name="title" value="{{ marketing_page.title }}" required />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label">Subtitle</label>
+        <input class="form-input" name="subtitle" value="{{ marketing_page.subtitle or '' }}" />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label">Intro text</label>
+        <textarea class="form-input" name="intro_text" rows="3">{{ marketing_page.intro_text or '' }}</textarea>
+      </div>
+      <div class="form-field">
+        <label class="checkbox">
+          <input type="checkbox" name="is_published" value="1" {% if marketing_page.is_published %}checked{% endif %} />
+          <span>Published</span>
+        </label>
+        <p class="form-help">Unpublished pages are hidden from public access.</p>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Save page</button>
+      </div>
+    </form>
+    <form action="/admin/marketing/pages/{{ marketing_page.id }}/delete" method="post" class="inline-form" data-confirm="Delete this page and all its sections?">
+      {% include "partials/csrf.html" %}
+      <button type="submit" class="button button--danger">Delete page</button>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Sections</h2>
+        <p class="card__subtitle">Add and manage the content sections for this page.</p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Section</th>
+            <th>Anchor</th>
+            <th>Order</th>
+            <th class="table__actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for section in marketing_page.sections %}
+            <tr>
+              <td data-label="Section">{{ section.title }}</td>
+              <td data-label="Anchor">#{{ section.anchor_slug }}</td>
+              <td data-label="Order">{{ section.sort_order }}</td>
+              <td class="table__actions">
+                <form action="/admin/marketing/sections/{{ section.id }}/delete" method="post" class="inline-form">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--danger button--small">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="4" class="table__empty">No sections yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form action="/admin/marketing/pages/{{ marketing_page.id }}/sections" method="post" class="form-grid">
+      {% include "partials/csrf.html" %}
+      <div class="form-field">
+        <label class="form-label">Section title</label>
+        <input class="form-input" name="title" required />
+      </div>
+      <div class="form-field">
+        <label class="form-label">Anchor slug</label>
+        <input class="form-input" name="anchor_slug" placeholder="optional-custom-anchor" />
+      </div>
+      <div class="form-field">
+        <label class="form-label">Sort order</label>
+        <input class="form-input" name="sort_order" type="number" value="0" />
+      </div>
+      <div class="form-field form-field--wide">
+        <label class="form-label">Content</label>
+        <textarea class="form-input" name="content_text" rows="3" required></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Add section</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}
