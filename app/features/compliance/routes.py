@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,6 +17,25 @@ from app.repositories import user_companies as user_company_repo
 
 router = APIRouter(tags=["Compliance"])
 settings = get_settings()
+
+
+def _slugify_essential8_element(name: str) -> str:
+    cleaned = "".join(char.lower() if char.isalnum() else "-" for char in (name or ""))
+    return "-".join(part for part in cleaned.split("-") if part)
+
+
+def _build_essential8_help_url(base_url: str, element_slug: str) -> str:
+    if not base_url or not element_slug:
+        return base_url
+    if "{element}" in base_url:
+        return base_url.replace("{element}", element_slug)
+    split = urlsplit(base_url)
+    query_items = parse_qsl(split.query, keep_blank_values=True)
+    query_items = [(key, value) for key, value in query_items if key != "element"]
+    query_items.append(("element", element_slug))
+    return urlunsplit(
+        (split.scheme, split.netloc, split.path, urlencode(query_items), split.fragment)
+    )
 
 
 @lru_cache(maxsize=1)
@@ -84,6 +104,19 @@ async def compliance_page(request: Request):
     has_compliance_gaps = bool(
         summary.get("not_started", 0) > 0 or summary.get("in_progress", 0) > 0
     )
+    statuses_requiring_help = {"not_started", "in_progress", "non_compliant"}
+    for record in compliance_records:
+        element_slug = _slugify_essential8_element(record.get("control", {}).get("name", ""))
+        needs_help = bool(record.get("status") in statuses_requiring_help and element_slug)
+        record["show_compliance_help"] = needs_help
+        record["compliance_help_url"] = (
+            _build_essential8_help_url(
+                settings.essential8_compliance_marketing_url,
+                element_slug,
+            )
+            if needs_help
+            else ""
+        )
 
     extra = {
         "title": "Essential 8 Compliance",

@@ -40,16 +40,6 @@
         </div>
       </div>
     </div>
-    {% if has_compliance_gaps and essential8_compliance_help_url %}
-    <div class="card card--panel">
-      <div class="card__body">
-        <h2 class="card__title">Need help becoming Essential 8 compliant?</h2>
-        <p class="card__subtitle">See how we can help close your remaining Essential 8 compliance gaps.</p>
-        <a href="{{ essential8_compliance_help_url }}" class="button button--primary">Get compliance help</a>
-      </div>
-    </div>
-    {% endif %}
-
     <div class="card card--panel compliance-table-card">
       <header class="card__header">
         <div class="card__controls">
@@ -123,6 +113,11 @@
                   <a href="/compliance/control/{{ record.control_id }}" class="button button--ghost button--small">
                     View requirements
                   </a>
+                  {% if record.show_compliance_help and record.compliance_help_url %}
+                  <a href="{{ record.compliance_help_url }}" class="button button--primary button--small">
+                    Get compliance help
+                  </a>
+                  {% endif %}
                 </div>
               </td>
             </tr>

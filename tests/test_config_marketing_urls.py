@@ -48,6 +48,23 @@ def test_marketing_urls_accept_https_urls() -> None:
         assert settings.bcp_compliance_marketing_url == "https://example.com/bcp"
 
 
+def test_marketing_urls_accept_https_urls_with_element_placeholder() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            **_base_env(),
+            "ESSENTIAL8_COMPLIANCE_MARKETING_URL": "https://example.com/essential8/{element}",
+            "BCP_COMPLIANCE_MARKETING_URL": "https://example.com/bcp",
+        },
+        clear=True,
+    ):
+        settings = Settings()
+        assert (
+            settings.essential8_compliance_marketing_url
+            == "https://example.com/essential8/{element}"
+        )
+
+
 @pytest.mark.parametrize(
     "field,value,expected_loc",
     [
