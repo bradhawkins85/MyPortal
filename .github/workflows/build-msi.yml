@@ -73,6 +73,7 @@ jobs:
 
       - name: Stage Windows chat shell binary
         shell: pwsh
+        working-directory: tray
         run: |
           Copy-Item chat-shell\dist\myportal-tray-chat.exe dist\windows\myportal-tray-chat.exe -Force
 
