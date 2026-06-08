@@ -7,6 +7,7 @@ from functools import lru_cache
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.core.config import get_settings
 from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as cc_repo
 from app.repositories import essential8 as essential8_repo
@@ -14,6 +15,7 @@ from app.repositories import user_companies as user_company_repo
 
 
 router = APIRouter(tags=["Compliance"])
+settings = get_settings()
 
 
 @lru_cache(maxsize=1)
@@ -86,6 +88,7 @@ async def compliance_page(request: Request):
         "summary": summary,
         "company": company,
         "is_super_admin": bool(user.get("is_super_admin")),
+        "essential8_compliance_help_url": settings.essential8_compliance_marketing_url,
     }
     return await main_module._render_template("compliance/index.html", request, user, extra=extra)
 

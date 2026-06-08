@@ -40,6 +40,16 @@
         </div>
       </div>
     </div>
+    {% set has_compliance_gap = (summary.not_started | default(0)) > 0 or (summary.in_progress | default(0)) > 0 %}
+    {% if has_compliance_gap and essential8_compliance_help_url %}
+    <div class="card card--panel">
+      <div class="card__body">
+        <h2 class="card__title">Need help becoming Essential 8 compliant?</h2>
+        <p class="card__subtitle">See how we can help close your remaining Essential 8 compliance gaps.</p>
+        <a href="{{ essential8_compliance_help_url }}" class="button button--primary">Get compliance help</a>
+      </div>
+    </div>
+    {% endif %}
 
     <div class="card card--panel compliance-table-card">
       <header class="card__header">

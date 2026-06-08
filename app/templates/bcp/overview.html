@@ -42,6 +42,16 @@
       </div>
     </div>
   </section>
+  {% set has_bcp_gaps = (not plan.last_reviewed) or (not objectives) or (not distribution_list) %}
+  {% if has_bcp_gaps and bcp_compliance_help_url %}
+  <section class="card">
+    <div class="card-body">
+      <h2 class="card-title">Need help strengthening BCP compliance?</h2>
+      <p class="page-description">Access our business continuity services to close planning gaps and improve readiness.</p>
+      <a href="{{ bcp_compliance_help_url }}" class="btn btn-primary">Get BCP compliance help</a>
+    </div>
+  </section>
+  {% endif %}
 
   <!-- Objectives Section -->
   <section class="card">

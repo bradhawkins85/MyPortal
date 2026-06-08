@@ -206,6 +206,7 @@ async def bcp_overview(request: Request):
             "objectives": objectives,
             "distribution_list": distribution_list,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "bcp_compliance_help_url": settings.bcp_compliance_marketing_url,
         },
     )
     
