@@ -40,7 +40,6 @@
         </div>
       </div>
     </div>
-
     <div class="card card--panel compliance-table-card">
       <header class="card__header">
         <div class="card__controls">
@@ -114,6 +113,11 @@
                   <a href="/compliance/control/{{ record.control_id }}" class="button button--ghost button--small">
                     View requirements
                   </a>
+                  {% if record.show_compliance_help and record.compliance_help_url %}
+                  <a href="{{ record.compliance_help_url }}" class="button button--primary button--small">
+                    Get compliance help
+                  </a>
+                  {% endif %}
                 </div>
               </td>
             </tr>
