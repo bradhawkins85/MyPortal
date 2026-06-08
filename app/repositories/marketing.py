@@ -56,10 +56,10 @@ async def list_pages() -> list[dict[str, Any]]:
 
 
 async def get_page_by_slug(slug: str, *, published_only: bool = False) -> dict[str, Any] | None:
-    query = "SELECT * FROM marketing_pages WHERE slug = %s"
-    if published_only:
-        query += " AND is_published = 1"
-    row = await db.fetch_one(query, (slug,))
+    row = await db.fetch_one(
+        "SELECT * FROM marketing_pages WHERE slug = %s AND (is_published = 1 OR %s = 0)",
+        (slug, 1 if published_only else 0),
+    )
     if not row:
         return None
     page = _normalise_page(row)
