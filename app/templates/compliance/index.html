@@ -40,7 +40,6 @@
         </div>
       </div>
     </div>
-    {% set has_compliance_gaps = (summary.not_started | default(0)) > 0 or (summary.in_progress | default(0)) > 0 %}
     {% if has_compliance_gaps and essential8_compliance_help_url %}
     <div class="card card--panel">
       <div class="card__body">

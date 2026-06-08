@@ -49,15 +49,17 @@ def test_marketing_urls_accept_https_urls() -> None:
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    "field,value,expected_loc",
     [
-        ("ESSENTIAL8_COMPLIANCE_MARKETING_URL", "javascript:alert(1)"),
-        ("ESSENTIAL8_COMPLIANCE_MARKETING_URL", "data:text/html;base64,abcd"),
-        ("BCP_COMPLIANCE_MARKETING_URL", "//example.com/marketing"),
-        ("BCP_COMPLIANCE_MARKETING_URL", "not-a-url"),
+        ("ESSENTIAL8_COMPLIANCE_MARKETING_URL", "javascript:alert(1)", "essential8_compliance_marketing_url"),
+        ("ESSENTIAL8_COMPLIANCE_MARKETING_URL", "data:text/html;base64,abcd", "essential8_compliance_marketing_url"),
+        ("BCP_COMPLIANCE_MARKETING_URL", "//example.com/marketing", "bcp_compliance_marketing_url"),
+        ("BCP_COMPLIANCE_MARKETING_URL", "not-a-url", "bcp_compliance_marketing_url"),
     ],
 )
-def test_marketing_urls_reject_unsafe_or_invalid_values(field: str, value: str) -> None:
+def test_marketing_urls_reject_unsafe_or_invalid_values(
+    field: str, value: str, expected_loc: str
+) -> None:
     with patch.dict(
         os.environ,
         {
@@ -68,5 +70,8 @@ def test_marketing_urls_reject_unsafe_or_invalid_values(field: str, value: str) 
         },
         clear=True,
     ):
-        with pytest.raises(ValidationError, match="Marketing URL"):
+        with pytest.raises(ValidationError, match="Marketing URL") as excinfo:
             Settings()
+
+        error_text = str(excinfo.value)
+        assert expected_loc in error_text or field in error_text
