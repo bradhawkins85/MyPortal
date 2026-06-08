@@ -22,7 +22,7 @@ def _make_request(path: str) -> Request:
     return Request(scope, _dummy_receive)
 
 
-class _FormRequest:
+class MockFormRequest:
     def __init__(self, form_data: dict[str, str]) -> None:
         self._form_data = form_data
 
@@ -259,7 +259,7 @@ async def test_marketing_update_help_links_requires_super_admin(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as excinfo:
-        await marketing_routes.admin_marketing_update_essential8_help_links(_FormRequest({}))
+        await marketing_routes.admin_marketing_update_essential8_help_links(MockFormRequest({}))
 
     assert excinfo.value.status_code == 403
 
@@ -298,7 +298,7 @@ async def test_marketing_update_help_links_replaces_mappings(monkeypatch):
     )
 
     response = await marketing_routes.admin_marketing_update_essential8_help_links(
-        _FormRequest({"requirement_101": "7", "requirement_102": ""})
+        MockFormRequest({"requirement_101": "7", "requirement_102": ""})
     )
 
     assert response.status_code == 303
