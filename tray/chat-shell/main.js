@@ -105,11 +105,14 @@ app.whenReady().then(() => {
       } else {
         // Redirect off-origin navigations to the system browser.
         if (details.resourceType === 'mainFrame') {
-          shell.openExternal(details.url).catch(() => {});
+          shell.openExternal(details.url).catch((err) => {
+            console.error('[MyPortal Chat] Failed to open external URL:', err);
+          });
         }
         callback({ cancel: true });
       }
-    } catch {
+    } catch (err) {
+      console.error('[MyPortal Chat] webRequest filter error:', err);
       callback({ cancel: false });
     }
   });
