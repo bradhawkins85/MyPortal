@@ -62,7 +62,7 @@
               <th scope="col" style="width: 16%">ML2</th>
               <th scope="col" style="width: 16%">ML3</th>
               <th scope="col" style="width: 10%">Last reviewed</th>
-              <th scope="col" style="width: 12%">Actions</th>
+              <th scope="col" style="width: 12%">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -113,11 +113,6 @@
                   <a href="/compliance/control/{{ record.control_id }}" class="button button--ghost button--small">
                     View requirements
                   </a>
-                  {% if record.show_compliance_help and record.compliance_help_url %}
-                  <a href="{{ record.compliance_help_url }}" class="button button--primary button--small">
-                    Get compliance help
-                  </a>
-                  {% endif %}
                 </div>
               </td>
             </tr>

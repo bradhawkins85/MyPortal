@@ -40,6 +40,29 @@ def _build_essential8_help_url(base_url: str, element_slug: str) -> str:
     )
 
 
+def _requirement_needs_compliance_help(requirement_status: str | None) -> bool:
+    return requirement_status in {"not_started", "in_progress", "non_compliant"}
+
+
+def _apply_requirement_help_links(
+    requirements: list[dict],
+    requirement_compliance_map: dict[int, dict],
+    requirement_help_links: dict[int, dict],
+) -> None:
+    for requirement in requirements:
+        req_id = requirement.get("id")
+        req_compliance = requirement_compliance_map.get(req_id)
+        req_status = req_compliance.get("status") if req_compliance else "not_started"
+        help_link = requirement_help_links.get(req_id)
+        help_url = ""
+        if help_link and help_link.get("marketing_page_slug") and help_link.get("marketing_page_is_published"):
+            help_url = f"/marketing/{help_link['marketing_page_slug']}"
+        requirement["show_compliance_help"] = bool(
+            help_url and _requirement_needs_compliance_help(req_status)
+        )
+        requirement["compliance_help_url"] = help_url if requirement["show_compliance_help"] else ""
+
+
 @lru_cache(maxsize=1)
 def _main():
     from app import main as main_module
@@ -106,19 +129,9 @@ async def compliance_page(request: Request):
     has_compliance_gaps = bool(
         summary.get("not_started", 0) > 0 or summary.get("in_progress", 0) > 0
     )
-    statuses_requiring_help = {"not_started", "in_progress", "non_compliant"}
     for record in compliance_records:
-        element_slug = _slugify_essential8_element(record.get("control", {}).get("name", ""))
-        needs_help = bool(record.get("status") in statuses_requiring_help and element_slug)
-        record["show_compliance_help"] = needs_help
-        record["compliance_help_url"] = (
-            _build_essential8_help_url(
-                settings.essential8_compliance_marketing_url,
-                element_slug,
-            )
-            if needs_help
-            else ""
-        )
+        record["show_compliance_help"] = False
+        record["compliance_help_url"] = ""
 
     extra = {
         "title": "Essential 8 Compliance",
@@ -150,6 +163,16 @@ async def compliance_control_requirements_page(request: Request, control_id: int
     requirement_compliance_map = {}
     for rc in control_data.get("requirement_compliance", []):
         requirement_compliance_map[rc["requirement_id"]] = rc
+    requirement_help_links = {
+        item["requirement_id"]: item
+        for item in await essential8_repo.list_requirement_marketing_page_links()
+    }
+    for key in ("requirements_ml1", "requirements_ml2", "requirements_ml3"):
+        _apply_requirement_help_links(
+            control_data.get(key, []),
+            requirement_compliance_map,
+            requirement_help_links,
+        )
 
     ml_statuses = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
     ctrl_ml = ml_statuses.get(

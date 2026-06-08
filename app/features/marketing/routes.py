@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
 from app.repositories import company_memberships as membership_repo
+from app.repositories import essential8 as essential8_repo
 from app.repositories import marketing as marketing_repo
 from app.security.flash import flash_redirect
 from app.services import tickets as tickets_service
@@ -77,6 +78,32 @@ def _coerce_title(raw_title: str) -> str:
     if len(title) > 160:
         raise ValueError("Title must be 160 characters or fewer.")
     return title
+
+
+async def _build_essential8_help_mapping_controls() -> list[dict[str, Any]]:
+    controls = await essential8_repo.list_essential8_controls()
+    requirements = await essential8_repo.list_essential8_requirements()
+    mapping_rows = {
+        item["requirement_id"]: item
+        for item in await essential8_repo.list_requirement_marketing_page_links()
+    }
+    requirements_by_control: dict[int, list[dict[str, Any]]] = {}
+    for requirement in requirements:
+        row = dict(requirement)
+        mapping = mapping_rows.get(requirement["id"])
+        row["selected_marketing_page_id"] = (
+            mapping["marketing_page_id"] if mapping else None
+        )
+        requirements_by_control.setdefault(requirement["control_id"], []).append(row)
+    result: list[dict[str, Any]] = []
+    for control in controls:
+        result.append(
+            {
+                **control,
+                "requirements": requirements_by_control.get(control["id"], []),
+            }
+        )
+    return result
 
 
 @router.get("/marketing/{slug}", response_class=HTMLResponse)
@@ -192,15 +219,19 @@ async def admin_marketing_dashboard(request: Request):
         return redirect
     pages = await marketing_repo.list_pages()
     leads = await marketing_repo.list_leads()
+    extra: dict[str, Any] = {
+        "title": "Marketing pages",
+        "marketing_pages": pages,
+        "marketing_leads": leads,
+        "essential8_help_controls": [],
+    }
+    if bool(current_user.get("is_super_admin")):
+        extra["essential8_help_controls"] = await _build_essential8_help_mapping_controls()
     return await _main()._render_template(
         "admin/marketing.html",
         request,
         current_user,
-        extra={
-            "title": "Marketing pages",
-            "marketing_pages": pages,
-            "marketing_leads": leads,
-        },
+        extra=extra,
     )
 
 
@@ -243,16 +274,20 @@ async def admin_marketing_create_page(request: Request):
             is_published=is_published,
         )
     except ValueError as exc:
+        extra: dict[str, Any] = {
+            "title": "Marketing pages",
+            "marketing_pages": await marketing_repo.list_pages(),
+            "marketing_leads": await marketing_repo.list_leads(),
+            "error_message": str(exc),
+            "essential8_help_controls": [],
+        }
+        if bool(current_user.get("is_super_admin")):
+            extra["essential8_help_controls"] = await _build_essential8_help_mapping_controls()
         return await _main()._render_template(
             "admin/marketing.html",
             request,
             current_user,
-            extra={
-                "title": "Marketing pages",
-                "marketing_pages": await marketing_repo.list_pages(),
-                "marketing_leads": await marketing_repo.list_leads(),
-                "error_message": str(exc),
-            },
+            extra=extra,
         )
     return flash_redirect("/admin/marketing", "Marketing page created.", "success")
 
@@ -292,6 +327,36 @@ async def admin_marketing_update_page(page_id: int, request: Request):
             },
         )
     return flash_redirect(f"/admin/marketing/pages/{page_id}/edit", "Marketing page updated.", "success")
+
+
+@router.post("/admin/marketing/essential8-help-links", response_class=HTMLResponse)
+async def admin_marketing_update_essential8_help_links(request: Request):
+    current_user, redirect = await _require_marketing_access(request)
+    if redirect:
+        return redirect
+    if not bool(current_user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    pages = await marketing_repo.list_pages()
+    requirements = await essential8_repo.list_essential8_requirements()
+    valid_page_ids = {page["id"] for page in pages}
+    mappings: dict[int, int | None] = {}
+    form = await request.form()
+    for requirement in requirements:
+        field_name = f"requirement_{requirement['id']}"
+        raw_value = str(form.get(field_name) or "").strip()
+        if not raw_value:
+            mappings[requirement["id"]] = None
+            continue
+        try:
+            page_id = int(raw_value)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid marketing page selection") from exc
+        if page_id not in valid_page_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown marketing page selection")
+        mappings[requirement["id"]] = page_id
+    await essential8_repo.replace_requirement_marketing_page_links(mappings)
+    return flash_redirect("/admin/marketing", "Essential 8 help links updated.", "success")
 
 
 @router.post("/admin/marketing/pages/{page_id}/delete", response_class=HTMLResponse)
