@@ -903,7 +903,7 @@ async def get_tray_version(request: Request) -> JSONResponse:
     rolled-out (``rollout_percent = 100``) version instead, spreading
     downloads across the fleet and avoiding a thundering-herd effect.
 
-    Devices that are not authenticated (no ****** are always
+    Devices that are not authenticated (no Authorization header) are always
     served the latest version.
     """
     agent_os = request.headers.get("X-Tray-OS", "all").lower()
