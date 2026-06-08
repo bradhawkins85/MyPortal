@@ -24,6 +24,7 @@
       "preload.js"
     ],
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "portable",
@@ -48,7 +49,7 @@
     }
   },
   "devDependencies": {
-    "electron": "^42.3.3",
+    "electron": "^28.3.3",
     "electron-builder": "^24.13.3"
   }
 }
