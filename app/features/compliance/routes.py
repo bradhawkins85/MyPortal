@@ -81,11 +81,15 @@ async def compliance_page(request: Request):
         record["ml3_status"] = ctrl_ml["ml3"]
 
     summary = await essential8_repo.get_company_compliance_summary(company_id)
+    has_compliance_gaps = bool(
+        (summary.get("not_started") or 0) > 0 or (summary.get("in_progress") or 0) > 0
+    )
 
     extra = {
         "title": "Essential 8 Compliance",
         "compliance_records": compliance_records,
         "summary": summary,
+        "has_compliance_gaps": has_compliance_gaps,
         "company": company,
         "is_super_admin": bool(user.get("is_super_admin")),
         "essential8_compliance_help_url": settings.essential8_compliance_marketing_url,
