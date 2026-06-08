@@ -42,7 +42,7 @@
       </div>
     </div>
   </section>
-  {% set has_bcp_gaps = (not plan.last_reviewed) or (not objectives) or (not distribution_list) %}
+  {% set has_bcp_gaps = (not plan.last_reviewed) or (objectives | length == 0) or (distribution_list | length == 0) %}
   {% if has_bcp_gaps and bcp_compliance_help_url %}
   <section class="card card--panel">
     <div class="card__body">
