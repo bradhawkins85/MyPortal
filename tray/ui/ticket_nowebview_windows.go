@@ -298,9 +298,9 @@ $btnSubmit.add_Click({
 		}
 	}
 
-	sb.WriteString(`
-    if ($errs.Count -gt 0) {
-        [System.Windows.Forms.MessageBox]::Show(($errs -join "`n"), 'Validation', 'OK', 'Warning') | Out-Null
+	// The backtick character cannot appear inside a Go raw string literal, so we
+	// concatenate: the PowerShell newline escape is a literal backtick followed by n.
+	sb.WriteString("\n    if ($errs.Count -gt 0) {\n        [System.Windows.Forms.MessageBox]::Show(($errs -join \"" + "`" + `n"), 'Validation', 'OK', 'Warning') | Out-Null
         return
     }
 `)

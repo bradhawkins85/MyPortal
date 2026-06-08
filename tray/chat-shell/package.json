@@ -1,0 +1,53 @@
+{
+  "name": "myportal-tray-chat",
+  "productName": "MyPortal Chat",
+  "version": "1.0.0",
+  "description": "Dedicated chat window for the MyPortal Tray App. Opens the MyPortal support chat in an isolated app window, completely separate from the user's browser sessions.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win --x64",
+    "build:mac": "electron-builder --mac --x64 --arm64"
+  },
+  "build": {
+    "appId": "io.myportal.tray.chat",
+    "productName": "MyPortal Chat",
+    "executableName": "myportal-tray-chat",
+    "copyright": "Copyright © MyPortal",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "executableName": "myportal-tray-chat"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "darkModeSupport": true
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  }
+}

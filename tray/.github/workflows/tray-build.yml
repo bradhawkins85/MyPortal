@@ -83,9 +83,58 @@ jobs:
           name: tray-${{ matrix.goos }}-${{ matrix.goarch }}
           path: tray/dist/${{ matrix.goos }}-${{ matrix.goarch }}/
 
+  build-chat-shell-win:
+    name: Build chat shell (Windows)
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: tray/chat-shell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: tray/chat-shell/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Windows chat shell
+        run: npm run build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chat-shell-windows
+          path: tray/chat-shell/dist/myportal-tray-chat.exe
+
+  build-chat-shell-mac:
+    name: Build chat shell (macOS)
+    needs: test
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tray/chat-shell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: tray/chat-shell/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Build macOS chat shell (x64 + arm64)
+        run: npm run build:mac
+      - name: Rename .app bundle to myportal-tray-chat.app
+        run: mv "dist/mac/MyPortal Chat.app" dist/mac/myportal-tray-chat.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chat-shell-darwin
+          # Upload the entire .app bundle directory.
+          path: tray/chat-shell/dist/mac/myportal-tray-chat.app
+
   build-msi:
     name: Build Windows MSI installer
-    needs: build
+    needs: [build, build-chat-shell-win]
     # WiX is Windows-only (see wixtoolset/issues#7154); the Directory/@Name
     # validator always fails on Linux/macOS. Use a Windows runner so the MSI
     # actually builds.
@@ -104,6 +153,10 @@ jobs:
         with:
           name: tray-windows-amd64
           path: tray/dist/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: chat-shell-windows
+          path: tray/dist/windows
       - name: Build MSI
         # `-acceptEula wix7` accepts the FireGiant OSMF EULA non-interactively
         # so the build does not fail with WIX7015. See
@@ -121,7 +174,7 @@ jobs:
 
   build-pkg:
     name: Build macOS .pkg installer
-    needs: build
+    needs: [build, build-chat-shell-mac]
     runs-on: macos-latest
     defaults:
       run:
@@ -136,10 +189,15 @@ jobs:
         with:
           name: tray-darwin-arm64
           path: tray/dist/darwin-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: chat-shell-darwin
+          path: tray/dist/darwin/myportal-tray-chat.app
       - name: Make binaries executable
         run: |
           chmod +x dist/darwin-amd64/myportal-tray-service dist/darwin-amd64/myportal-tray-ui
           chmod +x dist/darwin-arm64/myportal-tray-service dist/darwin-arm64/myportal-tray-ui
+          chmod +x "dist/darwin/myportal-tray-chat.app/Contents/MacOS/myportal-tray-chat"
       - name: Create universal binaries
         run: |
           mkdir -p dist/darwin
