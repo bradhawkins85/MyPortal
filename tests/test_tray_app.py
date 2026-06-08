@@ -927,6 +927,37 @@ def test_rollout_bucket_deterministic():
     assert 0 <= _rollout_bucket(uid) < 100
 
 
+def test_rollout_bucket_distribution():
+    """_rollout_bucket covers the full [0, 100) range across many distinct UIDs."""
+    from app.api.routes.tray import _rollout_bucket
+
+    buckets = {_rollout_bucket(f"device-uid-{i:06d}") for i in range(500)}
+    # With 500 samples we should see at least 90 distinct buckets out of 100.
+    assert len(buckets) >= 90
+
+
+def test_update_rollout_repo(tray_db, run):
+    """update_tray_version_rollout persists a new rollout_percent."""
+    from app.repositories import tray as repo
+
+    version_id = run(
+        repo.publish_tray_version(
+            version="6.0.0",
+            platform="all",
+            download_url="https://example.com/6.0.0.msi",
+            required=False,
+            release_notes=None,
+            published_by_user_id=None,
+            rollout_percent=10,
+        )
+    )
+    run(repo.update_tray_version_rollout(version_id, rollout_percent=50))
+    rows = run(repo.list_tray_versions())
+    matching = [r for r in rows if r["version"] == "6.0.0"]
+    assert matching, "version 6.0.0 not found"
+    assert int(matching[0]["rollout_percent"]) == 50
+
+
 # ---------------------------------------------------------------------------
 # Phase 5 – Diagnostics upload
 # ---------------------------------------------------------------------------

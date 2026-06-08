@@ -14,7 +14,7 @@
 <div class="admin-grid">
   <section class="card card--panel">
     <header class="card__header">
-      <p class="card__lede">Manage installer versions served by the auto-update endpoint (<code>GET /api/tray/version</code>). The most recently published enabled entry wins per platform. Use <strong>Rollout %</strong> to stage a rollout — only the set percentage of devices will receive the new version per poll.</p>
+      <p class="card__lede">Manage installer versions served by the auto-update endpoint (<code>GET /api/tray/version</code>). The most recently published enabled entry wins per platform. Use <strong>Rollout %</strong> to stage a rollout — devices are deterministically assigned to a cohort based on their device UID; only devices in the eligible cohort will receive the new version until the percentage is widened.</p>
     </header>
     <div class="card__body">
       <form method="post" action="/admin/tray/versions" class="form-stack">
@@ -68,7 +68,6 @@
               <th>Required</th>
               <th>Rollout</th>
               <th>Published</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -98,7 +97,6 @@
                   {% endif %}
                 </td>
                 <td><span data-utc="{{ v.published_at }}">{{ v.published_at }}</span></td>
-                <td>—</td>
               </tr>
             {% endfor %}
           </tbody>
