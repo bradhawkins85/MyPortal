@@ -15,6 +15,10 @@ tray/
 │   ├── logger/       Structured logger with file rotation
 │   ├── notify/       Push-notification helpers
 │   └── updater/      Auto-update checker (6-hour timer, deferred install)
+├── chat-shell/       Minimal Electron chat window (dedicated app for support chat)
+│   ├── main.js       Electron main process — session isolation + window management
+│   ├── preload.js    Security preload (context isolation)
+│   └── package.json  electron-builder config for Windows portable exe + macOS .app
 ├── installer/
 │   ├── windows/      WiX v7 MSI project + PowerShell RMM deployment script
 │   └── macos/        pkgbuild scripts + LaunchDaemon/LaunchAgent plists + bash RMM script
@@ -32,6 +36,7 @@ tray/
   WiX v7 requires accepting the FireGiant OSMF EULA — the Makefile passes
   `-acceptEula wix7` per https://docs.firegiant.com/wix/osmf/.
 - For macOS .pkg packaging: Xcode command-line tools with `pkgbuild` / `productbuild` (macOS only)
+- For chat shell: **Node.js 20+** and npm (required only on the native host runner for each platform)
 
 ### Cross-compile (CGO=0, no webview — for RMM deployment)
 
@@ -45,6 +50,24 @@ make build-darwin-arm64
 
 Binaries land in `dist/<platform>/`.
 
+### Build the dedicated chat shell
+
+The chat shell is a minimal Electron app that opens the MyPortal support chat
+in an isolated window completely separate from the user's browser sessions.
+It **must be built on the target platform** (electron-builder constraint).
+
+```sh
+# On a Windows host — produces dist/windows/myportal-tray-chat.exe
+make build-chat-shell-win
+
+# On a macOS host — produces dist/darwin/myportal-tray-chat.app
+make build-chat-shell-mac
+```
+
+In CI these targets run as separate jobs on `windows-latest` and `macos-latest`
+runners respectively. The resulting artifacts are downloaded into `dist/` before
+the MSI / .pkg installer jobs run.
+
 ### Build installer packages
 
 ```sh
@@ -52,9 +75,11 @@ Binaries land in `dist/<platform>/`.
 # building on Linux/macOS, see wixtoolset/issues#7154). The Makefile
 # automatically passes `-acceptEula wix7` to satisfy the FireGiant OSMF
 # EULA (https://docs.firegiant.com/wix/osmf/).
+# Requires dist/windows/myportal-tray-chat.exe from build-chat-shell-win.
 make build-msi          # produces dist/windows/myportal-tray.msi
 
 # macOS .pkg (requires pkgbuild — macOS only)
+# Requires dist/darwin/myportal-tray-chat.app from build-chat-shell-mac.
 make build-pkg          # produces dist/darwin/myportal-tray.pkg
 
 # Build all binaries + MSI (+ .pkg on macOS)
@@ -79,6 +104,30 @@ See `Makefile` comments for details.
 cd tray
 go test -tags nowebview -count=1 ./...
 ```
+
+## Chat client architecture
+
+When a user clicks **Support Chat** in the tray menu, `openChatWindow` uses a
+three-tier launch strategy:
+
+| Tier | Method | Isolation |
+|------|--------|-----------|
+| 1 | **Dedicated chat shell** (`myportal-tray-chat`) | Full — Electron `persist:myportal-tray-chat` session partition, completely separate from all browsers |
+| 2 | Chromium-based browser in `--app=` mode with `--user-data-dir` isolation | Partial — separate profile but same browser binary |
+| 3 | Default system browser | None — shares user's browser session |
+
+The server-side `chat_client_mode` config field (set per device in the admin UI)
+controls this behaviour:
+
+| Value | Behaviour |
+|-------|-----------|
+| `""` / `"app"` (default) | Try tier 1 → 2 → 3 in order |
+| `"browser"` | Skip directly to tier 3 (rollout safety valve) |
+| `"shell"` | Require tier 1; warn and abort if the shell is absent (no silent fallback) |
+
+The chat shell binary is installed to:
+- **Windows**: `%ProgramFiles%\MyPortalTray\myportal-tray-chat.exe`
+- **macOS**: `/Library/MyPortal/Tray/myportal-tray-chat.app/Contents/MacOS/myportal-tray-chat`
 
 ## Configuration
 
@@ -126,6 +175,7 @@ MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/mac
 - The device exchanges the install token for a **long-lived per-device auth token** stored in the platform credential store (DPAPI / Keychain System). The install token is then discarded.
 - Env-var values are read client-side and only reported when the server explicitly lists them in the allowlist. The server never requests them wholesale.
 - The WebSocket endpoint authenticates via the per-device bearer token; revoked devices are rejected immediately.
+- The chat shell runs in an isolated Electron session partition (`persist:myportal-tray-chat`) and only loads URLs from the configured portal origin; external links are delegated to the system browser.
 
 ## Phases
 
@@ -136,4 +186,5 @@ MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/mac
 | 3 — Windows client MVP | ✅ Shipped | Service + UI agent + WiX MSI + nowebview build |
 | 4 — macOS client MVP | ✅ Shipped | LaunchDaemon + LaunchAgent + pkgbuild |
 | 5 — Hardening | ✅ Shipped | Auto-update, diagnostics upload, version endpoint |
-| 6 — Polish | 🔄 Partial | Notification push, versions admin page; localization deferred |
+| 6 — Dedicated chat shell | ✅ Shipped | Electron chat shell; 3-tier launch strategy; `chat_client_mode` server flag |
+| 7 — Polish | 🔄 Partial | Notification push, versions admin page; localization deferred |

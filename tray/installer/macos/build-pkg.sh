@@ -20,6 +20,18 @@ mkdir -p "$PAYLOAD_DIR/Library/LaunchAgents"
 cp ../../dist/darwin/myportal-tray-service "$PAYLOAD_DIR$INSTALL_LOCATION/"
 cp ../../dist/darwin/myportal-tray-ui     "$PAYLOAD_DIR$INSTALL_LOCATION/"
 
+# Dedicated chat shell: an Electron .app bundle pre-built on a macOS runner.
+# The tray UI launches the binary inside this bundle directly for an isolated
+# chat window that is fully separate from the user's browser sessions.
+if [ -d "../../dist/darwin/myportal-tray-chat.app" ]; then
+    cp -R "../../dist/darwin/myportal-tray-chat.app" "$PAYLOAD_DIR$INSTALL_LOCATION/"
+    # Ensure the main executable is executable after copy.
+    chmod +x "$PAYLOAD_DIR$INSTALL_LOCATION/myportal-tray-chat.app/Contents/MacOS/myportal-tray-chat" 2>/dev/null || true
+else
+    echo "Warning: dist/darwin/myportal-tray-chat.app not found; chat shell will not be included in this package." >&2
+    echo "  Run 'make build-chat-shell-mac' on a macOS host first, or download the chat-shell-darwin CI artifact." >&2
+fi
+
 # Plists.
 cp io.myportal.tray.service.plist "$PAYLOAD_DIR/Library/LaunchDaemons/"
 cp io.myportal.tray.agent.plist   "$PAYLOAD_DIR/Library/LaunchAgents/"
