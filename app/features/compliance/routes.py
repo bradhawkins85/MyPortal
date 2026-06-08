@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import unicodedata
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -20,7 +21,8 @@ settings = get_settings()
 
 
 def _slugify_essential8_element(name: str) -> str:
-    cleaned = "".join(char.lower() if char.isalnum() else "-" for char in (name or ""))
+    normalised = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    cleaned = "".join(char.lower() if char.isalnum() else "-" for char in normalised)
     return "-".join(part for part in cleaned.split("-") if part)
 
 
