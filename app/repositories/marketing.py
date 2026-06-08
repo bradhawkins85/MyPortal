@@ -22,6 +22,7 @@ def _normalise_page(row: dict[str, Any]) -> dict[str, Any]:
         "title": str(row.get("title") or "").strip(),
         "subtitle": str(row.get("subtitle") or "").strip() or None,
         "intro_text": str(row.get("intro_text") or "").strip() or None,
+        "is_published": bool(int(row.get("is_published") or 0)),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
@@ -51,14 +52,13 @@ async def list_pages() -> list[dict[str, Any]]:
     pages = [_normalise_page(row) for row in rows]
     for page, row in zip(pages, rows):
         page["lead_count"] = int(row.get("lead_count") or 0)
-        page["sections"] = await list_sections(page["id"])
     return pages
 
 
-async def get_page_by_slug(slug: str) -> dict[str, Any] | None:
+async def get_page_by_slug(slug: str, *, published_only: bool = False) -> dict[str, Any] | None:
     row = await db.fetch_one(
-        "SELECT * FROM marketing_pages WHERE slug = %s",
-        (slug,),
+        "SELECT * FROM marketing_pages WHERE slug = %s AND (is_published = 1 OR %s = 0)",
+        (slug, 1 if published_only else 0),
     )
     if not row:
         return None
@@ -82,14 +82,15 @@ async def create_page(
     title: str,
     subtitle: str | None = None,
     intro_text: str | None = None,
+    is_published: bool = False,
 ) -> dict[str, Any]:
     now = datetime.utcnow()
     await db.execute(
         """
-        INSERT INTO marketing_pages (slug, title, subtitle, intro_text, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO marketing_pages (slug, title, subtitle, intro_text, is_published, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (slug, title, subtitle, intro_text, now, now),
+        (slug, title, subtitle, intro_text, 1 if is_published else 0, now, now),
     )
     created = await get_page_by_slug(slug)
     if not created:
@@ -104,6 +105,7 @@ async def update_page(
     title: str,
     subtitle: str | None,
     intro_text: str | None,
+    is_published: bool = False,
 ) -> dict[str, Any]:
     await db.execute(
         """
@@ -112,10 +114,11 @@ async def update_page(
             title = %s,
             subtitle = %s,
             intro_text = %s,
+            is_published = %s,
             updated_at = %s
         WHERE id = %s
         """,
-        (slug, title, subtitle, intro_text, datetime.utcnow(), page_id),
+        (slug, title, subtitle, intro_text, 1 if is_published else 0, datetime.utcnow(), page_id),
     )
     updated = await get_page_by_id(page_id)
     if not updated:
@@ -170,6 +173,16 @@ async def create_section(
 
 async def delete_section(section_id: int) -> None:
     await db.execute("DELETE FROM marketing_page_sections WHERE id = %s", (section_id,))
+
+
+async def get_section_by_id(section_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM marketing_page_sections WHERE id = %s",
+        (section_id,),
+    )
+    if not row:
+        return None
+    return _normalise_section(row)
 
 
 async def list_leads(limit: int = 200) -> list[dict[str, Any]]:
