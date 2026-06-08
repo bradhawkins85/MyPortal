@@ -66,11 +66,14 @@ jobs:
 
       - name: Build Windows chat shell
         shell: pwsh
+        working-directory: tray/chat-shell
         run: |
-          Push-Location chat-shell
           npm ci
           npm run build:win
-          Pop-Location
+
+      - name: Stage Windows chat shell binary
+        shell: pwsh
+        run: |
           Copy-Item chat-shell\dist\myportal-tray-chat.exe dist\windows\myportal-tray-chat.exe -Force
 
       - name: Build MSI
