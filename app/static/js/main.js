@@ -730,9 +730,9 @@
       '[data-email-recipients-close]',
       '[data-auto-modal-close]',
     ].join(', ');
-    const headerCloseSelector = closeControlSelector
+    const headerCloseSelector = headerSelector
       .split(', ')
-      .map((selector) => `${headerSelector} ${selector}`)
+      .flatMap((h) => closeControlSelector.split(', ').map((c) => `${h.trim()} ${c.trim()}`))
       .join(', ');
     const contentSelector = '.modal__content, .modal__panel, .modal__inner, .modal-content';
 
