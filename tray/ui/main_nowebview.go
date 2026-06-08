@@ -280,7 +280,8 @@ func handleIPCMessages(conn net.Conn) {
 			_ = json.Unmarshal(msg.Payload, &payload)
 			chatURL := requestChatTokenForRoom(payload.RoomID)
 			if chatURL == "" {
-				chatURL = buildChatURL(payload.RoomID)
+				logger.Warn("handleIPCMessages: chat_open: could not obtain chat token — portal may be unreachable")
+				break
 			}
 			openChatWindow(chatURL, gConfig)
 		case "config_changed":
