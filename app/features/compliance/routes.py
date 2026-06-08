@@ -18,6 +18,7 @@ from app.repositories import user_companies as user_company_repo
 
 router = APIRouter(tags=["Compliance"])
 settings = get_settings()
+_STATUSES_REQUIRING_HELP = {"not_started", "in_progress", "non_compliant"}
 
 
 def _slugify_essential8_element(name: str) -> str:
@@ -41,7 +42,7 @@ def _build_essential8_help_url(base_url: str, element_slug: str) -> str:
 
 
 def _requirement_needs_compliance_help(requirement_status: str | None) -> bool:
-    return requirement_status in {"not_started", "in_progress", "non_compliant"}
+    return requirement_status in _STATUSES_REQUIRING_HELP
 
 
 def _apply_requirement_help_links(
