@@ -11,6 +11,7 @@ import (
 	"runtime"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
+	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
 func openBrowser(url string) {
@@ -36,6 +37,7 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 		// requires a portal login and is not useful for tray end-users.
 		authedURL := requestChatTokenForRoom(0)
 		if authedURL == "" {
+			logger.Warn("openChatWindow: could not obtain chat token — portal may be unreachable or device not enrolled")
 			return
 		}
 		chatURL = authedURL
