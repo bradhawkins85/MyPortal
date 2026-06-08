@@ -192,6 +192,11 @@ async def bcp_overview(request: Request):
     # Get objectives and distribution list
     objectives = await bcp_repo.list_objectives(plan["id"])
     distribution_list = await bcp_repo.list_distribution_list(plan["id"])
+    has_bcp_planning_gaps = (
+        plan.get("last_reviewed") is None
+        or len(objectives) == 0
+        or len(distribution_list) == 0
+    )
     
     # Import template rendering from main
     from app.main import _build_base_context, templates
@@ -205,7 +210,9 @@ async def bcp_overview(request: Request):
             "plan": plan,
             "objectives": objectives,
             "distribution_list": distribution_list,
+            "has_bcp_planning_gaps": has_bcp_planning_gaps,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "bcp_compliance_help_url": settings.bcp_compliance_marketing_url,
         },
     )
     

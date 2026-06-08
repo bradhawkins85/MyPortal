@@ -33,6 +33,7 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
 
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
+_MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
 
 
 def _is_weak_secret(value: str | None) -> tuple[bool, str]:
@@ -256,6 +257,26 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="BCP_ENABLED",
     )
+    essential8_compliance_marketing_url: str = Field(
+        default="/marketing/essential8",
+        validation_alias="ESSENTIAL8_COMPLIANCE_MARKETING_URL",
+        description=(
+            "Customer-facing base URL for Essential 8 compliance upsell CTAs. "
+            "Accepts either a relative path (e.g. '/marketing/essential8') "
+            "or an absolute HTTP(S) URL. MyPortal appends '?element=<slug>' "
+            "per control by default; optional '{element}' placeholders are "
+            "also supported in the configured URL."
+        ),
+    )
+    bcp_compliance_marketing_url: str = Field(
+        default="/marketing/bcp",
+        validation_alias="BCP_COMPLIANCE_MARKETING_URL",
+        description=(
+            "Customer-facing help page URL for BCP compliance upsell CTAs. "
+            "Accepts either a relative path (e.g. '/marketing/bcp') "
+            "or an absolute HTTP(S) URL."
+        ),
+    )
     enable_hsts: bool = Field(
         default=False,
         validation_alias="ENABLE_HSTS",
@@ -472,6 +493,47 @@ class Settings(BaseSettings):
                 raise ValueError(f"Invalid CORS origin in ALLOWED_ORIGINS: {origin}") from exc
 
         return value
+
+    @field_validator(
+        "essential8_compliance_marketing_url",
+        "bcp_compliance_marketing_url",
+        mode="before",
+    )
+    @classmethod
+    def _validate_marketing_help_url(cls, value: str) -> str:
+        """Allow only safe relative paths or absolute HTTP(S) marketing URLs.
+
+        Rules:
+        - Accept `/path` style links such as `/marketing/essential8`.
+        - Accept absolute HTTP(S) URLs.
+        - Reject script/data schemes and protocol-relative values (`//...`).
+        """
+
+        if not isinstance(value, str):
+            raise ValueError("Marketing URL must be a string.")
+
+        normalised = value.strip()
+        if not normalised:
+            raise ValueError("Marketing URL cannot be empty.")
+
+        lowered = normalised.lower()
+        if lowered.startswith(("javascript:", "data:", "vbscript:")):
+            raise ValueError("Marketing URL must not use script/data schemes.")
+
+        if normalised.startswith("//"):
+            raise ValueError("Marketing URL must not be protocol-relative.")
+
+        if normalised.startswith("/"):
+            return normalised
+
+        candidate = normalised.replace("{element}", _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE)
+        try:
+            TypeAdapter(AnyHttpUrl).validate_python(candidate)
+        except ValidationError as exc:
+            raise ValueError(
+                "Marketing URL must be a relative path or absolute HTTP(S) URL."
+            ) from exc
+        return normalised
 
     def is_production(self) -> bool:
         """Return True when the application is running in production mode."""

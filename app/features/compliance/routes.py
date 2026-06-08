@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import unicodedata
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.core.config import get_settings
 from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as cc_repo
 from app.repositories import essential8 as essential8_repo
@@ -14,6 +17,27 @@ from app.repositories import user_companies as user_company_repo
 
 
 router = APIRouter(tags=["Compliance"])
+settings = get_settings()
+
+
+def _slugify_essential8_element(name: str) -> str:
+    normalised = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    cleaned = "".join(char.lower() if char.isalnum() else "-" for char in normalised)
+    return "-".join(part for part in cleaned.split("-") if part)
+
+
+def _build_essential8_help_url(base_url: str, element_slug: str) -> str:
+    if not base_url or not element_slug:
+        return base_url
+    if "{element}" in base_url:
+        return base_url.replace("{element}", element_slug)
+    split = urlsplit(base_url)
+    query_items = parse_qsl(split.query, keep_blank_values=True)
+    query_items = [(key, value) for key, value in query_items if key != "element"]
+    query_items.append(("element", element_slug))
+    return urlunsplit(
+        (split.scheme, split.netloc, split.path, urlencode(query_items), split.fragment)
+    )
 
 
 @lru_cache(maxsize=1)
@@ -79,13 +103,31 @@ async def compliance_page(request: Request):
         record["ml3_status"] = ctrl_ml["ml3"]
 
     summary = await essential8_repo.get_company_compliance_summary(company_id)
+    has_compliance_gaps = bool(
+        summary.get("not_started", 0) > 0 or summary.get("in_progress", 0) > 0
+    )
+    statuses_requiring_help = {"not_started", "in_progress", "non_compliant"}
+    for record in compliance_records:
+        element_slug = _slugify_essential8_element(record.get("control", {}).get("name", ""))
+        needs_help = bool(record.get("status") in statuses_requiring_help and element_slug)
+        record["show_compliance_help"] = needs_help
+        record["compliance_help_url"] = (
+            _build_essential8_help_url(
+                settings.essential8_compliance_marketing_url,
+                element_slug,
+            )
+            if needs_help
+            else ""
+        )
 
     extra = {
         "title": "Essential 8 Compliance",
         "compliance_records": compliance_records,
         "summary": summary,
+        "has_compliance_gaps": has_compliance_gaps,
         "company": company,
         "is_super_admin": bool(user.get("is_super_admin")),
+        "essential8_compliance_help_url": settings.essential8_compliance_marketing_url,
     }
     return await main_module._render_template("compliance/index.html", request, user, extra=extra)
 

@@ -42,6 +42,15 @@
       </div>
     </div>
   </section>
+  {% if has_bcp_planning_gaps and bcp_compliance_help_url %}
+  <section class="card card--panel">
+    <div class="card__body">
+      <h2 class="card__title">Need help strengthening BCP compliance?</h2>
+      <p class="card__subtitle">Access our business continuity services to close planning gaps and improve readiness.</p>
+      <a href="{{ bcp_compliance_help_url }}" class="button button--primary">Get BCP compliance help</a>
+    </div>
+  </section>
+  {% endif %}
 
   <!-- Objectives Section -->
   <section class="card">
