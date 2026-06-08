@@ -43,6 +43,10 @@ const chatURL = getChatURL();
 // session.
 const CHAT_PARTITION = 'persist:myportal-tray-chat';
 
+// How long (ms) to display the informational window when the app is run without
+// a --url= argument (e.g. manually by a user).
+const INFO_WINDOW_DISPLAY_MS = 8000;
+
 // ---------------------------------------------------------------------------
 // Single-instance lock
 // ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ app.whenReady().then(() => {
         )
     );
     // Auto-close after 8 seconds so it does not linger.
-    setTimeout(() => app.quit(), 8000);
+    setTimeout(() => app.quit(), INFO_WINDOW_DISPLAY_MS);
     return;
   }
 
