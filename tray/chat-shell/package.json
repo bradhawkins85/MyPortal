@@ -30,7 +30,8 @@
           "arch": ["x64"]
         }
       ],
-      "executableName": "myportal-tray-chat"
+      "executableName": "myportal-tray-chat",
+      "artifactName": "myportal-tray-chat.exe"
     },
     "mac": {
       "target": [
