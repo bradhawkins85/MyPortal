@@ -7,13 +7,16 @@
 ##   - For macOS builds: zig (used as cross-compiler via GOFLAGS)
 ##   - For Windows builds: MinGW-w64 (for CGO from webview_go)
 ##     OR set CGO_ENABLED=0 and build ui without webview (headless mode)
+##   - Node.js 20+ and npm (required for chat-shell builds on native hosts)
 ##
 ## Targets:
-##   make build-all         Build all platform targets
-##   make build-windows     Build Windows (amd64)
+##   make build-all            Build all platform targets
+##   make build-windows        Build Windows (amd64)
 ##   make build-darwin-amd64
 ##   make build-darwin-arm64
-##   make test              Run Go tests
+##   make build-chat-shell-win Build Electron chat shell for Windows (Windows host only)
+##   make build-chat-shell-mac Build Electron chat shell for macOS (macOS host only)
+##   make test                 Run Go tests
 ##   make clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
@@ -21,7 +24,9 @@ LDFLAGS  := -X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVer
 DIST     := dist
 
 .PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
-        build-darwin-universal build-msi build-pkg package-all test lint clean
+        build-darwin-universal build-msi build-pkg package-all \
+        build-chat-shell-win build-chat-shell-mac \
+        test lint clean
 
 all: build-all
 
@@ -74,6 +79,44 @@ build-darwin-universal: build-darwin-amd64 build-darwin-arm64
 	lipo -create -output $(DIST)/darwin/myportal-tray-ui \
 	    $(DIST)/darwin-amd64/myportal-tray-ui \
 	    $(DIST)/darwin-arm64/myportal-tray-ui
+
+# -----------------------------------------------------------------------
+# Chat shell — dedicated Electron chat window (platform-native builds)
+#
+# electron-builder is platform-specific:
+#   --win  must run on a Windows host (produces myportal-tray-chat.exe)
+#   --mac  must run on a macOS host   (produces myportal-tray-chat.app)
+#
+# Like build-msi, these targets print an explanatory message and exit
+# successfully when run on the wrong host OS.
+# -----------------------------------------------------------------------
+build-chat-shell-win:
+	@case "$(HOST_OS)" in \
+	    MINGW*|MSYS*|CYGWIN*|Windows_NT) \
+	        echo "Building chat shell for Windows..."; \
+	        (cd chat-shell && npm ci && npm run build:win); \
+	        mkdir -p $(DIST)/windows; \
+	        cp chat-shell/dist/myportal-tray-chat.exe $(DIST)/windows/ ;; \
+	    *) \
+	        echo "Skipping Windows chat shell build: electron-builder --win requires a Windows host (host: $(HOST_OS))."; \
+	        echo "Run 'make build-chat-shell-win' on a Windows machine, or build via the GitHub Actions windows-latest runner."; \
+	        exit 0 ;; \
+	esac
+
+build-chat-shell-mac:
+	@case "$(HOST_OS)" in \
+	    Darwin) \
+	        echo "Building chat shell for macOS (x64 + arm64)..."; \
+	        (cd chat-shell && npm ci && npm run build:mac); \
+	        mkdir -p $(DIST)/darwin; \
+	        echo "Renaming .app bundle to myportal-tray-chat.app..."; \
+	        rm -rf $(DIST)/darwin/myportal-tray-chat.app; \
+	        cp -R "chat-shell/dist/mac/MyPortal Chat.app" $(DIST)/darwin/myportal-tray-chat.app ;; \
+	    *) \
+	        echo "Skipping macOS chat shell build: electron-builder --mac requires a macOS host (host: $(HOST_OS))."; \
+	        echo "Run 'make build-chat-shell-mac' on a macOS machine, or build via the GitHub Actions macos-latest runner."; \
+	        exit 0 ;; \
+	esac
 
 # -----------------------------------------------------------------------
 # Windows MSI installer
