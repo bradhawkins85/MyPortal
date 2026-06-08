@@ -40,8 +40,8 @@
         </div>
       </div>
     </div>
-    {% set has_incomplete_items = (summary.not_started | default(0)) > 0 or (summary.in_progress | default(0)) > 0 %}
-    {% if has_incomplete_items and essential8_compliance_help_url %}
+    {% set has_compliance_gaps = (summary.not_started | default(0)) > 0 or (summary.in_progress | default(0)) > 0 %}
+    {% if has_compliance_gaps and essential8_compliance_help_url %}
     <div class="card card--panel">
       <div class="card__body">
         <h2 class="card__title">Need help becoming Essential 8 compliant?</h2>

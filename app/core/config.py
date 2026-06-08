@@ -488,7 +488,13 @@ class Settings(BaseSettings):
     )
     @classmethod
     def _validate_marketing_help_url(cls, value: str) -> str:
-        """Allow only safe relative paths or absolute HTTP(S) marketing URLs."""
+        """Allow only safe relative paths or absolute HTTP(S) marketing URLs.
+
+        Rules:
+        - Accept `/path` style links such as `/marketing/essential8`.
+        - Accept absolute HTTP(S) URLs.
+        - Reject script/data schemes and protocol-relative values (`//...`).
+        """
 
         if not isinstance(value, str):
             raise ValueError("Marketing URL must be a string.")
@@ -509,7 +515,7 @@ class Settings(BaseSettings):
 
         try:
             TypeAdapter(AnyHttpUrl).validate_python(normalised)
-        except ValidationError as exc:  # pragma: no cover - exercised in settings construction
+        except ValidationError as exc:
             raise ValueError(
                 "Marketing URL must be a relative path or absolute HTTP(S) URL."
             ) from exc
