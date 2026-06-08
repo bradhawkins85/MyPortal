@@ -144,6 +144,11 @@
                 </div>
                 <div class="compliance-form__actions">
                   <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+                  {% if req.show_compliance_help and req.compliance_help_url %}
+                  <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
+                    Get compliance help
+                  </a>
+                  {% endif %}
                 </div>
               </form>
             </div>
@@ -208,6 +213,11 @@
                 </div>
                 <div class="compliance-form__actions">
                   <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+                  {% if req.show_compliance_help and req.compliance_help_url %}
+                  <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
+                    Get compliance help
+                  </a>
+                  {% endif %}
                 </div>
               </form>
             </div>
@@ -272,6 +282,11 @@
                 </div>
                 <div class="compliance-form__actions">
                   <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+                  {% if req.show_compliance_help and req.compliance_help_url %}
+                  <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
+                    Get compliance help
+                  </a>
+                  {% endif %}
                 </div>
               </form>
             </div>
