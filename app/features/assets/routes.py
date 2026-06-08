@@ -258,7 +258,8 @@ async def asset_detail_page(request: Request, asset_id: int):
         return redirect
 
     record = await asset_repo.get_asset_by_id(asset_id)
-    if not record or int(record.get("company_id", 0) or 0) != company_id:
+    record_company_id = record.get("company_id") if record else None
+    if record_company_id is None or int(record_company_id) != company_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
     return RedirectResponse(url=f"/assets#asset-{asset_id}", status_code=status.HTTP_303_SEE_OTHER)
