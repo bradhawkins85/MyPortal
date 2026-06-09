@@ -165,6 +165,31 @@ func TestBuildTicketScriptAnswersJSON(t *testing.T) {
 	}
 }
 
+func TestBuildTicketScriptEmitsResultAfterDialogCloses(t *testing.T) {
+	script := buildTicketScript(nil)
+
+	mustContain := []string{
+		"$script:TicketDialogResult = $null",
+		"$script:TicketDialogResult = @{",
+		"$dialogResult = $form.ShowDialog()",
+		"$script:TicketDialogResult | ConvertTo-Json -Compress -Depth 5 | Write-Output",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(script, want) {
+			t.Fatalf("expected script to contain %q", want)
+		}
+	}
+
+	clickHandlerStart := strings.Index(script, "$btnSubmit.add_Click({")
+	showDialogStart := strings.Index(script, "$dialogResult = $form.ShowDialog()")
+	if clickHandlerStart < 0 || showDialogStart < 0 {
+		t.Fatal("expected submit handler and ShowDialog block in script")
+	}
+	if strings.Contains(script[clickHandlerStart:showDialogStart], "ConvertTo-Json") {
+		t.Fatal("submit click handler should store the payload, not write pipeline output before ShowDialog returns")
+	}
+}
+
 func TestNewTicketDialogCommandAllowsWinFormsWindow(t *testing.T) {
 	cmd := newTicketDialogCommand(`C:\Temp\mp-ticket.ps1`)
 	for _, arg := range cmd.Args {
