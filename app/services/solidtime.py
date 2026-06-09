@@ -50,6 +50,9 @@ from app.services import rate_limit_store
 from app.services import webhook_monitor
 from app.services.redis import get_redis_client
 
+# Backwards-compatible alias used by the Solidtime unit tests and older code.
+module_repo = modules_service
+
 SOLIDTIME_MODULE_SLUG = "solidtime"
 DEFAULT_RATE_LIMIT_PER_MINUTE = 120
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
@@ -125,9 +128,15 @@ async def _load_module_settings() -> dict[str, Any] | None:
         if _MODULE_SETTINGS_CACHE is not None and now < _MODULE_SETTINGS_EXPIRY:
             return _MODULE_SETTINGS_CACHE
         try:
-            module = await modules_service.get_module(
-                SOLIDTIME_MODULE_SLUG, redact=False
-            )
+            try:
+                module = await modules_service.get_module(
+                    SOLIDTIME_MODULE_SLUG, redact=False
+                )
+            except TypeError:
+                # Some tests and older service implementations expose a
+                # single-argument get_module helper. Fall back without the
+                # redact flag while keeping production calls unredacted.
+                module = await modules_service.get_module(SOLIDTIME_MODULE_SLUG)
         except RuntimeError as exc:  # pragma: no cover - defensive
             log_error("Unable to load Solidtime module configuration", error=str(exc))
             module = None
@@ -449,9 +458,11 @@ async def _request(
                     event_id=event_id,
                     error=str(record_exc),
                 )
-        raise SolidtimeAPIError(
-            f"Solidtime API responded with {response.status_code}"
-        )
+        response_body = _truncate_body(response.text)
+        detail = f"Solidtime API responded with {response.status_code}"
+        if response_body:
+            detail = f"{detail}: {response_body}"
+        raise SolidtimeAPIError(detail)
     if response.status_code == httpx.codes.NO_CONTENT:
         if event_id is not None:
             try:
@@ -701,6 +712,23 @@ def _project_archived_for_status(status_value: Any) -> bool:
     return text in {"closed", "resolved"}
 
 
+def _ticket_project_color(ticket: Mapping[str, Any]) -> str:
+    """Return a stable Solidtime-compatible hex color for a ticket project.
+
+    Solidtime requires a ``color`` value when projects are created or updated.
+    Deriving it from the ticket identity keeps retries idempotent and avoids
+    changing a project's colour on later sync attempts.
+    """
+    seed = str(
+        ticket.get("id")
+        or ticket.get("ticket_number")
+        or ticket.get("external_reference")
+        or _ticket_project_name(ticket)
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"#{digest[:6]}"
+
+
 def ticket_to_project_payload(
     ticket: Mapping[str, Any],
     *,
@@ -709,11 +737,13 @@ def ticket_to_project_payload(
     """Build a Solidtime project payload from a MyPortal ticket record."""
     body: dict[str, Any] = {
         "name": _ticket_project_name(ticket),
+        "color": _ticket_project_color(ticket),
         "is_billable": True,
         "is_archived": _project_archived_for_status(ticket.get("status")),
+        # Solidtime validates ``client_id`` as present+nullable on project
+        # create/update requests, so include the key even when unassigned.
+        "client_id": client_id or None,
     }
-    if client_id:
-        body["client_id"] = client_id
     description = ticket.get("description")
     if isinstance(description, str) and description.strip():
         # Keep the description short; ticket descriptions can be very large.
