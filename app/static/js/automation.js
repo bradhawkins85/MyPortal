@@ -30,6 +30,30 @@
       }),
     },
     {
+      label: 'Ticket is older than 30 days',
+      value: toJsonTemplate({
+        greater_than: {
+          'ticket.age_days': 30,
+        },
+      }),
+    },
+    {
+      label: 'Ticket has not been updated for 7 days',
+      value: toJsonTemplate({
+        greater_than: {
+          'ticket.updated_age_days': 7,
+        },
+      }),
+    },
+    {
+      label: 'Ticket has not had a reply for 24 hours',
+      value: toJsonTemplate({
+        greater_than: {
+          'ticket.last_reply_age_hours': 24,
+        },
+      }),
+    },
+    {
       label: 'Match any ticket status open or pending',
       value: toJsonTemplate({
         any: [
@@ -1458,8 +1482,23 @@
       if (!node || typeof node !== 'object') {
         return null;
       }
-      if (node.match && typeof node.match === 'object' && !Array.isArray(node.match)) {
-        const entries = Object.entries(node.match);
+      const operatorNodes = {
+        match: 'equals',
+        not_equals: 'not_equals',
+        greater_than: 'greater_than',
+        gt: 'greater_than',
+        greater_than_or_equal: 'greater_than_or_equal',
+        gte: 'greater_than_or_equal',
+        less_than: 'less_than',
+        lt: 'less_than',
+        less_than_or_equal: 'less_than_or_equal',
+        lte: 'less_than_or_equal',
+      };
+      const operatorKey = Object.keys(operatorNodes).find((key) => (
+        node[key] && typeof node[key] === 'object' && !Array.isArray(node[key])
+      ));
+      if (operatorKey) {
+        const entries = Object.entries(node[operatorKey]);
         if (entries.length < 1) {
           return null;
         }
@@ -1467,6 +1506,7 @@
         return makeRowState({
           conditionType: 'match',
           fieldPath: String(fieldPath),
+          operator: operatorNodes[operatorKey],
           valueType: inferType(value),
           value: value === null ? '' : String(value),
         });
@@ -1519,7 +1559,14 @@
         return null;
       }
       const typedValue = parseTypedValue(row.valueType, row.value);
-      const matchNode = { match: { [fieldPath]: typedValue } };
+      const operatorKey = {
+        not_equals: 'not_equals',
+        greater_than: 'greater_than',
+        greater_than_or_equal: 'greater_than_or_equal',
+        less_than: 'less_than',
+        less_than_or_equal: 'less_than_or_equal',
+      }[row.operator] || 'match';
+      const matchNode = { [operatorKey]: { [fieldPath]: typedValue } };
       if (row.conditionType === 'all') {
         return { all: [matchNode] };
       }
@@ -1598,10 +1645,19 @@
 
         const operatorSelect = document.createElement('select');
         operatorSelect.className = 'form-input';
-        const equalsOption = document.createElement('option');
-        equalsOption.value = 'equals';
-        equalsOption.textContent = 'equals';
-        operatorSelect.appendChild(equalsOption);
+        [
+          ['equals', 'equals'],
+          ['not_equals', 'not equals'],
+          ['greater_than', 'greater than'],
+          ['greater_than_or_equal', 'greater than or equal'],
+          ['less_than', 'less than'],
+          ['less_than_or_equal', 'less than or equal'],
+        ].forEach(([value, label]) => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = label;
+          operatorSelect.appendChild(option);
+        });
         operatorSelect.value = row.operator || 'equals';
         operatorSelect.addEventListener('change', () => handleRowChange(index, 'operator', operatorSelect.value));
 
