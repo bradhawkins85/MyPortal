@@ -25,7 +25,7 @@ DIST     := dist
 
 .PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
         build-darwin-universal build-msi build-pkg package-all \
-        build-chat-shell-win build-chat-shell-mac \
+        build-macos-icons build-chat-shell-win build-chat-shell-mac \
         test lint clean
 
 all: build-all
@@ -90,6 +90,10 @@ build-darwin-universal: build-darwin-amd64 build-darwin-arm64
 # Like build-msi, these targets print an explanatory message and exit
 # successfully when run on the wrong host OS.
 # -----------------------------------------------------------------------
+build-macos-icons:
+	@echo "Building macOS icon asset..."
+	@bash scripts/build-macos-icons.sh
+
 build-chat-shell-win:
 	@case "$(HOST_OS)" in \
 	    MINGW*|MSYS*|CYGWIN*|Windows_NT) \
