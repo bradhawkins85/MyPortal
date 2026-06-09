@@ -581,7 +581,7 @@ func submitTicketToPortal(result ticketFormResult) error {
 		Value      string `json:"value"`
 	}
 	type submitRequest struct {
-		DeviceUID   string         `json:"device_uid"`
+		DeviceUID   string         `json:"device_uid,omitempty"`
 		Name        string         `json:"name"`
 		Email       string         `json:"email"`
 		Phone       string         `json:"phone,omitempty"`
@@ -600,8 +600,8 @@ func submitTicketToPortal(result ticketFormResult) error {
 		refreshDeviceUID()
 		deviceUID = strings.TrimSpace(gDeviceUID)
 	}
-	if deviceUID == "" {
-		return fmt.Errorf("device UID is not available yet")
+	if deviceUID == "" && strings.TrimSpace(gAuthToken) == "" {
+		return fmt.Errorf("device UID or auth token is not available yet")
 	}
 
 	body, err := json.Marshal(submitRequest{
