@@ -210,7 +210,7 @@ class TrayChatTokenResponse(BaseModel):
 class TrayTicketSubmitRequest(BaseModel):
     """Fields submitted by a tray device when the user clicks Submit Ticket."""
 
-    device_uid: str = Field(min_length=1, max_length=64)
+    device_uid: Optional[str] = Field(default=None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     email: str = Field(min_length=1, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=50)
