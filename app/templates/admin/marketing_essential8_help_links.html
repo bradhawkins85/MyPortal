@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Essential 8 help links{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to marketing pages", "type": "link", "href": "/admin/marketing", "variant": "ghost"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <div>
+      <p class="card__subtitle">Choose the marketing page shown for each Essential 8 requirement that still needs work.</p>
+    </div>
+  </header>
+  <form action="/admin/marketing/essential8-help-links" method="post">
+    {% include "partials/csrf.html" %}
+    {% for control in essential8_help_controls %}
+    <section class="card card--subpanel" style="margin-bottom: 1rem;">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h3 class="card__title">{{ control.control_order }}. {{ control.name }}</h3>
+          {% if control.description %}
+          <p class="card__subtitle">{{ control.description }}</p>
+          {% endif %}
+        </div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>ML</th>
+              <th>Requirement</th>
+              <th>Marketing page</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for requirement in control.requirements %}
+            <tr>
+              <td data-label="ML">{{ requirement.maturity_level|upper }}</td>
+              <td data-label="Requirement">{{ requirement.requirement_order }}. {{ requirement.description }}</td>
+              <td data-label="Marketing page">
+                <select class="form-input" name="requirement_{{ requirement.id }}">
+                  <option value="">No help page</option>
+                  {% for page in marketing_pages %}
+                  <option value="{{ page.id }}" {% if requirement.selected_marketing_page_id == page.id %}selected{% endif %}>
+                    {{ page.title }}{% if not page.is_published %} (unpublished){% endif %}
+                  </option>
+                  {% endfor %}
+                </select>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="3" class="table__empty">No requirements found for this control.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endfor %}
+    <div class="form-actions">
+      <button type="submit" class="button">Save help links</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

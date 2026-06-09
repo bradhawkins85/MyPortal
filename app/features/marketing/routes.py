@@ -223,15 +223,31 @@ async def admin_marketing_dashboard(request: Request):
         "title": "Marketing pages",
         "marketing_pages": pages,
         "marketing_leads": leads,
-        "essential8_help_controls": [],
     }
-    if bool(current_user.get("is_super_admin")):
-        extra["essential8_help_controls"] = await _build_essential8_help_mapping_controls()
     return await _main()._render_template(
         "admin/marketing.html",
         request,
         current_user,
         extra=extra,
+    )
+
+
+@router.get("/admin/marketing/essential8-help-links", response_class=HTMLResponse)
+async def admin_marketing_essential8_help_links(request: Request):
+    current_user, redirect = await _require_marketing_access(request)
+    if redirect:
+        return redirect
+    if not bool(current_user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    return await _main()._render_template(
+        "admin/marketing_essential8_help_links.html",
+        request,
+        current_user,
+        extra={
+            "title": "Essential 8 help links",
+            "marketing_pages": await marketing_repo.list_pages(),
+            "essential8_help_controls": await _build_essential8_help_mapping_controls(),
+        },
     )
 
 
@@ -279,10 +295,7 @@ async def admin_marketing_create_page(request: Request):
             "marketing_pages": await marketing_repo.list_pages(),
             "marketing_leads": await marketing_repo.list_leads(),
             "error_message": str(exc),
-            "essential8_help_controls": [],
         }
-        if bool(current_user.get("is_super_admin")):
-            extra["essential8_help_controls"] = await _build_essential8_help_mapping_controls()
         return await _main()._render_template(
             "admin/marketing.html",
             request,
@@ -362,7 +375,11 @@ async def admin_marketing_update_essential8_help_links(request: Request):
             )
         mappings[requirement["id"]] = page_id
     await essential8_repo.replace_requirement_marketing_page_links(mappings)
-    return flash_redirect("/admin/marketing", "Essential 8 help links updated.", "success")
+    return flash_redirect(
+        "/admin/marketing/essential8-help-links",
+        "Essential 8 help links updated.",
+        "success",
+    )
 
 
 @router.post("/admin/marketing/pages/{page_id}/delete", response_class=HTMLResponse)

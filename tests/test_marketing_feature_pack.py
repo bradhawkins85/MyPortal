@@ -14,6 +14,7 @@ EXPECTED = {
     ("GET", "/marketing/{slug}"),
     ("POST", "/marketing/{slug}/contact"),
     ("GET", "/admin/marketing"),
+    ("GET", "/admin/marketing/essential8-help-links"),
     ("GET", "/admin/marketing/pages/{page_id}/edit"),
     ("POST", "/admin/marketing/essential8-help-links"),
     ("POST", "/admin/marketing/pages"),
