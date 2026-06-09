@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+
+@pytest.mark.anyio
+async def test_tray_submit_ticket_uses_bearer_token_without_device_uid(monkeypatch):
+    from app.api.routes import tray as tray_routes
+    from app.schemas.tray import TrayTicketSubmitRequest
+
+    captured_hashes: list[str] = []
+    created: dict[str, object] = {}
+
+    async def fake_get_device_by_auth_hash(token_hash: str):
+        captured_hashes.append(token_hash)
+        return {
+            "id": 123,
+            "uid": "device-from-token",
+            "status": "active",
+            "company_id": 456,
+            "asset_id": None,
+        }
+
+    async def fake_get_user_by_email(email: str):
+        return None
+
+    async def fake_get_questions_for_company(company_id: int | None):
+        created["questions_company_id"] = company_id
+        return []
+
+    async def fake_resolve_status_or_default(status: str | None):
+        return "open"
+
+    async def fake_create_ticket(**kwargs):
+        created.update(kwargs)
+        return {"id": 789, "ticket_number": "T-789"}
+
+    monkeypatch.setattr(
+        tray_routes.tray_repo,
+        "get_device_by_auth_hash",
+        fake_get_device_by_auth_hash,
+    )
+    monkeypatch.setattr(tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(
+        tray_routes.tq_service,
+        "get_questions_for_company",
+        fake_get_questions_for_company,
+    )
+    monkeypatch.setattr(
+        tray_routes.tickets_service,
+        "resolve_status_or_default",
+        fake_resolve_status_or_default,
+    )
+    monkeypatch.setattr(tray_routes.tickets_service, "create_ticket", fake_create_ticket)
+
+    request = SimpleNamespace(headers={"Authorization": "Bearer token-abc"})
+    payload = TrayTicketSubmitRequest(
+        name="Jane",
+        email="JANE@EXAMPLE.COM",
+        subject="Help",
+        description="Broken",
+    )
+
+    response = await tray_routes.tray_submit_ticket(payload, request)  # type: ignore[arg-type]
+
+    assert captured_hashes
+    assert response.ticket_id == 789
+    assert created["company_id"] == 456
+    assert created["requester_email"] == "jane@example.com"
+    assert created["questions_company_id"] == 456

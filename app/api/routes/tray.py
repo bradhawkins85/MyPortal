@@ -231,20 +231,42 @@ async def get_ticket_questions(
 )
 async def tray_submit_ticket(
     payload: TrayTicketSubmitRequest,
+    request: Request,
 ) -> TrayTicketSubmitResponse:
     """Create a support ticket submitted via the tray icon.
 
-    The ``device_uid`` identifies the device and is used to link the ticket
-    to the corresponding asset and company.  No bearer auth is required —
-    the device_uid is the device identifier.  Name, email, and phone are
-    provided by the user in the tray dialog; email is used to match an
-    existing portal user account when one exists.
+    The bearer auth token is the preferred device identity and is used to link
+    the ticket to the corresponding asset and company.  ``device_uid`` remains
+    accepted as a backwards-compatible fallback for older tray clients that do
+    not send bearer auth.  Name, email, and phone are provided by the user in
+    the tray dialog; email is used to match an existing portal user account
+    when one exists.
 
     Dynamic question answers are validated server-side against the current
     question definitions.  Required visible questions must have a non-empty
     value; select questions must use a declared option.
     """
-    device = await tray_repo.get_device_by_uid(payload.device_uid)
+    # Prefer the bearer auth token when available. Older tray clients also send
+    # device_uid in the JSON body, but relying exclusively on that body value
+    # makes submissions fragile when the UI has an auth token yet cannot read
+    # the service-written DeviceUID from registry/state. The token already
+    # identifies the enrolled device, so use it as the authoritative source and
+    # keep device_uid as a backwards-compatible fallback for existing clients.
+    device = None
+    auth_header = request.headers.get("Authorization", "")
+    token = ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if token:
+        device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
+        if not device:
+            raise HTTPException(
+                status_code=401, detail="Tray device authentication failed"
+            )
+
+    if device is None and payload.device_uid:
+        device = await tray_repo.get_device_by_uid(payload.device_uid)
+
     if not device or device.get("status") == "revoked":
         raise HTTPException(status_code=404, detail="Device not found")
 
@@ -351,7 +373,7 @@ async def tray_submit_ticket(
 
     log_info(
         "Tray ticket submitted",
-        device_uid=payload.device_uid,
+        device_uid=device.get("uid") or payload.device_uid,
         ticket_id=ticket.get("id"),
         requester_id=requester_id,
     )

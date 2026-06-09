@@ -273,17 +273,56 @@ func TestSubmitTicketToPortalPostsJSONWithAuth(t *testing.T) {
 	}
 }
 
-func TestSubmitTicketToPortalRequiresDeviceUID(t *testing.T) {
-	oldPortalURL, oldDeviceUID := gPortalURL, gDeviceUID
+func TestSubmitTicketToPortalCanUseAuthTokenWithoutDeviceUID(t *testing.T) {
+	oldPortalURL, oldDeviceUID, oldAuthToken, oldClient := gPortalURL, gDeviceUID, gAuthToken, ticketHTTPClient
 	defer func() {
 		gPortalURL = oldPortalURL
 		gDeviceUID = oldDeviceUID
+		gAuthToken = oldAuthToken
+		ticketHTTPClient = oldClient
+	}()
+
+	gDeviceUID = ""
+	gAuthToken = "token-abc"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token-abc" {
+			t.Fatalf("unexpected Authorization header: %q", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if _, ok := body["device_uid"]; ok {
+			t.Fatalf("device_uid should be omitted when unavailable: %#v", body["device_uid"])
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ticket_id":42}`))
+	}))
+	defer server.Close()
+
+	gPortalURL = server.URL
+	ticketHTTPClient = server.Client()
+	ticketHTTPClient.Timeout = 5 * time.Second
+
+	if err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"}); err != nil {
+		t.Fatalf("submit ticket with auth token only: %v", err)
+	}
+}
+
+func TestSubmitTicketToPortalRequiresDeviceUIDOrAuthToken(t *testing.T) {
+	oldPortalURL, oldDeviceUID, oldAuthToken := gPortalURL, gDeviceUID, gAuthToken
+	defer func() {
+		gPortalURL = oldPortalURL
+		gDeviceUID = oldDeviceUID
+		gAuthToken = oldAuthToken
 	}()
 	gPortalURL = "https://portal.example.test"
 	gDeviceUID = ""
+	gAuthToken = ""
 
 	err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"})
-	if err == nil || !strings.Contains(err.Error(), "device UID") {
-		t.Fatalf("expected device UID error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "device UID or auth token") {
+		t.Fatalf("expected device UID/auth token error, got %v", err)
 	}
 }
