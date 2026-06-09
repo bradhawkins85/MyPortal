@@ -34,6 +34,48 @@ type ticketDynamicAnswer struct {
 	Value      string `json:"value"`
 }
 
+// UnmarshalJSON accepts the PowerShell ConvertTo-Json shapes used by the
+// WinForms dialog. PowerShell 5 can collapse a single-item array into an
+// object, so answers may arrive either as [] or as a single object.
+func (r *ticketFormResult) UnmarshalJSON(data []byte) error {
+	type rawTicketFormResult struct {
+		Name        string          `json:"name"`
+		Email       string          `json:"email"`
+		Phone       string          `json:"phone"`
+		Subject     string          `json:"subject"`
+		Description string          `json:"description"`
+		Answers     json.RawMessage `json:"answers"`
+	}
+	var raw rawTicketFormResult
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Name = raw.Name
+	r.Email = raw.Email
+	r.Phone = raw.Phone
+	r.Subject = raw.Subject
+	r.Description = raw.Description
+	r.Answers = nil
+
+	answerBytes := bytes.TrimSpace(raw.Answers)
+	if len(answerBytes) == 0 || bytes.Equal(answerBytes, []byte("null")) {
+		return nil
+	}
+	if bytes.Equal(answerBytes, []byte("[]")) {
+		r.Answers = []ticketDynamicAnswer{}
+		return nil
+	}
+	if answerBytes[0] == '[' {
+		return json.Unmarshal(answerBytes, &r.Answers)
+	}
+	var single ticketDynamicAnswer
+	if err := json.Unmarshal(answerBytes, &single); err != nil {
+		return err
+	}
+	r.Answers = []ticketDynamicAnswer{single}
+	return nil
+}
+
 // buildTicketScript generates the PowerShell WinForms script for the Submit
 // Ticket dialog.  Fixed fields (name, email, phone, subject, description) are
 // always rendered first; dynamic questions follow in the order returned by the
@@ -371,6 +413,30 @@ func indexOfQID(qs []api.TicketQuestion, id int) int {
 	return -1
 }
 
+// parseTicketDialogOutput decodes the JSON object emitted by the PowerShell
+// dialog. If PowerShell or the host emits incidental text before/after the
+// JSON payload, the final object is extracted so contact details can still be
+// saved and the ticket can be submitted.
+func parseTicketDialogOutput(output string) (ticketFormResult, error) {
+	var result ticketFormResult
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return result, fmt.Errorf("empty dialog output")
+	}
+	if err := json.Unmarshal([]byte(trimmed), &result); err == nil {
+		return result, nil
+	}
+	start := strings.Index(trimmed, "{")
+	end := strings.LastIndex(trimmed, "}")
+	if start >= 0 && end > start {
+		candidate := trimmed[start : end+1]
+		if err := json.Unmarshal([]byte(candidate), &result); err == nil {
+			return result, nil
+		}
+	}
+	return result, fmt.Errorf("invalid dialog JSON")
+}
+
 // openNewTicketDialog loads dynamic questions from the portal, shows the New
 // Ticket WinForms dialog, persists prefill values to HKCU, and submits the
 // ticket to the portal.
@@ -418,8 +484,8 @@ func openNewTicketDialog(cfg *api.ConfigResponse) {
 		return
 	}
 
-	var result ticketFormResult
-	if jsonErr := json.Unmarshal([]byte(outStr), &result); jsonErr != nil {
+	result, jsonErr := parseTicketDialogOutput(outStr)
+	if jsonErr != nil {
 		logger.Warn("openNewTicketDialog: parse dialog output: %v", jsonErr)
 		return
 	}
@@ -430,12 +496,14 @@ func openNewTicketDialog(cfg *api.ConfigResponse) {
 	result.Subject = strings.TrimSpace(result.Subject)
 	result.Description = strings.TrimSpace(result.Description)
 
+	if result.Name != "" || result.Email != "" || result.Phone != "" {
+		saveTicketPrefill(result.Name, result.Email, result.Phone)
+	}
+
 	if result.Name == "" || result.Email == "" || result.Subject == "" {
 		showOSNotification("Submit Ticket", "Name, email and subject are required.")
 		return
 	}
-
-	saveTicketPrefill(result.Name, result.Email, result.Phone)
 
 	if err := submitTicketToPortal(result); err != nil {
 		logger.Warn("openNewTicketDialog: submit: %v", err)
@@ -518,8 +586,17 @@ func submitTicketToPortal(result ticketFormResult) error {
 		answers = append(answers, submitAnswer{QuestionID: a.QuestionID, Value: a.Value})
 	}
 
+	deviceUID := strings.TrimSpace(gDeviceUID)
+	if deviceUID == "" {
+		refreshDeviceUID()
+		deviceUID = strings.TrimSpace(gDeviceUID)
+	}
+	if deviceUID == "" {
+		return fmt.Errorf("device UID is not available yet")
+	}
+
 	body, err := json.Marshal(submitRequest{
-		DeviceUID:   gDeviceUID,
+		DeviceUID:   deviceUID,
 		Name:        result.Name,
 		Email:       result.Email,
 		Phone:       result.Phone,
@@ -532,7 +609,15 @@ func submitTicketToPortal(result ticketFormResult) error {
 	}
 
 	url := strings.TrimRight(gPortalURL, "/") + "/api/tray/submit-ticket"
-	resp, err := ticketHTTPClient.Post(url, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if gAuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+gAuthToken)
+	}
+	resp, err := ticketHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("post: %w", err)
 	}
