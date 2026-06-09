@@ -8634,7 +8634,13 @@ a.service-card__ai-icon:hover {
 
 .compliance-form__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.requirement-item__ticket-form {
+  display: inline-flex;
+  margin: 0;
 }
 
 .requirement-item__help-btn {
