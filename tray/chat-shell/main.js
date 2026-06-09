@@ -24,7 +24,11 @@ const { URL } = require('url');
 // ---------------------------------------------------------------------------
 
 function getChatURL() {
-  for (const arg of process.argv.slice(2)) {
+  // In a packaged Electron app process.argv[0] is the executable and user
+  // arguments begin at index 1.  In development (electron .) argv[1] is the
+  // app entry point, so user arguments begin at index 2.
+  const argv = process.argv.slice(app.isPackaged ? 1 : 2);
+  for (const arg of argv) {
     if (arg.startsWith('--url=')) {
       const val = arg.slice('--url='.length).trim();
       return val || null;
