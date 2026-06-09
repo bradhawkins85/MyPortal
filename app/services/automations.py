@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 import re
@@ -13,6 +14,7 @@ from loguru import logger
 
 from app.core.database import db
 from app.repositories import automations as automation_repo
+from app.repositories import tickets as tickets_repo
 from app.services import modules as modules_service
 from app.services import value_templates
 
@@ -131,6 +133,65 @@ def _value_matches(actual: Any, expected: Any) -> bool:
     return actual == expected
 
 
+def _coerce_comparable(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, date):
+        return datetime.combine(value, time.min, tzinfo=timezone.utc).timestamp()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return text
+        try:
+            return float(text)
+        except ValueError:
+            return text.casefold()
+    return value
+
+
+def _compare_values(actual: Any, expected: Any, operator: str) -> bool:
+    actual_value = _coerce_comparable(actual)
+    expected_value = _coerce_comparable(expected)
+    try:
+        if operator == "not_equals":
+            return not _value_matches(actual, expected)
+        if operator == "greater_than":
+            return actual_value > expected_value
+        if operator == "greater_than_or_equal":
+            return actual_value >= expected_value
+        if operator == "less_than":
+            return actual_value < expected_value
+        if operator == "less_than_or_equal":
+            return actual_value <= expected_value
+    except TypeError:
+        return False
+    return _value_matches(actual, expected)
+
+
+def _operator_filters_match(
+    filters: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+    *,
+    operator: str,
+) -> bool:
+    if not filters:
+        return False
+    for key, expected in filters.items():
+        lookup_key = str(key)
+        actual = _resolve_context_value(context, lookup_key)
+        if actual is None and "." not in lookup_key and isinstance(context, Mapping):
+            ticket_ctx = context.get("ticket")
+            if isinstance(ticket_ctx, Mapping):
+                fallback = _resolve_context_value(ticket_ctx, lookup_key)
+                if fallback is not None:
+                    actual = fallback
+        if not _compare_values(actual, expected, operator):
+            return False
+    return True
+
+
 def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any] | None) -> bool:
     if not filters:
         return True
@@ -157,6 +218,22 @@ def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any]
 
     if "not" in filters:
         return not _filters_match(filters.get("not"), context)
+
+    operator_keys = {
+        "not_equals": "not_equals",
+        "gt": "greater_than",
+        "greater_than": "greater_than",
+        "gte": "greater_than_or_equal",
+        "greater_than_or_equal": "greater_than_or_equal",
+        "lt": "less_than",
+        "less_than": "less_than",
+        "lte": "less_than_or_equal",
+        "less_than_or_equal": "less_than_or_equal",
+    }
+    for filter_key, operator in operator_keys.items():
+        comparison_filters = filters.get(filter_key)
+        if isinstance(comparison_filters, Mapping):
+            return _operator_filters_match(comparison_filters, context, operator=operator)
 
     matchers: Mapping[str, Any] | None
     if "match" in filters and isinstance(filters["match"], Mapping):
@@ -189,6 +266,60 @@ def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any]
             if not _value_matches(actual, expected):
                 return False
     return True
+
+
+def _serialise_datetime(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    return None
+
+
+def _age_metrics(value: Any, *, now: datetime) -> dict[str, Any]:
+    if not isinstance(value, datetime):
+        return {"seconds": None, "minutes": None, "hours": None, "days": None}
+    timestamp = value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    seconds = max(0.0, (now - timestamp).total_seconds())
+    return {
+        "seconds": seconds,
+        "minutes": seconds / 60,
+        "hours": seconds / 3600,
+        "days": seconds / 86400,
+    }
+
+
+def _attach_ticket_age_context(ticket: Mapping[str, Any], *, now: datetime) -> dict[str, Any]:
+    enriched = dict(ticket)
+    created_at = enriched.get("created_at")
+    updated_at = enriched.get("updated_at")
+    latest_reply_at = enriched.get("latest_reply_at")
+    last_activity_at = latest_reply_at or updated_at or created_at
+
+    enriched["age"] = _age_metrics(created_at, now=now)
+    enriched["updated_age"] = _age_metrics(updated_at, now=now)
+    enriched["last_reply_at"] = latest_reply_at
+    enriched["last_activity_at"] = last_activity_at
+    enriched["last_reply_age"] = _age_metrics(latest_reply_at or created_at, now=now)
+    enriched["last_activity_age"] = _age_metrics(last_activity_at, now=now)
+
+    # Flat aliases keep the builder simple and make advanced JSON easy to read.
+    for prefix in ("age", "updated_age", "last_reply_age", "last_activity_age"):
+        metrics = enriched.get(prefix)
+        if isinstance(metrics, Mapping):
+            for unit, metric_value in metrics.items():
+                enriched[f"{prefix}_{unit}"] = metric_value
+    enriched["last_reply_at_iso"] = _serialise_datetime(latest_reply_at)
+    enriched["last_activity_at_iso"] = _serialise_datetime(last_activity_at)
+    return enriched
+
+
+def _is_ticket_scoped_scheduled_automation(automation: Mapping[str, Any]) -> bool:
+    if str(automation.get("kind") or "").strip().lower() != "scheduled":
+        return False
+    filters = automation.get("trigger_filters")
+    if not isinstance(filters, Mapping):
+        return False
+    haystack = json.dumps({"filters": filters}, default=str)
+    return "ticket" in haystack
 
 
 def calculate_next_run(
@@ -285,6 +416,146 @@ async def refresh_all_schedules() -> None:
         await automation_repo.set_next_run(int(automation["id"]), next_run)
 
 
+async def _invoke_automation_actions_for_context(
+    automation: Mapping[str, Any],
+    *,
+    context: Mapping[str, Any] | None,
+) -> tuple[Any, str | None]:
+    """Invoke configured module action(s) without recording an automation run."""
+
+    payload = automation.get("action_payload")
+    actions = _normalise_actions(payload.get("actions")) if isinstance(payload, Mapping) else []
+    if actions:
+        results: list[dict[str, Any]] = []
+        first_error: str | None = None
+        for action in actions:
+            module_slug = action["module"]
+            payload_source = action.get("payload")
+            module_payload = dict(payload_source) if isinstance(payload_source, Mapping) else {}
+            module_payload = await value_templates.render_value_async(module_payload, context)
+            if context:
+                module_payload.setdefault("context", context)
+            try:
+                action_result = await modules_service.trigger_module(
+                    module_slug,
+                    module_payload,
+                    background=False,
+                )
+            except Exception as exc:  # pragma: no cover - network/runtime guard
+                exc_message = str(exc)
+                if not first_error:
+                    first_error = exc_message
+                results.append({"module": module_slug, "status": "failed", "error": exc_message})
+                continue
+
+            action_status_raw = action_result.get("status") if isinstance(action_result, Mapping) else None
+            action_error = None
+            action_reason = None
+            if isinstance(action_result, Mapping):
+                action_status_raw = action_result.get("status") or action_result.get("event_status")
+                action_error = action_result.get("error") or action_result.get("last_error") or None
+                action_reason = action_result.get("reason")
+            action_status = str(action_status_raw or "").strip().lower() or "unknown"
+            result_entry: dict[str, Any] = {
+                "module": module_slug,
+                "status": action_status,
+                "result": action_result,
+            }
+            if action_error:
+                result_entry["error"] = action_error
+            if action_reason:
+                result_entry["reason"] = action_reason
+            results.append(result_entry)
+            if action_status in {"failed", "error"} or (action_status == "unknown" and action_error):
+                if not first_error:
+                    first_error = str(action_error or "Module action failed")
+        return results, first_error
+
+    if not isinstance(payload, Mapping):
+        payload = {}
+    module_slug = automation.get("action_module")
+    if module_slug:
+        module_payload = await value_templates.render_value_async(dict(payload), context)
+        if context:
+            module_payload.setdefault("context", context)
+        result = await modules_service.trigger_module(str(module_slug), module_payload, background=False)
+        if isinstance(result, Mapping):
+            result_status = str(result.get("status") or result.get("event_status") or "").strip().lower()
+            result_error = result.get("error") or result.get("last_error") or None
+            if result_status in {"failed", "error"} or result_error:
+                return result, str(result_error or "Module action failed")
+        return result, None
+    return {"status": "skipped", "reason": "No action module configured"}, None
+
+
+async def _execute_scheduled_ticket_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
+    """Run a scheduled automation once for each ticket matching its filters."""
+
+    now = datetime.now(timezone.utc)
+    raw_filters = automation.get("trigger_filters")
+    filters = raw_filters if isinstance(raw_filters, Mapping) else None
+    scanned = await tickets_repo.list_tickets_for_automation_scan(limit=1000)
+    matched = 0
+    succeeded = 0
+    failed = 0
+    skipped = 0
+    results: list[dict[str, Any]] = []
+
+    # Local import avoids a circular import during application startup because
+    # the ticket service emits automation events.
+    from app.services import tickets as tickets_service
+
+    for ticket in scanned:
+        ticket_context = _attach_ticket_age_context(ticket, now=now)
+        try:
+            enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
+        except Exception:  # pragma: no cover - defensive fallback
+            enriched_ticket = ticket_context
+        context = {
+            "ticket": _attach_ticket_age_context(enriched_ticket, now=now),
+            "ticket_update": {
+                "actor_type": "automation",
+                "actor_label": "Automation",
+                "actor_user": None,
+            },
+            "schedule": {
+                "automation_id": automation.get("id"),
+                "automation_name": automation.get("name"),
+                "checked_at": now.isoformat(),
+            },
+        }
+        if not _filters_match(filters, context):
+            continue
+        matched += 1
+        action_result, action_error = await _invoke_automation_actions_for_context(
+            automation,
+            context=context,
+        )
+        ticket_result: dict[str, Any] = {
+            "ticket_id": ticket.get("id"),
+            "status": "failed" if action_error else "succeeded",
+            "result": action_result,
+        }
+        if action_error:
+            failed += 1
+            ticket_result["error"] = action_error
+        else:
+            succeeded += 1
+        results.append(ticket_result)
+
+    if matched == 0:
+        skipped = len(scanned)
+    return {
+        "mode": "scheduled_ticket_scan",
+        "scanned": len(scanned),
+        "matched": matched,
+        "succeeded": succeeded,
+        "failed": failed,
+        "skipped": skipped,
+        "results": results,
+    }
+
+
 async def _execute_automation(
     automation: Mapping[str, Any],
     *,
@@ -316,7 +587,13 @@ async def _execute_automation(
         payload = automation.get("action_payload")
         actions = _normalise_actions(payload.get("actions")) if isinstance(payload, Mapping) else []
         try:
-            if actions:
+            if context is None and _is_ticket_scoped_scheduled_automation(automation):
+                result_payload = await _execute_scheduled_ticket_automation(automation)
+                failed_count = int(result_payload.get("failed", 0)) if isinstance(result_payload, Mapping) else 0
+                if failed_count > 0:
+                    status = "failed"
+                    error_message = f"{failed_count} scheduled ticket action(s) failed"
+            elif actions:
                 results: list[dict[str, Any]] = []
                 for action in actions:
                     module_slug = action["module"]

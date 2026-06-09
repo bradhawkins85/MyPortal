@@ -737,3 +737,114 @@ async def test_execute_automation_continues_after_first_action_failure(monkeypat
     assert len(captured_run["result_payload"]) == 2
     assert captured_run["result_payload"][0]["status"] == "failed"
     assert captured_run["result_payload"][1]["status"] == "succeeded"
+
+
+def test_filters_match_supports_ticket_age_comparisons():
+    context = {
+        "ticket": {
+            "status": "open",
+            "age_days": 31,
+            "updated_age_hours": 49,
+            "last_reply_age_hours": 12,
+        }
+    }
+
+    assert automations_service._filters_match(
+        {
+            "all": [
+                {"match": {"ticket.status": "open"}},
+                {"greater_than": {"ticket.age_days": 30}},
+                {"greater_than_or_equal": {"ticket.updated_age_hours": 48}},
+            ]
+        },
+        context,
+    )
+    assert not automations_service._filters_match(
+        {"greater_than": {"ticket.last_reply_age_hours": 24}},
+        context,
+    )
+
+
+@pytest.mark.anyio
+async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tickets(monkeypatch):
+    scanned_tickets = [
+        {
+            "id": 1,
+            "status": "open",
+            "subject": "Old ticket",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=45),
+            "updated_at": datetime.now(timezone.utc) - timedelta(days=40),
+            "latest_reply_at": datetime.now(timezone.utc) - timedelta(days=35),
+        },
+        {
+            "id": 2,
+            "status": "open",
+            "subject": "New ticket",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=5),
+            "updated_at": datetime.now(timezone.utc) - timedelta(days=1),
+            "latest_reply_at": datetime.now(timezone.utc) - timedelta(hours=4),
+        },
+    ]
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_list_tickets_for_automation_scan(*, limit: int = 1000):
+        assert limit == 1000
+        return scanned_tickets
+
+    async def fake_enrich(ticket):
+        return dict(ticket)
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        captured.append((module_slug, payload))
+        return {"status": "succeeded"}
+
+    from app.services import tickets as tickets_service
+
+    monkeypatch.setattr(
+        automations_service.tickets_repo,
+        "list_tickets_for_automation_scan",
+        fake_list_tickets_for_automation_scan,
+    )
+    monkeypatch.setattr(
+        tickets_service,
+        "_enrich_ticket_context",
+        fake_enrich,
+    )
+    monkeypatch.setattr(
+        automations_service.modules_service,
+        "trigger_module",
+        fake_trigger_module,
+    )
+
+    automation = {
+        "id": 11,
+        "name": "Close stale tickets",
+        "kind": "scheduled",
+        "trigger_filters": {
+            "all": [
+                {"match": {"ticket.status": "open"}},
+                {"greater_than": {"ticket.age_days": 30}},
+                {"greater_than": {"ticket.last_reply_age_days": 30}},
+            ]
+        },
+        "action_payload": {
+            "actions": [
+                {
+                    "module": "update-ticket",
+                    "payload": {"ticket_id": "{{ ticket.id }}", "status": "closed"},
+                }
+            ]
+        },
+    }
+
+    result = await automations_service._execute_scheduled_ticket_automation(automation)
+
+    assert result["scanned"] == 2
+    assert result["matched"] == 1
+    assert result["succeeded"] == 1
+    assert result["failed"] == 0
+    assert len(captured) == 1
+    assert captured[0][0] == "update-ticket"
+    assert captured[0][1]["ticket_id"] == 1
+    assert captured[0][1]["status"] == "closed"
+    assert captured[0][1]["context"]["ticket"]["id"] == 1

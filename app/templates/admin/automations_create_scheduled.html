@@ -48,7 +48,7 @@
         <section class="card card--panel">
           <header class="card__header card__header--stacked">
             <h2 class="card__title">Workflow definition</h2>
-            <p class="card__subtitle">All fields support JSON validation and UTC storage to keep automations deterministic.</p>
+            <p class="card__subtitle">Scheduled automations run on cadence, scan tickets with the filters below, and execute actions for every matching ticket.</p>
           </header>
           <div class="card__body">
             <form action="{{ action_url }}" method="post" class="form management__form">
@@ -106,30 +106,9 @@
                 />
                 <p class="form-help">Select the date and time when this automation should run. The automation will run once and will not repeat.</p>
               </div>
-              <div class="form-field">
-                <label class="form-label" for="automation-trigger-select">Trigger event</label>
-                <select id="automation-trigger-select" class="form-input" data-trigger-select>
-                  <option value="">Select a trigger</option>
-                  {% for trigger in automation_trigger_options %}
-                    <option value="{{ trigger.value }}" {% if trigger_select == trigger.value %}selected{% endif %}>{{ trigger.label }}</option>
-                  {% endfor %}
-                  <option value="__custom__" {% if trigger_select == '__custom__' %}selected{% endif %}>Custom event…</option>
-                </select>
-                <input
-                  id="automation-trigger-custom"
-                  class="form-input"
-                  type="text"
-                  name="triggerEventCustom"
-                  placeholder="custom.event"
-                  data-trigger-custom
-                  {% if trigger_select != '__custom__' %}hidden{% endif %}
-                  value="{{ trigger_custom }}"
-                />
-                <input type="hidden" id="automation-trigger" name="triggerEvent" value="{{ values.get('triggerEvent', '') }}" />
-                <p class="form-help">Choose the event that starts this automation. Select “Custom event…” to enter your own value.</p>
-              </div>
+              <input type="hidden" id="automation-trigger" name="triggerEvent" value="" />
               <div class="form-field" data-filter-builder data-filter-raw="{{ values.get('triggerFiltersRaw', '') | e }}">
-                <label class="form-label" for="automation-filters-advanced">Trigger filters</label>
+                <label class="form-label" for="automation-filters-advanced">Ticket selection filters</label>
                 <input type="hidden" id="automation-filters-data" name="triggerFilters" value="{{ values.get('triggerFiltersRaw', '') }}" />
                 <input type="hidden" id="automation-filters-mode" name="triggerFiltersMode" value="builder" />
                 <div class="automation-filters" data-filter-builder-list></div>
@@ -147,11 +126,11 @@
                   >{{ values.get('triggerFiltersRaw', '') }}</textarea>
                 </div>
                 <p class="form-help" data-filter-builder-error hidden></p>
-                <p class="form-help">Build common trigger filters with structured conditions. Use Advanced JSON for complex nested logic.</p>
+                <p class="form-help">Use ticket fields such as <code>ticket.status</code>, <code>ticket.age_days</code>, <code>ticket.updated_age_hours</code>, and <code>ticket.last_reply_age_hours</code>. Use Advanced JSON for complex nested logic.</p>
               </div>
               <div class="form-field" data-automation-actions>
-                <label class="form-label">Trigger actions</label>
-                <p class="form-help">Define one or more module executions. Payloads are persisted as JSON objects and executed sequentially.</p>
+                <label class="form-label">Scheduled actions</label>
+                <p class="form-help">Define one or more module executions. Actions run once per matching ticket and can use templates such as <code>{{ '{{ ticket.id }}' }}</code>.</p>
                 <div
                   class="automation-actions"
                   id="automation-actions-list"
