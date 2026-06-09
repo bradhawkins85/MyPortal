@@ -20,12 +20,12 @@ import (
 
 // ticketFormResult holds the core and dynamic fields collected by the dialog.
 type ticketFormResult struct {
-	Name        string                   `json:"name"`
-	Email       string                   `json:"email"`
-	Phone       string                   `json:"phone"`
-	Subject     string                   `json:"subject"`
-	Description string                   `json:"description"`
-	Answers     []ticketDynamicAnswer    `json:"answers"`
+	Name        string                `json:"name"`
+	Email       string                `json:"email"`
+	Phone       string                `json:"phone"`
+	Subject     string                `json:"subject"`
+	Description string                `json:"description"`
+	Answers     []ticketDynamicAnswer `json:"answers"`
 }
 
 // ticketDynamicAnswer represents one answer to a dynamic question.
@@ -401,11 +401,7 @@ func openNewTicketDialog(cfg *api.ConfigResponse) {
 
 	prefillName, prefillEmail, prefillPhone := loadTicketPrefill()
 
-	cmd := exec.Command(
-		"powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
-		"-File", scriptPath,
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
+	cmd := newTicketDialogCommand(scriptPath)
 	cmd.Env = append(os.Environ(),
 		"MP_PREFILL_NAME="+prefillName,
 		"MP_PREFILL_EMAIL="+prefillEmail,
@@ -448,6 +444,19 @@ func openNewTicketDialog(cfg *api.ConfigResponse) {
 	}
 
 	showOSNotification("Submit Ticket", "Your ticket has been submitted. We will be in touch soon.")
+}
+
+func newTicketDialogCommand(scriptPath string) *exec.Cmd {
+	cmd := exec.Command(
+		"powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+		"-File", scriptPath,
+	)
+	// CREATE_NO_WINDOW suppresses the transient PowerShell console while still
+	// allowing the WinForms ticket dialog to become visible. Do not pass
+	// -WindowStyle Hidden or STARTF_USESHOWWINDOW/HideWindow here: those startup
+	// hints can hide the form itself, making the tray action appear to do nothing.
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
+	return cmd
 }
 
 // fetchTicketQuestions calls GET /api/tray/ticket-questions using the device
@@ -539,4 +548,3 @@ func submitTicketToPortal(result ticketFormResult) error {
 	logger.Info("Tray ticket submitted (HTTP %d)", resp.StatusCode)
 	return nil
 }
-
