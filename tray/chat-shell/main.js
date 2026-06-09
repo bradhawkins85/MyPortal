@@ -34,6 +34,8 @@ function getChatURL() {
 }
 
 const chatURL = getChatURL();
+let launchURL = chatURL;
+let appReady = false;
 
 // ---------------------------------------------------------------------------
 // Session isolation
@@ -66,6 +68,17 @@ let mainWindow = null;
 // handler can cancel the timer and open a real chat window.
 let infoWindow = null;
 let infoCloseTimer = null;
+
+function closeInfoWindow() {
+  if (infoCloseTimer !== null) {
+    clearTimeout(infoCloseTimer);
+    infoCloseTimer = null;
+  }
+  if (infoWindow && !infoWindow.isDestroyed()) {
+    infoWindow.destroy();
+  }
+  infoWindow = null;
+}
 
 // ---------------------------------------------------------------------------
 // Chat window factory
@@ -154,6 +167,13 @@ function createChatWindow(url) {
 
 app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
   const newURL = (additionalData && additionalData.chatURL) || null;
+  if (newURL) {
+    launchURL = newURL;
+  }
+
+  if (!appReady) {
+    return;
+  }
 
   if (mainWindow) {
     // A chat window is already open — focus it and navigate to the new URL.
@@ -169,18 +189,8 @@ app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
     // The first instance either showed the info window (no URL was passed on
     // first launch) or its chat window was closed while a new click arrived
     // before the app fully quit.  In either case, open a proper chat window.
-    //
-    // Create mainWindow BEFORE destroying infoWindow so that window-all-closed
-    // does not fire in the gap and trigger a premature app.quit().
-    if (infoCloseTimer !== null) {
-      clearTimeout(infoCloseTimer);
-      infoCloseTimer = null;
-    }
     createChatWindow(newURL);
-    if (infoWindow && !infoWindow.isDestroyed()) {
-      infoWindow.destroy();
-      infoWindow = null;
-    }
+    closeInfoWindow();
   }
 });
 
@@ -189,10 +199,12 @@ app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(() => {
+  appReady = true;
+
   // When no --url= argument is supplied (e.g. the user ran the EXE manually),
   // show a brief informational window instead of silently exiting, so the
   // user understands how the app is intended to be launched.
-  if (!chatURL) {
+  if (!launchURL) {
     infoWindow = new BrowserWindow({
       width: 480,
       height: 220,
@@ -228,7 +240,7 @@ app.whenReady().then(() => {
     return;
   }
 
-  createChatWindow(chatURL);
+  createChatWindow(launchURL);
 });
 
 // Quit when all windows are closed (standard desktop app behaviour).
