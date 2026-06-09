@@ -48,6 +48,7 @@ var (
 	gConfig    *api.ConfigResponse
 	gIPCConn   net.Conn
 	gPortalURL string
+	gDeviceUID string
 	gAuthToken string
 )
 
@@ -55,27 +56,9 @@ func main() {
 	_ = logger.Init("ui")
 	logger.Info("MyPortal Tray UI (webview) starting")
 
-	gPortalURL = os.Getenv("MYPORTAL_URL")
-	if p := filepath.Join(stateDir(), "tray-state.json"); gPortalURL == "" {
-		if data, err := os.ReadFile(p); err == nil {
-			var state struct {
-				PortalURL string `json:"portal_url"`
-			}
-			_ = json.Unmarshal(data, &state)
-			gPortalURL = state.PortalURL
-		}
-	}
-
-	// Load auth token from tray-state.json.
-	if p := filepath.Join(stateDir(), "tray-state.json"); gAuthToken == "" {
-		if data, err := os.ReadFile(p); err == nil {
-			var state struct {
-				AuthToken string `json:"auth_token"`
-			}
-			_ = json.Unmarshal(data, &state)
-			gAuthToken = state.AuthToken
-		}
-	}
+	refreshPortalURL()
+	refreshDeviceUID()
+	refreshAuthToken()
 
 	// Load cached config.
 	gConfig = loadCachedConfig()
@@ -325,6 +308,9 @@ func handleIPCMessages(conn net.Conn) {
 			openChatWindow(chatURL, gConfig)
 
 		case "config_changed":
+			refreshPortalURL()
+			refreshDeviceUID()
+			refreshAuthToken()
 			// Re-read cached config. Menu rebuild on config_changed is deferred
 			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()

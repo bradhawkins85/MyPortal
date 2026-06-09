@@ -1,4 +1,4 @@
-//go:build nowebview && windows
+//go:build windows
 
 package main
 
