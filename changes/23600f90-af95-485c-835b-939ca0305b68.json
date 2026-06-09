@@ -1,0 +1,7 @@
+{
+  "guid": "23600f90-af95-485c-835b-939ca0305b68",
+  "occurred_at": "2026-06-09T02:04:17Z",
+  "change_type": "Fix",
+  "summary": "Fix tray support chat messages not being sent to Matrix rooms",
+  "content_hash": "142de3233cfb8983cc5edd5e2317dc99fbaac995a4942e821dda1fdc03848fea"
+}
