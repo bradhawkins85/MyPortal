@@ -409,6 +409,39 @@ async def list_tickets(
     return [_normalise_ticket(row) for row in rows]
 
 
+async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketRecord]:
+    """Return recent ticket records with reply timestamps for scheduled automations.
+
+    Scheduled automations apply their filter JSON in Python so the same nested
+    filter language used for event automations can be reused for time-based
+    ticket scans.  The query intentionally caps the batch size to avoid a
+    runaway automation reading an unbounded ticket table in one scheduler tick.
+    """
+
+    safe_limit = max(1, min(int(limit or 1000), 5000))
+    rows = await db.fetch_all(
+        """
+        SELECT
+            t.*,
+            (
+                SELECT MAX(tr.created_at)
+                FROM ticket_replies tr
+                WHERE tr.ticket_id = t.id
+            ) AS latest_reply_at
+        FROM tickets t
+        ORDER BY t.updated_at ASC, t.id ASC
+        LIMIT %s
+        """,
+        (safe_limit,),
+    )
+    records: list[TicketRecord] = []
+    for row in rows:
+        record = _normalise_ticket(row)
+        record["latest_reply_at"] = _make_aware(row.get("latest_reply_at"))
+        records.append(record)
+    return records
+
+
 def _prepare_status_filters(status: str | Sequence[str] | None) -> list[str]:
     if status in (None, ""):
         return []
