@@ -1,0 +1,7 @@
+{
+  "guid": "cdef4343-a2b9-4bf8-8f52-dd047ff97622",
+  "occurred_at": "2026-06-09T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Add macOS tray chat-shell icon build process",
+  "content_hash": "90fe055210c3ab48a1241614cd7909d3a035056fcfa6193cdd5db50282abe028"
+}
