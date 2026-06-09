@@ -205,11 +205,12 @@ async def test_control_requirements_page_sets_help_per_requirement(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
-async def test_marketing_dashboard_shows_requirement_mappings_for_super_admin(monkeypatch):
-    request = _make_request("/admin/marketing")
+async def test_marketing_help_links_page_shows_requirement_mappings_for_super_admin(monkeypatch):
+    request = _make_request("/admin/marketing/essential8-help-links")
     captured: dict[str, object] = {}
 
     async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["template_name"] = template_name
         captured["extra"] = extra
         return extra
 
@@ -243,8 +244,9 @@ async def test_marketing_dashboard_shows_requirement_mappings_for_super_admin(mo
     )
     monkeypatch.setattr(marketing_routes, "_main", lambda: SimpleNamespace(_render_template=fake_render_template))
 
-    await marketing_routes.admin_marketing_dashboard(request)
+    await marketing_routes.admin_marketing_essential8_help_links(request)
 
+    assert captured["template_name"] == "admin/marketing_essential8_help_links.html"
     controls = captured["extra"]["essential8_help_controls"]
     assert len(controls) == 1
     assert controls[0]["requirements"][0]["selected_marketing_page_id"] == 7
