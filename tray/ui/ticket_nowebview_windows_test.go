@@ -160,3 +160,18 @@ func TestBuildTicketScriptAnswersJSON(t *testing.T) {
 		t.Error("expected question id 5 in JSON output")
 	}
 }
+
+func TestNewTicketDialogCommandAllowsWinFormsWindow(t *testing.T) {
+	cmd := newTicketDialogCommand(`C:\Temp\mp-ticket.ps1`)
+	for _, arg := range cmd.Args {
+		if arg == "-WindowStyle" || arg == "Hidden" {
+			t.Fatalf("ticket dialog command must not hide the PowerShell process: %v", cmd.Args)
+		}
+	}
+	if cmd.SysProcAttr == nil {
+		t.Fatal("expected Windows process attributes")
+	}
+	if cmd.SysProcAttr.HideWindow {
+		t.Fatal("HideWindow hides the WinForms ticket dialog")
+	}
+}
