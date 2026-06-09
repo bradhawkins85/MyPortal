@@ -1,0 +1,7 @@
+{
+  "guid": "3e9785a8-3ed8-42c2-b26f-dc04364d4a1e",
+  "occurred_at": "2026-06-09T02:12:58.630323Z",
+  "change_type": "Feature",
+  "summary": "Feature: Added Essential 8 requirement ticket submission with duplicate open-ticket prevention.",
+  "content_hash": "6432cfd13e1c7b18104e896c8264532f4c78ce3a4fbfddc7f8603a2509867576"
+}
