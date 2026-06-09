@@ -43,11 +43,8 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	w.Run()
 }
 
-func openNewTicketWindow(_ *api.ConfigResponse) {
-	url := gPortalURL + "/tickets/new"
-	cmd := exec.Command("cmd", "/c", "start", url)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
-	_ = cmd.Start()
+func openNewTicketWindow(cfg *api.ConfigResponse) {
+	openNewTicketDialog(cfg)
 }
 
 func showOSNotification(title, body string) {
