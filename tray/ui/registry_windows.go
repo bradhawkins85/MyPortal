@@ -3,6 +3,7 @@
 package main
 
 import (
+	"github.com/bradhawkins85/myportal-tray/internal/logger"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -68,10 +69,17 @@ func saveTicketPrefill(name, email, phone string) {
 		registry.SET_VALUE,
 	)
 	if err != nil {
+		logger.Warn("saveTicketPrefill: open HKCU prefill key: %v", err)
 		return
 	}
 	defer k.Close()
-	_ = k.SetStringValue("Name", name)
-	_ = k.SetStringValue("Email", email)
-	_ = k.SetStringValue("Phone", phone)
+	if err := k.SetStringValue("Name", name); err != nil {
+		logger.Warn("saveTicketPrefill: save Name: %v", err)
+	}
+	if err := k.SetStringValue("Email", email); err != nil {
+		logger.Warn("saveTicketPrefill: save Email: %v", err)
+	}
+	if err := k.SetStringValue("Phone", phone); err != nil {
+		logger.Warn("saveTicketPrefill: save Phone: %v", err)
+	}
 }
