@@ -46,6 +46,8 @@ def test_ticket_to_project_payload_uses_number_and_subject():
     body = ticket_to_project_payload(ticket, client_id="client-uuid")
     assert body["name"] == "#T-007 – Email not sending"
     assert body["client_id"] == "client-uuid"
+    assert body["color"].startswith("#")
+    assert len(body["color"]) == 7
     assert body["description"] == "please help"
     assert body["is_archived"] is False
     assert body["is_billable"] is True
@@ -61,13 +63,16 @@ def test_ticket_to_project_payload_archives_closed():
     body = ticket_to_project_payload(ticket)
     assert body["name"] == "#11 – All done"
     assert body["is_archived"] is True
-    assert "client_id" not in body
+    assert body["client_id"] is None
 
 
 def test_ticket_to_project_payload_falls_back_when_missing():
     body = ticket_to_project_payload({"id": 3, "subject": ""})
     # Empty subject falls back to "Ticket"
     assert body["name"] == "#3 – Ticket"
+    assert body["color"] == ticket_to_project_payload(
+        {"id": 3, "subject": "Renamed"}
+    )["color"]
 
 
 def test_reply_to_time_entry_payload_computes_start_from_minutes_and_created_at():
@@ -392,9 +397,10 @@ async def test_request_records_failure_when_api_returns_error(reset_solidtime_ca
 
     reset_solidtime_caches.setattr(solidtime.httpx, "AsyncClient", _DummyAsyncClient)
 
-    with pytest.raises(SolidtimeAPIError):
+    with pytest.raises(SolidtimeAPIError) as exc_info:
         await solidtime._request("GET", "/anything")
 
+    assert "server boom" in str(exc_info.value)
     assert failures, "failure should be recorded against the webhook monitor"
     assert failures[0]["response_status"] == 500
 
@@ -480,14 +486,14 @@ async def test_sync_ticket_to_project_creates_link(reset_solidtime_caches):
         solidtime.links_repo, "mark_project_link_error", fake_mark_project_error
     )
 
-    api_calls: list[tuple[str, str]] = []
+    api_calls: list[tuple[str, object]] = []
 
     async def fake_create_client(org_id, *, name):
         api_calls.append(("create_client", name))
         return {"id": "client-uuid"}
 
     async def fake_create_project(org_id, *, body):
-        api_calls.append(("create_project", body["name"]))
+        api_calls.append(("create_project", dict(body)))
         return {"id": "project-uuid", "name": body["name"]}
 
     async def fake_update_project(*args, **kwargs):
@@ -504,6 +510,10 @@ async def test_sync_ticket_to_project_creates_link(reset_solidtime_caches):
     # Client should be created first, then project.
     kinds = [call[0] for call in api_calls]
     assert kinds == ["create_client", "create_project"]
+    project_payload = api_calls[1][1]
+    assert isinstance(project_payload, dict)
+    assert project_payload["color"].startswith("#")
+    assert project_payload["client_id"] == "client-uuid"
     assert any(u.get("kind") == "client" for u in upserts)
     assert any(
         u.get("kind") == "project" and u.get("sync_status") == "synced"
