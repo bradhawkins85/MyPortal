@@ -115,6 +115,9 @@
                   <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
                 </div>
+                {% if req.show_compliance_help and req.compliance_help_url %}
+                <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
+                {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
             </summary>
@@ -184,6 +187,9 @@
                   <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
                 </div>
+                {% if req.show_compliance_help and req.compliance_help_url %}
+                <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
+                {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
             </summary>
@@ -253,6 +259,9 @@
                   <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
                 </div>
+                {% if req.show_compliance_help and req.compliance_help_url %}
+                <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
+                {% endif %}
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
             </summary>
