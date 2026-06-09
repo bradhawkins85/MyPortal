@@ -234,6 +234,12 @@ $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 $form.CancelButton = $btnCancel
 $form.Controls.Add($btnCancel)
 
+# WinForms event handlers do not reliably write pipeline output back to the
+# host process. Store the accepted payload in script scope and emit it only
+# after ShowDialog returns so the Go tray process can capture stdout and submit
+# the ticket to MyPortal.
+$script:TicketDialogResult = $null
+
 # ── Conditional visibility helper ─────────────────────────────────
 `)
 
@@ -373,19 +379,22 @@ $btnSubmit.add_Click({
 	}
 
 	sb.WriteString(`
-    @{
+    $script:TicketDialogResult = @{
         name        = $txtName.Text.Trim()
         email       = $txtEmail.Text.Trim()
         phone       = $txtPhone.Text.Trim()
         subject     = $txtSubject.Text.Trim()
         description = $txtDesc.Text.Trim()
         answers     = $answers
-    } | ConvertTo-Json -Compress -Depth 5 | Write-Output
+    }
     $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $form.Close()
 })
 
-$form.ShowDialog() | Out-Null
+$dialogResult = $form.ShowDialog()
+if ($dialogResult -eq [System.Windows.Forms.DialogResult]::OK -and $script:TicketDialogResult -ne $null) {
+    $script:TicketDialogResult | ConvertTo-Json -Compress -Depth 5 | Write-Output
+}
 `)
 
 	return sb.String()
