@@ -144,6 +144,36 @@ async def test_send_message_success(monkeypatch):
     assert result["event_id"] == "$event1"
 
 
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_message_with_sender_display_name_prefixes_matrix_payload(monkeypatch):
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    captured = {}
+
+    def handler(request):
+        captured["payload"] = json.loads(request.content.decode())
+        return httpx.Response(200, json={"event_id": "$event2"})
+
+    respx.put(
+        url__regex=r"https://matrix\.example\.com/_matrix/client/v3/rooms/.*/send/.*"
+    ).mock(side_effect=handler)
+
+    result = await send_message(
+        "!room1:example.com",
+        "<Hello>",
+        sender_display_name="DESKTOP-CQ2NEJ1",
+    )
+
+    assert result["event_id"] == "$event2"
+    assert captured["payload"]["body"] == "DESKTOP-CQ2NEJ1: <Hello>"
+    assert captured["payload"]["format"] == "org.matrix.custom.html"
+    assert captured["payload"]["formatted_body"] == (
+        "<strong>DESKTOP-CQ2NEJ1</strong>: &lt;Hello&gt;"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------

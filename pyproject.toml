@@ -43,6 +43,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "httpx",
+    "respx",
 ]
 
 [build-system]

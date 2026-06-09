@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 import secrets
 import time
@@ -153,17 +154,35 @@ async def send_message(
     formatted_body: str | None = None,
     msgtype: str = "m.text",
     access_token: str | None = None,
+    sender_display_name: str | None = None,
 ) -> dict[str, Any]:
-    """Send a message to a room. Returns {event_id}."""
+    """Send a message to a room. Returns {event_id}.
+
+    ``sender_display_name`` is used when a non-Matrix actor (for example a
+    tray popup device) sends through the bot token. Matrix rooms display the
+    bot as the sender, so prefixing both the plain-text and formatted payloads
+    preserves the actual device/user attribution for Element and mobile apps.
+    """
     txn_id = uuid.uuid4().hex
     headers = _bot_headers() if not access_token else {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
-    content: dict[str, Any] = {"msgtype": msgtype, "body": body}
-    if formatted_body:
+    content_body = body
+    content_formatted_body = formatted_body
+    display_name = (sender_display_name or "").strip()
+    if display_name:
+        content_body = f"{display_name}: {body}"
+        if content_formatted_body is None:
+            content_formatted_body = (
+                f"<strong>{html.escape(display_name)}</strong>: "
+                f"{html.escape(body)}"
+            )
+
+    content: dict[str, Any] = {"msgtype": msgtype, "body": content_body}
+    if content_formatted_body:
         content["format"] = "org.matrix.custom.html"
-        content["formatted_body"] = formatted_body
+        content["formatted_body"] = content_formatted_body
     return await _request(
         "PUT",
         f"/_matrix/client/v3/rooms/{room_id}/send/m.room.message/{txn_id}",
