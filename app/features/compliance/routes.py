@@ -13,12 +13,17 @@ from app.core.config import get_settings
 from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as cc_repo
 from app.repositories import essential8 as essential8_repo
+from app.repositories import tickets as tickets_repo
 from app.repositories import user_companies as user_company_repo
+from app.security.flash import flash_redirect
+from app.services import tickets as tickets_service
 
 
 router = APIRouter(tags=["Compliance"])
 settings = get_settings()
 _STATUSES_REQUIRING_HELP = {"not_started", "in_progress", "non_compliant"}
+_ESSENTIAL8_TICKET_CATEGORY = "essential8"
+_ESSENTIAL8_TICKET_MODULE = "compliance"
 
 
 def _slugify_essential8_element(name: str) -> str:
@@ -38,6 +43,59 @@ def _build_essential8_help_url(base_url: str, element_slug: str) -> str:
     query_items.append(("element", element_slug))
     return urlunsplit(
         (split.scheme, split.netloc, split.path, urlencode(query_items), split.fragment)
+    )
+
+
+def _build_essential8_ticket_reference(company_id: int, requirement_id: int) -> str:
+    return f"essential8:req:{requirement_id}:company:{company_id}"
+
+
+def _format_requirement_label(requirement: dict) -> str:
+    maturity_level = str(requirement.get("maturity_level") or "").upper() or "ML"
+    requirement_order = requirement.get("requirement_order")
+    if requirement_order not in (None, ""):
+        return f"{maturity_level} requirement {requirement_order}"
+    return f"{maturity_level} requirement"
+
+
+def _build_essential8_ticket_subject(control: dict, requirement: dict) -> str:
+    control_name = str(control.get("name") or "Essential 8 control").strip()
+    label = _format_requirement_label(requirement)
+    return f"Essential 8 implementation request: {control_name} - {label}"[:255]
+
+
+def _build_essential8_ticket_description(
+    *,
+    control: dict,
+    requirement: dict,
+    company: dict | None,
+    user: dict,
+) -> str:
+    company_name = str((company or {}).get("name") or "Unknown company").strip()
+    requester_name = str(
+        user.get("display_name")
+        or user.get("full_name")
+        or user.get("name")
+        or user.get("username")
+        or user.get("email")
+        or "Portal user"
+    ).strip()
+    requester_email = str(user.get("email") or "Not provided").strip()
+    return "\n".join(
+        [
+            "A portal user requested technician assistance to implement an Essential 8 requirement.",
+            "",
+            f"Company: {company_name}",
+            f"Requester: {requester_name}",
+            f"Requester email: {requester_email}",
+            "",
+            f"Control: {control.get('name') or 'Essential 8 control'}",
+            f"Control description: {control.get('description') or 'No description provided.'}",
+            f"Requirement: {_format_requirement_label(requirement)}",
+            f"Requirement details: {requirement.get('description') or 'No requirement details provided.'}",
+            "",
+            "Requested action: Please contact the requester to plan and implement this Essential 8 item.",
+        ]
     )
 
 
@@ -111,7 +169,7 @@ async def _load_compliance_context(request: Request):
 @router.get("/compliance", response_class=HTMLResponse)
 async def compliance_page(request: Request):
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_compliance_context(request)
+    user, _membership, company, company_id, redirect = await _load_compliance_context(request)
     if redirect:
         return redirect
 
@@ -149,7 +207,7 @@ async def compliance_page(request: Request):
 @router.get("/compliance/control/{control_id}", response_class=HTMLResponse)
 async def compliance_control_requirements_page(request: Request, control_id: int):
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_compliance_context(request)
+    user, _membership, company, company_id, redirect = await _load_compliance_context(request)
     if redirect:
         return redirect
 
@@ -201,6 +259,57 @@ async def compliance_control_requirements_page(request: Request, control_id: int
         user,
         extra=extra,
     )
+
+
+@router.post("/compliance/requirements/{requirement_id}/ticket", response_class=HTMLResponse)
+async def compliance_submit_requirement_ticket(request: Request, requirement_id: int):
+    user, _membership, company, company_id, redirect = await _load_compliance_context(request)
+    if redirect:
+        return redirect
+
+    requirement = await essential8_repo.get_essential8_requirement(requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
+    control_id = int(requirement["control_id"])
+    control = await essential8_repo.get_essential8_control(control_id)
+    if not control:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Control not found")
+
+    external_reference = _build_essential8_ticket_reference(company_id, requirement_id)
+    existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(external_reference)
+    if existing_ticket:
+        ticket_id = existing_ticket.get("id")
+        message = "An open ticket already exists for that Essential 8 requirement."
+        if ticket_id:
+            message = f"An open ticket already exists for that Essential 8 requirement (ticket #{ticket_id})."
+        return flash_redirect(f"/compliance/control/{control_id}", message, "info")
+
+    ticket_status = await tickets_service.resolve_status_or_default(None)
+    ticket = await tickets_service.create_ticket(
+        subject=_build_essential8_ticket_subject(control, requirement),
+        description=_build_essential8_ticket_description(
+            control=control,
+            requirement=requirement,
+            company=company,
+            user=user,
+        ),
+        requester_id=int(user["id"]),
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status=ticket_status,
+        category=_ESSENTIAL8_TICKET_CATEGORY,
+        module_slug=_ESSENTIAL8_TICKET_MODULE,
+        external_reference=external_reference,
+        trigger_automations=True,
+        initial_reply_author_id=int(user["id"]),
+        requester_email=str(user.get("email") or "") or None,
+    )
+    ticket_id = ticket.get("id")
+    message = "Ticket submitted. A technician will contact you about this Essential 8 requirement."
+    if ticket_id:
+        message = f"Ticket #{ticket_id} submitted. A technician will contact you about this Essential 8 requirement."
+    return flash_redirect(f"/compliance/control/{control_id}", message, "success")
 
 
 async def _load_compliance_checks_context(request: Request):
