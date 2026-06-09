@@ -151,8 +151,12 @@
                   <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
                     Get compliance help
                   </a>
+                  <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
                   {% endif %}
                 </div>
+              </form>
+              <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
               </form>
             </div>
           </details>
@@ -223,8 +227,12 @@
                   <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
                     Get compliance help
                   </a>
+                  <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
                   {% endif %}
                 </div>
+              </form>
+              <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
               </form>
             </div>
           </details>
@@ -295,8 +303,12 @@
                   <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
                     Get compliance help
                   </a>
+                  <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
                   {% endif %}
                 </div>
+              </form>
+              <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
               </form>
             </div>
           </details>

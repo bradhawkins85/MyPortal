@@ -305,3 +305,101 @@ async def test_marketing_update_help_links_replaces_mappings(monkeypatch):
 
     assert response.status_code == 303
     assert captured["mappings"] == {101: 7, 102: None}
+
+@pytest.mark.anyio("asyncio")
+async def test_submit_requirement_ticket_creates_e8_ticket(monkeypatch):
+    request = _make_request("/compliance/requirements/101/ticket")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        compliance_routes,
+        "_load_compliance_context",
+        AsyncMock(
+            return_value=(
+                {"id": 5, "is_super_admin": False, "email": "user@example.test", "name": "User One"},
+                {},
+                {"id": 2, "name": "Acme"},
+                2,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_essential8_requirement",
+        AsyncMock(
+            return_value={
+                "id": 101,
+                "control_id": 1,
+                "maturity_level": "ml1",
+                "requirement_order": 3,
+                "description": "Block unapproved apps.",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_essential8_control",
+        AsyncMock(return_value={"id": 1, "name": "Application Control", "description": "Only approved apps run."}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.tickets_repo,
+        "find_open_ticket_by_external_reference",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(compliance_routes.tickets_service, "resolve_status_or_default", AsyncMock(return_value="open"))
+
+    async def fake_create_ticket(**kwargs):
+        captured["ticket"] = kwargs
+        return {"id": 77, **kwargs}
+
+    monkeypatch.setattr(compliance_routes.tickets_service, "create_ticket", fake_create_ticket)
+
+    response = await compliance_routes.compliance_submit_requirement_ticket(request, requirement_id=101)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/compliance/control/1"
+    ticket = captured["ticket"]
+    assert ticket["requester_id"] == 5
+    assert ticket["company_id"] == 2
+    assert ticket["category"] == "essential8"
+    assert ticket["module_slug"] == "compliance"
+    assert ticket["external_reference"] == "essential8:req:101:company:2"
+    assert "Application Control" in ticket["subject"]
+    assert "ML1 requirement 3" in ticket["subject"]
+    assert "Block unapproved apps." in ticket["description"]
+    assert "Only approved apps run." in ticket["description"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_submit_requirement_ticket_reuses_existing_open_ticket(monkeypatch):
+    request = _make_request("/compliance/requirements/101/ticket")
+    create_ticket = AsyncMock()
+
+    monkeypatch.setattr(
+        compliance_routes,
+        "_load_compliance_context",
+        AsyncMock(return_value=({"id": 5, "is_super_admin": False}, {}, {"id": 2, "name": "Acme"}, 2, None)),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_essential8_requirement",
+        AsyncMock(return_value={"id": 101, "control_id": 1, "maturity_level": "ml2", "requirement_order": 1, "description": "Req"}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_essential8_control",
+        AsyncMock(return_value={"id": 1, "name": "Application Control", "description": "Desc"}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.tickets_repo,
+        "find_open_ticket_by_external_reference",
+        AsyncMock(return_value={"id": 88}),
+    )
+    monkeypatch.setattr(compliance_routes.tickets_service, "create_ticket", create_ticket)
+
+    response = await compliance_routes.compliance_submit_requirement_ticket(request, requirement_id=101)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/compliance/control/1"
+    create_ticket.assert_not_awaited()
