@@ -18,6 +18,7 @@ from app.schemas.chat import (
 )
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import audit as audit_service
+from app.services import chat_ticket_sync
 from app.services import matrix as matrix_service
 from app.services import matrix_admin
 from app.services.realtime import refresh_notifier
@@ -207,6 +208,15 @@ async def send_message(
 
     await chat_repo.update_room(room_id, last_message_at=now)
 
+    try:
+        await chat_ticket_sync.sync_chat_message_to_ticket(
+            room=room,
+            message=msg,
+            author_id=user_id,
+        )
+    except Exception as exc:
+        log_error("Failed to sync chat message to linked ticket", room_id=room_id, error=str(exc))
+
     msg_data = _serialize(dict(msg))
     msg_data.setdefault("sender_display_name", display_name)
 
@@ -216,6 +226,38 @@ async def send_message(
     )
 
     return JSONResponse(msg_data, status_code=201)
+
+
+@router.post("/rooms/{room_id}/ticket", summary="Create or return a ticket linked to a chat room")
+async def create_ticket_from_room(
+    room_id: int,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    _require_matrix_enabled()
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        raise HTTPException(status_code=403, detail="Only technicians or admins can create tickets from chats")
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    try:
+        ticket = await chat_ticket_sync.create_ticket_from_chat(room_id, actor=current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        log_error("Failed to create ticket from chat", room_id=room_id, error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to create ticket from chat") from exc
+
+    await audit_service.log_action(
+        action="create_ticket",
+        entity_type="chat_room",
+        entity_id=room_id,
+        user_id=current_user["id"],
+        new_value={"ticket_id": ticket.get("id")},
+    )
+    return JSONResponse(_serialize({"ticket": ticket, "linked_ticket_id": ticket.get("id")}), status_code=201)
 
 
 @router.post("/rooms/{room_id}/join", summary="Join a chat room (technician/admin)")
