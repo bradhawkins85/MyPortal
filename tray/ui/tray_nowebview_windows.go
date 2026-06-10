@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -26,6 +27,13 @@ import (
 // lastRestartAt is used to prevent rapid restart loops when config_changed
 // events arrive in quick succession.
 var lastRestartAt time.Time
+
+// trayReady is set after systray has created its hidden window and notify icon.
+// IPC can connect very quickly during startup, and the service replays a
+// config_changed message on connect. Calling systray.SetTooltip/SetIcon before
+// onTrayReady runs dereferences systray's internal notify-icon state and exits
+// the GUI-subsystem process before any error can be shown.
+var trayReady atomic.Bool
 
 // hasHandledInitialConfigChanged prevents restart loops from the service's
 // IPC onConnect bootstrap replay of config_changed.
@@ -43,6 +51,7 @@ func runUI() {
 }
 
 func onTrayReady() {
+	trayReady.Store(true)
 	systray.SetTitle("MyPortal")
 	systray.SetTooltip(trayTooltip(gConfig))
 	// Set the default icon immediately so the tray appears without delay,
@@ -93,6 +102,17 @@ func fetchAndSetIcon() {
 // A 60-second cooldown prevents restart storms if multiple config_changed
 // events arrive in quick succession.
 func handleConfigChanged(cfg *api.ConfigResponse) {
+	if !trayReady.Load() {
+		// The initial config replay can arrive before systray.Run has completed
+		// native initialization. gConfig has already been refreshed by the IPC
+		// handler, so onTrayReady will render the latest cache shortly.
+		if !hasHandledInitialConfigChanged {
+			hasHandledInitialConfigChanged = true
+		}
+		logger.Debug("config_changed: received before tray ready; deferring systray updates")
+		return
+	}
+
 	systray.SetTooltip(trayTooltip(cfg))
 
 	// Always refresh the icon — this can be updated without a restart.
@@ -136,6 +156,7 @@ func handleConfigChanged(cfg *api.ConfigResponse) {
 }
 
 func onTrayExit() {
+	trayReady.Store(false)
 	if gIPCConn != nil {
 		gIPCConn.Close()
 	}
