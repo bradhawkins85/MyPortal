@@ -21,6 +21,17 @@ type chatOpenPayload struct {
 	Message      string `json:"message"`
 }
 
+type chatMessagePayload struct {
+	RoomID        int    `json:"room_id"`
+	MatrixRoomID  string `json:"matrix_room_id"`
+	Subject       string `json:"subject"`
+	Sender        string `json:"sender"`
+	Message       string `json:"message"`
+	MessageID     int    `json:"message_id"`
+	MatrixEventID string `json:"matrix_event_id"`
+	SentAt        string `json:"sent_at"`
+}
+
 var (
 	notificationActionOnce    sync.Once
 	notificationActionBaseURL string
@@ -41,6 +52,36 @@ func handleChatOpen(payload chatOpenPayload) {
 
 	title, body := chatNotificationText(payload)
 	showChatSessionNotification(title, body, actionURL)
+}
+
+func handleChatMessage(payload chatMessagePayload) {
+	actionURL := registerChatOpenAction(payload.RoomID)
+	if actionURL == "" {
+		logger.Warn("handleChatMessage: could not register chat notification action for room_id=%d", payload.RoomID)
+	}
+
+	title, body := chatMessageNotificationText(payload)
+	showChatSessionNotification(title, body, actionURL)
+}
+
+func chatMessageNotificationText(payload chatMessagePayload) (string, string) {
+	sender := strings.TrimSpace(payload.Sender)
+	if sender == "" {
+		sender = "A technician"
+	}
+
+	subject := strings.TrimSpace(payload.Subject)
+	message := summarizeChatMessage(payload.Message)
+
+	title := "New MyPortal chat message"
+	body := sender + " replied to your support chat"
+	if subject != "" {
+		body += ": " + subject
+	}
+	if message != "" {
+		body += "\n" + message
+	}
+	return title, body
 }
 
 func chatNotificationText(payload chatOpenPayload) (string, string) {
