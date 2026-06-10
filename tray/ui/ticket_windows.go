@@ -92,70 +92,192 @@ func buildTicketScript(questions []api.TicketQuestion) string {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class NativeMethods {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+}
+"@
+
 $prefillName  = $Env:MP_PREFILL_NAME
 $prefillEmail = $Env:MP_PREFILL_EMAIL
 $prefillPhone = $Env:MP_PREFILL_PHONE
 
+$colorInk = [System.Drawing.ColorTranslator]::FromHtml('#1f2937')
+$colorMuted = [System.Drawing.ColorTranslator]::FromHtml('#64748b')
+$colorPrimary = [System.Drawing.ColorTranslator]::FromHtml('#0f8f8f')
+$fontBase = New-Object System.Drawing.Font('Segoe UI', 10)
+$fontLabel = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+$fontTitle = New-Object System.Drawing.Font('Segoe UI', 18, [System.Drawing.FontStyle]::Bold)
+$fontIntro = New-Object System.Drawing.Font('Segoe UI', 10.5)
+
+function Set-CueBanner($control, $text) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return }
+    if ($control.IsHandleCreated -eq $false) { [void]$control.CreateControl() }
+    [void][NativeMethods]::SendMessage($control.Handle, 0x1501, [IntPtr]1, $text)
+}
 function New-Label($text, $x, $y) {
     $l = New-Object System.Windows.Forms.Label
-    $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x, $y)
-    $l.Size = New-Object System.Drawing.Size(110, 20); $l.TextAlign = 'MiddleRight'
+    $l.Text = $text
+    $l.Location = New-Object System.Drawing.Point($x, $y)
+    $l.Size = New-Object System.Drawing.Size(125, 24)
+    $l.TextAlign = 'MiddleLeft'
+    $l.ForeColor = $colorInk
+    $l.Font = $fontLabel
     return $l
 }
-function New-TextBox($x, $y, $w, $h, $val) {
+function New-TextBox($x, $y, $w, $h, $val, $placeholder) {
     $t = New-Object System.Windows.Forms.TextBox
     $t.Location = New-Object System.Drawing.Point($x, $y)
     $t.Size = New-Object System.Drawing.Size($w, $h)
     $t.Text = $val
+    $t.Font = $fontBase
+    $t.ForeColor = $colorInk
+    $t.BorderStyle = 'FixedSingle'
+    Set-CueBanner $t $placeholder
     return $t
 }
 function New-ComboBox($x, $y, $w, $items) {
     $c = New-Object System.Windows.Forms.ComboBox
     $c.Location = New-Object System.Drawing.Point($x, $y)
-    $c.Size = New-Object System.Drawing.Size($w, 24)
+    $c.Size = New-Object System.Drawing.Size($w, 28)
     $c.DropDownStyle = 'DropDownList'
+    $c.Font = $fontBase
+    $c.ForeColor = $colorInk
     foreach ($i in $items) { [void]$c.Items.Add($i) }
     return $c
 }
 function New-CheckBox($text, $x, $y, $w) {
     $cb = New-Object System.Windows.Forms.CheckBox
-    $cb.Text = $text; $cb.Location = New-Object System.Drawing.Point($x, $y)
-    $cb.Size = New-Object System.Drawing.Size($w, 22)
+    $cb.Text = $text
+    $cb.Location = New-Object System.Drawing.Point($x, $y)
+    $cb.Size = New-Object System.Drawing.Size($w, 26)
+    $cb.Font = $fontBase
+    $cb.ForeColor = $colorInk
     return $cb
+}
+function New-RoundedRectPath($x, $y, $w, $h, $r) {
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $d = $r * 2
+    $path.AddArc($x, $y, $d, $d, 180, 90)
+    $path.AddArc(($x + $w - $d), $y, $d, $d, 270, 90)
+    $path.AddArc(($x + $w - $d), ($y + $h - $d), $d, $d, 0, 90)
+    $path.AddArc($x, ($y + $h - $d), $d, $d, 90, 90)
+    $path.CloseFigure()
+    return $path
+}
+function New-BrandBitmap($size) {
+    # Mirrors app/static/logo.svg using GDI+ so the tray dialog has the branded
+    # image and window icon without shipping generated binary assets.
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $scale = $size / 120.0
+    $g.ScaleTransform($scale, $scale)
+    $rectPath = New-RoundedRectPath 0 0 120 120 28
+    $g.FillPath((New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml('#0f172a'))), $rectPath)
+    $gradRect = New-Object System.Drawing.Rectangle(18, 18, 84, 84)
+    $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush($gradRect, [System.Drawing.ColorTranslator]::FromHtml('#38bdf8'), [System.Drawing.ColorTranslator]::FromHtml('#6366f1'), 45)
+    $g.FillEllipse($grad, 18, 18, 84, 84)
+    $g.FillEllipse((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(242, 15, 23, 42))), 36, 36, 48, 48)
+    $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(217, 248, 250, 252), 6)
+    $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+    $g.DrawArc($pen, 28, 28, 64, 64, 180, 180)
+    $g.DrawArc($pen, 28, 28, 64, 64, 0, 180)
+    $g.FillEllipse((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(217, 248, 250, 252))), 50, 50, 20, 20)
+    $g.Dispose()
+    return $bmp
+}
+function Set-ButtonStyle($button, $isPrimary) {
+    $button.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+    $button.FlatStyle = 'Flat'
+    $button.FlatAppearance.BorderSize = 1
+    if ($isPrimary) {
+        $button.BackColor = $colorPrimary
+        $button.ForeColor = [System.Drawing.Color]::White
+        $button.FlatAppearance.BorderColor = $colorPrimary
+    } else {
+        $button.BackColor = [System.Drawing.Color]::White
+        $button.ForeColor = $colorInk
+        $button.FlatAppearance.BorderColor = [System.Drawing.ColorTranslator]::FromHtml('#9ca3af')
+    }
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Submit New Ticket"
+$form.Text = "Support Request"
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
+$form.MinimizeBox = $true
 $form.StartPosition = 'CenterScreen'
+$form.BackColor = [System.Drawing.Color]::White
+$form.Font = $fontBase
+$form.AutoScroll = $true
+$form.ClientSize = New-Object System.Drawing.Size(780, 760)
+$brandIcon = New-BrandBitmap 32
+$form.Icon = [System.Drawing.Icon]::FromHandle($brandIcon.GetHicon())
 
-$y = 10
+$logo = New-Object System.Windows.Forms.PictureBox
+$logo.Image = New-BrandBitmap 116
+$logo.SizeMode = 'Zoom'
+$logo.Location = New-Object System.Drawing.Point(332, 34)
+$logo.Size = New-Object System.Drawing.Size(116, 116)
+$form.Controls.Add($logo)
+
+$lblTitle = New-Object System.Windows.Forms.Label
+$lblTitle.Text = "Support Request"
+$lblTitle.Location = New-Object System.Drawing.Point(70, 188)
+$lblTitle.Size = New-Object System.Drawing.Size(640, 36)
+$lblTitle.Font = $fontTitle
+$lblTitle.ForeColor = $colorInk
+$form.Controls.Add($lblTitle)
+
+$lblIntro = New-Object System.Windows.Forms.Label
+$lblIntro.Text = "Please fill out the form to submit your support request."
+$lblIntro.Location = New-Object System.Drawing.Point(70, 228)
+$lblIntro.Size = New-Object System.Drawing.Size(640, 24)
+$lblIntro.Font = $fontIntro
+$lblIntro.ForeColor = $colorMuted
+$form.Controls.Add($lblIntro)
+
+$labelX = 70
+$fieldX = 205
+$fieldW = 505
+$y = 284
+$rowGap = 46
 
 # ── Fixed fields ────────────────────────────────────────────────────
-$form.Controls.Add((New-Label "Name:" 10 ($y+2)))
-$txtName = New-TextBox 130 $y 330 22 $prefillName; $form.Controls.Add($txtName)
-$y += 34
+$form.Controls.Add((New-Label "Name *" $labelX ($y+2)))
+$txtName = New-TextBox $fieldX $y $fieldW 30 $prefillName "e.g. John Smith"; $form.Controls.Add($txtName)
+$y += $rowGap
 
-$form.Controls.Add((New-Label "Email:" 10 ($y+2)))
-$txtEmail = New-TextBox 130 $y 330 22 $prefillEmail; $form.Controls.Add($txtEmail)
-$y += 34
+$form.Controls.Add((New-Label "Email *" $labelX ($y+2)))
+$txtEmail = New-TextBox $fieldX $y $fieldW 30 $prefillEmail "e.g. john@smith.com"; $form.Controls.Add($txtEmail)
+$y += $rowGap
 
-$form.Controls.Add((New-Label "Phone:" 10 ($y+2)))
-$txtPhone = New-TextBox 130 $y 330 22 $prefillPhone; $form.Controls.Add($txtPhone)
-$y += 34
+$form.Controls.Add((New-Label "Phone" $labelX ($y+2)))
+$txtPhone = New-TextBox $fieldX $y $fieldW 30 $prefillPhone "The best number to reach you at"; $form.Controls.Add($txtPhone)
+$y += $rowGap
 
-$form.Controls.Add((New-Label "Subject:" 10 ($y+2)))
-$txtSubject = New-TextBox 130 $y 330 22 ""; $form.Controls.Add($txtSubject)
-$y += 34
+$form.Controls.Add((New-Label "Subject *" $labelX ($y+2)))
+$txtSubject = New-TextBox $fieldX $y $fieldW 30 "" "e.g. I'm having networking issues"; $form.Controls.Add($txtSubject)
+$y += $rowGap
 
-$form.Controls.Add((New-Label "Description:" 10 ($y+2)))
+$form.Controls.Add((New-Label "Description" $labelX ($y+2)))
 $txtDesc = New-Object System.Windows.Forms.TextBox
-$txtDesc.Location = New-Object System.Drawing.Point(130, $y)
-$txtDesc.Size = New-Object System.Drawing.Size(330, 80)
-$txtDesc.Multiline = $true; $txtDesc.ScrollBars = 'Vertical'
+$txtDesc.Location = New-Object System.Drawing.Point($fieldX, $y)
+$txtDesc.Size = New-Object System.Drawing.Size($fieldW, 112)
+$txtDesc.Multiline = $true
+$txtDesc.ScrollBars = 'Vertical'
+$txtDesc.Font = $fontBase
+$txtDesc.ForeColor = $colorInk
+$txtDesc.BorderStyle = 'FixedSingle'
+Set-CueBanner $txtDesc "Please provide the details about the issue you are experiencing"
 $form.Controls.Add($txtDesc)
-$y += 90
+$y += 132
 
 # ── Dynamic questions ─────────────────────────────────────────────
 `)
@@ -182,18 +304,18 @@ $y += 90
 		switch q.FieldType {
 		case "select":
 			optList := psStringList(q.Options)
-			sb.WriteString(fmt.Sprintf("\n$form.Controls.Add((New-Label %q 10 ($y+2)))\n", labelText))
-			sb.WriteString(fmt.Sprintf("%s = New-ComboBox 130 $y 330 @(%s)\n", varName, optList))
+			sb.WriteString(fmt.Sprintf("\n$form.Controls.Add((New-Label %q $labelX ($y+2)))\n", labelText))
+			sb.WriteString(fmt.Sprintf("%s = New-ComboBox $fieldX $y $fieldW @(%s)\n", varName, optList))
 			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", varName))
 		case "boolean":
-			sb.WriteString(fmt.Sprintf("\n%s = New-CheckBox %q 130 $y 330\n", varName, labelText))
+			sb.WriteString(fmt.Sprintf("\n%s = New-CheckBox %q $fieldX $y $fieldW\n", varName, labelText))
 			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", varName))
 			// For booleans the label IS the checkbox; still emit a hidden label var.
 			sb.WriteString(fmt.Sprintf("%s = $null\n", lblVar))
 		default: // text
-			sb.WriteString(fmt.Sprintf("\n$form.Controls.Add((New-Label %q 10 ($y+2)))\n", labelText))
+			sb.WriteString(fmt.Sprintf("\n$form.Controls.Add((New-Label %q $labelX ($y+2)))\n", labelText))
 			placeholder := q.Placeholder
-			sb.WriteString(fmt.Sprintf("%s = New-TextBox 130 $y 330 22 %q\n", varName, placeholder))
+			sb.WriteString(fmt.Sprintf("%s = New-TextBox $fieldX $y $fieldW 30 \"\" %q\n", varName, placeholder))
 			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", varName))
 		}
 
@@ -203,7 +325,7 @@ $y += 90
 				lblVar, labelText))
 		}
 
-		sb.WriteString(fmt.Sprintf("$y += 34\n"))
+		sb.WriteString("$y += $rowGap\n")
 
 		metas = append(metas, qMeta{
 			varName:    varName,
@@ -217,22 +339,25 @@ $y += 90
 
 	// Resize form and place buttons after all controls.
 	sb.WriteString(`
-$y += 10
-$form.ClientSize = New-Object System.Drawing.Size(480, ($y + 44))
-
-$btnSubmit = New-Object System.Windows.Forms.Button
-$btnSubmit.Text = "Submit Ticket"
-$btnSubmit.Location = New-Object System.Drawing.Point(250, $y)
-$btnSubmit.Size = New-Object System.Drawing.Size(110, 30)
-$form.Controls.Add($btnSubmit)
+$y += 12
+$form.ClientSize = New-Object System.Drawing.Size(780, [Math]::Min(($y + 92), [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height - 80))
 
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "Cancel"
-$btnCancel.Location = New-Object System.Drawing.Point(370, $y)
-$btnCancel.Size = New-Object System.Drawing.Size(90, 30)
+$btnCancel.Location = New-Object System.Drawing.Point($labelX, ($y + 18))
+$btnCancel.Size = New-Object System.Drawing.Size(112, 40)
 $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+Set-ButtonStyle $btnCancel $false
 $form.CancelButton = $btnCancel
 $form.Controls.Add($btnCancel)
+
+$btnSubmit = New-Object System.Windows.Forms.Button
+$btnSubmit.Text = "Send Request  ›"
+$btnSubmit.Location = New-Object System.Drawing.Point(($fieldX + $fieldW - 190), ($y + 18))
+$btnSubmit.Size = New-Object System.Drawing.Size(190, 40)
+Set-ButtonStyle $btnSubmit $true
+$form.AcceptButton = $btnSubmit
+$form.Controls.Add($btnSubmit)
 
 # WinForms event handlers do not reliably write pipeline output back to the
 # host process. Store the accepted payload in script scope and emit it only
