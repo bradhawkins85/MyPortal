@@ -995,7 +995,23 @@ async def create_reply(
             (reply_id,),
         )
         if row:
-            return _normalise_reply(row)
+            normalised = _normalise_reply(row)
+            if not normalised.get("is_internal") and not str(normalised.get("external_reference") or "").startswith("chat:"):
+                try:
+                    from app.services import chat_ticket_sync
+
+                    await chat_ticket_sync.sync_ticket_reply_to_chat(
+                        ticket_id=ticket_id,
+                        reply=normalised,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    log_error(
+                        "Failed to sync public ticket reply to linked chat",
+                        ticket_id=ticket_id,
+                        reply_id=normalised.get("id"),
+                        error=str(exc),
+                    )
+            return normalised
     fallback_row: dict[str, Any] = {
         "id": reply_id,
         "ticket_id": ticket_id,
