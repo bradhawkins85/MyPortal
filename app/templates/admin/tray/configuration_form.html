@@ -84,7 +84,7 @@
             <p class="form-help">No Tactical RMM scripts were returned by the configured TRMM API.</p>
           {% endif %}
           <p class="form-help">
-            Configure each row with the fields you need. Types: <code>label</code>, <code>link</code>, <code>submenu</code>,
+            Configure each row with the fields you need. Types: <code>label</code>, <code>app_version</code>, <code>link</code>, <code>submenu</code>,
             <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>,
             <code>TRMM_Script</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
             Use <code>Level</code> to place nodes under the nearest preceding submenu. Add company visibility conditions to show a node only for selected company IDs or hide it from selected company IDs.
@@ -130,6 +130,7 @@
 
       const NODE_TYPES = [
         'label',
+        'app_version',
         'link',
         'submenu',
         'display_text',
@@ -211,6 +212,10 @@
       function getSummaryText(row) {
         const type = row.querySelector('[data-node-type]').value;
         if (type === 'separator') return '— separator —';
+        if (type === 'app_version') {
+          const label = row.querySelector('[data-node-label]').value.trim();
+          return label ? `${label} (app version)` : 'Version (app version)';
+        }
         if (type === 'env_var') {
           const name = row.querySelector('[data-node-name]').value.trim();
           return name || '(no name)';

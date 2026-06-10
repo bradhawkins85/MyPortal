@@ -131,7 +131,7 @@ func defaultConfig() *api.ConfigResponse {
 
 func onTrayReady() {
 	systray.SetTitle("MyPortal")
-	systray.SetTooltip("MyPortal Helpdesk")
+	systray.SetTooltip(trayTooltip())
 	// Use a simple built-in icon; real icon bytes loaded from branding URL in Phase 6.
 	buildMenu(gConfig)
 }
@@ -189,6 +189,10 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		if node.Color == "" {
 			item.Disable()
 		}
+
+	case "app_version":
+		item := addTrayMenuItem(parent, versionMenuLabel(node), "")
+		item.Disable()
 
 	case "link":
 		item := addTrayMenuItem(parent, node.Label, node.URL)
