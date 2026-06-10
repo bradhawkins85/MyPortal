@@ -165,7 +165,7 @@
     <div id="chat-empty">No messages yet. Say hello!</div>
     {% endif %}
     {% for msg in messages %}
-    <div class="chat-message{% if not msg.sender_user_id %} chat-message--self{% endif %}"
+    <div class="chat-message{% if msg.sender_matrix_id == ('@tray-device-' ~ device_id ~ ':tray') %} chat-message--self{% endif %}"
          data-msg-id="{{ msg.id | default('') }}"
          data-event-id="{{ msg.matrix_event_id | default('') }}">
       <div class="chat-message__meta">
@@ -203,6 +203,7 @@
   const CSRF_TOKEN = {{ csrf_token | tojson }};
   const DEVICE_ID = {{ device_id | int }};
   const IS_CLOSED = {{ 'true' if (room and room.status == 'closed') else 'false' }};
+  const DEVICE_MATRIX_ID = '@tray-device-' + DEVICE_ID + ':tray';
 
   const messagesEl = document.getElementById('chat-messages');
   const inputEl    = document.getElementById('chat-input');
@@ -227,6 +228,10 @@
     errorEl.textContent = msg;
     errorEl.style.display = 'block';
     setTimeout(() => { errorEl.style.display = 'none'; }, 5000);
+  }
+
+  function isMessageFromThisTray(msg) {
+    return String(msg?.sender_matrix_id || '') === DEVICE_MATRIX_ID;
   }
 
   function appendMessage(msg, isSelf, isNew) {
@@ -318,8 +323,10 @@
           if (mid && renderedMsgIds.has(mid)) continue;
           if (key) rendered.add(key);
           if (mid) renderedMsgIds.add(mid);
-          // Messages without a sender_user_id are from the tray device (self).
-          const isSelf = !msg.sender_user_id;
+          // Only messages sent by this tray device are self messages; Matrix
+          // technician/mobile replies may not map to a portal user and must
+          // still render as received messages.
+          const isSelf = isMessageFromThisTray(msg);
           appendMessage(msg, isSelf, !isSelf);
         }
       } catch (_) {}
