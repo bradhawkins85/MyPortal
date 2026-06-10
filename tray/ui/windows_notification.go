@@ -21,8 +21,9 @@ func windowsToastEncodedCommand(title, body string) string {
 	}
 	script := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::` + template + `)
-` + imageScript + `$xml.GetElementsByTagName('text')[0].InnerText = '` + powershellSingleQuotedString(title) + `'
-$xml.GetElementsByTagName('text')[1].InnerText = '` + powershellSingleQuotedString(body) + `'
+` + imageScript + `$textNodes = $xml.GetElementsByTagName('text')
+[void]$textNodes.Item(0).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(title) + `'))
+[void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyPortal').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
 	return encodePowerShellCommand(script)
 }
@@ -40,8 +41,9 @@ func windowsPersistentChatToastEncodedCommand(title, body, chatURL string) strin
 $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::` + template + `)
 ` + imageScript + `$toast = $xml.GetElementsByTagName('toast')[0]
 $toast.SetAttribute('scenario', 'reminder')
-$xml.GetElementsByTagName('text')[0].InnerText = '` + powershellSingleQuotedString(title) + `'
-$xml.GetElementsByTagName('text')[1].InnerText = '` + powershellSingleQuotedString(body) + `'
+$textNodes = $xml.GetElementsByTagName('text')
+[void]$textNodes.Item(0).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(title) + `'))
+[void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))
 $actions = $xml.CreateElement('actions')
 $open = $xml.CreateElement('action')
 $open.SetAttribute('content', 'Open chat')

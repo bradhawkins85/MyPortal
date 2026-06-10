@@ -1,0 +1,35 @@
+//go:build windows
+
+package main
+
+import (
+	"encoding/base64"
+	"strings"
+	"testing"
+	"unicode/utf16"
+)
+
+func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
+	cmd := windowsToastEncodedCommand("Script scheduled", `The script "Nightly Maintenance" has been scheduled.`)
+	raw, err := base64.StdEncoding.DecodeString(cmd)
+	if err != nil {
+		t.Fatalf("decode encoded command: %v", err)
+	}
+	units := make([]uint16, 0, len(raw)/2)
+	for i := 0; i+1 < len(raw); i += 2 {
+		units = append(units, uint16(raw[i])|uint16(raw[i+1])<<8)
+	}
+	script := string(utf16.Decode(units))
+	for _, want := range []string{
+		"$textNodes = $xml.GetElementsByTagName('text')",
+		"AppendChild($xml.CreateTextNode('Script scheduled'))",
+		`AppendChild($xml.CreateTextNode('The script "Nightly Maintenance" has been scheduled.'))`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("encoded script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, ".InnerText =") {
+		t.Fatalf("encoded script should not use InnerText assignment:\n%s", script)
+	}
+}
