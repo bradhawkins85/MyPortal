@@ -51,6 +51,22 @@ async def get_tray_icon_path() -> str | None:
     return str(value) if value else None
 
 
+async def get_tray_icon_tooltip_name() -> str | None:
+    """Return the custom tray icon tooltip display name, or ``None`` if unset."""
+    row = await db.fetch_one(
+        "SELECT tray_icon_tooltip_name FROM site_settings WHERE id = 1",
+        (),
+    )
+    if row is None:
+        return None
+    value = (
+        row.get("tray_icon_tooltip_name")
+        if isinstance(row, Mapping)
+        else row["tray_icon_tooltip_name"]
+    )
+    return str(value) if value else None
+
+
 async def set_tray_icon_path(path: str | None) -> None:
     """Persist (or clear) the custom tray icon path in site_settings.
 
@@ -72,9 +88,29 @@ async def set_tray_icon_path(path: str | None) -> None:
         )
 
 
+async def set_tray_icon_tooltip_name(name: str | None) -> None:
+    """Persist (or clear) the custom tray icon tooltip display name."""
+    existing = await db.fetch_one(
+        "SELECT id FROM site_settings WHERE id = 1",
+        (),
+    )
+    if existing is None:
+        await db.execute(
+            "INSERT INTO site_settings (id, tray_icon_tooltip_name) VALUES (1, %s)",
+            (name,),
+        )
+    else:
+        await db.execute(
+            "UPDATE site_settings SET tray_icon_tooltip_name = %s WHERE id = 1",
+            (name,),
+        )
+
+
 __all__ = [
     "get_pdf_cover_image",
     "set_pdf_cover_image",
     "get_tray_icon_path",
+    "get_tray_icon_tooltip_name",
     "set_tray_icon_path",
+    "set_tray_icon_tooltip_name",
 ]

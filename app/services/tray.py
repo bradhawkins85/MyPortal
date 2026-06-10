@@ -25,6 +25,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
+from app.repositories import site_settings as site_settings_repo
 from app.repositories import tray as tray_repo
 
 _settings = get_settings()
@@ -226,6 +227,7 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     payload: list[dict[str, Any]]
     display_text: str | None = None
     branding_icon_url: str | None = None
+    branding_display_name = await site_settings_repo.get_tray_icon_tooltip_name()
     env_allowlist: list[str] = []
     version = 0
 
@@ -254,6 +256,7 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
         "menu": payload,
         "display_text": display_text,
         "branding_icon_url": branding_icon_url,
+        "branding_display_name": branding_display_name,
         "env_allowlist": env_allowlist,
     }
 

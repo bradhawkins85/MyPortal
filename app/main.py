@@ -5903,9 +5903,12 @@ async def admin_tray_branding_page(
     if redirect:
         return redirect
     current_path = await site_settings_repo.get_tray_icon_path()
+    tooltip_name = await site_settings_repo.get_tray_icon_tooltip_name()
     extra = {
         "title": "Tray icon",
         "current_path": current_path,
+        "tooltip_name": tooltip_name or "",
+        "default_tooltip_name": "MyPortal Helpdesk",
     }
     return await _render_template(
         "admin/tray/branding.html", request, current_user, extra=extra
@@ -5916,6 +5919,7 @@ async def admin_tray_branding_page(
 async def admin_tray_branding_upload(
     request: Request,
     icon: UploadFile = File(None),
+    tooltip_name: str | None = Form(None),
 ):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5923,8 +5927,27 @@ async def admin_tray_branding_upload(
 
     from app.services import tray_icon as tray_icon_service
 
+    normalized_tooltip_name = re.sub(r"\s+", " ", str(tooltip_name or "").strip())
+    if len(normalized_tooltip_name) > 100:
+        return flash_redirect(
+            "/admin/tray/branding",
+            "Display name must be 100 characters or fewer",
+            "error",
+        )
     if icon is None or not icon.filename:
-        return flash_redirect("/admin/tray/branding", "No file selected", "error")
+        if tooltip_name is not None:
+            await site_settings_repo.set_tray_icon_tooltip_name(
+                normalized_tooltip_name or None
+            )
+        await audit_service.log_action(
+            action="admin.tray.branding.update",
+            user_id=current_user.get("id"),
+            entity_type="site_settings",
+            entity_id=1,
+            metadata={"tooltip_name": normalized_tooltip_name or None},
+            request=request,
+        )
+        return flash_redirect("/admin/tray/branding", "Tray branding updated", "success")
 
     data = await icon.read(_TRAY_ICON_MAX_BYTES + 1)
     if len(data) > _TRAY_ICON_MAX_BYTES:
@@ -5942,15 +5965,23 @@ async def admin_tray_branding_upload(
 
     relative_path = str(target.relative_to(uploads_root)).replace("\\", "/")
     await site_settings_repo.set_tray_icon_path(relative_path)
+    if tooltip_name is not None:
+        await site_settings_repo.set_tray_icon_tooltip_name(
+            normalized_tooltip_name or None
+        )
     await audit_service.log_action(
         action="admin.tray.icon.upload",
         user_id=current_user.get("id"),
         entity_type="site_settings",
         entity_id=1,
-        metadata={"path": relative_path, "bytes": len(data)},
+        metadata={
+            "path": relative_path,
+            "bytes": len(data),
+            "tooltip_name": normalized_tooltip_name or None,
+        },
         request=request,
     )
-    return flash_redirect("/admin/tray/branding", "Tray icon updated", "success")
+    return flash_redirect("/admin/tray/branding", "Tray branding updated", "success")
 
 
 @app.post("/admin/tray/branding/delete", response_class=HTMLResponse)
