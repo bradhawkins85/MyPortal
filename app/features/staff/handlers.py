@@ -14,7 +14,12 @@ from pydantic import ValidationError
 
 from app import main as main_module
 
-from .helpers import _load_staff_context, _staff_member_matches_company_email_domains
+from .helpers import (
+    _filter_staff_for_offboarding_choices,
+    _load_staff_context,
+    _staff_member_is_offboarding_mail_choice,
+    _staff_member_matches_company_email_domains,
+)
 
 
 CompanyWorkflowPolicyUpsertSchema = main_module.CompanyWorkflowPolicyUpsertSchema
@@ -101,8 +106,11 @@ async def staff_page(
             company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag,
             exclude_package_staff=not show_ex_staff_flag
         )
-        active_staff_for_offboarding = await staff_repo.list_active_staff_for_offboarding(company_id)
         company_record = await company_repo.get_company_by_id(company_id)
+        active_staff_for_offboarding = _filter_staff_for_offboarding_choices(
+            await staff_repo.list_active_staff_for_offboarding(company_id),
+            list((company_record or {}).get("email_domains") or []),
+        )
         offboarding_email_forwarding_enabled = bool(
             int((company_record or {}).get("offboarding_email_forwarding_enabled", 1) or 1)
         )
@@ -2230,7 +2238,10 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         )
 
     payload = await request.json()
-    reason = str(payload.get("reason") or "").strip()
+    offboarding_type = str(payload.get("offboardingType") or payload.get("offboarding_type") or payload.get("type") or "").strip()
+    legacy_reason = str(payload.get("reason") or "").strip()
+    if not offboarding_type and legacy_reason in {"Resignation", "Termination"}:
+        offboarding_type = legacy_reason
     requested_at_raw = str(payload.get("requestedAt", payload.get("requested_at")) or "").strip()
     requested_timezone = str(payload.get("requestedTimezone") or payload.get("requested_timezone") or "").strip() or None
     requested_at = _parse_local_datetime_to_utc(
@@ -2238,6 +2249,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         timezone_name=requested_timezone,
     )
     notes = str(payload.get("notes") or "").strip() or None
+    company_email_domains = list((company or {}).get("email_domains") or [])
 
     # Optional offboarding request fields
     out_of_office_message = str(payload.get("outOfOfficeMessage") or payload.get("out_of_office_message") or "").strip() or None
@@ -2254,11 +2266,15 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         forward_staff = await staff_repo.get_staff_by_id(forward_staff_id)
         if not forward_staff or not forward_staff.get("email"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target staff not found")
+        if int(forward_staff.get("company_id") or 0) != int(company_id or 0):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must belong to this company")
         if (
             not bool(forward_staff.get("enabled", False))
             or bool(forward_staff.get("is_ex_staff", False))
         ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must be an active staff member")
+        if not _staff_member_is_offboarding_mail_choice(forward_staff, company_email_domains):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must use an allowed company email domain")
         email_forward_to = str(forward_staff["email"]).strip().lower()
 
     # Resolve mailbox grant access list
@@ -2272,17 +2288,25 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             grant_staff = await staff_repo.get_staff_by_id(grant_staff_id)
             if not grant_staff or not grant_staff.get("email"):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant staff #{grant_staff_id} not found")
+            if int(grant_staff.get("company_id") or 0) != int(company_id or 0):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must belong to this company")
             if (
                 not bool(grant_staff.get("enabled", False))
                 or bool(grant_staff.get("is_ex_staff", False))
             ):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must be an active staff member")
-            mailbox_grant_emails.append(str(grant_staff["email"]).strip().lower())
+            if not _staff_member_is_offboarding_mail_choice(grant_staff, company_email_domains):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must use an allowed company email domain")
+            grant_email = str(grant_staff["email"]).strip().lower()
+            if grant_email not in mailbox_grant_emails:
+                mailbox_grant_emails.append(grant_email)
 
     mailbox_grant_emails_json: str | None = json.dumps(mailbox_grant_emails) if mailbox_grant_emails else None
 
-    if not reason:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reason is required")
+    if offboarding_type not in {"Resignation", "Termination"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Offboarding type must be Resignation or Termination")
+    if len(notes or "") > 2000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Notes must be 2000 characters or fewer")
     if not requested_at_raw or not _raw_value_includes_time(requested_at_raw):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2294,7 +2318,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             detail="A valid requested offboarding date/time is required",
         )
 
-    request_notes = reason if not notes else f"Reason: {reason}\n\nNotes: {notes}"
+    request_notes = f"Type: {offboarding_type}" if not notes else f"Type: {offboarding_type}\n\nNotes: {notes}"
 
     updated = await staff_repo.update_staff(
         staff_id,
@@ -2348,7 +2372,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         metadata={
             "company_id": int(existing.get("company_id") or company_id or 0),
             "requested_offboarding_at": requested_at,
-            "reason": reason,
+            "offboarding_type": offboarding_type,
             "notes": notes,
             "requested_offboarding_input": {
                 "requested_at_local": requested_at_raw,
