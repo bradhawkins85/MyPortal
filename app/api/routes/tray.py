@@ -55,6 +55,7 @@ from app.schemas.tray import (
     TrayTicketSubmitResponse,
 )
 from app.services import audit as audit_service
+from app.services import chat_ticket_sync
 from app.services import matrix as matrix_service
 from app.services import tickets as tickets_service
 from app.services import tray as tray_service
@@ -1454,6 +1455,7 @@ async def popup_chat_send_message(
         except Exception as exc:
             log_error("popup_chat_send_message: Matrix send failed", error=str(exc))
 
+    sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
     msg = await chat_repo.add_message(
         room_id=room_id,
         matrix_event_id=matrix_event_id,
@@ -1461,15 +1463,36 @@ async def popup_chat_send_message(
         body=message_body,
         sender_user_id=None,
         sender_display_name=hostname,
+        sent_at=sent_at,
     )
+    await chat_repo.update_room(room_id, last_message_at=sent_at, updated_at=sent_at)
+
+    try:
+        await chat_ticket_sync.sync_chat_message_to_ticket(
+            room=room,
+            message=msg,
+            author_id=None,
+        )
+    except Exception as exc:
+        log_error(
+            "popup_chat_send_message: failed to sync chat message to linked ticket",
+            room_id=room_id,
+            error=str(exc),
+        )
 
     # Notify portal users of new message.
     try:
         from app.services.realtime import refresh_notifier
 
-        await refresh_notifier.notify(
-            f"chat:room:{room_id}",
-            data={"message": {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()}},
+        await refresh_notifier.broadcast_refresh(
+            topics=[f"chat:room:{room_id}"],
+            data={
+                "message": {
+                    k: (v.isoformat() if isinstance(v, datetime) else v)
+                    for k, v in msg.items()
+                },
+                "room_id": room_id,
+            },
         )
     except Exception:
         pass
