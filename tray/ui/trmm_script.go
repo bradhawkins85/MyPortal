@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,20 +43,34 @@ func runTRMMScriptFromMenu(node api.MenuNode) {
 		showTextWindow("Tactical RMM", "MyPortal could not start the Tactical RMM script. Please contact support.")
 		return
 	}
-	label := node.ScriptName
+	var result struct {
+		ScriptName string `json:"script_name"`
+		Message    string `json:"message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil && err != io.EOF {
+		logger.Debug("TRMM script response decode failed: %v", err)
+	}
+	label := result.ScriptName
+	if label == "" {
+		label = node.ScriptName
+	}
 	if label == "" {
 		label = node.Label
 	}
 	if label == "" {
 		label = fmt.Sprintf("Script #%d", node.ScriptID)
 	}
-	showOSNotification("Script requested", trmmScriptSuccessMessage(label))
+	showOSNotification("Script scheduled", trmmScriptSuccessMessage(label, result.Message))
 }
 
-func trmmScriptSuccessMessage(label string) string {
+func trmmScriptSuccessMessage(label string, serverMessage string) string {
+	serverMessage = strings.TrimSpace(serverMessage)
+	if serverMessage != "" {
+		return serverMessage
+	}
 	label = strings.TrimSpace(label)
 	if label == "" {
-		return "Your requested script has been executed and will run shortly."
+		return "Your requested script has been scheduled and will run shortly."
 	}
-	return fmt.Sprintf("The script %q you requested has been executed and will run shortly.", label)
+	return fmt.Sprintf("The script %q has been scheduled and will run shortly.", label)
 }
