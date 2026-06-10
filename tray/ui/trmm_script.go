@@ -49,5 +49,13 @@ func runTRMMScriptFromMenu(node api.MenuNode) {
 	if label == "" {
 		label = fmt.Sprintf("Script #%d", node.ScriptID)
 	}
-	showTextWindow("Tactical RMM", "Requested Tactical RMM to run "+label+" on this computer.")
+	showOSNotification("Tactical RMM", trmmScriptSuccessMessage(label))
+}
+
+func trmmScriptSuccessMessage(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "The Tactical RMM script has been executed and will run in the background shortly."
+	}
+	return fmt.Sprintf("The Tactical RMM script %q has been executed and will run in the background shortly.", label)
 }
