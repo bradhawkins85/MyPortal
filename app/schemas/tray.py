@@ -50,6 +50,7 @@ class TrayMenuNode(BaseModel):
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.
     * ``open_chat`` — opens the chat window.
     * ``submit_ticket`` — opens the submit-a-ticket dialog.
+    * ``TRMM_Script`` — asks MyPortal to run a selected Tactical RMM script on the linked asset.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.
     * ``quit`` — exits the tray application.
@@ -61,6 +62,8 @@ class TrayMenuNode(BaseModel):
     name: Optional[str] = Field(default=None, max_length=128)
     text: Optional[str] = Field(default=None)
     color: Optional[str] = Field(default=None, max_length=32)
+    script_id: Optional[int] = Field(default=None, ge=1)
+    script_name: Optional[str] = Field(default=None, max_length=200)
     children: Optional[list["TrayMenuNode"]] = None
 
 
@@ -118,6 +121,18 @@ class TrayInstallTokenResponse(BaseModel):
     revoked_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
     use_count: int = 0
+
+
+class TrayTRMMScriptRunRequest(BaseModel):
+    script_id: int = Field(ge=1)
+
+
+class TrayTRMMScriptRunResponse(BaseModel):
+    status: str
+    script_id: int
+    script_name: Optional[str] = None
+    event_id: Optional[int] = None
+    message: Optional[str] = None
 
 
 class TrayChatStartRequest(BaseModel):

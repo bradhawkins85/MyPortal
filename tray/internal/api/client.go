@@ -55,14 +55,14 @@ func (c *Client) DeviceUID() string {
 
 // EnrolRequest mirrors the server's TrayEnrolRequest schema.
 type EnrolRequest struct {
-	InstallToken  string  `json:"install_token"`
-	DeviceUID     string  `json:"device_uid,omitempty"`
-	OS            string  `json:"os"`
-	OSVersion     string  `json:"os_version,omitempty"`
-	Hostname      string  `json:"hostname,omitempty"`
-	SerialNumber  string  `json:"serial_number,omitempty"`
-	AgentVersion  string  `json:"agent_version,omitempty"`
-	ConsoleUser   string  `json:"console_user,omitempty"`
+	InstallToken string `json:"install_token"`
+	DeviceUID    string `json:"device_uid,omitempty"`
+	OS           string `json:"os"`
+	OSVersion    string `json:"os_version,omitempty"`
+	Hostname     string `json:"hostname,omitempty"`
+	SerialNumber string `json:"serial_number,omitempty"`
+	AgentVersion string `json:"agent_version,omitempty"`
+	ConsoleUser  string `json:"console_user,omitempty"`
 }
 
 // EnrolResponse mirrors the server's TrayEnrolResponse schema.
@@ -98,30 +98,32 @@ func (c *Client) Enrol(ctx context.Context, req EnrolRequest) (*EnrolResponse, e
 
 // MenuNode mirrors the server's TrayMenuNode schema.
 type MenuNode struct {
-	Type     string      `json:"type"`
-	Label    string      `json:"label,omitempty"`
-	URL      string      `json:"url,omitempty"`
-	Name     string      `json:"name,omitempty"`
-	Text     string      `json:"text,omitempty"`
-	Color    string      `json:"color,omitempty"`
-	Children []*MenuNode `json:"children,omitempty"`
+	Type       string      `json:"type"`
+	Label      string      `json:"label,omitempty"`
+	URL        string      `json:"url,omitempty"`
+	Name       string      `json:"name,omitempty"`
+	Text       string      `json:"text,omitempty"`
+	Color      string      `json:"color,omitempty"`
+	ScriptID   int         `json:"script_id,omitempty"`
+	ScriptName string      `json:"script_name,omitempty"`
+	Children   []*MenuNode `json:"children,omitempty"`
 }
 
 // ConfigResponse mirrors the server's TrayConfigResponse schema.
 type ConfigResponse struct {
-	Version          int        `json:"version"`
-	Menu             []MenuNode `json:"menu"`
-	DisplayText      string     `json:"display_text,omitempty"`
-	BrandingIconURL  string     `json:"branding_icon_url,omitempty"`
-	EnvAllowlist     []string   `json:"env_allowlist"`
-	ChatEnabled      bool       `json:"chat_enabled"`
+	Version         int        `json:"version"`
+	Menu            []MenuNode `json:"menu"`
+	DisplayText     string     `json:"display_text,omitempty"`
+	BrandingIconURL string     `json:"branding_icon_url,omitempty"`
+	EnvAllowlist    []string   `json:"env_allowlist"`
+	ChatEnabled     bool       `json:"chat_enabled"`
 	// ChatClientMode controls how the tray opens chat windows.
 	// "" or "app" (default): try dedicated chat shell, then browser app-mode, then
 	// fall back to the default browser.
 	// "browser": always open in the default system browser (legacy behaviour).
 	// "shell": require the dedicated chat shell; log a warning if absent rather
 	// than falling back to the browser.
-	ChatClientMode   string     `json:"chat_client_mode,omitempty"`
+	ChatClientMode string `json:"chat_client_mode,omitempty"`
 }
 
 // GetConfig fetches the resolved menu configuration for this device.
@@ -275,6 +277,26 @@ func (c *Client) RequestChatToken(ctx context.Context, roomID int) (*ChatTokenRe
 		return nil, err
 	}
 	return &out, nil
+}
+
+// RunTRMMScript asks MyPortal to run a configured Tactical RMM script on this device.
+func (c *Client) RunTRMMScript(ctx context.Context, scriptID int) error {
+	if scriptID <= 0 {
+		return fmt.Errorf("trmm-script: script id is required")
+	}
+	body, err := json.Marshal(map[string]int{"script_id": scriptID})
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/trmm-script", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("trmm-script: HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // UploadDiagnostics zips logDir and uploads it to the server.

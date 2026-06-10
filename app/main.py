@@ -5573,11 +5573,21 @@ async def admin_tray_configurations_page(request: Request):
     )
 
 
+async def _get_tray_trmm_scripts_for_form() -> tuple[list[dict], str | None]:
+    from app.services import tacticalrmm as tacticalrmm_service
+
+    try:
+        return await tacticalrmm_service.fetch_scripts(), None
+    except Exception as exc:  # pragma: no cover - external integration availability
+        return [], str(exc)
+
+
 @app.get("/admin/tray/configurations/new", response_class=HTMLResponse)
 async def admin_tray_new_configuration_page(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
     extra = {
         "title": "New tray configuration",
         "heading": "New tray menu configuration",
@@ -5592,6 +5602,8 @@ async def admin_tray_new_configuration_page(request: Request):
             "branding_icon_url": "",
             "payload_json": "[]",
         },
+        "trmm_scripts": trmm_scripts,
+        "trmm_scripts_error": trmm_scripts_error,
     }
     return await _render_template(
         "admin/tray/configuration_form.html", request, current_user, extra=extra
@@ -5608,6 +5620,7 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
     record = await tray_repo.get_menu_config(config_id)
     if not record:
         return RedirectResponse(url="/admin/tray/configurations", status_code=303)
+    trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
     extra = {
         "title": "Edit tray configuration",
         "heading": f"Edit configuration: {record.get('name')}",
@@ -5622,6 +5635,8 @@ async def admin_tray_edit_configuration_page(config_id: int, request: Request):
             "branding_icon_url": record.get("branding_icon_url") or "",
             "payload_json": record.get("payload_json") or "[]",
         },
+        "trmm_scripts": trmm_scripts,
+        "trmm_scripts_error": trmm_scripts_error,
     }
     return await _render_template(
         "admin/tray/configuration_form.html", request, current_user, extra=extra
