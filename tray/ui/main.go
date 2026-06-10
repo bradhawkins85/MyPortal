@@ -344,6 +344,11 @@ func handleIPCMessages(conn net.Conn) {
 			_ = json.Unmarshal(msg.Payload, &payload)
 			handleChatOpen(payload)
 
+		case "chat_message":
+			var payload chatMessagePayload
+			_ = json.Unmarshal(msg.Payload, &payload)
+			handleChatMessage(payload)
+
 		case "config_changed":
 			refreshPortalURL()
 			refreshDeviceUID()

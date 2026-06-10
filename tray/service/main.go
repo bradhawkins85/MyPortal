@@ -304,6 +304,15 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 				Payload: json.RawMessage(rawPayload),
 			})
 		}
+	case "chat_message":
+		logger.Info("chat_message received")
+		if d.ipcSrv != nil {
+			rawPayload, _ := json.Marshal(msg)
+			d.ipcSrv.Broadcast(ipc.Message{
+				Type:    "chat_message",
+				Payload: json.RawMessage(rawPayload),
+			})
+		}
 	case "show_notification":
 		if d.ipcSrv != nil {
 			payload := msg["payload"]

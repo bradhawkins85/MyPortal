@@ -9,6 +9,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import chat as chat_repo
 from app.services import matrix as matrix_service
 from app.services import chat_ticket_sync
+from app.services import tray_chat_notifications
 
 _settings = get_settings()
 _running = False
@@ -71,6 +72,10 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             )
 
             await chat_repo.update_room(room["id"], last_message_at=sent_at, updated_at=sent_at)
+            await tray_chat_notifications.notify_tray_device_of_chat_message(
+                room=room,
+                message=message,
+            )
             try:
                 await chat_ticket_sync.sync_chat_message_to_ticket(
                     room=room,

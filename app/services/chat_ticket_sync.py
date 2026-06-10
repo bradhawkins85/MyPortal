@@ -10,6 +10,7 @@ from app.repositories import chat as chat_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.services import matrix as matrix_service
+from app.services import tray_chat_notifications
 from app.services import tickets as tickets_service
 from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
@@ -203,6 +204,10 @@ async def sync_ticket_reply_to_chat(*, ticket_id: int, reply: Mapping[str, Any])
     await refresh_notifier.broadcast_refresh(
         topics=[f"chat:room:{room['id']}"],
         data={"message": message_payload, "room_id": room["id"]},
+    )
+    await tray_chat_notifications.notify_tray_device_of_chat_message(
+        room=room,
+        message=message_payload,
     )
 
 

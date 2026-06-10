@@ -19,6 +19,7 @@ from app.schemas.chat import (
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
+from app.services import tray_chat_notifications
 from app.services import matrix as matrix_service
 from app.services import matrix_admin
 from app.services.realtime import refresh_notifier
@@ -223,6 +224,10 @@ async def send_message(
     await refresh_notifier.broadcast_refresh(
         topics=[f"chat:room:{room_id}"],
         data={"message": msg_data, "room_id": room_id},
+    )
+    await tray_chat_notifications.notify_tray_device_of_chat_message(
+        room=room,
+        message=msg_data,
     )
 
     return JSONResponse(msg_data, status_code=201)
