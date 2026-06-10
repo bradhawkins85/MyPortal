@@ -332,17 +332,9 @@ func handleIPCMessages(conn net.Conn) {
 		}
 		switch msg.Type {
 		case "chat_open":
-			var payload struct {
-				RoomID       int    `json:"room_id"`
-				MatrixRoomID string `json:"matrix_room_id"`
-				Subject      string `json:"subject"`
-			}
+			var payload chatOpenPayload
 			_ = json.Unmarshal(msg.Payload, &payload)
-			chatURL := requestChatTokenForRoom(payload.RoomID)
-			if chatURL == "" {
-				chatURL = buildChatURL(payload.RoomID)
-			}
-			openChatWindow(chatURL, gConfig)
+			handleChatOpen(payload)
 
 		case "config_changed":
 			refreshPortalURL()

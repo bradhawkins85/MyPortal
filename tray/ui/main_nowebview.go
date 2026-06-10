@@ -191,16 +191,9 @@ func handleIPCMessages(conn net.Conn) {
 		logger.Debug("handleIPCMessages: received type=%q", msg.Type)
 		switch msg.Type {
 		case "chat_open":
-			var payload struct {
-				RoomID int `json:"room_id"`
-			}
+			var payload chatOpenPayload
 			_ = json.Unmarshal(msg.Payload, &payload)
-			chatURL := requestChatTokenForRoom(payload.RoomID)
-			if chatURL == "" {
-				logger.Warn("handleIPCMessages: chat_open: could not obtain chat token — portal may be unreachable")
-				break
-			}
-			openChatWindow(chatURL, gConfig)
+			handleChatOpen(payload)
 		case "config_changed":
 			refreshPortalURL()
 			refreshDeviceUID()
