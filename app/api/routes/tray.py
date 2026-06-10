@@ -755,6 +755,42 @@ async def start_device_chat(
     # Link the room back to its device so the UI can highlight it.
     await _attach_room_to_device(int(room["id"]), int(device["id"]))
 
+    initial_message = (payload.message or "").strip()[:4000]
+    initiator_name = current_user.get("display_name") or current_user.get("email")
+    if initial_message:
+        matrix_event_id: str | None = None
+        try:
+            matrix_event = await matrix_service.send_message(
+                room_id=matrix_room_id,
+                body=initial_message,
+                sender_display_name=initiator_name,
+            )
+            matrix_event_id = matrix_event.get("event_id")
+        except Exception as exc:
+            log_error(
+                "Failed to send initial tray chat message",
+                room_id=room["id"],
+                error=str(exc),
+            )
+
+        sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await chat_repo.add_message(
+            room_id=int(room["id"]),
+            matrix_event_id=matrix_event_id,
+            sender_matrix_id=(
+                current_user.get("matrix_user_id") or _settings.matrix_bot_user_id or ""
+            ),
+            body=initial_message,
+            sender_user_id=int(current_user["id"]),
+            sender_display_name=initiator_name,
+            sent_at=sent_at,
+        )
+        await chat_repo.update_room(
+            int(room["id"]),
+            last_message_at=sent_at,
+            updated_at=sent_at,
+        )
+
     delivered = await tray_service.send_to_device(
         device_uid,
         {
@@ -762,8 +798,8 @@ async def start_device_chat(
             "room_id": int(room["id"]),
             "matrix_room_id": matrix_room_id,
             "subject": subject,
-            "initiated_by": current_user.get("display_name")
-            or current_user.get("email"),
+            "initiated_by": initiator_name,
+            "message": initial_message,
         },
     )
     await tray_repo.log_command(
