@@ -255,6 +255,9 @@ async def tray_chat_popup(
             chat_room = None
 
     if not chat_room:
+        chat_room = await chat_repo.get_open_room_by_device_id(device_id)
+
+    if not chat_room:
         # User-initiated chat: create a fresh room.
         hostname = (device.get("hostname") or "Tray Device")[:200]
         subject = f"Chat from {hostname}"
