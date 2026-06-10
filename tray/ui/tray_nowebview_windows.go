@@ -44,7 +44,7 @@ func runUI() {
 
 func onTrayReady() {
 	systray.SetTitle("MyPortal")
-	systray.SetTooltip("MyPortal Helpdesk")
+	systray.SetTooltip(trayTooltip())
 	// Set the default icon immediately so the tray appears without delay,
 	// then fetch the branded icon from the portal in the background.
 	systray.SetIcon(defaultIconICO())
@@ -180,6 +180,10 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		if node.Color == "" {
 			item.Disable()
 		}
+
+	case "app_version":
+		item := addTrayMenuItem(parent, versionMenuLabel(node), "")
+		item.Disable()
 
 	case "link":
 		item := addTrayMenuItem(parent, node.Label, node.URL)
