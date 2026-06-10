@@ -64,6 +64,8 @@ class TrayMenuNode(BaseModel):
     color: Optional[str] = Field(default=None, max_length=32)
     script_id: Optional[int] = Field(default=None, ge=1)
     script_name: Optional[str] = Field(default=None, max_length=200)
+    visible_company_ids: Optional[list[int]] = None
+    hidden_company_ids: Optional[list[int]] = None
     children: Optional[list["TrayMenuNode"]] = None
 
 

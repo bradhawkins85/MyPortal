@@ -136,6 +136,66 @@ _DEFAULT_MENU: list[dict[str, Any]] = [
 ]
 
 
+def _normalise_company_id_list(value: Any) -> list[int]:
+    """Return positive company IDs from a menu-node condition field."""
+
+    if value is None or value == "":
+        return []
+    raw_items: Iterable[Any]
+    if isinstance(value, (list, tuple, set)):
+        raw_items = value
+    else:
+        raw_items = str(value).split(",")
+
+    ids: list[int] = []
+    seen: set[int] = set()
+    for item in raw_items:
+        try:
+            company_id = int(str(item).strip())
+        except (TypeError, ValueError):
+            continue
+        if company_id <= 0 or company_id in seen:
+            continue
+        ids.append(company_id)
+        seen.add(company_id)
+    return ids
+
+
+def _node_is_visible_for_company(node: dict[str, Any], company_id: int | None) -> bool:
+    """Return whether a menu node passes company visibility conditions."""
+
+    include_ids = _normalise_company_id_list(node.get("visible_company_ids"))
+    exclude_ids = _normalise_company_id_list(node.get("hidden_company_ids"))
+    if include_ids and company_id not in include_ids:
+        return False
+    if company_id is not None and company_id in exclude_ids:
+        return False
+    return True
+
+
+def _filter_menu_nodes_for_company(
+    nodes: list[dict[str, Any]],
+    company_id: int | None,
+) -> list[dict[str, Any]]:
+    """Recursively remove menu nodes hidden for the device's assigned company."""
+
+    filtered: list[dict[str, Any]] = []
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        if not _node_is_visible_for_company(raw_node, company_id):
+            continue
+        node = dict(raw_node)
+        children = node.get("children")
+        if isinstance(children, list):
+            node["children"] = _filter_menu_nodes_for_company(children, company_id)
+            node_type = str(node.get("type") or "").strip().lower()
+            if node_type == "submenu" and not node["children"]:
+                continue
+        filtered.append(node)
+    return filtered
+
+
 async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     """Return the menu config payload + branding to send to ``device``.
 
@@ -172,8 +232,11 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
     if chosen:
         try:
             payload = json.loads(chosen.get("payload_json") or "[]") or _DEFAULT_MENU
+            if not isinstance(payload, list):
+                payload = _DEFAULT_MENU
         except (ValueError, TypeError):
             payload = _DEFAULT_MENU
+        payload = _filter_menu_nodes_for_company(payload, company_id)
         display_text = chosen.get("display_text")
         branding_icon_url = chosen.get("branding_icon_url")
         raw_allow = chosen.get("env_allowlist") or ""
