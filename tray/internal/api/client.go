@@ -111,12 +111,13 @@ type MenuNode struct {
 
 // ConfigResponse mirrors the server's TrayConfigResponse schema.
 type ConfigResponse struct {
-	Version         int        `json:"version"`
-	Menu            []MenuNode `json:"menu"`
-	DisplayText     string     `json:"display_text,omitempty"`
-	BrandingIconURL string     `json:"branding_icon_url,omitempty"`
-	EnvAllowlist    []string   `json:"env_allowlist"`
-	ChatEnabled     bool       `json:"chat_enabled"`
+	Version             int        `json:"version"`
+	Menu                []MenuNode `json:"menu"`
+	DisplayText         string     `json:"display_text,omitempty"`
+	BrandingIconURL     string     `json:"branding_icon_url,omitempty"`
+	BrandingDisplayName string     `json:"branding_display_name,omitempty"`
+	EnvAllowlist        []string   `json:"env_allowlist"`
+	ChatEnabled         bool       `json:"chat_enabled"`
 	// ChatClientMode controls how the tray opens chat windows.
 	// "" or "app" (default): try dedicated chat shell, then browser app-mode, then
 	// fall back to the default browser.

@@ -131,7 +131,7 @@ func defaultConfig() *api.ConfigResponse {
 
 func onTrayReady() {
 	systray.SetTitle("MyPortal")
-	systray.SetTooltip(trayTooltip())
+	systray.SetTooltip(trayTooltip(gConfig))
 	// Use a simple built-in icon; real icon bytes loaded from branding URL in Phase 6.
 	buildMenu(gConfig)
 }
@@ -351,6 +351,7 @@ func handleIPCMessages(conn net.Conn) {
 			// Re-read cached config. Menu rebuild on config_changed is deferred
 			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()
+			systray.SetTooltip(trayTooltip(gConfig))
 
 		case "show_notification":
 			var n struct {

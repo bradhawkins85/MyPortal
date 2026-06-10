@@ -17,8 +17,9 @@
     <header class="card__header">
       <p class="card__lede">
         The MyPortal tray app shows this icon in the system tray on every enrolled device.
-        By default it uses an icon derived from the website favicon. Upload a custom
-        Windows <code>.ico</code> file below to override it across all devices.
+        Use this page to customize both the tray icon image and the display name shown
+        when users hover over the icon. By default it uses an icon derived from the
+        website favicon and the tooltip name <strong>{{ default_tooltip_name }}</strong>.
       </p>
     </header>
     <div class="card__body">
@@ -29,6 +30,14 @@
         <p class="status status--danger">{{ error_message }}</p>
       {% endif %}
 
+      <p>
+        <strong>Current tooltip display name:</strong>
+        {% if tooltip_name %}
+          {{ tooltip_name }}
+        {% else %}
+          {{ default_tooltip_name }} (default)
+        {% endif %}
+      </p>
       <p>
         <strong>Current icon:</strong>
         {% if current_path %}
@@ -47,12 +56,22 @@
             enctype="multipart/form-data" class="form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <div class="form-field">
+          <label for="tray-tooltip-name">Tooltip display name</label>
+          <input class="form-input" id="tray-tooltip-name" type="text"
+                 name="tooltip_name" value="{{ tooltip_name }}" maxlength="100"
+                 placeholder="{{ default_tooltip_name }}" />
+          <p class="form-help">
+            Leave blank to use the default display name. The tray app adds its version after this name.
+          </p>
+        </div>
+        <div class="form-field">
           <label for="tray-icon-file">Upload new icon (.ico, max 1&nbsp;MB)</label>
           <input id="tray-icon-file" type="file" name="icon"
-                 accept=".ico,image/x-icon,image/vnd.microsoft.icon" required />
+                 accept=".ico,image/x-icon,image/vnd.microsoft.icon" />
+          <p class="form-help">Leave empty to update only the tooltip display name.</p>
         </div>
         <div class="form-actions">
-          <button type="submit" class="button button--primary">Upload icon</button>
+          <button type="submit" class="button button--primary">Save branding</button>
         </div>
       </form>
 
