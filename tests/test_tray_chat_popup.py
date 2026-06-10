@@ -303,3 +303,47 @@ def test_popup_session_rejects_tampered_cookie(monkeypatch):
     result = _parse_popup_session_cookie("this-is-not-valid-encrypted-data")
     assert result is None
 
+
+
+def test_tray_chat_popup_only_marks_current_tray_messages_as_self():
+    """Technician Matrix replies with no portal user ID render as received."""
+    from pathlib import Path
+
+    from jinja2 import Template
+
+    template = Template(Path("app/templates/tray/chat_popup.html").read_text(), autoescape=True)
+    html = template.render(
+        room={"id": 12, "subject": "Support", "status": "open"},
+        messages=[
+            {
+                "id": 1,
+                "matrix_event_id": "$client",
+                "sender_matrix_id": "@tray-device-7:tray",
+                "sender_user_id": None,
+                "sender_display_name": "Client PC",
+                "body": "Client message",
+                "sent_at": "2026-06-10T00:00:00",
+            },
+            {
+                "id": 2,
+                "matrix_event_id": "$tech",
+                "sender_matrix_id": "@technician:matrix.example",
+                "sender_user_id": None,
+                "sender_display_name": "Technician",
+                "body": "Technician reply",
+                "sent_at": "2026-06-10T00:01:00",
+            },
+        ],
+        csrf_token="csrf",
+        room_id=12,
+        device_id=7,
+        hostname="Client PC",
+    )
+
+    assert 'data-event-id="$client"' in html
+    client_block = html.split('data-event-id="$client"', 1)[0].rsplit('<div class="chat-message', 1)[1]
+    assert "chat-message--self" in client_block
+    tech_block = html.split('data-event-id="$tech"', 1)[0].rsplit('<div class="chat-message', 1)[1]
+    assert "chat-message--self" not in tech_block
+    assert "function isMessageFromThisTray" in html
+    assert "const isSelf = isMessageFromThisTray(msg);" in html
