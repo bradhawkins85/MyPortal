@@ -66,8 +66,12 @@ async def _load_settings() -> dict[str, Any]:
         return cached
 
 
-async def _call_endpoint(endpoint: str) -> Any:
-    payload = {"endpoint": endpoint, "method": "GET"}
+async def _call_endpoint(
+    endpoint: str, *, method: str = "GET", body: Any = None
+) -> Any:
+    payload = {"endpoint": endpoint, "method": method.upper()}
+    if body is not None:
+        payload["body"] = body
     try:
         result = await modules_service.trigger_module("tacticalrmm", payload, background=False)
     except ValueError as exc:
@@ -457,6 +461,125 @@ def extract_trmm_custom_fields(agent: Mapping[str, Any]) -> dict[str, dict[str, 
                 value = field.get("value")
         result[name] = {"type": field_type, "value": value}
     return result
+
+
+def _extract_items(response: Any, *keys: str) -> list[Mapping[str, Any]]:
+    if isinstance(response, list):
+        return [item for item in response if isinstance(item, Mapping)]
+    if isinstance(response, Mapping):
+        for key in keys or ("results", "items", "data"):
+            value = response.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, Mapping)]
+        if response.get("id") is not None:
+            return [response]
+    return []
+
+
+def _script_label(script: Mapping[str, Any]) -> str:
+    for key in ("name", "filename", "script_name", "title"):
+        label = _clean_text(script.get(key))
+        if label:
+            return label
+    script_id = script.get("id") or script.get("pk")
+    return f"Script #{script_id}" if script_id is not None else "Unnamed script"
+
+
+def _script_id(script: Mapping[str, Any]) -> int | None:
+    for key in ("id", "pk", "script", "script_id"):
+        raw = script.get(key)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+async def fetch_scripts() -> list[dict[str, Any]]:
+    """Return scripts from Tactical RMM's script library for tray menu design."""
+
+    await _load_settings()
+    try:
+        response = await _call_endpoint("scripts/")
+    except (TacticalRMMAPIError, TacticalRMMConfigurationError) as exc:
+        log_error("Failed to fetch Tactical RMM scripts", error=str(exc))
+        raise
+
+    scripts: list[dict[str, Any]] = []
+    for item in _extract_items(response, "results", "scripts", "items", "data"):
+        sid = _script_id(item)
+        if sid is None:
+            continue
+        scripts.append({
+            "id": sid,
+            "name": _script_label(item),
+            "description": _clean_text(item.get("description")),
+            "category": _clean_text(item.get("category")),
+            "script_type": (
+                _clean_text(item.get("shell"))
+                or _clean_text(item.get("script_type"))
+                or _clean_text(item.get("type"))
+            ),
+            "raw": dict(item),
+        })
+    scripts.sort(
+        key=lambda s: (str(s.get("name") or "").lower(), int(s.get("id") or 0))
+    )
+    return scripts
+
+
+def _script_default_body(
+    script_id: int, script: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    script = script or {}
+    timeout_raw = script.get("timeout") or script.get("default_timeout") or 90
+    try:
+        timeout = int(timeout_raw)
+    except (TypeError, ValueError):
+        timeout = 90
+    timeout = max(1, min(timeout, 86400))
+    return {
+        "output": script.get("output") or "forget",
+        "emails": script.get("emails") if isinstance(script.get("emails"), list) else [],
+        "emailMode": script.get("emailMode") or script.get("email_mode") or "default",
+        "custom_field": script.get("custom_field"),
+        "save_all_output": bool(script.get("save_all_output", False)),
+        "script": script_id,
+        "args": script.get("args") if isinstance(script.get("args"), list) else [],
+        "env_vars": script.get("env_vars") if isinstance(script.get("env_vars"), list) else [],
+        "run_as_user": bool(script.get("run_as_user", False)),
+        "timeout": timeout,
+    }
+
+
+async def run_script_on_agent(agent_id: str, script_id: int) -> dict[str, Any]:
+    """Ask Tactical RMM to run ``script_id`` on ``agent_id`` using default options."""
+
+    clean_agent_id = _clean_text(agent_id)
+    if not clean_agent_id:
+        raise TacticalRMMConfigurationError(
+            "Tactical RMM agent ID is not available for this device"
+        )
+    if int(script_id) <= 0:
+        raise TacticalRMMConfigurationError("Tactical RMM script ID is required")
+
+    script_record: Mapping[str, Any] | None = None
+    try:
+        detail = await _call_endpoint(f"scripts/{int(script_id)}/")
+        if isinstance(detail, Mapping):
+            script_record = detail
+    except TacticalRMMAPIError:
+        script_record = None
+
+    body = _script_default_body(int(script_id), script_record)
+    response = await _call_endpoint(
+        f"agents/{clean_agent_id}/runscript/",
+        method="POST",
+        body=body,
+    )
+    return {"response": response, "request": body}
 
 
 async def fetch_agent_installed_software(agent_id: str) -> list[str]:

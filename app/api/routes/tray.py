@@ -31,6 +31,7 @@ from app.api.dependencies.auth import (
 )
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
+from app.repositories import assets as assets_repo
 from app.repositories import chat as chat_repo
 from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
@@ -53,9 +54,12 @@ from app.schemas.tray import (
     TrayTicketQuestionUpdate,
     TrayTicketSubmitRequest,
     TrayTicketSubmitResponse,
+    TrayTRMMScriptRunRequest,
+    TrayTRMMScriptRunResponse,
 )
 from app.services import audit as audit_service
 from app.services import matrix as matrix_service
+from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tickets as tickets_service
 from app.services import tray as tray_service
 from app.services import tray_ticket_questions as tq_service
@@ -181,6 +185,102 @@ async def get_device_config(
         env_allowlist=config.get("env_allowlist") or [],
         chat_enabled=chat_enabled,
         chat_client_mode=config.get("chat_client_mode") or None,
+    )
+
+
+def _find_trmm_script_node(
+    nodes: list[dict[str, Any]], script_id: int
+) -> dict[str, Any] | None:
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("type") or "").strip().lower()
+        try:
+            node_script_id = int(node.get("script_id") or 0)
+        except (TypeError, ValueError):
+            node_script_id = 0
+        if node_type == "trmm_script" and node_script_id == int(script_id):
+            return node
+        children = node.get("children")
+        if isinstance(children, list):
+            found = _find_trmm_script_node(children, script_id)
+            if found:
+                return found
+    return None
+
+
+@router.post(
+    "/trmm-script",
+    response_model=TrayTRMMScriptRunResponse,
+    summary="Run a configured Tactical RMM script for this tray device",
+)
+async def run_trmm_script(
+    payload: TrayTRMMScriptRunRequest,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayTRMMScriptRunResponse:
+    """Run a menu-approved Tactical RMM script against the linked asset.
+
+    The script ID must exist in this device's resolved tray menu. This prevents
+    a compromised tray client from asking MyPortal to execute arbitrary scripts
+    that an administrator did not expose in the menu designer.
+    """
+
+    config = await tray_service.resolve_config_for_device(device)
+    script_node = _find_trmm_script_node(
+        config.get("menu") or [], int(payload.script_id)
+    )
+    if not script_node:
+        raise HTTPException(
+            status_code=403, detail="TRMM script is not enabled for this tray device"
+        )
+
+    asset_id = device.get("asset_id")
+    if not asset_id:
+        raise HTTPException(
+            status_code=409, detail="Tray device is not linked to an asset"
+        )
+    asset = await assets_repo.get_asset_by_id(int(asset_id))
+    if not asset:
+        raise HTTPException(status_code=409, detail="Linked asset was not found")
+    trmm_agent_id = str(asset.get("tactical_asset_id") or "").strip()
+    if not trmm_agent_id:
+        raise HTTPException(
+            status_code=409, detail="Linked asset does not have a Tactical RMM agent ID"
+        )
+
+    try:
+        result = await tacticalrmm_service.run_script_on_agent(
+            trmm_agent_id, int(payload.script_id)
+        )
+    except tacticalrmm_service.TacticalRMMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except tacticalrmm_service.TacticalRMMAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    response = result.get("response") if isinstance(result, dict) else None
+    event_id = None
+    if isinstance(response, dict) and response.get("event_id") is not None:
+        try:
+            event_id = int(response["event_id"])
+        except (TypeError, ValueError):
+            event_id = None
+    log_info(
+        "Tray requested Tactical RMM script",
+        device_id=device.get("id"),
+        asset_id=asset_id,
+        trmm_agent_id=trmm_agent_id,
+        script_id=payload.script_id,
+        event_id=event_id,
+    )
+    return TrayTRMMScriptRunResponse(
+        status="queued",
+        script_id=int(payload.script_id),
+        script_name=str(
+            script_node.get("script_name") or script_node.get("label") or ""
+        )
+        or None,
+        event_id=event_id,
+        message="Tactical RMM script request submitted.",
     )
 
 

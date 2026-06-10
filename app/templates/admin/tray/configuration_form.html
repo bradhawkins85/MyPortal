@@ -76,10 +76,17 @@
             </div>
           </div>
           <p class="form-help" id="menu-node-error" hidden></p>
+          {% if trmm_scripts_error %}
+            <p class="form-help">Tactical RMM scripts could not be loaded: {{ trmm_scripts_error }}</p>
+          {% elif trmm_scripts %}
+            <p class="form-help">Tactical RMM scripts are loaded from the configured TRMM API and can be selected with the <code>TRMM_Script</code> node type.</p>
+          {% else %}
+            <p class="form-help">No Tactical RMM scripts were returned by the configured TRMM API.</p>
+          {% endif %}
           <p class="form-help">
             Configure each row with the fields you need. Types: <code>label</code>, <code>link</code>, <code>submenu</code>,
             <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>,
-            <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
+            <code>TRMM_Script</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
             Use <code>Level</code> to place nodes under the nearest preceding submenu.
           </p>
           <p class="form-help">
@@ -118,6 +125,7 @@
       const NAME_MAX = 128;
       const COLOR_MAX = 32;
       const DEFAULT_MENU_LABEL = 'Menu';
+      const TRMM_SCRIPTS = {{ (trmm_scripts or [])|tojson }};
 
       const NODE_TYPES = [
         'label',
@@ -127,10 +135,26 @@
         'env_var',
         'open_chat',
         'submit_ticket',
+        'TRMM_Script',
         'refresh_config',
         'separator',
         'quit'
       ];
+
+      function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        }[char]));
+      }
+
+      function getSelectedScript(row) {
+        const scriptID = Number(row.querySelector('[data-node-script-id]').value) || 0;
+        return TRMM_SCRIPTS.find((script) => Number(script.id) === scriptID) || null;
+      }
 
       function showError(message) {
         if (!errorEl) return;
@@ -160,6 +184,7 @@
         row.querySelector('[data-wrap-url]').hidden = type !== 'link';
         row.querySelector('[data-wrap-name]').hidden = type !== 'env_var';
         row.querySelector('[data-wrap-text]').hidden = type !== 'display_text';
+        row.querySelector('[data-wrap-script]').hidden = type !== 'TRMM_Script';
         row.querySelector('[data-wrap-color]').hidden = type === 'separator';
       }
 
@@ -169,6 +194,10 @@
         if (type === 'env_var') {
           const name = row.querySelector('[data-node-name]').value.trim();
           return name || '(no name)';
+        }
+        if (type === 'TRMM_Script') {
+          const script = getSelectedScript(row);
+          return script ? script.name : '(no TRMM script selected)';
         }
         const label = row.querySelector('[data-node-label]').value.trim();
         return label || '(no label)';
@@ -222,6 +251,13 @@
                 <label class="form-label" for="${rowId}-text">Display text (HTML)</label>
                 <textarea class="form-input" id="${rowId}-text" data-node-text rows="2"></textarea>
               </div>
+              <div class="form-field" data-wrap-script>
+                <label class="form-label" for="${rowId}-script">Tactical RMM script</label>
+                <select class="form-input" id="${rowId}-script" data-node-script-id>
+                  <option value="">Select a TRMM script…</option>
+                  ${TRMM_SCRIPTS.map((script) => `<option value="${script.id}">${escapeHtml(script.name || ('Script #' + script.id))}</option>`).join('')}
+                </select>
+              </div>
             </div>
             <div class="form-row">
               <div class="form-field" data-wrap-color style="max-width:12rem;">
@@ -247,6 +283,7 @@
         row.querySelector('[data-node-url]').value = node.url || '';
         row.querySelector('[data-node-name]').value = node.name || '';
         row.querySelector('[data-node-text]').value = node.text || '';
+        row.querySelector('[data-node-script-id]').value = node.script_id || '';
 
         const colorEl = row.querySelector('[data-node-color]');
         const colorPreview = row.querySelector('[data-node-color-preview]');
@@ -346,7 +383,9 @@
             url: typeof candidate.url === 'string' ? candidate.url : '',
             name: typeof candidate.name === 'string' ? candidate.name : '',
             text: typeof candidate.text === 'string' ? candidate.text : '',
-            color: typeof candidate.color === 'string' ? candidate.color : ''
+            color: typeof candidate.color === 'string' ? candidate.color : '',
+            script_id: Number(candidate.script_id) || 0,
+            script_name: typeof candidate.script_name === 'string' ? candidate.script_name : ''
           };
           rows.push({ node: rest, level });
           const children = Array.isArray(candidate.children) ? candidate.children : [];
@@ -382,7 +421,8 @@
             url: row.querySelector('[data-node-url]').value.trim(),
             name: row.querySelector('[data-node-name]').value.trim(),
             text: row.querySelector('[data-node-text]').value.trim(),
-            color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : ''
+            color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : '',
+            script_id: Number(row.querySelector('[data-node-script-id]').value) || 0
           };
         });
       }
@@ -398,6 +438,11 @@
           if (row.name) node.name = row.name;
           if (row.text) node.text = row.text;
           if (row.color) node.color = row.color;
+          if (row.type === 'TRMM_Script') {
+            if (row.script_id) node.script_id = row.script_id;
+            const script = TRMM_SCRIPTS.find((candidate) => Number(candidate.id) === Number(row.script_id));
+            if (script && script.name) node.script_name = String(script.name).slice(0, LABEL_MAX);
+          }
           let parent = null;
           for (let level = row.level - 1; level >= 0; level -= 1) {
             const candidate = lastAtLevel[level];

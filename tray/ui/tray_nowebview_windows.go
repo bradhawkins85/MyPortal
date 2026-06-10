@@ -234,6 +234,21 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 			}
 		}()
 
+	case "TRMM_Script", "trmm_script":
+		label := node.Label
+		if label == "" {
+			label = node.ScriptName
+		}
+		if label == "" {
+			label = "Run Tactical RMM Script"
+		}
+		item := systray.AddMenuItem(label, "Run a Tactical RMM script on this computer")
+		go func(menuNode api.MenuNode) {
+			for range item.ClickedCh {
+				go runTRMMScriptFromMenu(menuNode)
+			}
+		}(node)
+
 	case "refresh_config":
 		label := node.Label
 		if label == "" {
