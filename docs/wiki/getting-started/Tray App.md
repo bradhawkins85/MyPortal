@@ -130,9 +130,38 @@ Each entry in `payload_json` is a JSON object:
 A built-in default menu is returned when no configuration matches a
 device — see `app/services/tray.py::_default_menu()`.
 
+### 4.1 Company-conditional menu nodes
+
+Any menu node can include company visibility conditions. The server evaluates
+these conditions against the company assigned to the tray device before sending
+the menu payload to the agent. This lets admins expose a TRMM script, link,
+submenu, or any other node only to the companies where it applies.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `visible_company_ids` | array of integers | Optional allowlist. When present, the node is shown only when the device's `company_id` is in this list. |
+| `hidden_company_ids` | array of integers | Optional denylist. When present, the node is hidden when the device's `company_id` is in this list. |
+
+Example TRMM script node visible only for company IDs `12` and `34`:
+
+```json
+{
+  "type": "TRMM_Script",
+  "label": "Run onboarding script",
+  "script_id": 123,
+  "script_name": "Onboarding",
+  "visible_company_ids": [12, 34]
+}
+```
+
+The **Admin → Tray → Configurations** menu-node editor exposes these as
+comma-separated **Show only for company IDs** and **Hide for company IDs**
+fields on every row. Empty submenus are removed after their children are
+filtered out.
+
 ---
 
-### 4.1 Displaying an environment variable in the tray menu
+### 4.2 Displaying an environment variable in the tray menu
 
 Follow these steps to add a menu item that shows the value of a Windows or macOS environment variable when a user clicks it.
 
