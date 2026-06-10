@@ -155,9 +155,8 @@ Example TRMM script node visible only for company IDs `12` and `34`:
 ```
 
 The **Admin → Tray → Configurations** menu-node editor exposes these as
-comma-separated **Show only for company IDs** and **Hide for company IDs**
-fields on every row. Empty submenus are removed after their children are
-filtered out.
+**Show only for companies** and **Hide for companies** dropdown fields on
+every row. Empty submenus are removed after their children are filtered out.
 
 ---
 
