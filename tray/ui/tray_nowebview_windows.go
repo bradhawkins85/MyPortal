@@ -150,23 +150,39 @@ func buildMenu(cfg *api.ConfigResponse) {
 	logger.Debug("buildMenu: rendering version=%d, %d top-level node(s), chat_enabled=%t",
 		cfg.Version, len(cfg.Menu), cfg.ChatEnabled)
 	for _, node := range cfg.Menu {
-		addNode(node, cfg)
+		addNode(node, cfg, nil)
 	}
 }
 
-func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
+func addTrayMenuItem(parent *systray.MenuItem, label string, tooltip string) *systray.MenuItem {
+	if parent != nil {
+		return parent.AddSubMenuItem(label, tooltip)
+	}
+	return systray.AddMenuItem(label, tooltip)
+}
+
+func addTraySeparator(parent *systray.MenuItem) {
+	if parent == nil {
+		systray.AddSeparator()
+		return
+	}
+	item := parent.AddSubMenuItem("────────", "")
+	item.Disable()
+}
+
+func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuItem) {
 	switch node.Type {
 	case "separator":
-		systray.AddSeparator()
+		addTraySeparator(parent)
 
 	case "label":
-		item := systray.AddMenuItem(node.Label, "")
+		item := addTrayMenuItem(parent, node.Label, "")
 		if node.Color == "" {
 			item.Disable()
 		}
 
 	case "link":
-		item := systray.AddMenuItem(node.Label, node.URL)
+		item := addTrayMenuItem(parent, node.Label, node.URL)
 		go func(url string) {
 			for range item.ClickedCh {
 				openBrowser(url)
@@ -181,7 +197,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		if label == "" {
 			label = "Chat with helpdesk"
 		}
-		item := systray.AddMenuItem(label, "Open chat window")
+		item := addTrayMenuItem(parent, label, "Open chat window")
 		go func() {
 			for range item.ClickedCh {
 				openChatWindow("", cfg)
@@ -193,7 +209,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		if label == "" {
 			label = "Info"
 		}
-		item := systray.AddMenuItem(label, "")
+		item := addTrayMenuItem(parent, label, "")
 		go func(text string) {
 			for range item.ClickedCh {
 				showTextWindow("Information", text)
@@ -202,7 +218,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 
 	case "env_var":
 		label := resolveEnvVarMenuLabel(node)
-		item := systray.AddMenuItem(label, "Click to copy value")
+		item := addTrayMenuItem(parent, label, "Click to copy value")
 		go func(varName string) {
 			for range item.ClickedCh {
 				val := os.Getenv(varName)
@@ -214,12 +230,16 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		}(normalizeEnvVarName(node.Name))
 
 	case "submenu":
-		if node.Label != "" {
-			item := systray.AddMenuItem("▸ "+node.Label, "")
-			item.Disable()
+		label := node.Label
+		if label == "" {
+			label = "Menu"
 		}
+		item := addTrayMenuItem(parent, label, "")
 		for _, child := range node.Children {
-			addNode(*child, cfg)
+			if child == nil {
+				continue
+			}
+			addNode(*child, cfg, item)
 		}
 
 	case "submit_ticket":
@@ -227,7 +247,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		if label == "" {
 			label = "Submit Ticket"
 		}
-		item := systray.AddMenuItem(label, "Submit a support ticket")
+		item := addTrayMenuItem(parent, label, "Submit a support ticket")
 		go func() {
 			for range item.ClickedCh {
 				go openNewTicketDialog(cfg)
@@ -242,7 +262,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		if label == "" {
 			label = "Run Tactical RMM Script"
 		}
-		item := systray.AddMenuItem(label, "Run a Tactical RMM script on this computer")
+		item := addTrayMenuItem(parent, label, "Run a Tactical RMM script on this computer")
 		go func(menuNode api.MenuNode) {
 			for range item.ClickedCh {
 				go runTRMMScriptFromMenu(menuNode)
@@ -254,7 +274,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		if label == "" {
 			label = "Refresh"
 		}
-		item := systray.AddMenuItem(label, "Refresh tray menu from server")
+		item := addTrayMenuItem(parent, label, "Refresh tray menu from server")
 		go func() {
 			for range item.ClickedCh {
 				requestConfigRefresh()
@@ -266,7 +286,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse) {
 		if label == "" {
 			label = "Quit"
 		}
-		item := systray.AddMenuItem(label, "Exit MyPortal tray")
+		item := addTrayMenuItem(parent, label, "Exit MyPortal tray")
 		go func() {
 			for range item.ClickedCh {
 				systray.Quit()
