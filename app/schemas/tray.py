@@ -44,6 +44,7 @@ class TrayMenuNode(BaseModel):
     The ``type`` discriminator selects how the client renders the node:
 
     * ``label`` — non-interactive caption.
+    * ``app_version`` — non-interactive caption showing the tray app version.
     * ``link`` — opens ``url`` in the default browser.
     * ``submenu`` — has ``children``.
     * ``display_text`` — opens a popup with ``text`` (sanitised HTML).
