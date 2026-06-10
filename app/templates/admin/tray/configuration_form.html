@@ -87,7 +87,7 @@
             Configure each row with the fields you need. Types: <code>label</code>, <code>link</code>, <code>submenu</code>,
             <code>display_text</code>, <code>env_var</code>, <code>open_chat</code>, <code>submit_ticket</code>,
             <code>TRMM_Script</code>, <code>refresh_config</code>, <code>separator</code>, <code>quit</code>.
-            Use <code>Level</code> to place nodes under the nearest preceding submenu.
+            Use <code>Level</code> to place nodes under the nearest preceding submenu. Add company visibility conditions to show a node only for selected company IDs or hide it from selected company IDs.
           </p>
           <p class="form-help">
             See <a href="/docs/tray_app">docs/tray_app</a> for the schema.
@@ -124,6 +124,7 @@
       const URL_MAX = 500;
       const NAME_MAX = 128;
       const COLOR_MAX = 32;
+      const COMPANY_IDS_MAX = 500;
       const DEFAULT_MENU_LABEL = 'Menu';
       const TRMM_SCRIPTS = {{ (trmm_scripts or [])|tojson }};
 
@@ -154,6 +155,25 @@
       function getSelectedScript(row) {
         const scriptID = Number(row.querySelector('[data-node-script-id]').value) || 0;
         return TRMM_SCRIPTS.find((script) => Number(script.id) === scriptID) || null;
+      }
+
+      function parseCompanyIDs(value) {
+        const seen = new Set();
+        return String(value || '')
+          .split(',')
+          .map((part) => Number.parseInt(part.trim(), 10))
+          .filter((id) => {
+            if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          });
+      }
+
+      function normaliseCompanyIDsForInput(value) {
+        if (Array.isArray(value)) {
+          return parseCompanyIDs(value.join(',')).join(', ');
+        }
+        return parseCompanyIDs(value).join(', ');
       }
 
       function showError(message) {
@@ -260,6 +280,18 @@
               </div>
             </div>
             <div class="form-row">
+              <div class="form-field">
+                <label class="form-label" for="${rowId}-visible-companies">Show only for company IDs</label>
+                <input class="form-input" id="${rowId}-visible-companies" data-node-visible-company-ids maxlength="${COMPANY_IDS_MAX}" placeholder="e.g. 12, 34" />
+                <p class="form-help">Leave blank to show for every company unless hidden below.</p>
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="${rowId}-hidden-companies">Hide for company IDs</label>
+                <input class="form-input" id="${rowId}-hidden-companies" data-node-hidden-company-ids maxlength="${COMPANY_IDS_MAX}" placeholder="e.g. 56, 78" />
+                <p class="form-help">Use this to suppress menu items that do not apply to specific companies.</p>
+              </div>
+            </div>
+            <div class="form-row">
               <div class="form-field" data-wrap-color style="max-width:12rem;">
                 <label class="form-label" for="${rowId}-color">Text color</label>
                 <div style="display:flex; align-items:center; gap:0.5rem;">
@@ -284,6 +316,8 @@
         row.querySelector('[data-node-name]').value = node.name || '';
         row.querySelector('[data-node-text]').value = node.text || '';
         row.querySelector('[data-node-script-id]').value = node.script_id || '';
+        row.querySelector('[data-node-visible-company-ids]').value = normaliseCompanyIDsForInput(node.visible_company_ids);
+        row.querySelector('[data-node-hidden-company-ids]').value = normaliseCompanyIDsForInput(node.hidden_company_ids);
 
         const colorEl = row.querySelector('[data-node-color]');
         const colorPreview = row.querySelector('[data-node-color-preview]');
@@ -385,7 +419,9 @@
             text: typeof candidate.text === 'string' ? candidate.text : '',
             color: typeof candidate.color === 'string' ? candidate.color : '',
             script_id: Number(candidate.script_id) || 0,
-            script_name: typeof candidate.script_name === 'string' ? candidate.script_name : ''
+            script_name: typeof candidate.script_name === 'string' ? candidate.script_name : '',
+            visible_company_ids: parseCompanyIDs(candidate.visible_company_ids),
+            hidden_company_ids: parseCompanyIDs(candidate.hidden_company_ids)
           };
           rows.push({ node: rest, level });
           const children = Array.isArray(candidate.children) ? candidate.children : [];
@@ -422,7 +458,9 @@
             name: row.querySelector('[data-node-name]').value.trim(),
             text: row.querySelector('[data-node-text]').value.trim(),
             color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : '',
-            script_id: Number(row.querySelector('[data-node-script-id]').value) || 0
+            script_id: Number(row.querySelector('[data-node-script-id]').value) || 0,
+            visible_company_ids: parseCompanyIDs(row.querySelector('[data-node-visible-company-ids]').value),
+            hidden_company_ids: parseCompanyIDs(row.querySelector('[data-node-hidden-company-ids]').value)
           };
         });
       }
@@ -438,6 +476,8 @@
           if (row.name) node.name = row.name;
           if (row.text) node.text = row.text;
           if (row.color) node.color = row.color;
+          if (row.visible_company_ids.length) node.visible_company_ids = row.visible_company_ids;
+          if (row.hidden_company_ids.length) node.hidden_company_ids = row.hidden_company_ids;
           if (row.type === 'TRMM_Script') {
             if (row.script_id) node.script_id = row.script_id;
             const script = TRMM_SCRIPTS.find((candidate) => Number(candidate.id) === Number(row.script_id));
