@@ -19,6 +19,20 @@ func TestTrayTooltipIncludesAgentVersion(t *testing.T) {
 	}
 }
 
+func TestTrayTooltipDoesNotDuplicateVersionPrefix(t *testing.T) {
+	old := updater.AgentVersion
+	updater.AgentVersion = "v0.0.1.2"
+	t.Cleanup(func() { updater.AgentVersion = old })
+
+	got := trayTooltip(nil)
+	if strings.Contains(got, "vv0.0.1.2") {
+		t.Fatalf("trayTooltip() = %q, should not duplicate version prefix", got)
+	}
+	if !strings.Contains(got, "v0.0.1.2") {
+		t.Fatalf("trayTooltip() = %q, want it to include prefixed agent version", got)
+	}
+}
+
 func TestTrayTooltipUsesBrandingDisplayName(t *testing.T) {
 	old := updater.AgentVersion
 	updater.AgentVersion = "9.8.7"
