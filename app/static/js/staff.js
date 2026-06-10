@@ -441,6 +441,7 @@
     const offboardingDateField = getField('offboarding-date');
     const offboardingTimeField = getField('offboarding-time');
     const offboardingTimezoneField = getField('offboarding-timezone');
+    const offboardingTypeField = getField('offboarding-type');
     const offboardingReasonNotesField = getField('offboarding-reason-notes');
     const offboardingOutOfOfficeField = getField('offboarding-out-of-office');
     const offboardingEmailForwardToField = getField('offboarding-email-forward-to');
@@ -703,11 +704,20 @@
     }
 
     function buildStaffOptions(excludeStaffId) {
+      const seen = new Set();
       return activeStaffForOffboarding
         .filter((s) => String(s.id) !== String(excludeStaffId))
+        .filter((s) => {
+          const email = String(s.email || '').trim().toLowerCase();
+          const key = email || String(s.id);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return Boolean(email);
+        })
         .map((s) => {
           const nameParts = [s.first_name, s.last_name].filter(Boolean);
-          const label = nameParts.length ? `${nameParts.join(' ')} (${s.email})` : s.email;
+          const email = String(s.email || '').trim();
+          const label = nameParts.length ? `${nameParts.join(' ')} (${email})` : email;
           return { value: s.id, label };
         });
     }
@@ -733,12 +743,14 @@
         || !offboardingDateField
         || !offboardingTimeField
         || !offboardingTimezoneField
+        || !offboardingTypeField
         || !offboardingReasonNotesField
       ) {
         return;
       }
       offboardingStaffIdField.value = String(staffId);
       offboardingReasonNotesField.value = '';
+      offboardingTypeField.value = 'Resignation';
       offboardingTimezoneField.value = getBrowserTimezone() || '';
       if (offboardingOutOfOfficeField) offboardingOutOfOfficeField.value = '';
       setDefaultOffboardingDateTime();
@@ -1047,11 +1059,12 @@
         const staffId = offboardingStaffIdField ? offboardingStaffIdField.value : '';
         const date = offboardingDateField ? offboardingDateField.value : '';
         const time = offboardingTimeField ? offboardingTimeField.value : '';
+        const offboardingType = offboardingTypeField ? offboardingTypeField.value.trim() : '';
         const reasonNotes = offboardingReasonNotesField ? offboardingReasonNotesField.value.trim() : '';
         const timezone = offboardingTimezoneField ? offboardingTimezoneField.value.trim() : '';
         const requestedAt = date && time ? `${date}T${time}` : '';
-        if (!staffId || !date || !time || !timezone || !reasonNotes) {
-          setInlineError(offboardingFormError, 'Offboarding date, time, timezone, and reason/notes are required.');
+        if (!staffId || !date || !time || !timezone || !offboardingType) {
+          setInlineError(offboardingFormError, 'Offboarding date, time, timezone, and type are required.');
           return;
         }
         const outOfOfficeMessage = offboardingOutOfOfficeField ? offboardingOutOfOfficeField.value.trim() || null : null;
@@ -1065,10 +1078,11 @@
           await requestJson(`/api/staff/${staffId}/offboarding/request`, {
             method: 'POST',
             body: JSON.stringify({
-              reason: reasonNotes,
+              offboardingType,
+              reason: offboardingType,
               requestedAt,
               requestedTimezone: timezone,
-              notes: null,
+              notes: reasonNotes || null,
               outOfOfficeMessage,
               emailForwardToStaffId,
               mailboxGrantStaffIds,
