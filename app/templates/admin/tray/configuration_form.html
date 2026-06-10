@@ -124,9 +124,9 @@
       const URL_MAX = 500;
       const NAME_MAX = 128;
       const COLOR_MAX = 32;
-      const COMPANY_IDS_MAX = 500;
       const DEFAULT_MENU_LABEL = 'Menu';
       const TRMM_SCRIPTS = {{ (trmm_scripts or [])|tojson }};
+      const TRAY_COMPANIES = {{ (companies or [])|tojson }};
 
       const NODE_TYPES = [
         'label',
@@ -169,11 +169,37 @@
           });
       }
 
-      function normaliseCompanyIDsForInput(value) {
-        if (Array.isArray(value)) {
-          return parseCompanyIDs(value.join(',')).join(', ');
-        }
-        return parseCompanyIDs(value).join(', ');
+      function getCompanyName(companyID) {
+        const company = TRAY_COMPANIES.find((candidate) => Number(candidate.id) === Number(companyID));
+        return company ? String(company.name || `Company #${companyID}`) : `Unknown company #${companyID}`;
+      }
+
+      function createCompanySelectOptions(selectedCompanyIDs = []) {
+        const selectedValue = Array.isArray(selectedCompanyIDs) ? selectedCompanyIDs.join(',') : selectedCompanyIDs;
+        const selectedSet = new Set(parseCompanyIDs(selectedValue));
+        const knownIDs = new Set(TRAY_COMPANIES.map((company) => Number(company.id)));
+        const options = TRAY_COMPANIES.map((company) => {
+          const id = Number(company.id);
+          const label = escapeHtml(String(company.name || `Company #${id}`));
+          const selected = selectedSet.has(id) ? ' selected' : '';
+          return `<option value="${id}"${selected}>${label}</option>`;
+        });
+
+        selectedSet.forEach((id) => {
+          if (knownIDs.has(id)) return;
+          options.push(`<option value="${id}" selected>${escapeHtml(getCompanyName(id))}</option>`);
+        });
+
+        return options.join('');
+      }
+
+      function getSelectedCompanyIDs(selectEl) {
+        return parseCompanyIDs(Array.from(selectEl.selectedOptions).map((option) => option.value).join(','));
+      }
+
+      function setSelectedCompanyIDs(selectEl, companyIDs) {
+        const selectedIDs = parseCompanyIDs(Array.isArray(companyIDs) ? companyIDs.join(',') : companyIDs);
+        selectEl.innerHTML = createCompanySelectOptions(selectedIDs);
       }
 
       function showError(message) {
@@ -281,14 +307,14 @@
             </div>
             <div class="form-row">
               <div class="form-field">
-                <label class="form-label" for="${rowId}-visible-companies">Show only for company IDs</label>
-                <input class="form-input" id="${rowId}-visible-companies" data-node-visible-company-ids maxlength="${COMPANY_IDS_MAX}" placeholder="e.g. 12, 34" />
-                <p class="form-help">Leave blank to show for every company unless hidden below.</p>
+                <label class="form-label" for="${rowId}-visible-companies">Show only for companies</label>
+                <select class="form-input" id="${rowId}-visible-companies" data-node-visible-company-ids multiple size="6"></select>
+                <p class="form-help">Leave empty to show for every company unless hidden below. Hold Ctrl (Windows) or Cmd (Mac) to select multiple companies.</p>
               </div>
               <div class="form-field">
-                <label class="form-label" for="${rowId}-hidden-companies">Hide for company IDs</label>
-                <input class="form-input" id="${rowId}-hidden-companies" data-node-hidden-company-ids maxlength="${COMPANY_IDS_MAX}" placeholder="e.g. 56, 78" />
-                <p class="form-help">Use this to suppress menu items that do not apply to specific companies.</p>
+                <label class="form-label" for="${rowId}-hidden-companies">Hide for companies</label>
+                <select class="form-input" id="${rowId}-hidden-companies" data-node-hidden-company-ids multiple size="6"></select>
+                <p class="form-help">Select companies where this menu item should be suppressed.</p>
               </div>
             </div>
             <div class="form-row">
@@ -316,8 +342,8 @@
         row.querySelector('[data-node-name]').value = node.name || '';
         row.querySelector('[data-node-text]').value = node.text || '';
         row.querySelector('[data-node-script-id]').value = node.script_id || '';
-        row.querySelector('[data-node-visible-company-ids]').value = normaliseCompanyIDsForInput(node.visible_company_ids);
-        row.querySelector('[data-node-hidden-company-ids]').value = normaliseCompanyIDsForInput(node.hidden_company_ids);
+        setSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]'), node.visible_company_ids);
+        setSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'), node.hidden_company_ids);
 
         const colorEl = row.querySelector('[data-node-color]');
         const colorPreview = row.querySelector('[data-node-color-preview]');
@@ -459,8 +485,8 @@
             text: row.querySelector('[data-node-text]').value.trim(),
             color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : '',
             script_id: Number(row.querySelector('[data-node-script-id]').value) || 0,
-            visible_company_ids: parseCompanyIDs(row.querySelector('[data-node-visible-company-ids]').value),
-            hidden_company_ids: parseCompanyIDs(row.querySelector('[data-node-hidden-company-ids]').value)
+            visible_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]')),
+            hidden_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'))
           };
         });
       }
