@@ -10,12 +10,18 @@ import (
 const defaultTrayTooltip = "MyPortal Helpdesk"
 
 // trayTooltip returns the system-tray hover text with the running app version.
-func trayTooltip() string {
+func trayTooltip(cfg *api.ConfigResponse) string {
+	displayName := defaultTrayTooltip
+	if cfg != nil {
+		if brandedName := strings.TrimSpace(cfg.BrandingDisplayName); brandedName != "" {
+			displayName = brandedName
+		}
+	}
 	version := strings.TrimSpace(updater.AgentVersion)
 	if version == "" {
-		return defaultTrayTooltip
+		return displayName
 	}
-	return defaultTrayTooltip + " v" + version
+	return displayName + " v" + version
 }
 
 // versionMenuLabel returns the visible label for an app_version menu node.

@@ -78,6 +78,7 @@ class TrayConfigResponse(BaseModel):
     menu: list[TrayMenuNode]
     display_text: Optional[str] = None
     branding_icon_url: Optional[str] = None
+    branding_display_name: Optional[str] = Field(default=None, max_length=100)
     env_allowlist: list[str] = Field(default_factory=list)
     chat_enabled: bool = False
     # Controls how the tray client opens chat windows.
