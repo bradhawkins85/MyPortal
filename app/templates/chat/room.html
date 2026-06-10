@@ -7,6 +7,11 @@
   <div class="header-actions">
     {% if room.status == 'open' %}
       {% if is_staff %}
+        {% if room.linked_ticket_id %}
+          <a class="button button--sm button--primary" href="/admin/tickets/{{ room.linked_ticket_id }}">Open Ticket #{{ room.linked_ticket_id }}</a>
+        {% else %}
+          <button class="button button--sm button--primary" id="btn-create-ticket" data-room-id="{{ room.id }}">Chat to Ticket</button>
+        {% endif %}
         <button class="button button--sm" id="btn-join-room" data-room-id="{{ room.id }}">Join room</button>
         <button class="button button--sm button--secondary" id="btn-assign-room" data-room-id="{{ room.id }}"
                 data-assigned="{{ room.assigned_tech_user_id | default('') }}"
@@ -51,6 +56,12 @@
       <em class="chat-meta-bar__muted">Unassigned</em>
     {% endif %}
   </span>
+  {% if room.linked_ticket_id %}
+  <span class="chat-meta-bar__item">
+    <strong>Ticket:</strong>
+    <a class="chat-meta-bar__link" href="/admin/tickets/{{ room.linked_ticket_id }}">#{{ room.linked_ticket_id }}</a>
+  </span>
+  {% endif %}
   {% if participants %}
   <span class="chat-meta-bar__item">
     <strong>Technicians:</strong>
@@ -157,6 +168,8 @@
 .chat-meta-bar { display: flex; gap: 1.5rem; padding: 0.5rem 1rem; background: #1e293b; border-bottom: 1px solid #334155; font-size: 0.875rem; color: #e2e8f0; flex-wrap: wrap; }
 .chat-meta-bar__item { display: flex; align-items: center; gap: 0.4rem; }
 .chat-meta-bar__muted { color: #94a3b8; font-style: italic; }
+.chat-meta-bar__link { color: #bfdbfe; font-weight: 600; text-decoration: none; }
+.chat-meta-bar__link:hover { text-decoration: underline; }
 .chat-layout { display: flex; flex-direction: column; height: calc(100vh - 12rem); }
 .chat-messages { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
 .chat-message { padding: 0.5rem 0.75rem; border-radius: 0.5rem; background: var(--color-surface-raised, #f8fafc); max-width: 80%; color: var(--color-text, #111827); }
@@ -392,6 +405,34 @@
       }
     } catch {}
   }, 5000);
+
+  document.getElementById('btn-create-ticket')?.addEventListener('click', async function() {
+    if (!confirm('Create a ticket from this chat transcript? Public replies will sync while the chat remains open.')) return;
+    this.disabled = true;
+    const originalText = this.textContent;
+    this.textContent = 'Creating…';
+    try {
+      const resp = await fetch(`/api/chat/rooms/${roomId}/ticket`, {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}, body: '{}',
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const ticketId = data.linked_ticket_id || data.ticket?.id;
+        showPortalToast(`Ticket #${ticketId} created from chat.`, 'success');
+        if (ticketId) window.location.href = `/admin/tickets/${ticketId}`;
+        else location.reload();
+      } else {
+        const err = await resp.json();
+        showPortalToast(err.detail || 'Failed to create ticket', 'error');
+        this.disabled = false;
+        this.textContent = originalText;
+      }
+    } catch(err) {
+      showPortalToast('Network error: ' + err.message, 'error');
+      this.disabled = false;
+      this.textContent = originalText;
+    }
+  });
 
   document.getElementById('btn-join-room')?.addEventListener('click', async function() {
     this.disabled = true;

@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import chat as chat_repo
 from app.services import matrix as matrix_service
+from app.services import chat_ticket_sync
 
 _settings = get_settings()
 _running = False
@@ -58,7 +59,7 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             if not sender_display_name:
                 sender_display_name = await matrix_service.get_display_name(sender)
 
-            await chat_repo.add_message(
+            message = await chat_repo.add_message(
                 room_id=room["id"],
                 matrix_event_id=event_id,
                 sender_matrix_id=sender,
@@ -70,6 +71,14 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             )
 
             await chat_repo.update_room(room["id"], last_message_at=sent_at, updated_at=sent_at)
+            try:
+                await chat_ticket_sync.sync_chat_message_to_ticket(
+                    room=room,
+                    message=message,
+                    author_id=portal_user_id,
+                )
+            except Exception as exc:
+                log_error("Failed to sync Matrix chat message to linked ticket", room_id=room["id"], error=str(exc))
 
         member_events = [e for e in events if e.get("type") == "m.room.member"]
         for event in member_events:
