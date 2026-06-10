@@ -731,29 +731,37 @@ async def start_device_chat(
 
     subject = (payload.subject or "Tray support chat").strip()[:500]
 
-    # Reuse Matrix room creation + chat_rooms persistence so the message
-    # appears in the standard /chat experience.
-    try:
-        matrix_resp = await matrix_service.create_room(
-            name=subject,
-            topic=f"Tray-initiated support chat: {subject}",
+    # Reconnect technicians to the device's current open chat first. User-
+    # initiated tray chats are linked to the device, so this prevents creating
+    # duplicate Matrix rooms while an active support conversation already
+    # exists.
+    room = await chat_repo.get_open_room_by_device_id(int(device["id"]))
+    matrix_room_id = str((room or {}).get("matrix_room_id") or "")
+
+    if not room:
+        # Reuse Matrix room creation + chat_rooms persistence so the message
+        # appears in the standard /chat experience.
+        try:
+            matrix_resp = await matrix_service.create_room(
+                name=subject,
+                topic=f"Tray-initiated support chat: {subject}",
+            )
+            matrix_room_id = matrix_resp.get("room_id", "")
+        except Exception as exc:
+            log_error("Failed to create Matrix room for tray chat", error=str(exc))
+            raise HTTPException(status_code=502, detail="Failed to create chat room") from exc
+
+        room = await chat_repo.create_room(
+            subject=subject,
+            matrix_room_id=matrix_room_id,
+            room_alias=matrix_resp.get("room_alias"),
+            created_by_user_id=int(current_user["id"]),
+            company_id=int(device.get("company_id") or 0),
+            linked_ticket_id=None,
         )
-        matrix_room_id = matrix_resp.get("room_id", "")
-    except Exception as exc:
-        log_error("Failed to create Matrix room for tray chat", error=str(exc))
-        raise HTTPException(status_code=502, detail="Failed to create chat room") from exc
 
-    room = await chat_repo.create_room(
-        subject=subject,
-        matrix_room_id=matrix_room_id,
-        room_alias=matrix_resp.get("room_alias"),
-        created_by_user_id=int(current_user["id"]),
-        company_id=int(device.get("company_id") or 0),
-        linked_ticket_id=None,
-    )
-
-    # Link the room back to its device so the UI can highlight it.
-    await _attach_room_to_device(int(room["id"]), int(device["id"]))
+        # Link the room back to its device so the UI can highlight it.
+        await _attach_room_to_device(int(room["id"]), int(device["id"]))
 
     initial_message = (payload.message or "").strip()[:4000]
     initiator_name = current_user.get("display_name") or current_user.get("email")
