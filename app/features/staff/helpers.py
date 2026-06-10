@@ -56,6 +56,14 @@ async def _load_staff_context(
     return user, membership, company, staff_permission, company_id, None
 
 
+def _company_email_domain_set(company_email_domains: list[str]) -> set[str]:
+    return {
+        str(domain).strip().lower()
+        for domain in company_email_domains
+        if str(domain).strip()
+    }
+
+
 def _staff_member_matches_company_email_domains(
     staff_member: dict[str, Any], company_email_domains: list[str]
 ) -> bool:
@@ -67,11 +75,7 @@ def _staff_member_matches_company_email_domains(
     email domain list.
     """
 
-    allowed_domains = {
-        str(domain).strip().lower()
-        for domain in company_email_domains
-        if str(domain).strip()
-    }
+    allowed_domains = _company_email_domain_set(company_email_domains)
     if not allowed_domains:
         return True
     email = str(staff_member.get("email") or "").strip().lower()
@@ -83,4 +87,42 @@ def _staff_member_matches_company_email_domains(
     return domain in allowed_domains
 
 
-__all__ = ["_load_staff_context", "_staff_member_matches_company_email_domains"]
+def _staff_member_is_offboarding_mail_choice(
+    staff_member: dict[str, Any], company_email_domains: list[str]
+) -> bool:
+    """Return whether staff can be used as an offboarding mail target."""
+
+    email = str(staff_member.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        return False
+    allowed_domains = _company_email_domain_set(company_email_domains)
+    if not allowed_domains:
+        return True
+    _, domain = email.rsplit("@", 1)
+    return domain in allowed_domains
+
+
+def _filter_staff_for_offboarding_choices(
+    staff_members: list[dict[str, Any]], company_email_domains: list[str]
+) -> list[dict[str, Any]]:
+    """Return unique active staff choices that match company email domains."""
+
+    filtered: list[dict[str, Any]] = []
+    seen_emails: set[str] = set()
+    for staff_member in staff_members:
+        if not _staff_member_is_offboarding_mail_choice(staff_member, company_email_domains):
+            continue
+        email = str(staff_member.get("email") or "").strip().lower()
+        if email in seen_emails:
+            continue
+        seen_emails.add(email)
+        filtered.append(staff_member)
+    return filtered
+
+
+__all__ = [
+    "_filter_staff_for_offboarding_choices",
+    "_load_staff_context",
+    "_staff_member_is_offboarding_mail_choice",
+    "_staff_member_matches_company_email_domains",
+]
