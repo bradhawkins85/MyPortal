@@ -48,13 +48,7 @@ func openNewTicketWindow(cfg *api.ConfigResponse) {
 }
 
 func showOSNotification(title, body string) {
-	// Use PowerShell toast for Windows 10+.
-	script := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$xml.GetElementsByTagName('text')[0].InnerText = '` + title + `'
-$xml.GetElementsByTagName('text')[1].InnerText = '` + body + `'
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyPortal').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
-	cmd := exec.Command("powershell", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", windowsToastEncodedCommand(title, body))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
 }
