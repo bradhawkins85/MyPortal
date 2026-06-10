@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -50,6 +51,11 @@ var (
 	gPortalURL string
 	gDeviceUID string
 	gAuthToken string
+
+	// trayReady is set once systray has created its hidden window and notify
+	// icon. The service can replay config_changed immediately after IPC connect,
+	// which may happen before systray.Run finishes native initialization.
+	trayReady atomic.Bool
 )
 
 func main() {
@@ -130,6 +136,7 @@ func defaultConfig() *api.ConfigResponse {
 }
 
 func onTrayReady() {
+	trayReady.Store(true)
 	systray.SetTitle("MyPortal")
 	systray.SetTooltip(trayTooltip(gConfig))
 	// Use a simple built-in icon; real icon bytes loaded from branding URL in Phase 6.
@@ -137,6 +144,7 @@ func onTrayReady() {
 }
 
 func onTrayExit() {
+	trayReady.Store(false)
 	if gIPCConn != nil {
 		gIPCConn.Close()
 	}
@@ -343,7 +351,11 @@ func handleIPCMessages(conn net.Conn) {
 			// Re-read cached config. Menu rebuild on config_changed is deferred
 			// until a systray library version that exposes ResetMenu is adopted.
 			gConfig = loadCachedConfig()
-			systray.SetTooltip(trayTooltip(gConfig))
+			if trayReady.Load() {
+				systray.SetTooltip(trayTooltip(gConfig))
+			} else {
+				logger.Debug("config_changed: received before tray ready; deferring tooltip update")
+			}
 
 		case "show_notification":
 			var n struct {
