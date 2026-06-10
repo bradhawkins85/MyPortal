@@ -13,9 +13,20 @@ func TestTrayTooltipIncludesAgentVersion(t *testing.T) {
 	updater.AgentVersion = "9.8.7"
 	t.Cleanup(func() { updater.AgentVersion = old })
 
-	got := trayTooltip()
+	got := trayTooltip(nil)
 	if !strings.Contains(got, "9.8.7") {
 		t.Fatalf("trayTooltip() = %q, want it to include agent version", got)
+	}
+}
+
+func TestTrayTooltipUsesBrandingDisplayName(t *testing.T) {
+	old := updater.AgentVersion
+	updater.AgentVersion = "9.8.7"
+	t.Cleanup(func() { updater.AgentVersion = old })
+
+	got := trayTooltip(&api.ConfigResponse{BrandingDisplayName: "Acme Support"})
+	if !strings.Contains(got, "Acme Support") {
+		t.Fatalf("trayTooltip() = %q, want it to include branded display name", got)
 	}
 }
 

@@ -44,7 +44,7 @@ func runUI() {
 
 func onTrayReady() {
 	systray.SetTitle("MyPortal")
-	systray.SetTooltip(trayTooltip())
+	systray.SetTooltip(trayTooltip(gConfig))
 	// Set the default icon immediately so the tray appears without delay,
 	// then fetch the branded icon from the portal in the background.
 	systray.SetIcon(defaultIconICO())
@@ -93,6 +93,8 @@ func fetchAndSetIcon() {
 // A 60-second cooldown prevents restart storms if multiple config_changed
 // events arrive in quick succession.
 func handleConfigChanged(cfg *api.ConfigResponse) {
+	systray.SetTooltip(trayTooltip(cfg))
+
 	// Always refresh the icon — this can be updated without a restart.
 	go fetchAndSetIcon()
 

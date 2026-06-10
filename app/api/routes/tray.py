@@ -183,6 +183,7 @@ async def get_device_config(
         menu=config.get("menu") or [],
         display_text=config.get("display_text"),
         branding_icon_url=config.get("branding_icon_url"),
+        branding_display_name=config.get("branding_display_name"),
         env_allowlist=config.get("env_allowlist") or [],
         chat_enabled=chat_enabled,
         chat_client_mode=config.get("chat_client_mode") or None,
