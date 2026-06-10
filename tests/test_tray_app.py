@@ -549,6 +549,67 @@ def test_resolve_config_precedence(tray_db, run):
     assert cfg_company["menu"][0]["label"] == "company-99"
 
 
+def test_resolve_config_filters_menu_nodes_by_company(tray_db, run):
+    import json
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    run(
+        repo.create_menu_config(
+            name="company-conditional-nodes",
+            scope="global",
+            scope_ref_id=None,
+            payload_json=json.dumps(
+                [
+                    {"type": "label", "label": "everyone"},
+                    {
+                        "type": "TRMM_Script",
+                        "label": "company 42 script",
+                        "script_id": 10,
+                        "visible_company_ids": [42],
+                    },
+                    {
+                        "type": "link",
+                        "label": "hidden from 12345",
+                        "url": "https://example.com",
+                        "hidden_company_ids": [12345],
+                    },
+                    {
+                        "type": "submenu",
+                        "label": "empty after filtering",
+                        "children": [
+                            {
+                                "type": "link",
+                                "label": "only company 7",
+                                "url": "https://example.com/7",
+                                "visible_company_ids": [7],
+                            }
+                        ],
+                    },
+                ]
+            ),
+            display_text=None,
+            env_allowlist=None,
+            branding_icon_url=None,
+            enabled=True,
+            created_by_user_id=None,
+        )
+    )
+
+    cfg_42 = run(svc.resolve_config_for_device({"company_id": 42, "asset_id": None}))
+    labels_42 = [node.get("label") for node in cfg_42["menu"]]
+    assert labels_42 == ["everyone", "company 42 script", "hidden from 12345"]
+
+    cfg_12345 = run(svc.resolve_config_for_device({"company_id": 12345, "asset_id": None}))
+    labels_12345 = [node.get("label") for node in cfg_12345["menu"]]
+    assert labels_12345 == ["everyone"]
+
+    cfg_7 = run(svc.resolve_config_for_device({"company_id": 7, "asset_id": None}))
+    labels_7 = [node.get("label") for node in cfg_7["menu"]]
+    assert labels_7 == ["everyone", "hidden from 12345", "empty after filtering"]
+    assert cfg_7["menu"][-1]["children"][0]["label"] == "only company 7"
+
+
 # ---------------------------------------------------------------------------
 # HTTP endpoints (TestClient) — exercises auth middleware too
 # ---------------------------------------------------------------------------
