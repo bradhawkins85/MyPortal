@@ -32,6 +32,15 @@
           aria-label="Search assets"
           data-table-filter="assets-table"
         />
+        {% if can_export_assets %}
+          <button
+            type="button"
+            class="button button--ghost asset-export-button"
+            data-export-csv="assets-table"
+          >
+            Export CSV
+          </button>
+        {% endif %}
         <div class="asset-columns" data-asset-columns>
           <button type="button" class="button button--ghost asset-columns__toggle" data-columns-toggle>
             <span>Columns</span>
