@@ -1210,11 +1210,10 @@ async def _require_helpdesk_page(request: Request) -> tuple[dict[str, Any] | Non
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return None, redirect
-    has_access = await _has_menu_page_access(request, user, "menu.tickets", write=True)
-    if not has_access:
+    if not await _is_helpdesk_technician(user, request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="All tickets permission required",
+            detail="Helpdesk technician privileges required",
         )
     return user, None
 
@@ -1853,6 +1852,9 @@ async def _has_menu_page_access(request: Request, user: Mapping[str, Any], key: 
         try:
             membership = await user_company_repo.get_user_company(int(user["id"]), int(active_company_id))
         except (TypeError, ValueError):
+            membership = None
+        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            log_error("Failed to load active membership for menu access", error=str(exc))
             membership = None
         if membership is not None:
             request.state.active_membership = membership
@@ -7039,20 +7041,48 @@ async def _render_portal_tickets_page(
     search_value = (search_term or "").strip()
     effective_search = search_value or None
 
+    has_all_ticket_access = await _has_menu_page_access(request, user, "menu.tickets", write=True)
+    has_platform_ticket_access = await _is_helpdesk_technician(user, request)
+
     try:
-        tickets = await tickets_repo.list_tickets_for_user(
-            user_id,
-            company_ids=active_company_ids or None,
-            status=selected_status_slugs,
-            search=effective_search,
-            limit=200,
-        )
-        total_count = await tickets_repo.count_tickets_for_user(
-            user_id,
-            company_ids=active_company_ids or None,
-            status=selected_status_slugs,
-            search=effective_search,
-        )
+        if has_platform_ticket_access:
+            tickets = await tickets_repo.list_tickets_in_companies(
+                company_ids=None,
+                status=selected_status_slugs,
+                search=effective_search,
+                limit=200,
+            )
+            total_count = await tickets_repo.count_tickets_in_companies(
+                company_ids=None,
+                status=selected_status_slugs,
+                search=effective_search,
+            )
+        elif has_all_ticket_access:
+            tickets = await tickets_repo.list_tickets_in_companies(
+                company_ids=active_company_ids,
+                status=selected_status_slugs,
+                search=effective_search,
+                limit=200,
+            )
+            total_count = await tickets_repo.count_tickets_in_companies(
+                company_ids=active_company_ids,
+                status=selected_status_slugs,
+                search=effective_search,
+            )
+        else:
+            tickets = await tickets_repo.list_tickets_for_user(
+                user_id,
+                company_ids=active_company_ids or None,
+                status=selected_status_slugs,
+                search=effective_search,
+                limit=200,
+            )
+            total_count = await tickets_repo.count_tickets_for_user(
+                user_id,
+                company_ids=active_company_ids or None,
+                status=selected_status_slugs,
+                search=effective_search,
+            )
     except Exception as exc:  # pragma: no cover - defensive fallback
         log_error("Failed to load portal tickets", error=str(exc))
         tickets = []
@@ -7092,6 +7122,15 @@ async def _render_portal_tickets_page(
             if hasattr(created_at, "astimezone")
             else ""
         )
+        requester_name = " ".join(
+            part
+            for part in (
+                str(record.get("requester_first_name") or "").strip(),
+                str(record.get("requester_last_name") or "").strip(),
+            )
+            if part
+        )
+        requester_label = requester_name or str(record.get("requester_email") or "").strip() or None
         formatted_tickets.append(
             {
                 "id": record.get("id"),
@@ -7102,6 +7141,7 @@ async def _render_portal_tickets_page(
                 "priority_label": priority_label,
                 "company_name": company_name,
                 "company_id": record.get("company_id"),
+                "requester_label": requester_label,
                 "updated_iso": updated_iso,
                 "created_iso": created_iso,
             }
@@ -7214,7 +7254,31 @@ async def _render_portal_ticket_detail(
             log_error("Failed to determine ticket watcher state", error=str(exc))
             is_watcher = False
 
+    has_company_ticket_access = False
     if not (has_helpdesk_access or is_super_admin or is_requester or is_watcher):
+        has_all_ticket_access = await _has_menu_page_access(request, user, "menu.tickets", write=True)
+        if has_all_ticket_access:
+            available_companies = await company_access.list_accessible_companies(user)
+            active_company_id = getattr(request.state, "active_company_id", None)
+            allowed_company_ids: set[int] = set()
+            if active_company_id is not None:
+                try:
+                    allowed_company_ids.add(int(active_company_id))
+                except (TypeError, ValueError):
+                    pass
+            if not allowed_company_ids:
+                for entry in available_companies:
+                    try:
+                        allowed_company_ids.add(int(entry.get("company_id")))
+                    except (TypeError, ValueError):
+                        continue
+            try:
+                ticket_company_id = int(ticket.get("company_id"))
+            except (TypeError, ValueError):
+                ticket_company_id = 0
+            has_company_ticket_access = ticket_company_id in allowed_company_ids
+
+    if not (has_helpdesk_access or is_super_admin or is_requester or is_watcher or has_company_ticket_access):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))

@@ -40,7 +40,9 @@ def test_portal_tickets_template_hides_priority_company_and_auto_applies_status(
     assert 'data-column-key="company"' not in template
     assert 'data-label="Priority"' not in template
     assert 'data-label="Company"' not in template
-    assert 'colspan="4"' in template
+    assert 'data-column-key="requester"' in template
+    assert 'data-label="Requestor"' in template
+    assert 'colspan="5"' in template
 
 
 @pytest.mark.anyio("asyncio")
@@ -115,6 +117,7 @@ async def test_render_portal_tickets_page_formats_results(monkeypatch):
             "priority_label": "High",
             "company_name": "Example",
             "company_id": 22,
+            "requester_label": None,
             "updated_iso": "2025-01-10T09:30:00+00:00",
             "created_iso": "2025-01-09T16:45:00+00:00",
         }
@@ -124,6 +127,60 @@ async def test_render_portal_tickets_page_formats_results(monkeypatch):
     ]
     option_labels = {option["value"]: option["label"] for option in extra["status_options"]}
     assert option_labels == {"open": "Open", "closed": "Closed"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_render_portal_tickets_page_company_all_scope_includes_requestor(monkeypatch):
+    request = _make_request()
+    request.state.active_company_id = 22
+    request.state.active_membership = {"menu_permissions": {"menu.tickets": "write"}}
+    user = {"id": 5, "company_id": 22, "is_super_admin": False}
+
+    statuses = [TicketStatusDefinition(tech_status="open", tech_label="Open", public_status="Open")]
+    listed_tickets = [
+        {
+            "id": 42,
+            "subject": "Shared company ticket",
+            "status": "open",
+            "priority": "normal",
+            "company_id": 22,
+            "requester_first_name": "Riley",
+            "requester_last_name": "Stone",
+            "requester_email": "riley@example.com",
+            "updated_at": datetime(2025, 1, 11, 9, 30, tzinfo=timezone.utc),
+            "created_at": datetime(2025, 1, 10, 16, 45, tzinfo=timezone.utc),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main.company_access,
+        "list_accessible_companies",
+        AsyncMock(return_value=[{"company_id": 22, "company_name": "Example"}]),
+    )
+    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=False))
+    company_list_mock = AsyncMock(return_value=listed_tickets)
+    company_count_mock = AsyncMock(return_value=1)
+    user_list_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(main.tickets_repo, "list_tickets_in_companies", company_list_mock)
+    monkeypatch.setattr(main.tickets_repo, "count_tickets_in_companies", company_count_mock)
+    monkeypatch.setattr(main.tickets_repo, "list_tickets_for_user", user_list_mock)
+    monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    await main._render_portal_tickets_page(request, user)
+
+    company_list_mock.assert_awaited_once()
+    company_count_mock.assert_awaited_once()
+    user_list_mock.assert_not_awaited()
+    assert company_list_mock.await_args.kwargs["company_ids"] == [22]
+    assert captured["extra"]["tickets"][0]["requester_label"] == "Riley Stone"
 
 
 @pytest.mark.anyio("asyncio")
