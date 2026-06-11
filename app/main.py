@@ -1753,7 +1753,7 @@ def _build_menu_access_map(
             menu_access[key] = level
 
     # Baseline authenticated pages remain readable unless explicitly controlled by a role.
-    for key in ("menu.dashboard", "menu.service_status", "menu.knowledge_base", "menu.help", "menu.reports", "menu.admin.profile"):
+    for key in ("menu.dashboard", "menu.service_status", "menu.knowledge_base", "menu.admin.profile"):
         promote(key, "read")
 
     legacy_boolean_to_menu = {
@@ -1802,6 +1802,44 @@ def _build_menu_access_map(
 def _menu_can(menu_access: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
     return menu_has_access(menu_access, key, write=write)
 
+
+async def _has_menu_page_access(request: Request, user: Mapping[str, Any], key: str, *, write: bool = False) -> bool:
+    """Return whether the authenticated user has explicit access to a menu-owned page.
+
+    Super administrators keep unrestricted access. Other users must have the
+    requested menu permission on their active company membership; baseline
+    authenticated menu items are intentionally not elevated here.
+    """
+    if user.get("is_super_admin"):
+        return True
+
+    membership = getattr(request.state, "active_membership", None)
+    active_company_id = getattr(request.state, "active_company_id", None) or user.get("company_id")
+    if membership is None and active_company_id is not None:
+        try:
+            membership = await user_company_repo.get_user_company(int(user["id"]), int(active_company_id))
+        except (TypeError, ValueError):
+            membership = None
+        if membership is not None:
+            request.state.active_membership = membership
+
+    menu_access = normalize_menu_permissions((membership or {}).get("menu_permissions"))
+    return _menu_can(menu_access, key, write=write)
+
+
+async def _require_menu_page_access(
+    request: Request,
+    key: str,
+    *,
+    write: bool = False,
+    detail: str = "Page access permission required",
+) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return None, redirect
+    if not await _has_menu_page_access(request, user, key, write=write):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+    return user, None
 
 def _membership_menu_can(user: dict[str, Any], membership: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
     if user.get("is_super_admin"):

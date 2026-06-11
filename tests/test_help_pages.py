@@ -104,6 +104,10 @@ def patched_dependencies(monkeypatch):
     async def fake_require_user(request):
         return {"id": 1, "email": "user@example.com"}, None
 
+    async def fake_require_menu_page_access(request, key, *, write=False, detail="Page access permission required"):
+        assert key == "menu.help"
+        return {"id": 1, "email": "user@example.com"}, None
+
     async def fake_build_base_context(request, user, *, extra=None):
         context = {
             "request": request,
@@ -124,6 +128,7 @@ def patched_dependencies(monkeypatch):
         return context
 
     monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_user)
+    monkeypatch.setattr(main_module, "_require_menu_page_access", fake_require_menu_page_access)
     monkeypatch.setattr(main_module, "_build_base_context", fake_build_base_context)
     main_module.templates.env.globals["plausible_config"] = {
         "enabled": False,

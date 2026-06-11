@@ -29,7 +29,11 @@ async def _load_report_context(request: Request):
     from app.repositories import companies as company_repo
     from app.repositories import user_companies as user_company_repo
 
-    user, redirect = await _main()._require_authenticated_user(request)
+    user, redirect = await _main()._require_menu_page_access(
+        request,
+        "menu.reports",
+        detail="Reports access permission required",
+    )
     if redirect:
         return user, None, None, None, redirect
     company_id_raw = user.get("company_id")
