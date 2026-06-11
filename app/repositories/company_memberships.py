@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 from app.core.database import db
 from app.repositories import users as user_repo
 from app.repositories import user_permissions as user_permissions_repo
+from app.security.menu_permissions import compact_menu_permissions, menu_permissions_to_legacy
 
 _VALID_STATUSES = {"invited", "active", "suspended"}
 
@@ -172,21 +173,23 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
     user_record = await user_repo.get_user_by_id(user_id)
     if user_record and bool(user_record.get("is_super_admin")):
         return True
-    
-    # Check role-based permissions from memberships
+
+    # Check role-based permissions from memberships. Roles may be stored as the
+    # current tri-state menu permission map or as the older list of permission
+    # strings, so always expand to the legacy permission names before matching.
     memberships = await list_memberships_for_user(user_id, status="active")
     for membership in memberships:
         permissions = membership.get("permissions") or []
-        if permission in permissions:
+        if _permission_matches(permissions, permission):
             return True
-        
+
         # Also check user-specific permissions for this company
         company_id = membership.get("company_id")
         if company_id:
             user_permissions = await user_permissions_repo.list_user_permissions(user_id, company_id)
-            if permission in user_permissions:
+            if _permission_matches(user_permissions, permission):
                 return True
-    
+
     return False
 
 
@@ -222,7 +225,7 @@ async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
             permissions = permissions_raw or []
 
         is_super_admin = bool(row.get("is_super_admin", 0))
-        if permission not in permissions and not is_super_admin:
+        if not _permission_matches(permissions, permission) and not is_super_admin:
             continue
 
         try:
@@ -303,18 +306,36 @@ async def list_impersonatable_memberships() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:
-    permissions_raw = row.get("permissions")
-    permissions: list[str]
-    if isinstance(permissions_raw, str):
+def _decode_permissions(raw: Any) -> Any:
+    if isinstance(raw, str):
         try:
-            permissions = json.loads(permissions_raw)
+            return json.loads(raw)
         except json.JSONDecodeError:
-            permissions = []
-    else:
-        permissions = permissions_raw or []
+            return []
+    return raw or []
+
+
+def _legacy_permission_set(raw: Any) -> set[str]:
+    decoded = _decode_permissions(raw)
+    direct_permissions = (
+        {item for item in decoded if isinstance(item, str)}
+        if isinstance(decoded, list)
+        else set()
+    )
+    return direct_permissions | set(menu_permissions_to_legacy(decoded))
+
+
+def _permission_matches(raw: Any, permission: str) -> bool:
+    return permission in _legacy_permission_set(raw)
+
+
+def _normalise_membership(row: dict[str, Any]) -> dict[str, Any]:
+    permissions = _decode_permissions(row.get("permissions"))
+    menu_permissions = compact_menu_permissions(permissions)
     return {
         **row,
         "permissions": permissions,
+        "menu_permissions": menu_permissions,
+        "legacy_permissions": sorted(_legacy_permission_set(permissions)),
         "is_active": row.get("status") == "active",
     }

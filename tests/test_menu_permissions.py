@@ -45,3 +45,13 @@ def test_menu_permissions_to_legacy_keeps_backward_compatibility():
 
     assert "m365_user_mailboxes.access" in legacy
     assert "assets.manage" in legacy
+
+
+def test_bcp_continuity_menu_permission_expands_to_legacy_permissions():
+    legacy_read = menu_permissions_to_legacy({"menu.continuity": "read"})
+    legacy_write = menu_permissions_to_legacy({"menu.continuity": "write"})
+
+    assert "continuity.access" in legacy_read
+    assert "bcp:view" in legacy_read
+    assert "bcp:edit" not in legacy_read
+    assert "bcp:edit" in legacy_write
