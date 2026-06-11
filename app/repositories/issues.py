@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
@@ -8,6 +9,18 @@ from app.core.database import db
 
 IssueRecord = dict[str, Any]
 AssignmentRecord = dict[str, Any]
+
+
+def _normalise_company_ids(company_ids: Sequence[int] | None) -> list[int] | None:
+    if company_ids is None:
+        return None
+    values: list[int] = []
+    for value in company_ids:
+        try:
+            values.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return list(dict.fromkeys(values))
 
 
 def _ensure_aware(value: Any) -> datetime | None:
@@ -79,6 +92,7 @@ async def list_issues_with_assignments(
     search: str | None = None,
     status: str | None = None,
     company_id: int | None = None,
+    company_ids: Sequence[int] | None = None,
 ) -> list[IssueRecord]:
     where: list[str] = []
     params: list[Any] = []
@@ -95,6 +109,14 @@ async def list_issues_with_assignments(
     if company_id is not None:
         where.append("ics.company_id = %s")
         params.append(company_id)
+    elif company_ids is not None:
+        allowed_company_ids = _normalise_company_ids(company_ids) or []
+        if allowed_company_ids:
+            placeholders = ", ".join(["%s"] * len(allowed_company_ids))
+            where.append(f"ics.company_id IN ({placeholders})")
+            params.extend(allowed_company_ids)
+        else:
+            where.append("1 = 0")
 
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
 
@@ -179,7 +201,11 @@ async def list_issues_with_assignments(
     return result
 
 
-async def get_issue_by_id(issue_id: int) -> IssueRecord | None:
+async def get_issue_by_id(
+    issue_id: int,
+    *,
+    company_ids: Sequence[int] | None = None,
+) -> IssueRecord | None:
     row = await db.fetch_one(
         "SELECT id AS issue_id, name, slug, description, created_by, updated_by, created_at_utc, updated_at_utc FROM issue_definitions WHERE id = %s",
         (issue_id,),
@@ -187,8 +213,18 @@ async def get_issue_by_id(issue_id: int) -> IssueRecord | None:
     issue = _normalise_issue(row)
     if not issue:
         return None
+    assignment_where = ["issue_id = %s"]
+    assignment_params: list[Any] = [issue_id]
+    if company_ids is not None:
+        allowed_company_ids = _normalise_company_ids(company_ids) or []
+        if allowed_company_ids:
+            placeholders = ", ".join(["%s"] * len(allowed_company_ids))
+            assignment_where.append(f"company_id IN ({placeholders})")
+            assignment_params.extend(allowed_company_ids)
+        else:
+            assignment_where.append("1 = 0")
     assignment_rows = await db.fetch_all(
-        """
+        f"""
         SELECT
             id AS assignment_id,
             issue_id,
@@ -199,10 +235,10 @@ async def get_issue_by_id(issue_id: int) -> IssueRecord | None:
             created_at_utc,
             updated_at_utc
         FROM issue_company_statuses
-        WHERE issue_id = %s
+        WHERE {' AND '.join(assignment_where)}
         ORDER BY updated_at_utc DESC
         """,
-        (issue_id,),
+        tuple(assignment_params),
     )
     issue["assignments"] = [assignment for assignment in (_normalise_assignment(row) for row in assignment_rows) if assignment]
     return issue
@@ -390,6 +426,18 @@ async def assign_issue_to_company(
         "created_at_utc": None,
         "updated_at_utc": None,
     }
+
+
+async def get_assignment_by_id(assignment_id: int) -> AssignmentRecord | None:
+    row = await db.fetch_one(
+        """
+        SELECT id AS assignment_id, issue_id, company_id, status, notes, updated_by, created_at_utc, updated_at_utc
+        FROM issue_company_statuses
+        WHERE id = %s
+        """,
+        (assignment_id,),
+    )
+    return _normalise_assignment(row)
 
 
 async def update_assignment_status(

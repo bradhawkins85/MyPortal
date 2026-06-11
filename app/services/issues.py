@@ -143,13 +143,16 @@ async def build_issue_overview(
     search: str | None = None,
     status: str | None = None,
     company_id: int | None = None,
+    company_ids: Iterable[int] | None = None,
 ) -> list[IssueOverview]:
     status_filter = normalise_status(status) if status else None
     search_term = search.strip() if search else ""
+    scoped_company_ids = list(company_ids) if company_ids is not None else None
     rows = await issues_repo.list_issues_with_assignments(
         search=search_term.lower() if search_term else None,
         status=status_filter,
         company_id=company_id,
+        company_ids=scoped_company_ids,
     )
     overview: list[IssueOverview] = []
     for row in rows:
@@ -184,8 +187,13 @@ async def resolve_company_by_name(name: str) -> dict[str, Any]:
     return company
 
 
-async def get_issue_overview(issue_id: int) -> IssueOverview | None:
-    record = await issues_repo.get_issue_by_id(issue_id)
+async def get_issue_overview(
+    issue_id: int,
+    *,
+    company_ids: Iterable[int] | None = None,
+) -> IssueOverview | None:
+    scoped_company_ids = list(company_ids) if company_ids is not None else None
+    record = await issues_repo.get_issue_by_id(issue_id, company_ids=scoped_company_ids)
     if not record:
         return None
     return _build_overview(record)

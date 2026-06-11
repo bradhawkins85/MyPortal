@@ -59,7 +59,7 @@ def _build_filters(
     params: list[Any] = []
 
     if user_id is not None:
-        clauses.append("(user_id = %s OR user_id IS NULL)")
+        clauses.append("user_id = %s")
         params.append(user_id)
 
     if read_state == "unread":
@@ -279,7 +279,7 @@ async def list_event_types(*, user_id: int | None = None) -> list[str]:
     clauses = ["1=1"]
     params: list[Any] = []
     if user_id is not None:
-        clauses.append("(user_id = %s OR user_id IS NULL)")
+        clauses.append("user_id = %s")
         params.append(user_id)
     sql = f"SELECT DISTINCT event_type FROM notifications WHERE {' AND '.join(clauses)} ORDER BY event_type"
     rows = await db.fetch_all(sql, tuple(params))
