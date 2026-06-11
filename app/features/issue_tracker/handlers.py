@@ -17,6 +17,43 @@ def _main():
     return main_module
 
 
+
+def _coerce_company_id(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _accessible_company_options(user: dict[str, Any]) -> tuple[list[dict[str, Any]], set[int]]:
+    from app.services import company_access
+
+    memberships = await company_access.list_accessible_companies(user)
+    options: list[dict[str, Any]] = []
+    allowed_ids: set[int] = set()
+    for record in memberships:
+        company_id = _coerce_company_id(record.get("company_id") or record.get("id"))
+        if company_id is None:
+            continue
+        name = str(record.get("company_name") or record.get("name") or "").strip()
+        allowed_ids.add(company_id)
+        options.append({"id": company_id, "name": name or f"Company #{company_id}"})
+    options.sort(key=lambda item: item["name"].lower())
+    return options, allowed_ids
+
+
+def _filter_company_ids(company_ids: list[int], allowed_company_ids: set[int]) -> list[int]:
+    return [company_id for company_id in dict.fromkeys(company_ids) if company_id in allowed_company_ids]
+
+
+async def _assignment_is_accessible(assignment_id: int, allowed_company_ids: set[int]) -> bool:
+    from app.repositories import issues as issues_repo
+
+    assignment = await issues_repo.get_assignment_by_id(assignment_id)
+    company_id = _coerce_company_id((assignment or {}).get("company_id"))
+    return company_id is not None and company_id in allowed_company_ids
+
+
 def _format_issue_overview_for_template(overview: Any) -> dict[str, Any]:
     from app.services import issues as issues_service
 
@@ -51,7 +88,6 @@ async def admin_issue_tracker(
     company_id: int | None = Query(default=None, alias="companyId"),
     issue_id: int | None = Query(default=None, alias="issueId"),
 ):
-    from app.repositories import companies as company_repo
     from app.services import issues as issues_service
 
     current_user, redirect = await _main()._require_issue_tracker_access(request)
@@ -73,38 +109,26 @@ async def admin_issue_tracker(
         except ValueError:
             status_filter = None
 
+    company_options, allowed_company_ids = await _accessible_company_options(current_user)
+    if company_filter is not None and company_filter not in allowed_company_ids:
+        company_filter = None
+
     overviews = await issues_service.build_issue_overview(
         search=search_term,
         status=status_filter,
         company_id=company_filter,
+        company_ids=allowed_company_ids,
     )
     issues_payload = [_format_issue_overview_for_template(item) for item in overviews]
 
     editing_issue: dict[str, Any] | None = None
     edit_error: str | None = None
     if issue_id:
-        lookup = await issues_service.get_issue_overview(issue_id)
+        lookup = await issues_service.get_issue_overview(issue_id, company_ids=allowed_company_ids)
         if lookup:
             editing_issue = _format_issue_overview_for_template(lookup)
         else:
             edit_error = "Selected issue could not be found."
-
-    companies = await company_repo.list_companies()
-    company_options: list[dict[str, Any]] = []
-    for record in companies:
-        raw_id = record.get("id")
-        name = (record.get("name") or "").strip()
-        try:
-            option_id = int(raw_id)
-        except (TypeError, ValueError):
-            continue
-        company_options.append(
-            {
-                "id": option_id,
-                "name": name or f"Company #{option_id}",
-            }
-        )
-    company_options.sort(key=lambda item: item["name"].lower())
 
     if editing_issue:
         assigned_company_ids = {
@@ -140,7 +164,6 @@ async def admin_issue_tracker(
 
 async def admin_create_issue(request: Request):
     from app.core.logging import log_info
-    from app.repositories import companies as company_repo
     from app.repositories import issues as issues_repo
     from app.services import issues as issues_service
 
@@ -188,15 +211,12 @@ async def admin_create_issue(request: Request):
     company_ids_raw = form.getlist("company_ids")
     selected_companies: list[int] = []
     for raw in company_ids_raw:
-        try:
-            selected_companies.append(int(raw))
-        except (TypeError, ValueError):
-            continue
+        company_id_value = _coerce_company_id(raw)
+        if company_id_value is not None:
+            selected_companies.append(company_id_value)
+    _, allowed_company_ids = await _accessible_company_options(current_user)
 
-    for company_id_value in selected_companies:
-        company = await company_repo.get_company_by_id(company_id_value)
-        if not company:
-            continue
+    for company_id_value in _filter_company_ids(selected_companies, allowed_company_ids):
         await issues_repo.assign_issue_to_company(
             issue_id=issue_id_int,
             company_id=company_id_value,
@@ -215,7 +235,6 @@ async def admin_create_issue(request: Request):
 
 async def admin_update_issue(issue_id: int, request: Request):
     from app.core.logging import log_info
-    from app.repositories import companies as company_repo
     from app.repositories import issues as issues_repo
     from app.services import issues as issues_service
 
@@ -223,8 +242,9 @@ async def admin_update_issue(issue_id: int, request: Request):
     if redirect:
         return redirect
 
-    issue = await issues_repo.get_issue_by_id(issue_id)
-    if not issue:
+    _, allowed_company_ids = await _accessible_company_options(current_user)
+    issue = await issues_repo.get_issue_by_id(issue_id, company_ids=allowed_company_ids)
+    if not issue or not issue.get("assignments"):
         return flash_redirect("/admin/issues", 'Issue not found.', "error")
 
     form = await request.form()
@@ -262,15 +282,11 @@ async def admin_update_issue(issue_id: int, request: Request):
     new_company_ids_raw = form.getlist("newCompanyIds")
     selected_companies: list[int] = []
     for raw in new_company_ids_raw:
-        try:
-            selected_companies.append(int(raw))
-        except (TypeError, ValueError):
-            continue
+        company_id_value = _coerce_company_id(raw)
+        if company_id_value is not None:
+            selected_companies.append(company_id_value)
 
-    for company_id_value in selected_companies:
-        company = await company_repo.get_company_by_id(company_id_value)
-        if not company:
-            continue
+    for company_id_value in _filter_company_ids(selected_companies, allowed_company_ids):
         await issues_repo.assign_issue_to_company(
             issue_id=issue_id,
             company_id=company_id_value,
@@ -308,6 +324,10 @@ async def admin_update_issue_assignment_status(
         normalised_status = issues_service.normalise_status(status_value)
     except ValueError:
         return flash_redirect(f"/admin/issues?issueId={issue_id}", 'Invalid status selection.', "error")
+
+    _, allowed_company_ids = await _accessible_company_options(current_user)
+    if not await _assignment_is_accessible(assignment_id, allowed_company_ids):
+        return flash_redirect(f"/admin/issues?issueId={issue_id}", 'Assignment not found.', "error")
 
     try:
         await issues_repo.update_assignment_status(
@@ -350,6 +370,10 @@ async def admin_delete_issue_assignment(
 
     form = await request.form()
     return_url = str(form.get("returnUrl", "")).strip() or None
+
+    _, allowed_company_ids = await _accessible_company_options(current_user)
+    if not await _assignment_is_accessible(assignment_id, allowed_company_ids):
+        return flash_redirect(f"/admin/issues?issueId={issue_id}", 'Assignment not found.', "error")
 
     await issues_repo.delete_assignment(assignment_id)
     log_info(
