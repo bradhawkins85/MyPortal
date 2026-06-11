@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, cast
@@ -48,8 +49,211 @@ staff_onboarding_workflow_service = main_module.staff_onboarding_workflow_servic
 staff_repo = main_module.staff_repo
 staff_requests_repo = main_module.staff_requests_repo
 staff_workflow_repo = main_module.staff_workflow_repo
+tickets_service = main_module.tickets_service
 user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
+
+
+_STAFF_EDIT_REQUEST_FIELDS: tuple[tuple[str, str, str, str], ...] = (
+    ("first_name", "firstName", "Identity", "First name"),
+    ("last_name", "lastName", "Identity", "Last name"),
+    ("email", "email", "Identity", "Email"),
+    ("mobile_phone", "mobilePhone", "Identity", "Mobile phone"),
+    ("enabled", "enabled", "Identity", "Enabled"),
+    ("department", "department", "Employment / Organisation", "Department"),
+    ("job_title", "jobTitle", "Employment / Organisation", "Job title"),
+    ("org_company", "company", "Employment / Organisation", "Company"),
+    ("manager_name", "managerName", "Employment / Organisation", "Manager"),
+    ("street", "street", "Address", "Street"),
+    ("city", "city", "Address", "City"),
+    ("state", "state", "Address", "State"),
+    ("postcode", "postcode", "Address", "Postcode"),
+    ("country", "country", "Address", "Country"),
+)
+
+_STAFF_WORKFLOW_LIFECYCLE_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("account_action", "accountAction", "Account action"),
+    ("date_onboarded", "dateOnboarded", "Onboard date"),
+    ("date_offboarded", "dateOffboarded", "Offboard schedule"),
+    ("onboarding_status", "onboardingStatus", "Onboarding status"),
+    ("onboarding_complete", "onboardingComplete", "Onboarding complete"),
+    ("onboarding_completed_at", "onboardingCompletedAt", "Onboarding completed at"),
+    ("approval_status", "approvalStatus", "Approval status"),
+)
+
+
+def _payload_has_key(payload: Mapping[str, Any], snake_key: str, camel_key: str) -> bool:
+    return snake_key in payload or camel_key in payload
+
+
+def _payload_value(payload: Mapping[str, Any], snake_key: str, camel_key: str) -> Any:
+    if camel_key in payload:
+        return payload[camel_key]
+    return payload.get(snake_key)
+
+
+def _normalise_change_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def _normalise_lifecycle_value(field_name: str, value: Any) -> Any:
+    if field_name == "date_onboarded":
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        raw = str(value or "").strip()
+        return raw[:10] if raw else ""
+    if field_name == "date_offboarded":
+        if isinstance(value, datetime):
+            return value.replace(second=0, microsecond=0).isoformat()[:16]
+        raw = str(value or "").strip()
+        return raw.replace(" ", "T")[:16] if raw else ""
+    return _normalise_change_value(value)
+
+
+def _format_change_value(value: Any) -> str:
+    normalised = _normalise_change_value(value)
+    if normalised is True:
+        return "Yes"
+    if normalised is False:
+        return "No"
+    return str(normalised) if normalised != "" else "(blank)"
+
+
+def _staff_display_name(staff_member: Mapping[str, Any]) -> str:
+    name = " ".join(
+        part for part in (
+            str(staff_member.get("first_name") or "").strip(),
+            str(staff_member.get("last_name") or "").strip(),
+        ) if part
+    )
+    return name or str(staff_member.get("email") or f"Staff #{staff_member.get('id')}").strip()
+
+
+def _user_display_name(user: Mapping[str, Any]) -> str:
+    name = " ".join(
+        part for part in (
+            str(user.get("first_name") or "").strip(),
+            str(user.get("last_name") or "").strip(),
+        ) if part
+    )
+    return name or str(user.get("email") or f"User #{user.get('id')}").strip()
+
+
+def _staff_edit_request_changes(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for field_name, payload_key, section, label in _STAFF_EDIT_REQUEST_FIELDS:
+        if not _payload_has_key(payload, field_name, payload_key):
+            continue
+        requested = _payload_value(payload, field_name, payload_key)
+        current = existing.get(field_name)
+        if _normalise_change_value(current) == _normalise_change_value(requested):
+            continue
+        changes.append({"section": section, "label": label, "current": current, "requested": requested})
+
+    raw_custom_fields = _payload_value(payload, "custom_fields", "customFields")
+    if isinstance(raw_custom_fields, Mapping):
+        existing_custom = existing.get("custom_fields") if isinstance(existing.get("custom_fields"), Mapping) else {}
+        for name, requested in sorted(raw_custom_fields.items(), key=lambda item: str(item[0]).lower()):
+            current = existing_custom.get(name) if isinstance(existing_custom, Mapping) else None
+            if _normalise_change_value(current) == _normalise_change_value(requested):
+                continue
+            changes.append({
+                "section": "Custom fields",
+                "label": str(name),
+                "current": current,
+                "requested": requested,
+            })
+    return changes
+
+
+def _changed_workflow_lifecycle_fields(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> list[str]:
+    changed: list[str] = []
+    for field_name, payload_key, label in _STAFF_WORKFLOW_LIFECYCLE_FIELDS:
+        if not _payload_has_key(payload, field_name, payload_key):
+            continue
+        requested = _payload_value(payload, field_name, payload_key)
+        if _normalise_lifecycle_value(field_name, existing.get(field_name)) != _normalise_lifecycle_value(field_name, requested):
+            changed.append(label)
+    return changed
+
+
+def _render_staff_edit_ticket_description(
+    *,
+    existing: Mapping[str, Any],
+    requester: Mapping[str, Any],
+    company: Mapping[str, Any] | None,
+    changes: list[dict[str, Any]],
+) -> str:
+    staff_name = _staff_display_name(existing)
+    requester_name = _user_display_name(requester)
+    requester_email = str(requester.get("email") or "").strip() or "(no email)"
+    staff_email = str(existing.get("email") or "").strip() or "(no email)"
+    company_name = str((company or {}).get("name") or existing.get("company_name") or "").strip() or "(unknown company)"
+    lines = [
+        "A staff details change request was submitted from the Staff page.",
+        "",
+        "Staff member being edited:",
+        f"- Name: {staff_name}",
+        f"- Staff ID: {existing.get('id')}",
+        f"- Email: {staff_email}",
+        f"- Company: {company_name} (ID: {existing.get('company_id')})",
+        "",
+        "Requested by:",
+        f"- Name: {requester_name}",
+        f"- User ID: {requester.get('id')}",
+        f"- Email: {requester_email}",
+        "",
+        "Requested changes:",
+    ]
+    for change in changes:
+        lines.append(
+            f"- [{change['section']}] {change['label']}: "
+            f"{_format_change_value(change.get('current'))} -> {_format_change_value(change.get('requested'))}"
+        )
+    return "\n".join(lines)
+
+
+async def _create_staff_edit_request_ticket(
+    *,
+    existing: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    user: Mapping[str, Any],
+    company: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    changes = _staff_edit_request_changes(existing, payload)
+    if not changes:
+        return None
+    staff_name = _staff_display_name(existing)
+    description = _render_staff_edit_ticket_description(
+        existing=existing,
+        requester=user,
+        company=company,
+        changes=changes,
+    )
+    requester_id = int(user["id"]) if user.get("id") is not None else None
+    return await tickets_service.create_ticket(
+        subject=f"Staff change request: {staff_name}",
+        description=description,
+        requester_id=requester_id,
+        company_id=int(existing.get("company_id") or user.get("company_id") or 0) or None,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category="Staff Change Request",
+        module_slug="staff",
+        external_reference=f"staff-change-request:{existing.get('id')}",
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+        requester_email=str(user.get("email") or "").strip() or None,
+    )
 
 
 async def _get_current_user_staff_department(user: dict[str, Any], company_id: int) -> str | None:
@@ -2183,7 +2387,7 @@ async def update_staff_member(staff_id: int, request: Request):
         staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request)
+    ) = await _load_staff_context(request, require_admin=True)
     if redirect:
         return redirect
 
@@ -2194,6 +2398,10 @@ async def update_staff_member(staff_id: int, request: Request):
     is_super_admin = bool(user.get("is_super_admin"))
     if not is_super_admin and existing.get("company_id") != company_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if not is_super_admin and staff_permission == 1:
+        user_department = await _get_current_user_staff_department(user, int(company_id or 0))
+        if not _departments_match(user_department, str(existing.get("department") or "").strip() or None):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     payload = await request.json()
     if not isinstance(payload, dict):
@@ -2204,6 +2412,42 @@ async def update_staff_member(staff_id: int, request: Request):
             if key in payload:
                 return payload[key]
         return None
+
+    if not is_super_admin:
+        blocked_fields = _changed_workflow_lifecycle_fields(existing, payload)
+        if blocked_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Workflow & lifecycle fields cannot be changed from staff edit requests: "
+                    + ", ".join(blocked_fields)
+                ),
+            )
+        ticket = await _create_staff_edit_request_ticket(
+            existing=existing,
+            payload=payload,
+            user=user,
+            company=company,
+        )
+        await audit_service.log_action(
+            user_id=int(user["id"]) if user.get("id") is not None else None,
+            action="staff.change_request.ticket_created" if ticket else "staff.change_request.no_changes",
+            entity_type="staff",
+            entity_id=staff_id,
+            metadata={
+                "company_id": int(existing.get("company_id") or company_id or 0),
+                "ticket_id": ticket.get("id") if isinstance(ticket, Mapping) else None,
+            },
+        )
+        return JSONResponse({
+            "success": True,
+            "ticket": ticket,
+            "message": (
+                "A ticket has been created for a technician to review the requested staff changes."
+                if ticket
+                else "No staff changes were requested."
+            ),
+        })
 
     if is_super_admin:
         first_name = (get_value("firstName", "first_name") or existing.get("first_name") or "").strip()
