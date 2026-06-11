@@ -226,3 +226,51 @@ async def test_first_accessible_company_id_no_companies_returns_none(monkeypatch
 
     result = await company_access_service.first_accessible_company_id(user)
     assert result is None
+
+
+@pytest.mark.anyio
+async def test_technician_access_returns_all_companies_with_role_permissions(monkeypatch):
+    user = {"id": 7, "is_super_admin": False}
+
+    mock_db = MagicMock()
+    mock_db.is_connected.return_value = True
+    monkeypatch.setattr(company_access_service, "db", mock_db)
+    monkeypatch.setattr(
+        company_access_service.membership_repo,
+        "user_has_permission",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        company_access_service.membership_repo,
+        "get_first_membership_with_permission",
+        AsyncMock(
+            return_value={
+                "role_id": 4,
+                "role_name": "Technician",
+                "permissions": {
+                    "menu.admin.technician": "write",
+                    "menu.assets": "write",
+                    "menu.quotes": "read",
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        company_repo,
+        "list_companies",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "name": "Acme", "syncro_company_id": "A-1"},
+                {"id": 2, "name": "Beta", "syncro_company_id": "B-1"},
+            ]
+        ),
+    )
+
+    result = await company_access_service.list_accessible_companies(user)
+
+    assert [entry["company_id"] for entry in result] == [1, 2]
+    assert all(entry["is_global_company_access"] is True for entry in result)
+    assert all(entry["membership_role_name"] == "Technician" for entry in result)
+    assert all(entry["can_manage_assets"] is True for entry in result)
+    assert all(entry["can_access_quotes"] is True for entry in result)
+    assert all(entry["is_admin"] is False for entry in result)
