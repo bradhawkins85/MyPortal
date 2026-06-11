@@ -4,6 +4,23 @@ from typing import Any, Optional
 
 from app.core.database import db
 
+_STAFF_PERMISSION_NONE = 0
+_STAFF_PERMISSION_DEPARTMENT = 1
+_STAFF_PERMISSION_ALL = 3
+
+
+def _normalize_staff_access_scope(value: Any) -> int:
+    try:
+        permission_value = int(value or 0)
+    except (TypeError, ValueError):
+        return _STAFF_PERMISSION_NONE
+    if permission_value <= 0:
+        return _STAFF_PERMISSION_NONE
+    if permission_value >= _STAFF_PERMISSION_ALL:
+        return _STAFF_PERMISSION_ALL
+    return _STAFF_PERMISSION_DEPARTMENT
+
+
 _BOOLEAN_FIELDS = {
     "can_manage_licenses",
     "can_manage_staff",
@@ -29,7 +46,7 @@ def _normalise(row: dict[str, Any] | None) -> dict[str, Any] | None:
         if key in normalised:
             normalised[key] = bool(int(normalised.get(key, 0)))
     if "staff_permission" in normalised and normalised["staff_permission"] is not None:
-        normalised["staff_permission"] = int(normalised["staff_permission"])
+        normalised["staff_permission"] = _normalize_staff_access_scope(normalised["staff_permission"])
     if "company_id" in normalised and normalised["company_id"] is not None:
         normalised["company_id"] = int(normalised["company_id"])
     if "staff_id" in normalised and normalised["staff_id"] is not None:
@@ -59,9 +76,7 @@ async def upsert_assignment(
     is_admin: bool = False,
     role_id: int | None = None,
 ) -> dict[str, Any]:
-    staff_permission_value = max(0, int(staff_permission))
-    if staff_permission_value > 3:
-        staff_permission_value = 3
+    staff_permission_value = _normalize_staff_access_scope(staff_permission)
     await db.execute(
         """
         INSERT INTO pending_staff_access (
@@ -106,7 +121,7 @@ async def upsert_assignment(
             staff_id,
             company_id,
             staff_permission_value,
-            1 if (can_manage_staff or staff_permission_value > 0) else 0,
+            1 if can_manage_staff else 0,
             1 if can_manage_licenses else 0,
             1 if can_manage_assets else 0,
             1 if can_manage_invoices else 0,
