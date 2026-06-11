@@ -475,3 +475,32 @@ def test_super_admin_keeps_help_and_reports_menu_access():
 
     assert menu_access["menu.help"] == "write"
     assert menu_access["menu.reports"] == "write"
+
+
+def test_backup_summary_menu_permission_shows_admin_menu_without_super_admin():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(
+        loader=FileSystemLoader("app/templates"),
+        autoescape=select_autoescape(["html"]),
+    )
+    template = env.get_template("base.html")
+    html = template.render(
+        request=type("Request", (), {"url": type("Url", (), {"path": "/admin/backup-summary"})()})(),
+        current_user={"id": 2, "is_super_admin": False},
+        active_membership={},
+        menu_access={"menu.admin.backup_summary": "read"},
+        csrf_token=None,
+        available_companies=[],
+        app_name="MyPortal",
+        current_year=2026,
+        cart_summary={"item_count": 0, "total_quantity": 0},
+        plausible_config={"enabled": False},
+        static_url=lambda path: path,
+    )
+
+    assert "Administration" in html
+    assert 'href="/admin/backup-summary"' in html
+    assert "Backup Summary" in html
+    assert 'href="/admin/backup-jobs"' not in html
+    assert 'href="/admin/impersonation"' not in html
