@@ -1,10 +1,17 @@
 {% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Roles{% endblock %}
 
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Add role", "variant": "primary", "attrs": {"data-role-create": "", "aria-haspopup": "dialog", "aria-controls": "role-modal"}}
+  ]) }}
+{% endblock %}
+
 {% block content %}
 <div class="admin-grid">
-  <section class="card card--panel">
+  <section class="card card--panel admin-grid__full">
     <header class="card__header">
       <input
         type="search"
@@ -50,7 +57,8 @@
               <td data-label="System" data-column-key="system">{{ 'Yes' if role.is_system else 'No' }}</td>
               <td class="table__actions" data-column-key="actions">
                 <div class="table__action-buttons">
-                  <button type="button" class="button button--ghost" data-role-edit>Edit</button>
+                  <button type="button" class="button button--ghost" data-role-edit aria-haspopup="dialog" aria-controls="role-modal">Edit</button>
+                  <button type="button" class="button button--ghost" data-role-clone aria-haspopup="dialog" aria-controls="role-modal">Clone</button>
                   {% if not role.is_system %}
                     <button type="button" class="button button--danger" data-role-delete>Delete</button>
                   {% endif %}
@@ -67,13 +75,13 @@
     </div>
   </section>
 
-  <section class="card card--panel">
-    <header class="card__header">
-      <div>
-        <h2 class="card__title">Create or update a role</h2>
-        <p class="card__subtitle">Editing a role updates permissions for every assigned member immediately.</p>
-      </div>
-    </header>
+  <div class="modal" id="role-modal" role="dialog" aria-modal="true" aria-labelledby="role-modal-title" aria-describedby="role-modal-subtitle" aria-hidden="true" hidden>
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-modal-close aria-label="Close role form"></button>
+      <header class="modal__header">
+        <h2 class="modal__title" id="role-modal-title">Create role</h2>
+        <p class="modal__subtitle" id="role-modal-subtitle">Create a least-privilege permission set for company members.</p>
+      </header>
     <form id="role-form" class="form" autocomplete="off">
       <input type="hidden" name="role_id" id="role-id" />
       <div class="form-field">
@@ -128,14 +136,16 @@
         <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct access, Read Only to view information without actions, or Read/Write to allow permitted actions.</p>
       </div>
       <div class="form-actions">
-        <button type="submit" class="button">Save role</button>
         <button type="button" class="button button--ghost" data-role-reset>Clear form</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        <button type="submit" class="button" data-role-submit>Save role</button>
       </div>
       <p class="form-hint">System roles cannot be deleted and their names are fixed to retain portal integrity.</p>
     </form>
-  </section>
+    </div>
+  </div>
 
-  <details class="card card--panel card-collapsible" data-roles-admin-menu>
+  <details class="card card--panel card-collapsible admin-grid__full" data-roles-admin-menu>
     <summary class="card__header card__header--collapsible">
       <div>
         <h2 class="card__title">Roles administration menu</h2>
@@ -152,9 +162,9 @@
         access policies.
       </p>
       <p>
-        When you open the menu from the navigation sidebar, two panels are always available: the catalogue of existing
-        roles and the management form for updates. Use the search filter to quickly locate a role, select <strong>Edit</strong>
-        to populate the form, and provide a comma-separated list of permission keys when creating or refining roles. All
+        When you open the menu from the navigation sidebar, the role catalogue is available with modal workflows for creating, editing, and cloning roles. Use the search filter
+        to quickly locate a role, select <strong>Edit</strong> to update it, or select <strong>Clone</strong> to start
+        from an existing permission set. Choose explicit menu permission levels when creating or refining roles. All
         changes take effect immediately across the portal to keep member privileges aligned with the latest security
         requirements.
       </p>

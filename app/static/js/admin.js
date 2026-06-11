@@ -1435,10 +1435,15 @@
     if (!form) {
       return;
     }
+    const modal = document.getElementById('role-modal');
+    const modalTitle = document.getElementById('role-modal-title');
+    const modalSubtitle = document.getElementById('role-modal-subtitle');
+    const submitButton = form.querySelector('[data-role-submit]');
     const idField = form.querySelector('#role-id');
     const nameField = form.querySelector('#role-name');
     const descriptionField = form.querySelector('#role-description');
     const permissionInputs = form.querySelectorAll('[data-permission-level]');
+    let activeRoleTrigger = null;
 
     function getSelectedPermissions() {
       const permissions = {};
@@ -1508,6 +1513,56 @@
       });
     }
 
+    function updateModalText(mode, roleName) {
+      if (modalTitle) {
+        modalTitle.textContent = mode === 'edit' ? 'Edit role' : mode === 'clone' ? 'Clone role' : 'Create role';
+      }
+      if (modalSubtitle) {
+        if (mode === 'edit') {
+          modalSubtitle.textContent = `Update ${roleName || 'this role'} for every assigned member immediately.`;
+        } else if (mode === 'clone') {
+          modalSubtitle.textContent = `Review the copied permissions from ${roleName || 'the selected role'} before saving a new role.`;
+        } else {
+          modalSubtitle.textContent = 'Create a least-privilege permission set for company members.';
+        }
+      }
+      if (submitButton) {
+        submitButton.textContent = mode === 'edit' ? 'Save role' : mode === 'clone' ? 'Create clone' : 'Create role';
+      }
+    }
+
+    function openRoleModal(trigger, mode, row) {
+      activeRoleTrigger = trigger || null;
+      const roleName = row ? row.dataset.roleName || '' : '';
+      idField.value = mode === 'edit' && row ? row.dataset.roleId || '' : '';
+      nameField.value = mode === 'clone' && roleName ? `Copy of ${roleName}` : row ? row.dataset.roleName || '' : '';
+      descriptionField.value = row ? row.dataset.roleDescription || '' : '';
+      try {
+        const permissions = row ? JSON.parse(row.dataset.rolePermissions || '{}') : {};
+        setSelectedPermissions(permissions);
+      } catch (error) {
+        setSelectedPermissions({});
+      }
+      updateModalText(mode, roleName);
+      if (modal) {
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+      }
+      nameField.focus();
+      nameField.select();
+    }
+
+    function closeRoleModal() {
+      if (modal) {
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+      }
+      if (activeRoleTrigger) {
+        activeRoleTrigger.focus();
+        activeRoleTrigger = null;
+      }
+    }
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const roleId = idField.value;
@@ -1533,9 +1588,16 @@
         nameField.value = '';
         descriptionField.value = '';
         setSelectedPermissions({});
+        updateModalText('create');
         nameField.focus();
       });
     }
+
+    document.querySelectorAll('[data-role-create]').forEach((button) => {
+      button.addEventListener('click', () => {
+        openRoleModal(button, 'create', null);
+      });
+    });
 
     document.querySelectorAll('[data-role-edit]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -1543,18 +1605,33 @@
         if (!row) {
           return;
         }
-        idField.value = row.dataset.roleId || '';
-        nameField.value = row.dataset.roleName || '';
-        descriptionField.value = row.dataset.roleDescription || '';
-        try {
-          const permissions = JSON.parse(row.dataset.rolePermissions || '{}');
-          setSelectedPermissions(permissions);
-        } catch (error) {
-          setSelectedPermissions({});
-        }
-        nameField.focus();
+        openRoleModal(button, 'edit', row);
       });
     });
+
+    document.querySelectorAll('[data-role-clone]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const row = button.closest('tr');
+        if (!row) {
+          return;
+        }
+        openRoleModal(button, 'clone', row);
+      });
+    });
+
+    if (modal) {
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal || event.target.closest('[data-modal-close]')) {
+          event.preventDefault();
+          closeRoleModal();
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !modal.hidden) {
+          closeRoleModal();
+        }
+      });
+    }
 
     document.querySelectorAll('[data-role-delete]').forEach((button) => {
       button.addEventListener('click', async () => {
