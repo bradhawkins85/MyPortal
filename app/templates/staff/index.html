@@ -186,7 +186,7 @@
               <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
             {% endfor %}
             <th scope="col" data-sort="string" data-column="enabled" data-mobile-priority="supporting">Enabled</th>
-            {% if can_edit_staff %}
+            {% if can_edit_staff or can_request_staff_offboarding %}
               <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
             {% endif %}
           </tr>
@@ -299,10 +299,10 @@
                   {{ 'Yes' if member.enabled else 'No' }}
                 {% endif %}
               </td>
-              {% if can_edit_staff %}
+              {% if can_edit_staff or can_request_staff_offboarding %}
                 <td class="table__actions">
                   <div class="table__action-buttons">
-                    <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
+                    <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">{{ 'Edit' if can_edit_staff else 'Actions' }}</button>
                     {% if is_super_admin %}
                       <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
                     {% endif %}
@@ -312,7 +312,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="{{ (10 if can_edit_staff else 9) + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
+              <td colspan="{{ (10 if (can_edit_staff or can_request_staff_offboarding) else 9) + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -727,7 +727,7 @@
         <legend>Custom fields</legend>
         <div class="staff-modal__group-stack" id="edit-custom-fields-grid"></div>
       </fieldset>
-      {% if can_edit_staff %}
+      {% if can_edit_staff or can_request_staff_offboarding %}
       <fieldset class="fieldset staff-modal__section" id="edit-actions-section">
         <legend>Secondary actions</legend>
         <p class="form-help form-field--full">Use these controls for invite, approvals, or workflow interventions. Add context notes for audit history.</p>
@@ -772,7 +772,9 @@
       {% endif %}
       <p class="form-help form-help--error form-field--full" id="edit-form-error" hidden role="alert" aria-live="polite"></p>
       <div class="form-actions staff-modal__footer">
-        <button type="submit" class="button">Save changes</button>
+        {% if can_edit_staff %}
+          <button type="submit" class="button">Save changes</button>
+        {% endif %}
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
       </div>
     </form>
@@ -787,6 +789,7 @@
   'isAdmin': is_admin,
   'canApproveOnboarding': can_approve_onboarding,
   'canEditStaff': can_edit_staff,
+  'canRequestStaffOffboarding': can_request_staff_offboarding,
   'isHelpdeskTechnician': is_helpdesk_technician,
   'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled,
   'hasM365': has_m365

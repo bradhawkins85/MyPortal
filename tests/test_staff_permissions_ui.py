@@ -42,6 +42,7 @@ def test_staff_page_menu_read_only_disables_staff_editing(monkeypatch):
     asyncio.run(handlers.staff_page(SimpleNamespace()))
 
     assert captured["can_edit_staff"] is False
+    assert captured["can_request_staff_offboarding"] is True
     assert captured["can_approve_onboarding"] is False
 
 
@@ -77,5 +78,21 @@ def test_staff_page_technician_can_approve_without_staff_manage(monkeypatch):
     asyncio.run(handlers.staff_page(SimpleNamespace()))
 
     assert captured["can_edit_staff"] is True
+    assert captured["can_request_staff_offboarding"] is True
     assert captured["can_approve_onboarding"] is True
     assert captured["staff_pending_requests"] == [{"id": 1}]
+
+
+def test_staff_page_template_exposes_offboarding_actions_for_read_access():
+    template = open("app/templates/staff/index.html", encoding="utf-8").read()
+
+    assert "can_edit_staff or can_request_staff_offboarding" in template
+    assert "'canRequestStaffOffboarding': can_request_staff_offboarding" in template
+    assert "{{ 'Edit' if can_edit_staff else 'Actions' }}" in template
+
+
+def test_staff_js_uses_offboarding_permission_flag():
+    script = open("app/static/js/staff.js", encoding="utf-8").read()
+
+    assert "flags.canRequestStaffOffboarding" in script
+    assert "!staffId || !(flags && flags.canEditStaff)" in script
