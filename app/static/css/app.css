@@ -5014,6 +5014,10 @@ dialog.modal:not([open]) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.profile-columns--standard {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 @media (max-width: 1200px) {
   .profile-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
