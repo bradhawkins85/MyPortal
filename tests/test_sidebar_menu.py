@@ -167,6 +167,10 @@ def test_m365_menu_item_has_data_menu_key(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "menu_access": main_module._build_menu_access_map(
+                is_super_admin=False,
+                membership_data=membership,
+            ),
             "can_access_tickets": False,
             "can_view_bcp": False,
             "can_view_compliance": False,
@@ -307,3 +311,40 @@ def test_public_knowledge_base_shows_login_menu(public_knowledge_base_context):
     # Should show the Knowledge base link
     assert 'href="/knowledge-base"' in html
     assert "Knowledge base" in html
+
+
+def test_help_and_reports_are_not_baseline_authenticated_menu_items():
+    menu_access = main_module._build_menu_access_map(
+        is_super_admin=False,
+        membership_data={},
+    )
+
+    assert menu_access["menu.dashboard"] == "read"
+    assert menu_access["menu.knowledge_base"] == "read"
+    assert menu_access["menu.help"] == "none"
+    assert menu_access["menu.reports"] == "none"
+
+
+def test_help_and_reports_menu_items_require_explicit_permission():
+    menu_access = main_module._build_menu_access_map(
+        is_super_admin=False,
+        membership_data={
+            "menu_permissions": {
+                "menu.help": "read",
+                "menu.reports": "read",
+            }
+        },
+    )
+
+    assert menu_access["menu.help"] == "read"
+    assert menu_access["menu.reports"] == "read"
+
+
+def test_super_admin_keeps_help_and_reports_menu_access():
+    menu_access = main_module._build_menu_access_map(
+        is_super_admin=True,
+        membership_data={},
+    )
+
+    assert menu_access["menu.help"] == "write"
+    assert menu_access["menu.reports"] == "write"
