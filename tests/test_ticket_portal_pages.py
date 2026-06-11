@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from starlette.requests import Request
 
 from app import main
+from app.features.tickets import portal_routes
 from app.services.tickets import TicketStatusDefinition
 
 
@@ -507,10 +508,11 @@ async def test_portal_tickets_page_loads_default_view(monkeypatch):
     monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
     monkeypatch.setattr(main.ticket_views_repo, "get_default_view", AsyncMock(return_value=default_view))
     
-    async def fake_require_auth(request_obj):
+    async def fake_require_auth(request_obj, key, **kwargs):
+        assert key == "menu.tickets"
         return user, None
     
-    monkeypatch.setattr(main, "_require_authenticated_user", fake_require_auth)
+    monkeypatch.setattr(main, "_require_menu_page_access", fake_require_auth)
     
     captured: dict[str, Any] = {}
     
@@ -522,7 +524,7 @@ async def test_portal_tickets_page_loads_default_view(monkeypatch):
     monkeypatch.setattr(main, "_render_template", fake_render_template)
     
     # Call the endpoint without any query parameters
-    response = await main.portal_tickets_page(request)
+    response = await portal_routes.portal_tickets_page(request)
     
     assert isinstance(response, HTMLResponse)
     assert response.status_code == status.HTTP_200_OK

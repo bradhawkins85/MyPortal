@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 import app.main as main_module
@@ -562,3 +563,33 @@ def test_staff_link_hidden_when_staff_menu_no_access_even_with_staff_assignment(
     )
 
     assert 'href="/staff"' not in html
+
+
+def test_tickets_menu_permission_uses_no_access_own_all_levels():
+    no_access = main_module._build_menu_access_map(
+        is_super_admin=False,
+        membership_data={},
+        is_helpdesk_technician=False,
+    )
+    own_access = main_module._build_menu_access_map(
+        is_super_admin=False,
+        membership_data={"menu_permissions": {"menu.tickets": "read"}},
+        is_helpdesk_technician=False,
+    )
+    all_access = main_module._build_menu_access_map(
+        is_super_admin=False,
+        membership_data={"menu_permissions": {"menu.tickets": "write"}},
+        is_helpdesk_technician=True,
+    )
+
+    assert no_access["menu.tickets"] == "none"
+    assert own_access["menu.tickets"] == "read"
+    assert all_access["menu.tickets"] == "write"
+
+
+def test_tickets_role_ui_labels_are_no_access_own_all():
+    template = Path("app/templates/admin/roles.html").read_text()
+
+    assert "permission.key == 'menu.tickets'" in template
+    assert "{{ 'Own' if is_ticket_permission else 'Read Only' }}" in template
+    assert "{{ 'All' if is_ticket_permission else 'Read/Write' }}" in template
