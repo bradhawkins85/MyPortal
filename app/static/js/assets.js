@@ -48,6 +48,100 @@
     totalElement.textContent = String(count);
   }
 
+
+  function csvEscape(value) {
+    const text = String(value ?? '').replace(/\r?\n|\r/g, ' ').trim();
+    const safeText = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+    return `"${safeText.replace(/"/g, '""')}"`;
+  }
+
+  function getVisibleTableColumns(table) {
+    if (!table || !table.tHead || !table.tHead.rows.length) {
+      return [];
+    }
+    return Array.from(table.tHead.rows[0].cells)
+      .filter((header) => header.dataset.column && header.style.display !== 'none')
+      .map((header) => ({
+        key: header.dataset.column,
+        label: (header.textContent || '').trim(),
+      }));
+  }
+
+  function getDisplayedRows(table) {
+    if (!table || !table.tBodies.length) {
+      return [];
+    }
+    return Array.from(table.tBodies[0].rows).filter((row) => row.style.display !== 'none');
+  }
+
+  function escapeColumnSelector(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(value);
+    }
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function getCellExportText(cell) {
+    if (!cell) {
+      return '';
+    }
+    const mutedPlaceholder = cell.querySelector('.text-muted');
+    if (mutedPlaceholder && (cell.textContent || '').trim() === (mutedPlaceholder.textContent || '').trim()) {
+      return '';
+    }
+    return (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function buildAssetsCsv(table) {
+    const columns = getVisibleTableColumns(table);
+    const rows = getDisplayedRows(table);
+    if (!columns.length) {
+      return '';
+    }
+    const lines = [columns.map((column) => csvEscape(column.label)).join(',')];
+    rows.forEach((row) => {
+      const values = columns.map((column) => {
+        const cell = row.querySelector(`td[data-column="${escapeColumnSelector(column.key)}"]`);
+        return csvEscape(getCellExportText(cell));
+      });
+      lines.push(values.join(','));
+    });
+    return lines.join('\r\n');
+  }
+
+  function downloadCsv(csv, filename) {
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function initialiseCsvExport(table) {
+    const button = document.querySelector('[data-export-csv="assets-table"]');
+    if (!button || !table) {
+      return;
+    }
+    button.addEventListener('click', () => {
+      const csv = buildAssetsCsv(table);
+      if (!csv) {
+        if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+          window.__portalToast.show('No asset columns are available to export.', { variant: 'error' });
+        } else {
+          window.alert('No asset columns are available to export.');
+        }
+        return;
+      }
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      downloadCsv(csv, `assets-${timestamp}.csv`);
+    });
+  }
+
   function initialiseColumnControls(table) {
     const container = document.querySelector('[data-asset-columns]');
     if (!container || !table) {
@@ -363,6 +457,7 @@
     const searchInput = document.getElementById('asset-search');
 
     initialiseColumnControls(table);
+    initialiseCsvExport(table);
     initialiseDeletion(table);
     initialiseCustomFieldsEditing();
     updateVisibleCount(table);

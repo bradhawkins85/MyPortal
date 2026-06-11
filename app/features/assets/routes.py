@@ -80,9 +80,11 @@ async def _load_asset_context(request: Request):
 @router.get("/assets", response_class=HTMLResponse)
 async def assets_page(request: Request):
     main_module = _main()
-    user, _membership, company, company_id, redirect = await _load_asset_context(request)
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
     if redirect:
         return redirect
+
+    can_export_assets = main_module._membership_menu_can(user, membership, "menu.assets", write=True)
 
     rows = await asset_repo.list_company_assets(company_id)
     field_definitions = await asset_custom_fields_repo.list_field_definitions()
@@ -246,6 +248,7 @@ async def assets_page(request: Request):
         "company": company,
         "stats": stats,
         "has_assets": bool(prepared),
+        "can_export_assets": can_export_assets,
         "is_super_admin": bool(user.get("is_super_admin")),
     }
     return await main_module._render_template("assets/index.html", request, user, extra=extra)
