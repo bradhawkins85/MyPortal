@@ -8,6 +8,23 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 
 
+_STAFF_PERMISSION_NONE = 0
+_STAFF_PERMISSION_DEPARTMENT = 1
+_STAFF_PERMISSION_ALL = 3
+
+
+def _normalize_staff_access_scope(value: Any) -> int:
+    try:
+        permission_value = int(value or 0)
+    except (TypeError, ValueError):
+        return _STAFF_PERMISSION_NONE
+    if permission_value <= 0:
+        return _STAFF_PERMISSION_NONE
+    if permission_value >= _STAFF_PERMISSION_ALL:
+        return _STAFF_PERMISSION_ALL
+    return _STAFF_PERMISSION_DEPARTMENT
+
+
 def _main():
     from app import main as main_module
 
@@ -19,6 +36,7 @@ async def _load_staff_context(
     *,
     require_admin: bool = False,
     require_super_admin: bool = False,
+    require_all_staff_access: bool = False,
 ):
     main_module = _main()
     user, redirect = await main_module._require_authenticated_user(request)
@@ -44,31 +62,25 @@ async def _load_staff_context(
         ) from exc
     membership = await main_module.user_company_repo.get_user_company(user["id"], company_id)
     membership_data = membership or {}
-    staff_permission = int(membership_data.get("staff_permission", 0)) if membership else 0
+    staff_permission = _normalize_staff_access_scope(membership_data.get("staff_permission", 0)) if membership else 0
     raw_staff_menu_access = main_module.normalize_menu_permissions(
         membership_data.get("menu_permissions")
     ).get("menu.staff", "none")
-    has_readonly_staff_menu_access = raw_staff_menu_access == "read"
     has_write_staff_menu_access = raw_staff_menu_access == "write"
-    legacy_staff_menu_access = main_module._membership_menu_can(
-        user, membership, "menu.staff", write=require_admin or require_super_admin
-    )
     has_staff_menu_access = (
         has_write_staff_menu_access
         if require_admin or require_super_admin
-        else raw_staff_menu_access in {"read", "write"} or legacy_staff_menu_access
+        else raw_staff_menu_access in {"read", "write"}
     )
-    if has_readonly_staff_menu_access and (require_admin or require_super_admin):
-        has_staff_menu_access = False
-    if not is_super_admin and staff_permission <= 0 and not has_staff_menu_access:
+    if not is_super_admin and (staff_permission <= 0 or not has_staff_menu_access):
         return user, membership, None, staff_permission, company_id, RedirectResponse(
             url="/", status_code=status.HTTP_303_SEE_OTHER
         )
-    if require_admin and not (
-        is_super_admin
-        or has_staff_menu_access
-        or (not has_readonly_staff_menu_access and membership and membership.get("is_admin"))
-    ):
+    if require_admin and not (is_super_admin or has_write_staff_menu_access):
+        return user, membership, None, staff_permission, company_id, RedirectResponse(
+            url="/", status_code=status.HTTP_303_SEE_OTHER
+        )
+    if require_all_staff_access and not (is_super_admin or staff_permission == _STAFF_PERMISSION_ALL):
         return user, membership, None, staff_permission, company_id, RedirectResponse(
             url="/", status_code=status.HTTP_303_SEE_OTHER
         )
@@ -144,5 +156,6 @@ __all__ = [
     "_filter_staff_for_offboarding_choices",
     "_load_staff_context",
     "_staff_member_is_offboarding_mail_choice",
+    "_normalize_staff_access_scope",
     "_staff_member_matches_company_email_domains",
 ]
