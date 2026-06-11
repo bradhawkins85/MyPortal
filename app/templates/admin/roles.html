@@ -39,8 +39,8 @@
               <td data-label="Permissions" data-column-key="permissions">
                 {% if role.permissions %}
                   <span class="tag-list">
-                    {% for perm in role.permissions %}
-                      <span class="tag">{{ perm }}</span>
+                    {% for perm, level in role.permissions.items() %}
+                      <span class="tag">{{ perm }}: {{ 'Read/Write' if level == 'write' else 'Read Only' }}</span>
                     {% endfor %}
                   </span>
                 {% else %}
@@ -85,145 +85,47 @@
         <textarea class="form-input form-input--textarea" id="role-description" name="description" rows="3"></textarea>
       </div>
       <div class="form-field">
-        <label class="form-label">Permissions</label>
-        <div class="form-checkboxes form-checkboxes--grid" id="role-permissions-group" role="group" aria-describedby="role-permissions-help">
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="company.manage" data-permission-checkbox />
-            <span>Company Management</span>
-            <span class="form-help">Configure company profiles, contact details, and operational settings</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="membership.manage" data-permission-checkbox />
-            <span>Membership Management</span>
-            <span class="form-help">Invite, approve, suspend, or reassign company members</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="billing.manage" data-permission-checkbox />
-            <span>Billing Management</span>
-            <span class="form-help">Access subscription, invoicing, and payment methods</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="audit.view" data-permission-checkbox />
-            <span>Audit View</span>
-            <span class="form-help">Read-only visibility into security and activity audit trails</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="portal.access" data-permission-checkbox />
-            <span>Portal Access</span>
-            <span class="form-help">Sign in and use the general portal experience</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="helpdesk.technician" data-permission-checkbox />
-            <span>Helpdesk Technician</span>
-            <span class="form-help">Access the global ticketing workspace to triage, assign, and update tickets</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="marketing.access" data-permission-checkbox />
-            <span>Marketing Access</span>
-            <span class="form-help">Access marketing page administration and collected marketing contacts</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="licenses.manage" data-permission-checkbox />
-            <span>Manage Licenses</span>
-            <span class="form-help">Manage company licenses and subscriptions</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="licenses.order" data-permission-checkbox />
-            <span>Order Licenses</span>
-            <span class="form-help">Place orders for new licenses</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="staff.manage" data-permission-checkbox />
-            <span>Manage Staff</span>
-            <span class="form-help">Manage company staff members</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="shop.access" data-permission-checkbox />
-            <span>Shop Access</span>
-            <span class="form-help">Access the company shop</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="cart.access" data-permission-checkbox />
-            <span>Cart Access</span>
-            <span class="form-help">Access and manage shopping cart</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="orders.access" data-permission-checkbox />
-            <span>Orders Access</span>
-            <span class="form-help">View and manage company orders</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="forms.access" data-permission-checkbox />
-            <span>Forms Access</span>
-            <span class="form-help">Access and submit company forms</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="assets.manage" data-permission-checkbox />
-            <span>Manage Assets</span>
-            <span class="form-help">Manage company assets and inventory</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="invoices.manage" data-permission-checkbox />
-            <span>Manage Invoices</span>
-            <span class="form-help">View and manage company invoices</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="office_groups.manage" data-permission-checkbox />
-            <span>Manage Office Groups</span>
-            <span class="form-help">Manage company office groups and locations</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="issues.manage" data-permission-checkbox />
-            <span>Manage Issues</span>
-            <span class="form-help">Manage company issues and support tickets</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="company.admin" data-permission-checkbox />
-            <span>Company Administrator</span>
-            <span class="form-help">Full administrative access to company resources</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="compliance.access" data-permission-checkbox />
-            <span>Compliance Access</span>
-            <span class="form-help">Access to view and manage compliance requirements</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="continuity.access" data-permission-checkbox />
-            <span>Continuity Access</span>
-            <span class="form-help">Access to view and manage business continuity plans</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="compliance_checks.access" data-permission-checkbox />
-            <span>Compliance Checks Access</span>
-            <span class="form-help">View compliance check results and assigned checks (separate from Essential 8 Compliance)</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="compliance_checks.manage" data-permission-checkbox />
-            <span>Compliance Checks Manage</span>
-            <span class="form-help">Create, update, and delete compliance check items and assignments</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="m365_best_practices.access" data-permission-checkbox />
-            <span>Office 365 Best Practice</span>
-            <span class="form-help">View and run Microsoft 365 best practice checks and remediation</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="m365_user_mailboxes.access" data-permission-checkbox />
-            <span>Office 365 User Mailboxes</span>
-            <span class="form-help">View and manage user mailboxes in Microsoft 365</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="m365_shared_mailboxes.access" data-permission-checkbox />
-            <span>Office 365 Shared Mailboxes</span>
-            <span class="form-help">View and manage shared mailboxes in Microsoft 365</span>
-          </label>
-          <label class="form-checkbox">
-            <input type="checkbox" name="permission" value="chat.access" data-permission-checkbox />
-            <span>Chat Access</span>
-            <span class="form-help">Access the chat interface to view and participate in conversations</span>
-          </label>
+        <label class="form-label">Menu permissions</label>
+        <div class="table-wrapper permissions-table-wrapper">
+          <table class="table permissions-table" data-table data-table-id="role-menu-permissions">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Menu item</th>
+                <th scope="col" data-sort="string">Group</th>
+                <th scope="col">Access level</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for permission in menu_permission_catalogue %}
+                <tr>
+                  <td data-label="Menu item">
+                    <strong>{{ permission.label }}</strong>
+                    <span class="form-help">{{ permission.description }}</span>
+                    <code>{{ permission.key }}</code>
+                  </td>
+                  <td data-label="Group">{{ permission.group }}</td>
+                  <td data-label="Access level">
+                    <div class="permission-level" role="radiogroup" aria-label="{{ permission.label }} access level">
+                      <label>
+                        <input type="radio" name="permission_level_{{ loop.index }}" value="none" data-permission-level data-permission-key="{{ permission.key }}" checked />
+                        <span>No Access</span>
+                      </label>
+                      <label>
+                        <input type="radio" name="permission_level_{{ loop.index }}" value="read" data-permission-level data-permission-key="{{ permission.key }}" />
+                        <span>Read Only</span>
+                      </label>
+                      <label>
+                        <input type="radio" name="permission_level_{{ loop.index }}" value="write" data-permission-level data-permission-key="{{ permission.key }}" />
+                        <span>Read/Write</span>
+                      </label>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
-        <p class="form-help" id="role-permissions-help">Select the permissions to assign to this role.</p>
+        <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct access, Read Only to view information without actions, or Read/Write to allow permitted actions.</p>
       </div>
       <div class="form-actions">
         <button type="submit" class="button">Save role</button>
@@ -262,74 +164,20 @@
         review the menu to confirm roles still match business needs, and document significant adjustments in your
         compliance records.
       </p>
-      <h3>Assignable permissions</h3>
+      <h3>Assignable menu permissions</h3>
       <p>
-        Roles can draw from the following permission catalogue. Combine only the capabilities required for each persona to
-        maintain least-privilege access.
+        Every left-menu item is available in the permission catalogue with three levels: <strong>No Access</strong>,
+        <strong>Read Only</strong>, and <strong>Read/Write</strong>. Use Read Only for mailbox visibility without
+        mailbox actions, and No Access to hide sensitive menus such as Office 365 configuration.
       </p>
       <dl class="definition-list">
+        {% for permission in menu_permission_catalogue %}
         <div class="definition-list__item">
-          <dt><code>company.manage</code></dt>
-          <dd>Grant authority to configure company profiles, contact details, and operational settings.</dd>
+          <dt><code>{{ permission.key }}</code></dt>
+          <dd>{{ permission.label }} — {{ permission.description }}</dd>
         </div>
-        <div class="definition-list__item">
-          <dt><code>membership.manage</code></dt>
-          <dd>Allow administrators to invite, approve, suspend, or reassign company members.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>billing.manage</code></dt>
-          <dd>Enable access to subscription, invoicing, and payment method management workflows.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>audit.view</code></dt>
-          <dd>Provide read-only visibility into security and activity audit trails.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>portal.access</code></dt>
-          <dd>Permit authenticated users to sign in and use the general portal experience.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>helpdesk.technician</code></dt>
-          <dd>Grant designated staff access to the global ticketing workspace so they can triage, assign, and update tickets without broader administrative privileges.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>marketing.access</code></dt>
-          <dd>Allow designated technicians to manage marketing landing pages and review submitted marketing contacts.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>compliance.access</code></dt>
-          <dd>Provide access to view and manage compliance requirements and essential 8 assessments.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>continuity.access</code></dt>
-          <dd>Provide access to view and manage business continuity plans and related documentation.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>compliance_checks.access</code></dt>
-          <dd>Allow members to view compliance check results and assigned checks. This is separate from the Essential 8 Compliance permission.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>compliance_checks.manage</code></dt>
-          <dd>Grant authority to create, update, and delete compliance check items and assignments.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>m365_best_practices.access</code></dt>
-          <dd>Allow members to view and run Microsoft 365 best practice checks and remediation actions.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>m365_user_mailboxes.access</code></dt>
-          <dd>Allow members to view and manage user mailboxes in the connected Microsoft 365 tenant.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>m365_shared_mailboxes.access</code></dt>
-          <dd>Allow members to view and manage shared mailboxes in the connected Microsoft 365 tenant.</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt><code>chat.access</code></dt>
-          <dd>Permit members to access the chat interface and participate in conversations.</dd>
-        </div>
+        {% endfor %}
       </dl>
-      <p class="text-muted">New permissions will be documented here as they become available.</p>
       </div>
     </div>
   </details>

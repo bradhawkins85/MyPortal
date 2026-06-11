@@ -10117,3 +10117,43 @@ a.stat-strip__stat:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+.permissions-table-wrapper {
+  max-height: min(58vh, 42rem);
+  overflow: auto;
+}
+
+.permissions-table code {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: var(--color-text-muted, #64748b);
+  font-size: 0.8rem;
+}
+
+.permission-level {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 16rem;
+}
+
+.permission-level label {
+  align-items: center;
+  border: 1px solid var(--color-border, #d8dee8);
+  border-radius: 999px;
+  cursor: pointer;
+  display: flex;
+  gap: 0.45rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.permission-level label:has(input:checked) {
+  background: var(--color-primary-soft, #e8f1ff);
+  border-color: var(--color-primary, #2563eb);
+  color: var(--color-primary-strong, #1d4ed8);
+}
+
+@media (min-width: 52rem) {
+  .permission-level {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
