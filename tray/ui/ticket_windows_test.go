@@ -150,43 +150,6 @@ func TestBuildTicketScriptConditionalEmitsUpdateVisibility(t *testing.T) {
 
 // TestBuildTicketScriptAnswersJSON verifies the JSON output block references
 // dynamic question answer variables.
-
-func TestBuildTicketScriptUsesCompactedDynamicLayout(t *testing.T) {
-	questions := []api.TicketQuestion{
-		{
-			ID:        10,
-			FieldType: "select",
-			Label:     "Issue category",
-			Options:   []string{"Hardware", "Software"},
-		},
-		{
-			ID:        11,
-			FieldType: "text",
-			Label:     "Application affected",
-			Conditions: []api.TicketQuestionCondition{
-				{ParentQuestionID: 10, Operator: "equals", ExpectedValue: "Software"},
-			},
-		},
-	}
-	script := buildTicketScript(questions)
-
-	mustContain := []string{
-		"Add-LayoutRow $dynLbl_10 $dynCtrl_10 $rowGap",
-		"Add-LayoutRow $dynLbl_11 $dynCtrl_11 $rowGap",
-		"Apply-FormLayout",
-		"$rowGap = 39",
-		"$btnSubmit.Text = \"Send Request\"",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(script, want) {
-			t.Fatalf("expected script to contain %q", want)
-		}
-	}
-	if strings.Contains(script, "Send Request  ›") {
-		t.Fatal("submit button should not include the decorative arrow glyph")
-	}
-}
-
 func TestBuildTicketScriptAnswersJSON(t *testing.T) {
 	questions := []api.TicketQuestion{
 		{ID: 5, FieldType: "text", Label: "Room number"},

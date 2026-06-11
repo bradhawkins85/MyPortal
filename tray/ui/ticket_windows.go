@@ -122,40 +122,11 @@ function New-Label($text, $x, $y) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text = $text
     $l.Location = New-Object System.Drawing.Point($x, $y)
-    $l.Size = New-Object System.Drawing.Size(125, 44)
-    $l.MaximumSize = New-Object System.Drawing.Size(125, 0)
-    $l.AutoSize = $true
+    $l.Size = New-Object System.Drawing.Size(125, 24)
     $l.TextAlign = 'MiddleLeft'
     $l.ForeColor = $colorInk
     $l.Font = $fontLabel
     return $l
-}
-function Add-LayoutRow($label, $control, $minHeight) {
-    $labelH = 0
-    if ($label -ne $null) { $labelH = $label.PreferredHeight }
-    $controlH = 0
-    if ($control -ne $null) { $controlH = $control.Height }
-    $rowHeight = [Math]::Max($minHeight, [Math]::Max($labelH, $controlH) + 8)
-    [void]$script:LayoutRows.Add([pscustomobject]@{ Label = $label; Control = $control; Height = $rowHeight })
-}
-function Test-RowVisible($row) {
-    if ($row.Control -ne $null) { return $row.Control.Visible }
-    if ($row.Label -ne $null) { return $row.Label.Visible }
-    return $false
-}
-function Apply-FormLayout {
-    $currentY = $script:FormStartY
-    foreach ($row in $script:LayoutRows) {
-        if (Test-RowVisible $row) {
-            if ($row.Label -ne $null) { $row.Label.Location = New-Object System.Drawing.Point($labelX, ($currentY + 2)) }
-            if ($row.Control -ne $null) { $row.Control.Location = New-Object System.Drawing.Point($fieldX, $currentY) }
-            $currentY += $row.Height
-        }
-    }
-    $currentY += 12
-    if ($btnCancel -ne $null) { $btnCancel.Location = New-Object System.Drawing.Point($labelX, ($currentY + 18)) }
-    if ($btnSubmit -ne $null) { $btnSubmit.Location = New-Object System.Drawing.Point(($fieldX + $fieldW - 190), ($currentY + 18)) }
-    $form.ClientSize = New-Object System.Drawing.Size(780, [Math]::Min(($currentY + 92), [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height - 80))
 }
 function New-TextBox($x, $y, $w, $h, $val, $placeholder) {
     $t = New-Object System.Windows.Forms.TextBox
@@ -275,32 +246,30 @@ $form.Controls.Add($lblIntro)
 $labelX = 70
 $fieldX = 205
 $fieldW = 505
-$y = 276
-$script:FormStartY = $y
-$rowGap = 39
-$script:LayoutRows = New-Object System.Collections.ArrayList
+$y = 284
+$rowGap = 46
 
 # ── Fixed fields ────────────────────────────────────────────────────
-$lblName = New-Label "Name *" $labelX ($y+2); $form.Controls.Add($lblName)
+$form.Controls.Add((New-Label "Name *" $labelX ($y+2)))
 $txtName = New-TextBox $fieldX $y $fieldW 30 $prefillName "e.g. John Smith"; $form.Controls.Add($txtName)
-Add-LayoutRow $lblName $txtName $rowGap
+$y += $rowGap
 
-$lblEmail = New-Label "Email *" $labelX ($y+2); $form.Controls.Add($lblEmail)
+$form.Controls.Add((New-Label "Email *" $labelX ($y+2)))
 $txtEmail = New-TextBox $fieldX $y $fieldW 30 $prefillEmail "e.g. john@smith.com"; $form.Controls.Add($txtEmail)
-Add-LayoutRow $lblEmail $txtEmail $rowGap
+$y += $rowGap
 
-$lblPhone = New-Label "Phone" $labelX ($y+2); $form.Controls.Add($lblPhone)
+$form.Controls.Add((New-Label "Phone" $labelX ($y+2)))
 $txtPhone = New-TextBox $fieldX $y $fieldW 30 $prefillPhone "The best number to reach you at"; $form.Controls.Add($txtPhone)
-Add-LayoutRow $lblPhone $txtPhone $rowGap
+$y += $rowGap
 
-$lblSubject = New-Label "Subject *" $labelX ($y+2); $form.Controls.Add($lblSubject)
+$form.Controls.Add((New-Label "Subject *" $labelX ($y+2)))
 $txtSubject = New-TextBox $fieldX $y $fieldW 30 "" "e.g. I'm having networking issues"; $form.Controls.Add($txtSubject)
-Add-LayoutRow $lblSubject $txtSubject $rowGap
+$y += $rowGap
 
-$lblDesc = New-Label "Description" $labelX ($y+2); $form.Controls.Add($lblDesc)
+$form.Controls.Add((New-Label "Description" $labelX ($y+2)))
 $txtDesc = New-Object System.Windows.Forms.TextBox
 $txtDesc.Location = New-Object System.Drawing.Point($fieldX, $y)
-$txtDesc.Size = New-Object System.Drawing.Size($fieldW, 100)
+$txtDesc.Size = New-Object System.Drawing.Size($fieldW, 112)
 $txtDesc.Multiline = $true
 $txtDesc.ScrollBars = 'Vertical'
 $txtDesc.Font = $fontBase
@@ -308,7 +277,7 @@ $txtDesc.ForeColor = $colorInk
 $txtDesc.BorderStyle = 'FixedSingle'
 Set-CueBanner $txtDesc "Please provide the details about the issue you are experiencing"
 $form.Controls.Add($txtDesc)
-Add-LayoutRow $lblDesc $txtDesc 108
+$y += 132
 
 # ── Dynamic questions ─────────────────────────────────────────────
 `)
@@ -335,8 +304,7 @@ Add-LayoutRow $lblDesc $txtDesc 108
 		switch q.FieldType {
 		case "select":
 			optList := psStringList(q.Options)
-			sb.WriteString(fmt.Sprintf("\n%s = New-Label %q $labelX ($y+2)\n", lblVar, labelText))
-			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", lblVar))
+			sb.WriteString(fmt.Sprintf("\n$form.Controls.Add((New-Label %q $labelX ($y+2)))\n", labelText))
 			sb.WriteString(fmt.Sprintf("%s = New-ComboBox $fieldX $y $fieldW @(%s)\n", varName, optList))
 			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", varName))
 		case "boolean":
@@ -345,18 +313,19 @@ Add-LayoutRow $lblDesc $txtDesc 108
 			// For booleans the label IS the checkbox; still emit a hidden label var.
 			sb.WriteString(fmt.Sprintf("%s = $null\n", lblVar))
 		default: // text
-			sb.WriteString(fmt.Sprintf("\n%s = New-Label %q $labelX ($y+2)\n", lblVar, labelText))
-			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", lblVar))
+			sb.WriteString(fmt.Sprintf("\n$form.Controls.Add((New-Label %q $labelX ($y+2)))\n", labelText))
 			placeholder := q.Placeholder
 			sb.WriteString(fmt.Sprintf("%s = New-TextBox $fieldX $y $fieldW 30 \"\" %q\n", varName, placeholder))
 			sb.WriteString(fmt.Sprintf("$form.Controls.Add(%s)\n", varName))
 		}
 
-		if q.FieldType == "boolean" {
-			sb.WriteString(fmt.Sprintf("Add-LayoutRow $null %s $rowGap\n", varName))
-		} else {
-			sb.WriteString(fmt.Sprintf("Add-LayoutRow %s %s $rowGap\n", lblVar, varName))
+		// Store the label control reference so we can hide it along with the control.
+		if q.FieldType != "boolean" {
+			sb.WriteString(fmt.Sprintf("%s = $form.Controls | Where-Object { $_.Text -eq %q } | Select-Object -Last 1\n",
+				lblVar, labelText))
 		}
+
+		sb.WriteString("$y += $rowGap\n")
 
 		metas = append(metas, qMeta{
 			varName:    varName,
@@ -370,6 +339,9 @@ Add-LayoutRow $lblDesc $txtDesc 108
 
 	// Resize form and place buttons after all controls.
 	sb.WriteString(`
+$y += 12
+$form.ClientSize = New-Object System.Drawing.Size(780, [Math]::Min(($y + 92), [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea.Height - 80))
+
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "Cancel"
 $btnCancel.Location = New-Object System.Drawing.Point($labelX, ($y + 18))
@@ -380,13 +352,12 @@ $form.CancelButton = $btnCancel
 $form.Controls.Add($btnCancel)
 
 $btnSubmit = New-Object System.Windows.Forms.Button
-$btnSubmit.Text = "Send Request"
+$btnSubmit.Text = "Send Request  ›"
 $btnSubmit.Location = New-Object System.Drawing.Point(($fieldX + $fieldW - 190), ($y + 18))
 $btnSubmit.Size = New-Object System.Drawing.Size(190, 40)
 Set-ButtonStyle $btnSubmit $true
 $form.AcceptButton = $btnSubmit
 $form.Controls.Add($btnSubmit)
-Apply-FormLayout
 
 # WinForms event handlers do not reliably write pipeline output back to the
 # host process. Store the accepted payload in script scope and emit it only
@@ -439,7 +410,7 @@ $script:TicketDialogResult = $null
 					m.varName+".Visible", m.labelVar, m.labelVar))
 			}
 		}
-		sb.WriteString("  Apply-FormLayout\n}\nUpdate-Visibility\n")
+		sb.WriteString("}\nUpdate-Visibility\n")
 
 		// Wire change events for controls whose answers may affect others.
 		triggeredIDs := map[int]bool{}
