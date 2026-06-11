@@ -1,6 +1,6 @@
 """Tests for BCP permission checks and company isolation."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException, Request
 
 pytestmark = pytest.mark.anyio
@@ -118,6 +118,27 @@ class TestBCPViewPermission:
                     
                     assert exc_info.value.status_code == 403
                     assert "BCP view permission required" in exc_info.value.detail
+
+
+class TestBCPPermissionCompatibility:
+    """Test BCP permission compatibility with tri-state role storage."""
+
+    def test_menu_continuity_read_grants_bcp_view(self):
+        from app.repositories.company_memberships import _permission_matches
+
+        assert _permission_matches({"menu.continuity": "read"}, "bcp:view") is True
+        assert _permission_matches({"menu.continuity": "read"}, "bcp:edit") is False
+
+    def test_menu_continuity_write_grants_bcp_edit(self):
+        from app.repositories.company_memberships import _permission_matches
+
+        assert _permission_matches({"menu.continuity": "write"}, "bcp:view") is True
+        assert _permission_matches({"menu.continuity": "write"}, "bcp:edit") is True
+
+    def test_continuity_alias_grants_bcp_view(self):
+        from app.repositories.company_memberships import _permission_matches
+
+        assert _permission_matches(["continuity.access"], "bcp:view") is True
 
 
 class TestBCPEditPermission:
