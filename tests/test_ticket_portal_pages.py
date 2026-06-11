@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -27,6 +28,19 @@ def _make_request(path: str = "/tickets", query_string: str = "") -> Request:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+def test_portal_tickets_template_hides_priority_company_and_auto_applies_status():
+    template = Path("app/templates/tickets/index.html").read_text()
+
+    assert "Apply filters" not in template
+    assert 'data-ticket-status-filter' in template
+    assert "statusFilter.addEventListener('change'" in template
+    assert 'data-column-key="priority"' not in template
+    assert 'data-column-key="company"' not in template
+    assert 'data-label="Priority"' not in template
+    assert 'data-label="Company"' not in template
+    assert 'colspan="4"' in template
 
 
 @pytest.mark.anyio("asyncio")
