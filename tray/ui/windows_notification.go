@@ -11,6 +11,7 @@ import (
 )
 
 func windowsToastEncodedCommand(title, body string) string {
+	appName := windowsToastAppName()
 	iconURL := windowsToastIconURL()
 	template := "ToastText02"
 	imageScript := ""
@@ -24,11 +25,12 @@ $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([
 ` + imageScript + `$textNodes = $xml.GetElementsByTagName('text')
 [void]$textNodes.Item(0).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(title) + `'))
 [void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyPortal').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('` + powershellSingleQuotedString(appName) + `').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
 	return encodePowerShellCommand(script)
 }
 
 func windowsPersistentChatToastEncodedCommand(title, body, chatURL string) string {
+	appName := windowsToastAppName()
 	iconURL := windowsToastIconURL()
 	template := "ToastText02"
 	imageScript := ""
@@ -73,7 +75,7 @@ $dismiss.SetAttribute('arguments', 'dismiss')
 $notification = [Windows.UI.Notifications.ToastNotification]::new($xml)
 $notification.Tag = 'myportal-chat'
 $notification.Group = 'myportal'
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyPortal').Show($notification)`
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('` + powershellSingleQuotedString(appName) + `').Show($notification)`
 	return encodePowerShellCommand(script)
 }
 
@@ -81,6 +83,10 @@ func showChatSessionNotification(title, body, chatURL string) {
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", windowsPersistentChatToastEncodedCommand(title, body, chatURL))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
+}
+
+func windowsToastAppName() string {
+	return trayDisplayName(gConfig)
 }
 
 func windowsToastIconURL() string {
