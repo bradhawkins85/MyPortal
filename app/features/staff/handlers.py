@@ -1491,7 +1491,12 @@ async def staff_onboarding_workflow_page(request: Request):
         staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
 
@@ -1515,7 +1520,12 @@ async def staff_onboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1539,7 +1549,12 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1574,7 +1589,12 @@ async def staff_offboarding_workflow_page(request: Request):
         staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
 
@@ -1598,7 +1618,12 @@ async def staff_offboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1629,7 +1654,12 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1678,7 +1708,12 @@ async def list_staff_workflow_policies(direction: str, request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1706,7 +1741,12 @@ async def create_staff_workflow_policy(direction: str, request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1746,7 +1786,12 @@ async def update_staff_workflow_policy(direction: str, policy_id: int, request: 
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1789,7 +1834,12 @@ async def delete_staff_workflow_policy(direction: str, policy_id: int, request: 
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if company_id is None:
@@ -1818,7 +1868,12 @@ async def staff_workflow_history_page(request: Request):
         staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
 
@@ -1844,7 +1899,12 @@ async def staff_workflow_history_recent(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
@@ -1933,7 +1993,12 @@ async def retry_workflow_execution(execution_id: int, request: Request):
         _staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
@@ -1957,7 +2022,12 @@ async def resume_workflow_execution(execution_id: int, request: Request):
         _staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
+    ) = await _load_staff_context(
+        request,
+        require_admin=True,
+        require_all_staff_access=True,
+        require_super_admin=True,
+    )
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
