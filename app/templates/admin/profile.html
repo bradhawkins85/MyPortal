@@ -3,7 +3,7 @@
 {% block header_title %}Profile{% endblock %}
 
 {% block content %}
-{% set show_technician_profile_fields = is_super_admin or is_helpdesk_technician %}
+{% set show_technician_profile_fields = profile_show_technician_tools | default(false) %}
 <div
   class="management management--single"
   data-layout
@@ -363,7 +363,7 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  {% if is_super_admin or is_helpdesk_technician %}
+  {% if profile_show_technician_tools | default(false) %}
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
   {% endif %}
   <script src="{{ static_url('/static/js/profile.js') }}" defer></script>

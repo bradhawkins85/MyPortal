@@ -1819,6 +1819,24 @@ def _menu_can(menu_access: dict[str, Any] | None, key: str, *, write: bool = Fal
     return menu_has_access(menu_access, key, write=write)
 
 
+def _can_edit_profile_technician_tools(user: Mapping[str, Any], membership: Mapping[str, Any] | None) -> bool:
+    """Return whether technician-only self-profile fields should be visible.
+
+    ``_is_helpdesk_technician`` intentionally treats some ticket access as
+    technician-like for broad ticket routing.  The profile-only contact tools
+    are narrower: they should be visible only to super admins and users whose
+    active membership has full technician ticket access.
+    """
+    if user.get("is_super_admin"):
+        return True
+    if not membership:
+        return False
+    profile_permissions = normalize_menu_permissions(
+        membership.get("menu_permissions") or membership.get("permissions")
+    )
+    return _menu_can(profile_permissions, "menu.tickets", write=True)
+
+
 async def _has_menu_page_access(request: Request, user: Mapping[str, Any], key: str, *, write: bool = False) -> bool:
     """Return whether the authenticated user has explicit access to a menu-owned page.
 
@@ -5192,6 +5210,7 @@ async def admin_profile_page(request: Request):
         extra={
             "title": "My profile",
             "profile_membership": membership,
+            "profile_show_technician_tools": _can_edit_profile_technician_tools(user, membership),
             "profile_totp_devices": totp_devices,
         },
     )
