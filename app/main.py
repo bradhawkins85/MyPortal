@@ -141,7 +141,7 @@ from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
-from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_menu_permissions
+from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import issues as issues_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
@@ -1733,6 +1733,15 @@ async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
 
 
 
+def _menu_permission_is_explicit_no_access(raw: Any, key: str) -> bool:
+    """Return whether a menu permission payload explicitly denies a menu key."""
+    if isinstance(raw, dict):
+        source = raw.get("menu") if isinstance(raw.get("menu"), dict) else raw
+        if key in source:
+            return normalize_access_level(source.get(key)) == "none"
+    return False
+
+
 def _build_menu_access_map(
     *,
     is_super_admin: bool,
@@ -1744,10 +1753,20 @@ def _build_menu_access_map(
     if is_super_admin:
         return {item.key: "write" for item in MENU_PERMISSIONS}
 
-    role_menu_permissions = normalize_menu_permissions(membership_data.get("menu_permissions"))
+    raw_menu_permissions = membership_data.get("menu_permissions")
+    role_menu_permissions = normalize_menu_permissions(raw_menu_permissions)
     menu_access = {item.key: role_menu_permissions.get(item.key, "none") for item in MENU_PERMISSIONS}
+    explicitly_denied_menu_keys = {
+        item.key
+        for item in MENU_PERMISSIONS
+        if _menu_permission_is_explicit_no_access(raw_menu_permissions, item.key)
+    }
+    for key in explicitly_denied_menu_keys:
+        menu_access[key] = "none"
 
     def promote(key: str, level: str = "write") -> None:
+        if key in explicitly_denied_menu_keys:
+            return
         rank = {"none": 0, "read": 1, "write": 2}
         if rank[level] > rank[menu_access.get(key, "none")]:
             menu_access[key] = level
@@ -1934,8 +1953,10 @@ async def _build_base_context(
         "can_manage_invoices": _menu_can(menu_access, "menu.invoices", write=True) or is_super_admin or _has_permission("can_manage_invoices"),
         "can_manage_staff": (
             is_super_admin
-            or _has_permission("can_manage_staff")
-            or staff_permission_level > 0
+            or (
+                _menu_can(menu_access, "menu.staff")
+                and (_has_permission("can_manage_staff") or staff_permission_level > 0)
+            )
         ),
         "can_manage_issues": _menu_can(menu_access, "menu.issues", write=True) or has_issue_tracker_access,
         "can_view_compliance": _menu_can(menu_access, "menu.compliance") or is_super_admin or _has_permission("can_view_compliance"),
