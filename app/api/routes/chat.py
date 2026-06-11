@@ -427,6 +427,12 @@ async def invite_external(
         raise HTTPException(status_code=404, detail="Room not found")
 
     user_id = current_user["id"]
+    is_staff = current_user.get("is_super_admin") or current_user.get(
+        "is_helpdesk_technician"
+    )
+    if not is_staff:
+        raise HTTPException(status_code=403, detail="Staff only")
+
     invite_domain = _settings.matrix_invite_domain or _settings.matrix_server_name or ""
     if not invite_domain:
         raise HTTPException(status_code=500, detail="MATRIX_INVITE_DOMAIN is not configured")

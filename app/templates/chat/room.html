@@ -19,7 +19,7 @@
           {% if room.assigned_tech_user_id %}Reassign to me{% else %}Assign to me{% endif %}
         </button>
       {% endif %}
-      {% if matrix_is_self_hosted and (is_creator or is_staff) %}
+      {% if matrix_is_self_hosted and is_staff %}
         <button class="button button--sm" id="btn-invite-external" data-room-id="{{ room.id }}" aria-haspopup="dialog" aria-controls="invite-modal">
           Invite to Matrix
         </button>
@@ -105,7 +105,7 @@
   {% endif %}
 </div>
 
-{% if matrix_is_self_hosted and (is_creator or is_staff) %}
+{% if matrix_is_self_hosted and is_staff %}
 <!-- Invite to Matrix modal -->
 <div id="invite-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="invite-modal-title" hidden>
   <div class="modal__backdrop" data-modal-close></div>

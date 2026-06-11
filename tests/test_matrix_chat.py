@@ -308,6 +308,18 @@ def test_external_invite_gated_by_self_hosted():
     )
 
 
+def test_external_invite_staff_only_in_route_and_chat_template():
+    """External Matrix invites must not be exposed or accepted for customer users."""
+    route_source = pathlib.Path("app/api/routes/chat.py").read_text()
+    template_source = pathlib.Path("app/templates/chat/room.html").read_text()
+
+    assert 'current_user.get("is_super_admin")' in route_source
+    assert '"is_helpdesk_technician"' in route_source
+    assert 'raise HTTPException(status_code=403, detail="Staff only")' in route_source
+    assert 'matrix_is_self_hosted and is_staff' in template_source
+    assert 'matrix_is_self_hosted and (is_creator or is_staff)' not in template_source
+
+
 def test_join_and_assign_use_tech_matrix_user_id():
     """join_room and assign_room must use the technician's matrix_user_id as admin."""
     source = pathlib.Path("app/api/routes/chat.py").read_text()
