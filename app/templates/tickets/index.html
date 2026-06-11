@@ -27,22 +27,21 @@
   <section class="card card--panel">
     <header class="card__header">
       <div class="card__controls tickets-toolbar">
-        <form method="get" class="tickets-toolbar__form" autocomplete="off">
+        <form method="get" class="tickets-toolbar__form" autocomplete="off" data-ticket-status-filter-form>
           <div class="tickets-toolbar__field">
             <label class="form-label" for="tickets-status-filter">Status</label>
-            <select id="tickets-status-filter" name="status" class="form-input">
+            <select id="tickets-status-filter" name="status" class="form-input" data-ticket-status-filter>
               <option value="">All statuses</option>
               {% for option in status_options %}
                 <option value="{{ option.value }}" {% if status_filter and status_filter == option.value %}selected{% endif %}>{{ option.label }}</option>
               {% endfor %}
             </select>
           </div>
-          <div class="tickets-toolbar__actions">
-            <button type="submit" class="button">Apply filters</button>
-            {% if filters_active %}
+          {% if filters_active %}
+            <div class="tickets-toolbar__actions">
               <a class="button button--ghost" href="{{ request.url.path }}">Clear</a>
-            {% endif %}
-          </div>
+            </div>
+          {% endif %}
         </form>
         <input
           type="search"
@@ -66,8 +65,6 @@
             <th scope="col" data-column-key="id" data-sort="int">Ticket</th>
             <th scope="col" data-column-key="subject" data-sort="string">Subject</th>
             <th scope="col" data-column-key="status" data-sort="string">Status</th>
-            <th scope="col" data-column-key="priority" data-sort="string">Priority</th>
-            <th scope="col" data-column-key="company" data-sort="string">Company</th>
             <th scope="col" data-column-key="updated" data-sort="date">Updated</th>
           </tr>
         </thead>
@@ -82,8 +79,6 @@
                 <td data-column-key="status" data-label="Status">
                   <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
                 </td>
-                <td data-column-key="priority" data-label="Priority">{{ ticket.priority_label }}</td>
-                <td data-column-key="company" data-label="Company">{{ ticket.company_name or '—' }}</td>
                 <td data-column-key="updated" data-label="Updated" data-value="{{ ticket.updated_iso or '' }}">
                   {% if ticket.updated_iso %}
                     <span data-utc="{{ ticket.updated_iso }}"></span>
@@ -95,7 +90,7 @@
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="6" class="table__empty">No tickets available.</td>
+              <td colspan="4" class="table__empty">No tickets available.</td>
             </tr>
           {% endif %}
         </tbody>
@@ -383,6 +378,20 @@
           modalId: 'create-ticket-modal', 
           triggerSelector: '[data-create-ticket-modal-open]' 
         });
+
+        const statusFilter = document.querySelector('[data-ticket-status-filter]');
+        const statusFilterForm = document.querySelector('[data-ticket-status-filter-form]');
+        if (statusFilter instanceof HTMLSelectElement && statusFilterForm instanceof HTMLFormElement) {
+          statusFilter.addEventListener('change', () => {
+            const targetUrl = new URL(statusFilterForm.action || window.location.href, window.location.href);
+            if (statusFilter.value) {
+              targetUrl.searchParams.set(statusFilter.name, statusFilter.value);
+            } else {
+              targetUrl.searchParams.delete(statusFilter.name);
+            }
+            window.location.assign(targetUrl.toString());
+          });
+        }
       });
     })();
   </script>
