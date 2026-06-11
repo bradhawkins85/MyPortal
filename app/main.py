@@ -5120,9 +5120,22 @@ async def admin_service_status_check_now(request: Request, service_id: int):
 # ---------------------------------------------------------------------------
 @app.get("/admin/profile", response_class=HTMLResponse)
 async def admin_profile_page(request: Request):
-    user, membership, redirect = await _require_administration_access(request)
+    user, redirect = await _require_authenticated_user(request)
     if redirect:
         return redirect
+
+    membership = getattr(request.state, "active_membership", None)
+    if membership is None:
+        active_company_id = getattr(request.state, "active_company_id", None)
+        if active_company_id is not None:
+            try:
+                membership = await user_company_repo.get_user_company(user["id"], int(active_company_id))
+            except Exception:  # pragma: no cover - defensive protection against membership lookup failures
+                membership = None
+            request.state.active_membership = membership
+
+    if not _membership_menu_can(user, membership, "menu.admin.profile"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Profile access required")
 
     try:
         devices = await auth_repo.get_totp_authenticators(user["id"])
