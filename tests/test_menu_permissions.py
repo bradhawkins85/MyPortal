@@ -55,3 +55,21 @@ def test_bcp_continuity_menu_permission_expands_to_legacy_permissions():
     assert "bcp:view" in legacy_read
     assert "bcp:edit" not in legacy_read
     assert "bcp:edit" in legacy_write
+
+
+def test_technician_permission_is_yes_no_for_catalogue_and_normalization():
+    permissions = normalize_menu_permissions({"menu.admin.technician": "Read Only"})
+
+    assert permissions["menu.admin.technician"] == "write"
+    assert compact_menu_permissions({"menu.admin.technician": "read"}) == {"menu.admin.technician": "write"}
+    assert menu_has_access({"menu.admin.technician": "read"}, "menu.admin.technician", write=True) is True
+
+
+def test_technician_permission_catalogue_exposes_yes_no_levels():
+    from app.security.menu_permissions import catalogue_for_api
+
+    technician_permission = next(
+        permission for permission in catalogue_for_api() if permission["key"] == "menu.admin.technician"
+    )
+
+    assert technician_permission["levels"] == ["none", "write"]
