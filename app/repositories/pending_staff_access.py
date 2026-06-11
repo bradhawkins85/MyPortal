@@ -15,6 +15,7 @@ _BOOLEAN_FIELDS = {
     "can_access_shop",
     "can_access_cart",
     "can_access_orders",
+    "can_access_quotes",
     "can_access_forms",
     "is_admin",
 }
@@ -53,6 +54,7 @@ async def upsert_assignment(
     can_access_shop: bool = False,
     can_access_cart: bool = False,
     can_access_orders: bool = False,
+    can_access_quotes: bool = False,
     can_access_forms: bool = False,
     is_admin: bool = False,
     role_id: int | None = None,
@@ -76,11 +78,12 @@ async def upsert_assignment(
             can_access_shop,
             can_access_cart,
             can_access_orders,
+            can_access_quotes,
             can_access_forms,
             is_admin,
             role_id
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON DUPLICATE KEY UPDATE
             staff_permission = VALUES(staff_permission),
@@ -94,6 +97,7 @@ async def upsert_assignment(
             can_access_shop = VALUES(can_access_shop),
             can_access_cart = VALUES(can_access_cart),
             can_access_orders = VALUES(can_access_orders),
+            can_access_quotes = VALUES(can_access_quotes),
             can_access_forms = VALUES(can_access_forms),
             is_admin = VALUES(is_admin),
             role_id = VALUES(role_id)
@@ -112,6 +116,7 @@ async def upsert_assignment(
             1 if can_access_shop else 0,
             1 if can_access_cart else 0,
             1 if can_access_orders else 0,
+            1 if can_access_quotes else 0,
             1 if can_access_forms else 0,
             1 if is_admin else 0,
             role_id,
