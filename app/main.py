@@ -1997,6 +1997,7 @@ async def _build_base_context(
         "can_manage_subscriptions": _menu_can(menu_access, "menu.subscriptions", write=True),
         "can_access_reports": _menu_can(menu_access, "menu.reports"),
         "can_access_reporting": _menu_can(menu_access, "menu.reporting"),
+        "can_access_admin_company": _menu_can(menu_access, "menu.admin.company"),
         "menu_access": menu_access,
         "menu_permission_catalogue": catalogue_for_api(),
     }
@@ -2083,7 +2084,7 @@ async def _build_base_context(
         "staff_permission": staff_permission_level,
         "is_super_admin": is_super_admin,
         "is_helpdesk_technician": is_helpdesk_technician,
-        "is_company_admin": is_super_admin or bool(membership_data.get("is_admin")),
+        "is_company_admin": is_super_admin or _menu_can(menu_access, "menu.admin.company"),
         "integration_modules": module_lookup,
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
         "enable_auto_refresh": bool(settings.enable_auto_refresh),

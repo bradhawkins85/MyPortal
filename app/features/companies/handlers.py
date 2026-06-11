@@ -83,12 +83,7 @@ async def _get_company_management_scope(
             company_id = int(raw_company_id)
         except (TypeError, ValueError):
             continue
-        staff_permission = _normalize_staff_access_scope(record.get("staff_permission"))
-        if (
-            bool(record.get("is_admin"))
-            or bool(record.get("can_manage_staff"))
-            or staff_permission > 0
-        ):
+        if _main()._membership_menu_can(user, record, "menu.admin.company"):
             membership_lookup[company_id] = record
 
     if not membership_lookup:
