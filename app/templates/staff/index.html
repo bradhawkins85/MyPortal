@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block header_title %}
-  {% if is_admin %}
+  {% if can_edit_staff %}
     <div class="header-title-menu">
       <span class="header-title-menu__label">Staff workspace</span>
       <details class="header-title-menu__dropdown" data-header-menu>
@@ -184,7 +184,9 @@
               <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
             {% endfor %}
             <th scope="col" data-sort="string" data-column="enabled" data-mobile-priority="supporting">Enabled</th>
-            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
+            {% if can_edit_staff %}
+              <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
@@ -277,32 +279,38 @@
                 </td>
               {% endfor %}
               <td data-label="Enabled" data-column="enabled">
-                <form action="/staff/enabled" method="post" class="inline-form">
-                  {% include "partials/csrf.html" %}
-                  <input type="hidden" name="staffId" value="{{ member.id }}" />
-                  <label class="visually-hidden" for="staff-enabled-{{ member.id }}">Toggle enabled state for {{ member.first_name }} {{ member.last_name }}</label>
-                  <input
-                    id="staff-enabled-{{ member.id }}"
-                    type="checkbox"
-                    name="enabled"
-                    value="1"
-                    {% if member.enabled %}checked{% endif %}
-                    data-submit-on-change
-                  />
-                </form>
+                {% if can_edit_staff %}
+                  <form action="/staff/enabled" method="post" class="inline-form">
+                    {% include "partials/csrf.html" %}
+                    <input type="hidden" name="staffId" value="{{ member.id }}" />
+                    <label class="visually-hidden" for="staff-enabled-{{ member.id }}">Toggle enabled state for {{ member.first_name }} {{ member.last_name }}</label>
+                    <input
+                      id="staff-enabled-{{ member.id }}"
+                      type="checkbox"
+                      name="enabled"
+                      value="1"
+                      {% if member.enabled %}checked{% endif %}
+                      data-submit-on-change
+                    />
+                  </form>
+                {% else %}
+                  {{ 'Yes' if member.enabled else 'No' }}
+                {% endif %}
               </td>
-              <td class="table__actions">
-                <div class="table__action-buttons">
-                  <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
-                  {% if is_super_admin %}
-                    <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
-                  {% endif %}
-                </div>
-              </td>
+              {% if can_edit_staff %}
+                <td class="table__actions">
+                  <div class="table__action-buttons">
+                    <button type="button" class="button button--ghost" data-staff-edit="{{ member.id }}">Edit</button>
+                    {% if is_super_admin %}
+                      <button type="button" class="button button--ghost" data-staff-verify="{{ member.id }}" {% if not member.mobile_phone %}disabled{% endif %}>Send code</button>
+                    {% endif %}
+                  </div>
+                </td>
+              {% endif %}
             </tr>
           {% else %}
             <tr>
-              <td colspan="{{ 10 + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
+              <td colspan="{{ (10 if can_edit_staff else 9) + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -331,7 +339,7 @@
   </section>
 </div>
 
-{% if is_admin %}
+{% if can_edit_staff %}
   <div class="modal" id="staff-add-modal" role="dialog" aria-modal="true" hidden>
     <div class="modal__content" role="document">
       <button type="button" class="modal__close" data-modal-close>
@@ -717,6 +725,7 @@
         <legend>Custom fields</legend>
         <div class="staff-modal__group-stack" id="edit-custom-fields-grid"></div>
       </fieldset>
+      {% if can_edit_staff %}
       <fieldset class="fieldset staff-modal__section" id="edit-actions-section">
         <legend>Secondary actions</legend>
         <p class="form-help form-field--full">Use these controls for invite, approvals, or workflow interventions. Add context notes for audit history.</p>
@@ -744,7 +753,8 @@
           <button type="button" class="button button--ghost" id="edit-action-m365-enable-sign-in" data-edit-action="m365-enable-sign-in" hidden>Enable O365 Sign-in</button>
           <button type="button" class="button button--ghost" id="edit-action-m365-disable-sign-in" data-edit-action="m365-disable-sign-in" hidden>Disable O365 Sign-in</button>
         </div>
-        <div class="staff-danger-panel">
+        {% if is_super_admin or is_helpdesk_technician %}
+        <div class="staff-danger-panel" id="edit-danger-zone">
           <h3 class="staff-danger-panel__title">Danger zone</h3>
           <p class="form-help">Delete permanently removes the staff record and cannot be undone.</p>
           <label class="checkbox" for="edit-delete-confirm">
@@ -755,7 +765,9 @@
           <button type="button" class="button button--danger" id="edit-action-delete" data-edit-action="delete">Delete</button>
           </div>
         </div>
+        {% endif %}
       </fieldset>
+      {% endif %}
       <p class="form-help form-help--error form-field--full" id="edit-form-error" hidden role="alert" aria-live="polite"></p>
       <div class="form-actions staff-modal__footer">
         <button type="submit" class="button">Save changes</button>
@@ -772,6 +784,8 @@
   'isSuperAdmin': is_super_admin,
   'isAdmin': is_admin,
   'canApproveOnboarding': can_approve_onboarding,
+  'canEditStaff': can_edit_staff,
+  'isHelpdeskTechnician': is_helpdesk_technician,
   'offboardingEmailForwardingEnabled': offboarding_email_forwarding_enabled,
   'hasM365': has_m365
 } | tojson }}</script>

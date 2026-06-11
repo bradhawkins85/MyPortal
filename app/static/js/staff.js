@@ -455,6 +455,7 @@
     const editActionError = getField('edit-action-error');
     const editFormError = getField('edit-form-error');
     const editDeleteConfirm = getField('edit-delete-confirm');
+    const editDangerZone = getField('edit-danger-zone');
 
     const editFields = {
       first_name: getField('edit-first-name'),
@@ -799,8 +800,9 @@
       const isExStaff = Boolean(member.date_offboarded) || accountAction === 'offboarded';
       const canInvite = Boolean(flags && flags.isAdmin && member.enabled && !isExStaff && member.email);
       const canRequestOffboarding = Boolean(flags && flags.isAdmin && member.enabled && !isExStaff && accountAction !== 'offboard requested');
-      const canApprove = Boolean(flags && flags.canApproveOnboarding && ['pending', 'requested'].includes(approvalStatus));
-      const canDeny = Boolean(flags && flags.canApproveOnboarding && ['pending', 'requested'].includes(approvalStatus));
+      const canPrivilegedStaffActions = Boolean(flags && (flags.isSuperAdmin || flags.isHelpdeskTechnician));
+      const canApprove = Boolean(canPrivilegedStaffActions && flags.canApproveOnboarding && ['pending', 'requested'].includes(approvalStatus));
+      const canDeny = Boolean(canPrivilegedStaffActions && flags.canApproveOnboarding && ['pending', 'requested'].includes(approvalStatus));
 
       setActionVisibility(editActionButtons.invite, { visible: canInvite, disabled: false });
       setActionVisibility(editActionButtons.offboardingRequest, { visible: canRequestOffboarding, disabled: false });
@@ -814,6 +816,10 @@
       setActionVisibility(editActionButtons.m365ResetPassword, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365EnableSignIn, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365DisableSignIn, { visible: canM365Actions, disabled: false });
+      const canSeeDangerZone = Boolean(flags && (flags.isSuperAdmin || flags.isHelpdeskTechnician));
+      if (editDangerZone) {
+        editDangerZone.hidden = !canSeeDangerZone;
+      }
       setActionVisibility(editActionButtons.delete, { visible: Boolean(flags && flags.isSuperAdmin), disabled: false });
 
       if (editActionButtons.workflowForceComplete) {
