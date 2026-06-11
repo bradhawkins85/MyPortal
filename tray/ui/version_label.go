@@ -20,14 +20,18 @@ func trayTooltipVersion(version string) string {
 	return "v" + version
 }
 
-// trayTooltip returns the system-tray hover text with the running app version.
-func trayTooltip(cfg *api.ConfigResponse) string {
-	displayName := defaultTrayTooltip
+func trayDisplayName(cfg *api.ConfigResponse) string {
 	if cfg != nil {
 		if brandedName := strings.TrimSpace(cfg.BrandingDisplayName); brandedName != "" {
-			displayName = brandedName
+			return brandedName
 		}
 	}
+	return defaultTrayTooltip
+}
+
+// trayTooltip returns the system-tray hover text with the running app version.
+func trayTooltip(cfg *api.ConfigResponse) string {
+	displayName := trayDisplayName(cfg)
 	version := trayTooltipVersion(updater.AgentVersion)
 	if version == "" {
 		return displayName

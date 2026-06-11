@@ -7,10 +7,21 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf16"
+
+	"github.com/bradhawkins85/myportal-tray/internal/api"
 )
 
 func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
-	cmd := windowsToastEncodedCommand("Script scheduled", `The script "Nightly Maintenance" has been scheduled.`)
+	prevConfig := gConfig
+	prevPortalURL := gPortalURL
+	gConfig = &api.ConfigResponse{BrandingDisplayName: "Acme Support"}
+	gPortalURL = "https://portal.example.test"
+	t.Cleanup(func() {
+		gConfig = prevConfig
+		gPortalURL = prevPortalURL
+	})
+
+	cmd := windowsToastEncodedCommand("Script scheduled", `The requested automation has been scheduled and will run in the background shortly.`)
 	raw, err := base64.StdEncoding.DecodeString(cmd)
 	if err != nil {
 		t.Fatalf("decode encoded command: %v", err)
@@ -22,8 +33,10 @@ func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
 	script := string(utf16.Decode(units))
 	for _, want := range []string{
 		"$textNodes = $xml.GetElementsByTagName('text')",
+		"$xml.GetElementsByTagName('image')[0].SetAttribute('src', 'https://portal.example.test/tray/icon.ico')",
 		"AppendChild($xml.CreateTextNode('Script scheduled'))",
-		`AppendChild($xml.CreateTextNode('The script "Nightly Maintenance" has been scheduled.'))`,
+		"AppendChild($xml.CreateTextNode('The requested automation has been scheduled and will run in the background shortly.'))",
+		"CreateToastNotifier('Acme Support').Show",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("encoded script missing %q:\n%s", want, script)
