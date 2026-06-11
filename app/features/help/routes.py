@@ -25,7 +25,11 @@ def _main():
 @router.get("/help", response_class=HTMLResponse)
 async def help_index(request: Request):
     main_module = _main()
-    user, redirect = await main_module._require_authenticated_user(request)
+    user, redirect = await main_module._require_menu_page_access(
+        request,
+        "menu.help",
+        detail="Help access permission required",
+    )
     if redirect:
         return redirect
 
@@ -44,7 +48,11 @@ async def help_index(request: Request):
 @router.get("/help/{section_slug}/{article_slug}", response_class=HTMLResponse)
 async def help_article(request: Request, section_slug: str, article_slug: str):
     main_module = _main()
-    user, redirect = await main_module._require_authenticated_user(request)
+    user, redirect = await main_module._require_menu_page_access(
+        request,
+        "menu.help",
+        detail="Help access permission required",
+    )
     if redirect:
         return redirect
 
