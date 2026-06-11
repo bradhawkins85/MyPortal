@@ -19,9 +19,26 @@ from app.schemas.issues import (
     IssueStatusUpdate,
     IssueUpdate,
 )
-from app.services import issues as issues_service
+from app.services import company_access, issues as issues_service
 
 router = APIRouter(prefix="/api/issues", tags=["Issues"])
+
+
+async def _accessible_company_ids(user: Mapping[str, Any]) -> set[int]:
+    memberships = await company_access.list_accessible_companies(user)
+    allowed_ids: set[int] = set()
+    for membership in memberships:
+        raw_id = membership.get("company_id") or membership.get("id")
+        try:
+            allowed_ids.add(int(raw_id))
+        except (TypeError, ValueError):
+            continue
+    return allowed_ids
+
+
+def _assert_company_allowed(company_id: int, allowed_company_ids: set[int]) -> None:
+    if company_id not in allowed_company_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company access required")
 
 
 def _build_issue_response(overview: issues_service.IssueOverview) -> IssueResponse:
@@ -88,7 +105,7 @@ async def list_issues(
     _: None = Depends(require_database),
     current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueListResponse:
-    del current_user  # Access control handled by dependency
+    allowed_company_ids = await _accessible_company_ids(current_user)
     resolved_company_id = company_id
     if resolved_company_id is None:
         raw_company_id = request.query_params.get("company_id")
@@ -100,6 +117,8 @@ async def list_issues(
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid company filter") from exc
     resolved_company_id = await _resolve_company_filter(resolved_company_id, company_name)
+    if resolved_company_id is not None and resolved_company_id not in allowed_company_ids:
+        return IssueListResponse(items=[], total=0)
     try:
         status_value = issues_service.normalise_status(status_filter) if status_filter else None
     except ValueError as exc:
@@ -115,6 +134,7 @@ async def list_issues(
         search=search_value,
         status=status_value,
         company_id=resolved_company_id,
+        company_ids=allowed_company_ids,
     )
     items = [_build_issue_response(overview) for overview in overviews]
     return IssueListResponse(items=items, total=len(items))
@@ -133,6 +153,16 @@ async def create_issue(
     current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueResponse:
     user_id = _extract_user_id(current_user)
+    allowed_company_ids = await _accessible_company_ids(current_user)
+    resolved_assignments: list[tuple[int, str]] = []
+    for assignment in payload.companies:
+        company = await company_repo.get_company_by_name(assignment.company_name)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        company_id = int(company["id"])
+        _assert_company_allowed(company_id, allowed_company_ids)
+        resolved_assignments.append((company_id, assignment.status))
+
     try:
         await issues_service.ensure_issue_name_available(payload.name)
     except ValueError as exc:
@@ -178,19 +208,16 @@ async def create_issue(
     if issue_id is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Issue identifier missing")
 
-    for assignment in payload.companies:
-        company = await company_repo.get_company_by_name(assignment.company_name)
-        if not company:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-        status_value = issues_service.normalise_status(assignment.status)
+    for company_id, assignment_status in resolved_assignments:
+        status_value = issues_service.normalise_status(assignment_status)
         await issues_repo.assign_issue_to_company(
             issue_id=issue_id,
-            company_id=int(company["id"]),
+            company_id=company_id,
             status=status_value,
             updated_by=user_id,
         )
 
-    overview = await issues_service.get_issue_overview(issue_id)
+    overview = await issues_service.get_issue_overview(issue_id, company_ids=allowed_company_ids)
     if not overview:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Issue lookup failed")
 
@@ -215,6 +242,11 @@ async def update_issue_status(
     current_user: dict[str, Any] = Depends(require_issue_tracker_access),
 ) -> IssueStatusResponse:
     user_id = _extract_user_id(current_user)
+    allowed_company_ids = await _accessible_company_ids(current_user)
+    company = await company_repo.get_company_by_name(payload.company_name)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    _assert_company_allowed(int(company["id"]), allowed_company_ids)
     try:
         assignment = await issues_service.upsert_issue_status_by_name(
             issue_name=payload.issue_name,
@@ -279,6 +311,17 @@ async def update_issue(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
     issue_id = int(issue["issue_id"])
     user_id = _extract_user_id(current_user)
+    allowed_company_ids = await _accessible_company_ids(current_user)
+    scoped_overview = await issues_service.get_issue_overview(issue_id, company_ids=allowed_company_ids)
+    has_existing_access = bool(scoped_overview and scoped_overview.assignments)
+    resolved_assignments: list[tuple[int, str]] = []
+    for assignment in payload.add_companies:
+        company = await company_repo.get_company_by_name(assignment.company_name)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Company '{assignment.company_name}' not found")
+        company_id = int(company["id"])
+        _assert_company_allowed(company_id, allowed_company_ids)
+        resolved_assignments.append((company_id, assignment.status))
 
     updates: dict[str, Any] = {}
     if payload.description is not None:
@@ -304,23 +347,23 @@ async def update_issue(
     if payload.new_slug is not None:
         updates["slug"] = payload.new_slug
 
+    if not has_existing_access and (updates or not resolved_assignments):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found")
+
     if updates:
         updates["updated_by"] = user_id
         await issues_repo.update_issue(issue_id, **updates)
 
-    for assignment in payload.add_companies:
-        company = await company_repo.get_company_by_name(assignment.company_name)
-        if not company:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Company '{assignment.company_name}' not found")
-        status_value = issues_service.normalise_status(assignment.status)
+    for company_id, assignment_status in resolved_assignments:
+        status_value = issues_service.normalise_status(assignment_status)
         await issues_repo.assign_issue_to_company(
             issue_id=issue_id,
-            company_id=int(company["id"]),
+            company_id=company_id,
             status=status_value,
             updated_by=user_id,
         )
 
-    overview = await issues_service.get_issue_overview(issue_id)
+    overview = await issues_service.get_issue_overview(issue_id, company_ids=allowed_company_ids)
     if not overview:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Issue lookup failed")
 
