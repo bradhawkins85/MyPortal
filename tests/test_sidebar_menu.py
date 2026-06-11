@@ -307,6 +307,8 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
                 is_super_admin=False,
                 membership_data=membership,
             ),
+            "is_super_admin": False,
+            "is_helpdesk_technician": False,
             "matrix_chat_enabled": False,
             "plausible_config": {"enabled": False, "site_domain": "", "base_url": ""},
         }
@@ -328,6 +330,82 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
 
     assert response.status_code == 200
     assert "Manage your account security" in response.text
+    assert "Notification Contact" not in response.text
+    assert "Booking Link" not in response.text
+    assert "Matrix Username" not in response.text
+    assert "Email signature" not in response.text
+    assert "profile-columns--standard" in response.text
+
+
+def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypatch):
+    user = {
+        "id": 8,
+        "email": "tech@example.com",
+        "is_super_admin": False,
+        "mobile_phone": None,
+        "booking_link_url": None,
+        "matrix_user_id": None,
+        "email_signature": None,
+    }
+    membership = {
+        "company_id": 10,
+        "is_admin": False,
+        "menu_permissions": {"menu.admin.profile": "read"},
+    }
+
+    async def fake_require_user(request):
+        request.state.active_company_id = membership["company_id"]
+        request.state.active_membership = membership
+        return user, None
+
+    async def fake_get_totp_authenticators(user_id):
+        return []
+
+    async def fake_build_base_context(request, current_user, *, extra=None):
+        context = {
+            "request": request,
+            "app_name": "MyPortal",
+            "current_year": 2026,
+            "current_user": current_user,
+            "available_companies": [],
+            "active_company": None,
+            "active_company_id": membership["company_id"],
+            "active_membership": membership,
+            "csrf_token": "csrf-token",
+            "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
+            "notification_unread_count": 0,
+            "menu_access": main_module._build_menu_access_map(
+                is_super_admin=False,
+                membership_data=membership,
+                is_helpdesk_technician=True,
+            ),
+            "is_super_admin": False,
+            "is_helpdesk_technician": True,
+            "matrix_chat_enabled": True,
+            "plausible_config": {"enabled": False, "site_domain": "", "base_url": ""},
+        }
+        if extra:
+            context.update(extra)
+        return context
+
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_user)
+    monkeypatch.setattr(main_module.auth_repo, "get_totp_authenticators", fake_get_totp_authenticators)
+    monkeypatch.setattr(main_module, "_build_base_context", fake_build_base_context)
+    main_module.templates.env.globals["plausible_config"] = {
+        "enabled": False,
+        "site_domain": "",
+        "base_url": "",
+    }
+
+    with TestClient(app) as client:
+        response = client.get("/admin/profile")
+
+    assert response.status_code == 200
+    assert "Notification Contact" in response.text
+    assert "Booking Link" in response.text
+    assert "Matrix Username" in response.text
+    assert "Email signature" in response.text
+    assert "profile-columns--standard" not in response.text
 
 
 def test_bcp_menu_replaces_business_continuity(company_admin_context):
