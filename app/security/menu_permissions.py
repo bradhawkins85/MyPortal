@@ -28,7 +28,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.knowledge_base", "Knowledge base", "General", "View knowledge base articles."),
     MenuPermission("menu.help", "Help", "General", "View help and support documentation."),
     MenuPermission("menu.chat", "Chat", "General", "Access the chat interface.", ("chat.access",), "can_access_chat"),
-    MenuPermission("menu.tickets", "Tickets", "Company", "No Access blocks tickets, Own opens /tickets for the user, and All opens /admin/tickets for technicians.", ("helpdesk.technician",), None),
+    MenuPermission("menu.tickets", "Tickets", "Company", "No Access blocks tickets, Own opens /tickets for the user, All opens /tickets for company tickets, and technicians can use /admin/tickets across customers.", ("helpdesk.technician",), None),
     MenuPermission("menu.issues", "Issue tracker", "Company", "View or manage issue tracker items.", ("issues.manage",), "can_manage_issues"),
     MenuPermission("menu.marketing", "Marketing", "Company", "View or manage marketing pages and contacts.", ("marketing.access",), None),
     MenuPermission("menu.shop", "Shop", "Commerce", "Browse shop products; write access allows cart actions.", ("shop.access",), "can_access_shop"),

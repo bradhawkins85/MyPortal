@@ -559,6 +559,99 @@ async def list_tickets_for_user(
     return [_normalise_ticket(row) for row in rows]
 
 
+async def list_tickets_in_companies(
+    *,
+    company_ids: Sequence[int] | None,
+    search: str | None = None,
+    status: str | Sequence[str] | None = None,
+    limit: int = 25,
+    offset: int = 0,
+) -> list[TicketRecord]:
+    """Return recent tickets for the supplied companies, or all tickets when company_ids is None."""
+
+    status_filters = _prepare_status_filters(status)
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    if company_ids is not None and not company_filters:
+        return []
+
+    search_clause, search_params = _build_ticket_search_clause(
+        search=search,
+        column_prefix="t.",
+        include_external_reference=True,
+    )
+
+    where_clauses = [f"({search_clause})"]
+    if status_filters:
+        status_placeholders = ", ".join(["%s"] * len(status_filters))
+        where_clauses.append(f"t.status IN ({status_placeholders})")
+    if company_filters:
+        company_placeholders = ", ".join(["%s"] * len(company_filters))
+        where_clauses.append(f"t.company_id IN ({company_placeholders})")
+
+    query = f"""
+        SELECT
+            t.*,
+            requester.first_name AS requester_first_name,
+            requester.last_name AS requester_last_name,
+            requester.email AS requester_email
+        FROM tickets AS t
+        LEFT JOIN users AS requester ON requester.id = t.requester_id
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY t.updated_at DESC, t.id DESC
+        LIMIT %s OFFSET %s
+    """
+    params: list[Any] = [
+        *search_params,
+        *status_filters,
+        *company_filters,
+        int(max(1, limit)),
+        int(max(0, offset)),
+    ]
+    rows = await db.fetch_all(query, tuple(params))
+    return [_normalise_ticket(row) for row in rows]
+
+
+async def count_tickets_in_companies(
+    *,
+    company_ids: Sequence[int] | None,
+    search: str | None = None,
+    status: str | Sequence[str] | None = None,
+) -> int:
+    """Return the number of tickets for the supplied companies, or all tickets when company_ids is None."""
+
+    status_filters = _prepare_status_filters(status)
+    company_filters = [int(cid) for cid in (company_ids or []) if int(cid) > 0]
+    if company_ids is not None and not company_filters:
+        return 0
+
+    search_clause, search_params = _build_ticket_search_clause(
+        search=search,
+        column_prefix="t.",
+        include_external_reference=True,
+    )
+
+    where_clauses = [f"({search_clause})"]
+    if status_filters:
+        status_placeholders = ", ".join(["%s"] * len(status_filters))
+        where_clauses.append(f"t.status IN ({status_placeholders})")
+    if company_filters:
+        company_placeholders = ", ".join(["%s"] * len(company_filters))
+        where_clauses.append(f"t.company_id IN ({company_placeholders})")
+
+    query = f"""
+        SELECT COUNT(*) AS count
+        FROM tickets AS t
+        WHERE {' AND '.join(where_clauses)}
+    """
+    params: list[Any] = [
+        *search_params,
+        *status_filters,
+        *company_filters,
+    ]
+    row = await db.fetch_one(query, tuple(params))
+    return int(row["count"]) if row else 0
+
+
 async def count_tickets_for_user(
     user_id: int,
     *,
