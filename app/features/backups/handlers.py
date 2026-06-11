@@ -114,21 +114,37 @@ async def admin_backup_jobs_page(request: Request):
 
 
 async def admin_backup_summary_page(request: Request):
+    from fastapi import HTTPException
+
     from app.repositories import companies as company_repo
     from app.services import backup_jobs as backup_jobs_service
 
-    user, redirect = await _main()._require_super_admin_page(request)
+    user, redirect = await _main()._require_menu_page_access(
+        request,
+        "menu.admin.backup_summary",
+        detail="Backup summary access required",
+    )
     if redirect:
         return redirect
 
     company_filter_raw = (request.query_params.get("company_id") or "").strip()
     status_filter = (request.query_params.get("status_filter") or "").strip().lower()
-    company_filter: int | None = None
+    requested_company_filter: int | None = None
     if company_filter_raw:
         try:
-            company_filter = int(company_filter_raw)
+            requested_company_filter = int(company_filter_raw)
         except ValueError:
-            company_filter = None
+            requested_company_filter = None
+
+    is_super_admin = bool((user or {}).get("is_super_admin"))
+    active_company_id = getattr(request.state, "active_company_id", None) or (user or {}).get("company_id")
+    if is_super_admin:
+        company_filter = requested_company_filter
+    else:
+        try:
+            company_filter = int(active_company_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Active company required")
 
     jobs = await backup_jobs_service.list_jobs_with_latest(
         company_id=company_filter, include_inactive=True
@@ -138,6 +154,16 @@ async def admin_backup_summary_page(request: Request):
 
     summary = backup_jobs_service.summarise_jobs(jobs)
     companies = await company_repo.list_companies()
+    if not is_super_admin:
+        scoped_companies = []
+        for company in companies:
+            try:
+                company_id = int(company.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if company_id == company_filter:
+                scoped_companies.append(company)
+        companies = scoped_companies
     company_lookup = {
         int(company["id"]): company.get("name")
         for company in companies
