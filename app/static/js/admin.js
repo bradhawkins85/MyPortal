@@ -1486,6 +1486,7 @@
           'm365_user_mailboxes.access': ['menu.m365.user_mailboxes', 'read'],
           'm365_shared_mailboxes.access': ['menu.m365.shared_mailboxes', 'read'],
           'company.admin': ['menu.admin.company', 'write'],
+          'company.switch_all': ['menu.admin.technician', 'write'],
         };
         return permissions.reduce((acc, permission) => {
           const mapped = legacyMap[permission];
@@ -1496,7 +1497,11 @@
         }, {});
       }
       if (typeof permissions === 'object') {
-        return permissions.menu && typeof permissions.menu === 'object' ? permissions.menu : permissions;
+        const menuPermissions = permissions.menu && typeof permissions.menu === 'object' ? permissions.menu : permissions;
+        if (menuPermissions['menu.admin.technician'] === 'read') {
+          return { ...menuPermissions, 'menu.admin.technician': 'write' };
+        }
+        return menuPermissions;
       }
       return {};
     }
