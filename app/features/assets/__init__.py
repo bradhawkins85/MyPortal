@@ -3,8 +3,8 @@
 Owns the assets pages and delete endpoint:
 
 * ``GET /assets``
-* ``GET /assets/{asset_id}``
 * ``GET /assets/settings``
+* ``GET /assets/{asset_id}``
 * ``DELETE /assets/{asset_id}``
 
 Handlers are migrated from ``app/main.py`` so they can be hot-reloaded
@@ -20,7 +20,7 @@ from .routes import router as assets_router
 
 PACK = FeaturePack(
     slug="assets",
-    version="1.0.2",
+    version="1.0.3",
     routers=(assets_router,),
 )
 
