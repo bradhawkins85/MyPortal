@@ -174,6 +174,7 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
         "can_access_shop": True,
         "can_access_cart": True,
         "can_access_orders": False,
+        "can_access_quotes": True,
         "can_access_forms": True,
         "can_manage_assets": True,
         "can_manage_licenses": False,
@@ -213,6 +214,7 @@ async def test_admin_assign_user_to_company_preserves_existing_permissions(monke
         "can_access_shop": True,
         "can_access_cart": True,
         "can_access_orders": False,
+        "can_access_quotes": True,
         "can_access_forms": True,
         "can_manage_assets": True,
         "can_manage_licenses": False,
@@ -290,6 +292,7 @@ async def test_admin_assign_user_to_company_queues_pending_access(monkeypatch):
             "staffPermission": "2",
             "can_manage_staff": "1",
             "can_access_shop": "1",
+            "can_access_quotes": "1",
             "roleId": "3",
         }
     )
@@ -354,6 +357,7 @@ async def test_admin_assign_user_to_company_queues_pending_access(monkeypatch):
         "can_access_shop": True,
         "can_access_cart": False,
         "can_access_orders": False,
+        "can_access_quotes": True,
         "can_access_forms": False,
         "is_admin": False,
         "role_id": 3,
