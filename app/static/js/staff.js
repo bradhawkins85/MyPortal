@@ -799,7 +799,7 @@
       const accountAction = String(member.account_action || '').toLowerCase();
       const isExStaff = Boolean(member.date_offboarded) || accountAction === 'offboarded';
       const canInvite = Boolean(flags && flags.isAdmin && member.enabled && !isExStaff && member.email);
-      const canRequestOffboarding = Boolean(flags && flags.isAdmin && member.enabled && !isExStaff && accountAction !== 'offboard requested');
+      const canRequestOffboarding = Boolean(flags && flags.canRequestStaffOffboarding && member.enabled && !isExStaff && accountAction !== 'offboard requested');
       const canPrivilegedStaffActions = Boolean(flags && (flags.isSuperAdmin || flags.isHelpdeskTechnician));
       const canApprove = Boolean(canPrivilegedStaffActions && flags.canApproveOnboarding && ['pending', 'requested'].includes(approvalStatus));
       const canDeny = Boolean(canPrivilegedStaffActions && flags.canApproveOnboarding && ['pending', 'requested'].includes(approvalStatus));
@@ -1105,7 +1105,7 @@
       editForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const staffId = editIdField ? editIdField.value : '';
-        if (!staffId) {
+        if (!staffId || !(flags && flags.canEditStaff)) {
           return;
         }
         const payload = {

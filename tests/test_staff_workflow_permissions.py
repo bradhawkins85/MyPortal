@@ -86,3 +86,26 @@ def test_staff_page_workflow_links_are_super_admin_only():
 
     assert "{% if is_super_admin %}" in template
     assert "is_super_admin or staff_permission == 3" not in template
+
+
+def test_request_staff_offboarding_uses_staff_read_context(monkeypatch):
+    captured_calls = []
+    redirect = SimpleNamespace(status_code=303)
+
+    async def fake_load_staff_context(request, **kwargs):
+        captured_calls.append(kwargs)
+        return (
+            {"id": 10, "company_id": 1, "is_super_admin": False},
+            {"menu_permissions": {"menu.staff": "read"}, "staff_permission": 3},
+            None,
+            3,
+            1,
+            redirect,
+        )
+
+    monkeypatch.setattr(handlers, "_load_staff_context", fake_load_staff_context)
+
+    result = asyncio.run(handlers.request_staff_offboarding(123, SimpleNamespace()))
+
+    assert result is redirect
+    assert captured_calls == [{}]
