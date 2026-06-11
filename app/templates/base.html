@@ -127,7 +127,8 @@
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') or can_access_m365_configuration or can_access_m365_licenses %}
           {% set can_manage_subscriptions = (can_manage_subscriptions | default(false)) or is_super_admin or (membership.get('can_manage_licenses') and membership.get('can_access_cart')) or menu_access.get('menu.subscriptions') in ['read', 'write'] %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') or menu_access.get('menu.invoices') in ['read', 'write'] %}
-          {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or ((staff_permission > 0) and menu_access.get('menu.staff') in ['read', 'write']) %}
+          {% set has_staff_menu_access = menu_access.get('menu.staff') in ['read', 'write'] %}
+          {% set can_manage_staff = is_super_admin or (has_staff_menu_access and ((can_manage_staff | default(false)) or (staff_permission > 0))) %}
           {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) or menu_access.get('menu.issues') in ['read', 'write'] %}
           {% set can_view_compliance = (can_view_compliance | default(false)) or is_super_admin or membership.get('can_view_compliance') or menu_access.get('menu.compliance') in ['read', 'write'] %}
           {% set can_view_m365_best_practices = (can_view_m365_best_practices | default(false)) or is_super_admin or membership.get('can_view_m365_best_practices') or menu_access.get('menu.m365.best_practices') in ['read', 'write'] %}
