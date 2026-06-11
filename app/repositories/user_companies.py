@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 from app.core.database import db
 from app.repositories import company_memberships as membership_repo
 from app.repositories import roles as role_repo
+from app.security.menu_permissions import menu_has_access, menu_permissions_to_legacy, normalize_menu_permissions
 
 _BOOLEAN_FIELDS = {
     "can_manage_licenses",
@@ -89,19 +90,22 @@ def _enrich_with_role_permissions(data: dict[str, Any], role_permissions_raw: An
         return
     
     try:
-        role_permissions = json.loads(role_permissions_raw) if isinstance(role_permissions_raw, str) else role_permissions_raw or []
+        role_permissions = json.loads(role_permissions_raw) if isinstance(role_permissions_raw, str) else role_permissions_raw or {}
     except json.JSONDecodeError:
-        role_permissions = []
-    
-    # Update boolean fields based on role permissions
-    # Role permissions override legacy boolean fields
+        role_permissions = {}
+
+    menu_permissions = normalize_menu_permissions(role_permissions)
+    legacy_permissions = set(menu_permissions_to_legacy(menu_permissions))
+    data["menu_permissions"] = menu_permissions
+
+    # Update boolean fields based on role permissions. Role permissions override legacy fields.
     for role_perm, field_name in _PERMISSION_MAPPING.items():
-        if role_perm in role_permissions:
+        if role_perm in legacy_permissions:
             data[field_name] = True
         elif field_name in _PERMISSION_FIELDS:
-            # If the role doesn't have this permission, explicitly set to False
-            # This ensures role-based permissions override legacy settings
             data[field_name] = False
+
+    data["can_access_quotes"] = menu_has_access(menu_permissions, "menu.quotes")
 
 
 def _normalise(row: dict[str, Any]) -> dict[str, Any]:

@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import roles as role_repo
-from app.schemas.roles import RoleCreate, RoleResponse, RoleUpdate
+from app.schemas.roles import MenuPermissionResponse, RoleCreate, RoleResponse, RoleUpdate
+from app.security.menu_permissions import catalogue_for_api
 from app.services import audit as audit_service
 
 router = APIRouter(prefix="/roles", tags=["Roles"])
@@ -44,6 +45,15 @@ async def create_role(
         request=request,
     )
     return created
+
+
+@router.get("/permissions/available", response_model=list[MenuPermissionResponse])
+async def list_available_permissions(
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Get assignable tri-state menu permissions for role management."""
+    return catalogue_for_api()
 
 
 @router.get("/{role_id}", response_model=RoleResponse)
@@ -111,43 +121,3 @@ async def delete_role(
         request=request,
     )
     return None
-
-
-@router.get("/permissions/available", response_model=list[str])
-async def list_available_permissions(
-    _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
-):
-    """Get list of all available permissions in the system."""
-    # These are all the permissions defined in the system
-    # Extracted from migrations and used throughout the codebase
-    return sorted([
-        "assets.manage",
-        "audit.view",
-        "billing.manage",
-        "cart.access",
-        "chat.access",
-        "company.admin",
-        "company.manage",
-        "compliance.access",
-        "compliance_checks.access",
-        "compliance_checks.manage",
-        "continuity.access",
-        "forms.access",
-        "helpdesk.technician",
-        "invoices.manage",
-        "issues.manage",
-        "licenses.manage",
-        "licenses.order",
-        "m365_best_practices.access",
-        "m365_shared_mailboxes.access",
-        "m365_user_mailboxes.access",
-        "marketing.access",
-        "membership.manage",
-        "office_groups.manage",
-        "orders.access",
-        "portal.access",
-        "shop.access",
-        "staff.manage",
-        "staff.request",
-    ])
