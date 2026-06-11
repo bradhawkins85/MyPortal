@@ -97,3 +97,123 @@ def test_backups_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_backup_summary_uses_menu_permission_and_scopes_non_super_admin(monkeypatch):
+    import asyncio
+
+    from starlette.requests import Request
+
+    from app.repositories import companies as company_repo
+    from app.services import backup_jobs as backup_jobs_service
+
+    calls: dict[str, object] = {}
+
+    async def fake_require_menu_page_access(request, key, *, write=False, detail=""):
+        calls["permission"] = (key, write, detail)
+        request.state.active_company_id = 10
+        return {"id": 7, "company_id": 10, "is_super_admin": False}, None
+
+    async def fake_list_jobs_with_latest(*, company_id=None, include_inactive=False):
+        calls["jobs_company_id"] = company_id
+        calls["jobs_include_inactive"] = include_inactive
+        return [{"id": 1, "company_id": company_id, "today_status": "success"}]
+
+    def fake_summarise_jobs(jobs):
+        calls["summarised_jobs"] = jobs
+        return {"total": len(jobs)}
+
+    async def fake_list_companies():
+        return [{"id": 10, "name": "Allowed"}, {"id": 20, "name": "Hidden"}]
+
+    async def fake_build_history_grid(*, company_id=None, days=14, include_inactive=False):
+        calls["history"] = (company_id, days, include_inactive)
+        return []
+
+    async def fake_render_template(template, request, user, *, extra=None):
+        calls["render"] = (template, user, extra)
+        return extra
+
+    monkeypatch.setattr(main_module, "_require_menu_page_access", fake_require_menu_page_access)
+    monkeypatch.setattr(main_module, "_render_template", fake_render_template)
+    monkeypatch.setattr(backup_jobs_service, "list_jobs_with_latest", fake_list_jobs_with_latest)
+    monkeypatch.setattr(backup_jobs_service, "summarise_jobs", fake_summarise_jobs)
+    monkeypatch.setattr(backup_jobs_service, "build_history_grid", fake_build_history_grid)
+    monkeypatch.setattr(company_repo, "list_companies", fake_list_companies)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/admin/backup-summary",
+        "query_string": b"company_id=20",
+        "headers": [],
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    request = Request(scope)
+
+    extra = asyncio.run(backup_handlers.admin_backup_summary_page(request))
+
+    assert calls["permission"] == (
+        "menu.admin.backup_summary",
+        False,
+        "Backup summary access required",
+    )
+    assert calls["jobs_company_id"] == 10
+    assert calls["jobs_include_inactive"] is True
+    assert calls["history"] == (10, 14, True)
+    assert extra["backup_company_filter"] == 10
+    assert extra["backup_companies"] == [{"id": 10, "name": "Allowed"}]
+    assert extra["backup_company_lookup"] == {10: "Allowed"}
+
+
+def test_backup_summary_keeps_super_admin_company_filter(monkeypatch):
+    import asyncio
+
+    from starlette.requests import Request
+
+    from app.repositories import companies as company_repo
+    from app.services import backup_jobs as backup_jobs_service
+
+    calls: dict[str, object] = {}
+
+    async def fake_require_menu_page_access(request, key, *, write=False, detail=""):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def fake_list_jobs_with_latest(*, company_id=None, include_inactive=False):
+        calls["jobs_company_id"] = company_id
+        return []
+
+    async def fake_list_companies():
+        return [{"id": 10, "name": "Allowed"}, {"id": 20, "name": "Other"}]
+
+    async def fake_build_history_grid(*, company_id=None, days=14, include_inactive=False):
+        calls["history_company_id"] = company_id
+        return []
+
+    async def fake_render_template(template, request, user, *, extra=None):
+        return extra
+
+    monkeypatch.setattr(main_module, "_require_menu_page_access", fake_require_menu_page_access)
+    monkeypatch.setattr(main_module, "_render_template", fake_render_template)
+    monkeypatch.setattr(backup_jobs_service, "list_jobs_with_latest", fake_list_jobs_with_latest)
+    monkeypatch.setattr(backup_jobs_service, "summarise_jobs", lambda jobs: {"total": len(jobs)})
+    monkeypatch.setattr(backup_jobs_service, "build_history_grid", fake_build_history_grid)
+    monkeypatch.setattr(company_repo, "list_companies", fake_list_companies)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/admin/backup-summary",
+        "query_string": b"company_id=20",
+        "headers": [],
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+
+    extra = asyncio.run(backup_handlers.admin_backup_summary_page(Request(scope)))
+
+    assert calls["jobs_company_id"] == 20
+    assert calls["history_company_id"] == 20
+    assert extra["backup_company_filter"] == 20
+    assert extra["backup_companies"] == [{"id": 10, "name": "Allowed"}, {"id": 20, "name": "Other"}]
