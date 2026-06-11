@@ -65,6 +65,7 @@
             <th scope="col" data-column-key="id" data-sort="int">Ticket</th>
             <th scope="col" data-column-key="subject" data-sort="string">Subject</th>
             <th scope="col" data-column-key="status" data-sort="string">Status</th>
+            <th scope="col" data-column-key="requester" data-sort="string">Requestor</th>
             <th scope="col" data-column-key="updated" data-sort="date">Updated</th>
           </tr>
         </thead>
@@ -79,6 +80,7 @@
                 <td data-column-key="status" data-label="Status">
                   <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
                 </td>
+                <td data-column-key="requester" data-label="Requestor">{{ ticket.requester_label or '—' }}</td>
                 <td data-column-key="updated" data-label="Updated" data-value="{{ ticket.updated_iso or '' }}">
                   {% if ticket.updated_iso %}
                     <span data-utc="{{ ticket.updated_iso }}"></span>
@@ -90,7 +92,7 @@
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="4" class="table__empty">No tickets available.</td>
+              <td colspan="5" class="table__empty">No tickets available.</td>
             </tr>
           {% endif %}
         </tbody>
