@@ -282,7 +282,7 @@ async def run_trmm_script(
         )
         or None,
         event_id=event_id,
-        message="Tactical RMM script has been scheduled and will run shortly.",
+        message="The requested automation has been scheduled and will run in the background shortly.",
     )
 
 
