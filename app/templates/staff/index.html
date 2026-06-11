@@ -615,6 +615,9 @@
     <div class="staff-modal__header">
       <h2 class="modal__title">Edit staff member</h2>
       <p class="staff-modal__staff-name" id="edit-modal-staff-name"></p>
+      {% if can_edit_staff and not is_super_admin %}
+        <p class="form-help">Saving Identity, Employment / Organisation, Address, or Custom Fields changes creates a helpdesk ticket for a technician to apply. Workflow &amp; lifecycle fields are read-only.</p>
+      {% endif %}
     </div>
     <form id="staff-edit-form" class="form-grid staff-modal-grid">
       <input type="hidden" id="edit-staff-id" />
@@ -623,23 +626,23 @@
         <div class="form-grid staff-modal-grid">
           <div class="form-field">
             <label class="form-label" for="edit-first-name">First name</label>
-            <input class="form-input" id="edit-first-name" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-first-name" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-last-name">Last name</label>
-            <input class="form-input" id="edit-last-name" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-last-name" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-email">Email</label>
-            <input class="form-input" id="edit-email" type="email" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-email" type="email" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-mobile">Mobile phone</label>
-            <input class="form-input" id="edit-mobile" type="tel" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-mobile" type="tel" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field form-field--checkbox form-field--full">
             <label class="checkbox">
-              <input type="checkbox" id="edit-enabled" {% if not is_super_admin %}disabled{% endif %} />
+              <input type="checkbox" id="edit-enabled" {% if not can_edit_staff %}disabled{% endif %} />
               <span>Enabled</span>
             </label>
           </div>
@@ -650,19 +653,19 @@
         <div class="form-grid staff-modal-grid">
           <div class="form-field">
             <label class="form-label" for="edit-department">Department</label>
-            <input class="form-input" id="edit-department" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-department" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-job-title">Job title</label>
-            <input class="form-input" id="edit-job-title" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-job-title" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-company">Company</label>
-            <input class="form-input" id="edit-company" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-company" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-manager-name">Manager</label>
-            <input class="form-input" id="edit-manager-name" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-manager-name" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
         </div>
       </fieldset>
@@ -689,7 +692,7 @@
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-date-offboarded">Offboard schedule</label>
-            <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-date-offboarded" type="datetime-local" {% if not is_super_admin %}readonly{% endif %} />
             <p class="form-help">Set when offboarding should be executed; leave blank until a confirmed exit date.</p>
           </div>
           <div class="form-field">
@@ -703,23 +706,23 @@
         <div class="form-grid staff-modal-grid">
           <div class="form-field">
             <label class="form-label" for="edit-street">Street</label>
-            <input class="form-input" id="edit-street" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-street" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-city">City</label>
-            <input class="form-input" id="edit-city" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-city" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-state">State</label>
-            <input class="form-input" id="edit-state" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-state" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-postcode">Postcode</label>
-            <input class="form-input" id="edit-postcode" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-postcode" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
           <div class="form-field">
             <label class="form-label" for="edit-country">Country</label>
-            <input class="form-input" id="edit-country" {% if not is_super_admin %}readonly{% endif %} />
+            <input class="form-input" id="edit-country" {% if not can_edit_staff %}readonly{% endif %} />
           </div>
         </div>
       </fieldset>

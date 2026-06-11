@@ -1113,8 +1113,6 @@
           lastName: editFields.last_name ? editFields.last_name.value : '',
           email: editFields.email ? editFields.email.value : '',
           mobilePhone: editFields.mobile_phone ? editFields.mobile_phone.value : '',
-          dateOnboarded: editFields.date_onboarded ? editFields.date_onboarded.value : '',
-          dateOffboarded: editFields.date_offboarded ? editFields.date_offboarded.value : '',
           enabled: editFields.enabled ? editFields.enabled.checked : false,
           street: editFields.street ? editFields.street.value : '',
           city: editFields.city ? editFields.city.value : '',
@@ -1125,9 +1123,13 @@
           jobTitle: editFields.job_title ? editFields.job_title.value : '',
           company: editFields.org_company ? editFields.org_company.value : '',
           managerName: editFields.manager_name ? editFields.manager_name.value : '',
-          accountAction: editFields.account_action ? editFields.account_action.value : '',
           customFields: {},
         };
+        if (flags && flags.isSuperAdmin) {
+          payload.dateOnboarded = editFields.date_onboarded ? editFields.date_onboarded.value : '';
+          payload.dateOffboarded = editFields.date_offboarded ? editFields.date_offboarded.value : '';
+          payload.accountAction = editFields.account_action ? editFields.account_action.value : '';
+        }
         editCustomFieldInputs.forEach((entry, name) => {
           if (!entry || !entry.input) {
             return;
@@ -1151,10 +1153,13 @@
         });
         try {
           setInlineError(editFormError, '');
-          await requestJson(`/staff/${staffId}`, {
+          const result = await requestJson(`/staff/${staffId}`, {
             method: 'PUT',
             body: JSON.stringify(payload),
           });
+          if (result && result.message && !(flags && flags.isSuperAdmin)) {
+            window.alert(result.message);
+          }
           window.location.reload();
         } catch (error) {
           setInlineError(editFormError, `Unable to update staff member: ${error.message}`);
