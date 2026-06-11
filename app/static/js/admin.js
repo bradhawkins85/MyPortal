@@ -1438,18 +1438,73 @@
     const idField = form.querySelector('#role-id');
     const nameField = form.querySelector('#role-name');
     const descriptionField = form.querySelector('#role-description');
-    const permissionCheckboxes = form.querySelectorAll('[data-permission-checkbox]');
+    const permissionInputs = form.querySelectorAll('[data-permission-level]');
 
     function getSelectedPermissions() {
-      return Array.from(permissionCheckboxes)
-        .filter((checkbox) => checkbox.checked)
-        .map((checkbox) => checkbox.value);
+      const permissions = {};
+      permissionInputs.forEach((input) => {
+        if (!(input instanceof HTMLInputElement) || !input.checked) {
+          return;
+        }
+        const key = input.getAttribute('data-permission-key');
+        const level = input.value;
+        if (key && level && level !== 'none') {
+          permissions[key] = level;
+        }
+      });
+      return permissions;
+    }
+
+    function normalizePermissions(permissions) {
+      if (!permissions) {
+        return {};
+      }
+      if (Array.isArray(permissions)) {
+        const legacyMap = {
+          'chat.access': ['menu.chat', 'read'],
+          'helpdesk.technician': ['menu.tickets', 'write'],
+          'marketing.access': ['menu.marketing', 'write'],
+          'shop.access': ['menu.shop', 'read'],
+          'orders.access': ['menu.orders', 'read'],
+          'forms.access': ['menu.forms', 'read'],
+          'assets.manage': ['menu.assets', 'write'],
+          'licenses.manage': ['menu.m365.licenses', 'write'],
+          'licenses.order': ['menu.m365.licenses', 'write'],
+          'invoices.manage': ['menu.invoices', 'write'],
+          'staff.manage': ['menu.staff', 'write'],
+          'issues.manage': ['menu.issues', 'write'],
+          'compliance.access': ['menu.compliance', 'read'],
+          'continuity.access': ['menu.continuity', 'read'],
+          'compliance_checks.access': ['menu.compliance_checks', 'read'],
+          'compliance_checks.manage': ['menu.compliance_checks.library', 'write'],
+          'm365_best_practices.access': ['menu.m365.best_practices', 'read'],
+          'm365_user_mailboxes.access': ['menu.m365.user_mailboxes', 'read'],
+          'm365_shared_mailboxes.access': ['menu.m365.shared_mailboxes', 'read'],
+          'company.admin': ['menu.admin.company', 'write'],
+        };
+        return permissions.reduce((acc, permission) => {
+          const mapped = legacyMap[permission];
+          if (mapped) {
+            acc[mapped[0]] = mapped[1];
+          }
+          return acc;
+        }, {});
+      }
+      if (typeof permissions === 'object') {
+        return permissions.menu && typeof permissions.menu === 'object' ? permissions.menu : permissions;
+      }
+      return {};
     }
 
     function setSelectedPermissions(permissions) {
-      const permissionSet = new Set(Array.isArray(permissions) ? permissions : []);
-      permissionCheckboxes.forEach((checkbox) => {
-        checkbox.checked = permissionSet.has(checkbox.value);
+      const permissionMap = normalizePermissions(permissions);
+      permissionInputs.forEach((input) => {
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        const key = input.getAttribute('data-permission-key');
+        const expectedLevel = key ? permissionMap[key] || 'none' : 'none';
+        input.checked = input.value === expectedLevel;
       });
     }
 
@@ -1477,7 +1532,7 @@
         idField.value = '';
         nameField.value = '';
         descriptionField.value = '';
-        setSelectedPermissions([]);
+        setSelectedPermissions({});
         nameField.focus();
       });
     }
@@ -1492,10 +1547,10 @@
         nameField.value = row.dataset.roleName || '';
         descriptionField.value = row.dataset.roleDescription || '';
         try {
-          const permissions = JSON.parse(row.dataset.rolePermissions || '[]');
+          const permissions = JSON.parse(row.dataset.rolePermissions || '{}');
           setSelectedPermissions(permissions);
         } catch (error) {
-          setSelectedPermissions([]);
+          setSelectedPermissions({});
         }
         nameField.focus();
       });

@@ -60,8 +60,9 @@ async def _load_subscription_context(request: Request):
     membership = await user_company_repo.get_user_company(user["id"], company_id)
     has_license = bool(membership and membership.get("can_manage_licenses"))
     has_cart = bool(membership and membership.get("can_access_cart"))
+    can_view_subscriptions = _main()._membership_menu_can(user, membership, "menu.subscriptions")
 
-    if not (is_super_admin or (has_license and has_cart)):
+    if not (is_super_admin or (has_license and has_cart) or can_view_subscriptions):
         return (
             user,
             membership,
@@ -105,6 +106,7 @@ async def subscriptions_page(request: Request):
     is_super_admin = bool(user.get("is_super_admin"))
     can_request_changes = bool(
         is_super_admin
+        or _main()._membership_menu_can(user, membership, "menu.subscriptions", write=True)
         or (
             membership
             and membership.get("can_manage_licenses")
@@ -128,6 +130,11 @@ async def request_subscription_change(request: Request, subscription_id: str):
     user, membership, _, company_id, redirect = await _load_subscription_context(request)
     if redirect:
         return redirect
+    if not (
+        _main()._membership_menu_can(user, membership, "menu.subscriptions", write=True)
+        or bool(membership and membership.get("can_manage_licenses") and membership.get("can_access_cart"))
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Subscription read/write permission required")
 
     subscription = await subscriptions_repo.get_subscription(subscription_id)
     if not subscription or int(subscription.get("customer_id", 0)) != company_id:

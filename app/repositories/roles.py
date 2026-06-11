@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from app.core.database import db
+from app.security.menu_permissions import compact_menu_permissions, menu_permissions_to_legacy
 
 
 async def list_roles() -> list[dict[str, Any]]:
@@ -26,7 +27,7 @@ async def get_role_by_name(name: str) -> Optional[dict[str, Any]]:
     return _normalise(row)
 
 
-async def create_role(*, name: str, description: str | None = None, permissions: list[str] | None = None, is_system: bool = False) -> dict[str, Any]:
+async def create_role(*, name: str, description: str | None = None, permissions: Any | None = None, is_system: bool = False) -> dict[str, Any]:
     now = datetime.utcnow()
     await db.execute(
         """
@@ -36,7 +37,7 @@ async def create_role(*, name: str, description: str | None = None, permissions:
         (
             name,
             description,
-            json.dumps(permissions or []),
+            json.dumps(compact_menu_permissions(permissions or {})),
             1 if is_system else 0,
             now,
             now,
@@ -58,7 +59,7 @@ async def update_role(role_id: int, **updates: Any) -> dict[str, Any]:
     params: list[Any] = []
     for column, value in updates.items():
         if column == "permissions" and value is not None:
-            value = json.dumps(value)
+            value = json.dumps(compact_menu_permissions(value))
         columns.append(f"{column} = %s")
         params.append(value)
     columns.append("updated_at = %s")
@@ -80,13 +81,16 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
     permissions_raw = row.get("permissions")
     if isinstance(permissions_raw, str):
         try:
-            permissions = json.loads(permissions_raw)
+            decoded_permissions = json.loads(permissions_raw)
         except json.JSONDecodeError:
-            permissions = []
+            decoded_permissions = {}
     else:
-        permissions = permissions_raw or []
+        decoded_permissions = permissions_raw or {}
+    permissions = compact_menu_permissions(decoded_permissions)
     return {
         **row,
         "permissions": permissions,
+        "menu_permissions": permissions,
+        "legacy_permissions": menu_permissions_to_legacy(permissions),
         "is_system": bool(row.get("is_system", 0)),
     }
