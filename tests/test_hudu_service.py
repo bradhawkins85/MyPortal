@@ -12,13 +12,13 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_create_asset_password_uses_company_scoped_endpoint_and_sends_auth(monkeypatch):
-    """create_asset_password must POST to the company-scoped URL and include the x-api-key header.
+async def test_create_asset_password_uses_flat_endpoint_with_company_id_and_sends_auth(monkeypatch):
+    """create_asset_password must POST to Hudu's asset_passwords endpoint with company_id in the body.
 
-    The flat /api/v1/asset_passwords endpoint does not carry the company ID
-    in the URL, which causes Hudu to return 401 because it cannot verify that
-    the API key is authorised for the requested company.  The correct endpoint
-    is /api/v1/companies/{company_id}/asset_passwords.
+    Hudu exposes password creation at /api/v1/asset_passwords. Posting to a
+    nested /api/v1/companies/{company_id}/asset_passwords URL returns 404 on
+    Hudu Cloud instances, so the company association must be sent as the
+    asset_password.company_id field.
     """
     captured: dict[str, object] = {}
 
@@ -60,15 +60,15 @@ async def test_create_asset_password_uses_company_scoped_endpoint_and_sends_auth
         username="alice@example.com",
     )
 
-    # Endpoint must be company-scoped (not the flat /api/v1/asset_passwords)
-    assert captured["url"] == "https://hudu.example.com/api/v1/companies/99/asset_passwords"
+    # Endpoint must be the flat Hudu asset_passwords endpoint (not company-scoped)
+    assert captured["url"] == "https://hudu.example.com/api/v1/asset_passwords"
 
     # Authentication header must be present with the configured API key
     assert captured["headers"].get("x-api-key") == "test-api-key-abc"
 
-    # company_id must NOT be in the body (it lives in the URL)
+    # Hudu expects company_id in the asset_password body
     pw_body = captured["json"]["asset_password"]
-    assert "company_id" not in pw_body
+    assert pw_body["company_id"] == "99"
 
     # Core fields must be present
     assert pw_body["name"] == "Test Password"
