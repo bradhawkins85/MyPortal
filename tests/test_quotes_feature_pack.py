@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 
 import app.main as main_module
@@ -85,3 +87,70 @@ def test_quotes_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_quotes_template_renders_for_non_admin_without_membership_alias():
+    from types import SimpleNamespace
+
+    from jinja2 import DictLoader, Environment, select_autoescape
+
+    template_source = Path("app/templates/shop/quotes.html").read_text(encoding="utf-8")
+    env = Environment(
+        loader=DictLoader(
+            {
+                "shop/quotes.html": template_source,
+                "base.html": (
+                    "{% block header_title %}{% endblock %}"
+                    "{% block header_actions %}{% endblock %}"
+                    "{% block content %}{% endblock %}"
+                    "{% block scripts %}{% endblock %}"
+                ),
+                "macros/header.html": (
+                    "{% macro page_header_actions(actions) %}"
+                    "{% for action in actions %}{{ action.label }}{% endfor %}"
+                    "{% endmacro %}"
+                ),
+                "partials/csrf.html": (
+                    '<input type="hidden" name="csrf_token" '
+                    'value="{{ csrf_token or \'\' }}">'
+                ),
+            }
+        ),
+        autoescape=select_autoescape(["html"]),
+    )
+    env.globals["static_url"] = lambda path: path
+
+    rendered = env.get_template("shop/quotes.html").render(
+        request=SimpleNamespace(url=SimpleNamespace(path="/quotes")),
+        current_user={"is_super_admin": False},
+        is_company_admin=False,
+        csrf_token="token",
+        quotes_total_all=1,
+        quotes_total=1,
+        filters_active=False,
+        status_summary=[],
+        status_options=[],
+        status_filter=None,
+        quotes=[
+            {
+                "quote_number": "QUO-001",
+                "company_id": 7,
+                "name": "Non-admin quote",
+                "po_number": None,
+                "status_value": "active",
+                "status_badge": "badge--success",
+                "status_label": "Active",
+                "assigned_user_email": None,
+                "created_at_iso": None,
+                "expires_at_iso": None,
+                "is_expired": False,
+                "notes": None,
+                "assigned_user_id": None,
+            }
+        ],
+    )
+
+    assert "QUO-001" in rendered
+    assert "Load to Cart" in rendered
+    assert "Sync to Xero" not in rendered
+    assert "data-quote-assign" not in rendered
