@@ -61,11 +61,9 @@ async def _require_bcp_view(
         active_company_id = getattr(request.state, "active_company_id", None)
         return user, active_company_id
     
-    # Check continuity.access permission (new) or legacy bcp:view permission
-    has_permission = (
-        await membership_repo.user_has_permission(session.user_id, "continuity.access") or
-        await membership_repo.user_has_permission(session.user_id, "bcp:view")
-    )
+    # Check BCP view permission. The membership repository expands tri-state
+    # menu permissions and the continuity.access alias for backward compatibility.
+    has_permission = await membership_repo.user_has_permission(session.user_id, "bcp:view")
     if not has_permission:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="BCP view permission required")
     
