@@ -484,6 +484,7 @@ def test_backup_summary_menu_permission_shows_admin_menu_without_super_admin():
         loader=FileSystemLoader("app/templates"),
         autoescape=select_autoescape(["html"]),
     )
+    env.globals["static_url"] = lambda path: path
     template = env.get_template("base.html")
     html = template.render(
         request=type("Request", (), {"url": type("Url", (), {"path": "/admin/backup-summary"})()})(),
@@ -504,3 +505,60 @@ def test_backup_summary_menu_permission_shows_admin_menu_without_super_admin():
     assert "Backup Summary" in html
     assert 'href="/admin/backup-jobs"' not in html
     assert 'href="/admin/impersonation"' not in html
+
+
+def test_staff_menu_no_access_overrides_staff_assignment_levels():
+    for staff_permission in (0, 1, 3):
+        menu_access = main_module._build_menu_access_map(
+            is_super_admin=False,
+            membership_data={
+                "menu_permissions": {"menu.staff": "none"},
+                "staff_permission": staff_permission,
+                "can_manage_staff": True,
+            },
+        )
+
+        assert menu_access["menu.staff"] == "none"
+
+    nested_menu_access = main_module._build_menu_access_map(
+        is_super_admin=False,
+        membership_data={
+            "menu_permissions": {
+                "menu": {"menu.staff": "No Access"},
+                "permissions": ["staff.manage"],
+            },
+            "staff_permission": 3,
+            "can_manage_staff": True,
+        },
+    )
+
+    assert nested_menu_access["menu.staff"] == "none"
+
+
+def test_staff_link_hidden_when_staff_menu_no_access_even_with_staff_assignment():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(
+        loader=FileSystemLoader("app/templates"),
+        autoescape=select_autoescape(["html"]),
+    )
+    env.globals["static_url"] = lambda path: path
+    template = env.get_template("base.html")
+    html = template.render(
+        request=type("Request", (), {"url": type("Url", (), {"path": "/"})()})(),
+        current_user={"id": 2, "is_super_admin": False},
+        active_membership={"staff_permission": 3, "can_manage_staff": True},
+        staff_permission=3,
+        can_manage_staff=True,
+        menu_access={
+            "menu.dashboard": "read",
+            "menu.staff": "none",
+        },
+        available_companies=[],
+        cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+        notification_unread_count=0,
+        plausible_config={"enabled": False},
+        csrf_token="csrf-token",
+    )
+
+    assert 'href="/staff"' not in html
