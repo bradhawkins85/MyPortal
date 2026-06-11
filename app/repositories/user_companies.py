@@ -182,6 +182,45 @@ async def _suspend_company_membership(company_id: int, user_id: int) -> None:
             await membership_repo.update_membership(int(membership_id), status="suspended")
 
 
+def _membership_row_to_user_company(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a legacy user_company-shaped record from an active role membership."""
+
+    data: dict[str, Any] = {
+        "user_id": row.get("user_id"),
+        "company_id": row.get("company_id"),
+        "company_name": row.get("company_name"),
+        "syncro_company_id": row.get("syncro_company_id"),
+        "staff_permission": _STAFF_PERMISSION_NONE,
+    }
+    for field in _BOOLEAN_FIELDS:
+        data.setdefault(field, False)
+
+    normalised = _normalise(data)
+    _enrich_with_role_permissions(normalised, row.get("role_permissions"))
+    return normalised
+
+
+async def _get_active_membership_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        """
+        SELECT
+            m.user_id,
+            m.company_id,
+            c.name AS company_name,
+            c.syncro_company_id,
+            r.permissions AS role_permissions
+        FROM company_memberships AS m
+        INNER JOIN companies AS c ON c.id = m.company_id
+        INNER JOIN roles AS r ON r.id = m.role_id
+        WHERE m.user_id = %s AND m.company_id = %s AND m.status = 'active'
+        """,
+        (user_id, company_id),
+    )
+    if not row:
+        return None
+    return _membership_row_to_user_company(row)
+
+
 async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         """
@@ -197,7 +236,7 @@ async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, 
         (user_id, company_id),
     )
     if not row:
-        return None
+        return await _get_active_membership_company(user_id, company_id)
     
     normalised = _normalise(row)
     _enrich_with_role_permissions(normalised, row.get("role_permissions"))
@@ -223,13 +262,48 @@ async def list_companies_for_user(user_id: int) -> List[dict[str, Any]]:
         (user_id,),
     )
     companies: List[dict[str, Any]] = []
+    seen_company_ids: set[int] = set()
     for row in rows:
         normalised = _normalise(row)
         normalised["company_name"] = row.get("company_name")
         if "syncro_company_id" in row:
             normalised["syncro_company_id"] = row.get("syncro_company_id")
         _enrich_with_role_permissions(normalised, row.get("role_permissions"))
+        company_id = normalised.get("company_id")
+        if company_id is not None:
+            seen_company_ids.add(int(company_id))
         companies.append(normalised)
+
+    membership_rows = await db.fetch_all(
+        """
+        SELECT
+            m.user_id,
+            m.company_id,
+            c.name AS company_name,
+            c.syncro_company_id,
+            r.permissions AS role_permissions
+        FROM company_memberships AS m
+        INNER JOIN companies AS c ON c.id = m.company_id
+        INNER JOIN roles AS r ON r.id = m.role_id
+        WHERE m.user_id = %s AND m.status = 'active'
+        ORDER BY c.name
+        """,
+        (user_id,),
+    )
+    for row in membership_rows:
+        membership_company = _membership_row_to_user_company(row)
+        company_id = membership_company.get("company_id")
+        if company_id is None or int(company_id) in seen_company_ids:
+            continue
+        seen_company_ids.add(int(company_id))
+        companies.append(membership_company)
+
+    companies.sort(
+        key=lambda company: (
+            (company.get("company_name") or "").lower(),
+            int(company.get("company_id") or 0),
+        )
+    )
     return companies
 
 
