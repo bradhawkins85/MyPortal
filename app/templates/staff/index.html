@@ -18,12 +18,14 @@
               Add Staff Member
             </button>
           </li>
-          <li class="header-title-menu__item" role="none">
-            <a href="/staff/workflows/onboarding" class="header-title-menu__link" role="menuitem">Onboarding workflow</a>
-          </li>
-          <li class="header-title-menu__item" role="none">
-            <a href="/staff/workflows/offboarding" class="header-title-menu__link" role="menuitem">Offboarding workflow</a>
-          </li>
+          {% if is_super_admin or staff_permission == 3 %}
+            <li class="header-title-menu__item" role="none">
+              <a href="/staff/workflows/onboarding" class="header-title-menu__link" role="menuitem">Onboarding workflow</a>
+            </li>
+            <li class="header-title-menu__item" role="none">
+              <a href="/staff/workflows/offboarding" class="header-title-menu__link" role="menuitem">Offboarding workflow</a>
+            </li>
+          {% endif %}
         </ul>
       </details>
     </div>

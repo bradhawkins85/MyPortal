@@ -17,6 +17,7 @@ from app import main as main_module
 from .helpers import (
     _filter_staff_for_offboarding_choices,
     _load_staff_context,
+    _normalize_staff_access_scope,
     _staff_member_is_offboarding_mail_choice,
     _staff_member_matches_company_email_domains,
 )
@@ -51,6 +52,27 @@ user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
 
 
+async def _get_current_user_staff_department(user: dict[str, Any], company_id: int) -> str | None:
+    user_email = str(user.get("email") or "").strip().lower()
+    if not user_email:
+        return None
+    staff_rows = await staff_repo.list_staff_by_email(user_email)
+    for staff_record in staff_rows:
+        try:
+            staff_company_id = int(staff_record.get("company_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if staff_company_id != company_id:
+            continue
+        department = str(staff_record.get("department") or "").strip()
+        return department or None
+    return None
+
+
+def _departments_match(left: str | None, right: str | None) -> bool:
+    return bool(left and right and left.strip().lower() == right.strip().lower())
+
+
 async def staff_page(
     request: Request,
     enabled: str = "",
@@ -75,19 +97,9 @@ async def staff_page(
     raw_staff_menu_access = main_module.normalize_menu_permissions(
         membership_data.get("menu_permissions")
     ).get("menu.staff", "none")
-    has_readonly_staff_menu_access = raw_staff_menu_access == "read"
     has_write_staff_menu_access = raw_staff_menu_access == "write"
-    can_edit_staff = bool(
-        is_super_admin
-        or has_write_staff_menu_access
-        or (
-            not has_readonly_staff_menu_access
-            and (
-                bool(membership_data.get("can_manage_staff"))
-                or int(membership_data.get("staff_permission") or 0) > 0
-            )
-        )
-    )
+    staff_access_scope = _normalize_staff_access_scope(membership_data.get("staff_permission", staff_permission))
+    can_edit_staff = bool(is_super_admin or (staff_access_scope > 0 and has_write_staff_menu_access))
     can_approve_onboarding = bool(is_super_admin or is_helpdesk_technician)
 
     enabled_value = enabled.strip()
@@ -261,7 +273,7 @@ async def staff_page(
             for member in staff_members
             if _staff_member_matches_company_email_domains(member, company_email_domains)
         ]
-        if not is_super_admin and staff_permission in (1, 2):
+        if not is_super_admin and staff_permission == 1:
             user_email = (user.get("email") or "").lower()
             current_staff = next(
                 (
@@ -272,31 +284,15 @@ async def staff_page(
                 None,
             )
             user_department = (current_staff or {}).get("department")
-            if staff_permission == 1:
-                if user_department:
-                    staff_members = [
-                        member
-                        for member in staff_members
-                        if member.get("department")
-                        and member["department"].lower() == user_department.lower()
-                    ]
-                else:
-                    staff_members = []
-            else:  # staff_permission == 2
-                if user_department:
-                    staff_members = [
-                        member
-                        for member in staff_members
-                        if (
-                            member.get("department")
-                            and member["department"].lower() == user_department.lower()
-                        )
-                        or not member.get("department")
-                    ]
-                else:
-                    staff_members = [
-                        member for member in staff_members if not member.get("department")
-                    ]
+            if user_department:
+                staff_members = [
+                    member
+                    for member in staff_members
+                    if member.get("department")
+                    and member["department"].lower() == user_department.lower()
+                ]
+            else:
+                staff_members = []
         else:
             if department_filter:
                 staff_members = [
@@ -1495,7 +1491,7 @@ async def staff_onboarding_workflow_page(request: Request):
         staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
 
@@ -1519,7 +1515,7 @@ async def staff_onboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1543,7 +1539,7 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1578,7 +1574,7 @@ async def staff_offboarding_workflow_page(request: Request):
         staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
 
@@ -1602,7 +1598,7 @@ async def staff_offboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1633,7 +1629,7 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1682,7 +1678,7 @@ async def list_staff_workflow_policies(direction: str, request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1710,7 +1706,7 @@ async def create_staff_workflow_policy(direction: str, request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1750,7 +1746,7 @@ async def update_staff_workflow_policy(direction: str, policy_id: int, request: 
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1793,7 +1789,7 @@ async def delete_staff_workflow_policy(direction: str, policy_id: int, request: 
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if company_id is None:
@@ -1822,7 +1818,7 @@ async def staff_workflow_history_page(request: Request):
         staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
 
@@ -1848,7 +1844,7 @@ async def staff_workflow_history_recent(request: Request):
         _staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
@@ -1937,7 +1933,7 @@ async def retry_workflow_execution(execution_id: int, request: Request):
         _staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
@@ -1961,7 +1957,7 @@ async def resume_workflow_execution(execution_id: int, request: Request):
         _staff_permission,
         _company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request, require_admin=True, require_all_staff_access=True)
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
@@ -1990,6 +1986,7 @@ async def create_staff_member(request: Request):
         return redirect
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+    is_super_admin = bool(user.get("is_super_admin"))
 
     form = await request.form()
     field_config = await staff_field_config_service.load_effective_company_staff_fields(company_id)
@@ -2026,6 +2023,13 @@ async def create_staff_member(request: Request):
         assume_midnight=True,
     )
     department = str(values.get("department") or "").strip() or None
+    if not is_super_admin and staff_permission == 1:
+        user_department = await _get_current_user_staff_department(user, company_id)
+        if not _departments_match(user_department, department):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Department staff access can only request staff for your department",
+            )
 
     custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
     custom_values: dict[str, Any] = {}
@@ -2239,6 +2243,11 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     is_super_admin = bool(user.get("is_super_admin"))
     if not is_super_admin and existing.get("company_id") != company_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if not is_super_admin and staff_permission == 1:
+        user_department = await _get_current_user_staff_department(user, company_id)
+        target_department = str(existing.get("department") or "").strip() or None
+        if not _departments_match(user_department, target_department):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     if not bool(existing.get("enabled", False)) or bool(existing.get("is_ex_staff", False)):
         raise HTTPException(

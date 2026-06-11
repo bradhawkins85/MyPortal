@@ -38,12 +38,27 @@ _COMPANY_PERMISSION_COLUMNS: list[dict[str, str]] = [
     {"field": "is_admin", "label": "Company admin"},
 ]
 
+_STAFF_PERMISSION_NONE = 0
+_STAFF_PERMISSION_DEPARTMENT = 1
+_STAFF_PERMISSION_ALL = 3
+
 _STAFF_PERMISSION_OPTIONS: list[dict[str, Any]] = [
-    {"value": 0, "label": "No staff access"},
-    {"value": 1, "label": "Department viewer"},
-    {"value": 2, "label": "Department manager"},
-    {"value": 3, "label": "Full staff manager"},
+    {"value": _STAFF_PERMISSION_NONE, "label": "None"},
+    {"value": _STAFF_PERMISSION_DEPARTMENT, "label": "Department"},
+    {"value": _STAFF_PERMISSION_ALL, "label": "All"},
 ]
+
+
+def _normalize_staff_access_scope(value: Any) -> int:
+    try:
+        permission_value = int(value or 0)
+    except (TypeError, ValueError):
+        return _STAFF_PERMISSION_NONE
+    if permission_value <= 0:
+        return _STAFF_PERMISSION_NONE
+    if permission_value >= _STAFF_PERMISSION_ALL:
+        return _STAFF_PERMISSION_ALL
+    return _STAFF_PERMISSION_DEPARTMENT
 
 
 async def _get_company_management_scope(
@@ -68,7 +83,7 @@ async def _get_company_management_scope(
             company_id = int(raw_company_id)
         except (TypeError, ValueError):
             continue
-        staff_permission = int(record.get("staff_permission") or 0)
+        staff_permission = _normalize_staff_access_scope(record.get("staff_permission"))
         if (
             bool(record.get("is_admin"))
             or bool(record.get("can_manage_staff"))
@@ -405,10 +420,7 @@ async def _render_company_edit_page(
                 except (TypeError, ValueError):
                     role_id_value = None
 
-            try:
-                staff_permission_value = int(pending_entry.get("staff_permission") or 0)
-            except (TypeError, ValueError):
-                staff_permission_value = 0
+            staff_permission_value = _normalize_staff_access_scope(pending_entry.get("staff_permission"))
 
             pending_record: dict[str, Any] = {
                 "company_id": pending_entry.get("company_id") or company_id,
@@ -562,11 +574,7 @@ async def _render_company_edit_page(
         except ValueError:
             assign_user_id = None
     assign_role_id = _assign_int("role_id")
-    assign_staff_permission = _assign_int("staff_permission", 0) or 0
-    if assign_staff_permission < 0:
-        assign_staff_permission = 0
-    if assign_staff_permission > 3:
-        assign_staff_permission = 3
+    assign_staff_permission = _normalize_staff_access_scope(_assign_int("staff_permission", 0))
     assign_can_manage_staff = _assign_bool("can_manage_staff", False)
     assign_permissions: dict[str, bool] = {}
     for column in _COMPANY_PERMISSION_COLUMNS:
@@ -854,12 +862,12 @@ async def _ensure_company_permission(
     membership = membership_lookup.get(company_id)
     if not membership:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    staff_permission = int(membership.get("staff_permission") or 0)
+    staff_permission = _normalize_staff_access_scope(membership.get("staff_permission"))
     if require_admin and not bool(membership.get("is_admin")):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     if (
         require_staff_manager
-        and staff_permission < 3
+        and staff_permission < _STAFF_PERMISSION_ALL
         and not bool(membership.get("can_manage_staff"))
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
@@ -1065,19 +1073,7 @@ async def admin_assign_user_to_company(request: Request):
                 parsed_user_id, company_id
             )
         else:
-            try:
-                staff_permission = (
-                    int(staff_permission_raw) if staff_permission_raw is not None else 0
-                )
-            except (TypeError, ValueError):
-                return await _assign_error(
-                    "Select a valid staff permission level.",
-                    status.HTTP_400_BAD_REQUEST,
-                )
-            if staff_permission < 0:
-                staff_permission = 0
-            if staff_permission > 3:
-                staff_permission = 3
+            staff_permission = _normalize_staff_access_scope(staff_permission_raw)
 
             permission_values: dict[str, bool] = {}
             for column in _COMPANY_PERMISSION_COLUMNS:
@@ -1163,16 +1159,7 @@ async def admin_assign_user_to_company(request: Request):
             parsed_user_id, company_id
         )
 
-    try:
-        staff_permission = int(staff_permission_raw) if staff_permission_raw is not None else 0
-    except (TypeError, ValueError):
-        return await _assign_error(
-            "Select a valid staff permission level.", status.HTTP_400_BAD_REQUEST
-        )
-    if staff_permission < 0:
-        staff_permission = 0
-    if staff_permission > 3:
-        staff_permission = 3
+    staff_permission = _normalize_staff_access_scope(staff_permission_raw)
     assign_form_state["staff_permission"] = staff_permission
 
     permission_values: dict[str, bool] = {}
@@ -1743,7 +1730,7 @@ async def admin_update_staff_permission(company_id: int, user_id: int, request: 
     await user_company_repo.update_staff_permission(
         user_id=user_id,
         company_id=company_id,
-        permission=permission_value,
+        permission=_normalize_staff_access_scope(permission_value),
     )
     return JSONResponse({"success": True})
 

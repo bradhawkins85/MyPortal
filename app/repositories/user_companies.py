@@ -9,6 +9,23 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import roles as role_repo
 from app.security.menu_permissions import menu_has_access, menu_permissions_to_legacy, normalize_menu_permissions
 
+_STAFF_PERMISSION_NONE = 0
+_STAFF_PERMISSION_DEPARTMENT = 1
+_STAFF_PERMISSION_ALL = 3
+
+
+def _normalize_staff_access_scope(value: Any) -> int:
+    try:
+        permission_value = int(value or 0)
+    except (TypeError, ValueError):
+        return _STAFF_PERMISSION_NONE
+    if permission_value <= 0:
+        return _STAFF_PERMISSION_NONE
+    if permission_value >= _STAFF_PERMISSION_ALL:
+        return _STAFF_PERMISSION_ALL
+    return _STAFF_PERMISSION_DEPARTMENT
+
+
 _BOOLEAN_FIELDS = {
     "can_manage_licenses",
     "can_manage_staff",
@@ -116,7 +133,7 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
         if key in normalised:
             normalised[key] = bool(int(normalised.get(key, 0)))
     if "staff_permission" in normalised and normalised["staff_permission"] is not None:
-        normalised["staff_permission"] = int(normalised["staff_permission"])
+        normalised["staff_permission"] = _normalize_staff_access_scope(normalised["staff_permission"])
     if "company_id" in normalised and normalised["company_id"] is not None:
         normalised["company_id"] = int(normalised["company_id"])
     if "user_id" in normalised and normalised["user_id"] is not None:
@@ -235,10 +252,8 @@ async def assign_user_to_company(
     can_access_forms: bool = False,
     is_admin: bool = False,
 ) -> None:
-    staff_permission_value = max(0, int(staff_permission))
-    if staff_permission_value > 3:
-        staff_permission_value = 3
-    can_manage_staff_flag = 1 if (can_manage_staff or staff_permission_value > 0) else 0
+    staff_permission_value = _normalize_staff_access_scope(staff_permission)
+    can_manage_staff_flag = 1 if can_manage_staff else 0
     await db.execute(
         """
         INSERT INTO user_companies (
@@ -382,18 +397,15 @@ async def update_permission(
 async def update_staff_permission(
     *, user_id: int, company_id: int, permission: int
 ) -> None:
-    permission_value = max(0, int(permission))
-    if permission_value > 3:
-        permission_value = 3
+    permission_value = _normalize_staff_access_scope(permission)
     await db.execute(
         """
         UPDATE user_companies
-        SET staff_permission = %s, can_manage_staff = %s
+        SET staff_permission = %s
         WHERE user_id = %s AND company_id = %s
         """,
         (
             permission_value,
-            1 if permission_value > 0 else 0,
             user_id,
             company_id,
         ),
