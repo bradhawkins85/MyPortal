@@ -98,8 +98,16 @@ async def staff_page(
         membership_data.get("menu_permissions")
     ).get("menu.staff", "none")
     has_write_staff_menu_access = raw_staff_menu_access == "write"
+    has_staff_menu_access = raw_staff_menu_access in {"read", "write"}
     staff_access_scope = _normalize_staff_access_scope(membership_data.get("staff_permission", staff_permission))
-    can_edit_staff = bool(is_super_admin or (staff_access_scope > 0 and has_write_staff_menu_access))
+    can_edit_staff = bool(
+        is_super_admin
+        or is_helpdesk_technician
+        or (staff_access_scope > 0 and has_write_staff_menu_access)
+    )
+    can_request_staff_offboarding = bool(
+        can_edit_staff or (staff_access_scope > 0 and has_staff_menu_access)
+    )
     can_approve_onboarding = bool(is_super_admin or is_helpdesk_technician)
 
     enabled_value = enabled.strip()
@@ -315,6 +323,7 @@ async def staff_page(
         "is_helpdesk_technician": is_helpdesk_technician,
         "staff_permission": staff_permission,
         "can_edit_staff": can_edit_staff,
+        "can_request_staff_offboarding": can_request_staff_offboarding,
         "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
         "staff_members": cast(list[dict[str, Any]], _serialise_for_json(staff_members)),
@@ -2302,7 +2311,7 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         staff_permission,
         company_id,
         redirect,
-    ) = await _load_staff_context(request, require_admin=True)
+    ) = await _load_staff_context(request)
     if redirect:
         return redirect
 
