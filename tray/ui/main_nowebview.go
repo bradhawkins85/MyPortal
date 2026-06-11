@@ -189,27 +189,35 @@ func handleIPCMessages(conn net.Conn) {
 			return
 		}
 		logger.Debug("handleIPCMessages: received type=%q", msg.Type)
-		switch msg.Type {
-		case "chat_open":
-			var payload chatOpenPayload
-			_ = json.Unmarshal(msg.Payload, &payload)
-			handleChatOpen(payload)
-		case "config_changed":
-			refreshPortalURL()
-			refreshDeviceUID()
-			refreshAuthToken()
-			gConfig = loadCachedConfig()
-			if onConfigChanged != nil {
-				onConfigChanged(gConfig)
-			}
-		case "show_notification":
-			var n struct {
-				Title string `json:"title"`
-				Body  string `json:"body"`
-			}
-			_ = json.Unmarshal(msg.Payload, &n)
-			showOSNotification(n.Title, n.Body)
+		handleIPCMessage(*msg)
+	}
+}
+
+func handleIPCMessage(msg ipc.Message) {
+	switch msg.Type {
+	case "chat_open":
+		var payload chatOpenPayload
+		_ = json.Unmarshal(msg.Payload, &payload)
+		handleChatOpen(payload)
+	case "chat_message":
+		var payload chatMessagePayload
+		_ = json.Unmarshal(msg.Payload, &payload)
+		handleChatMessage(payload)
+	case "config_changed":
+		refreshPortalURL()
+		refreshDeviceUID()
+		refreshAuthToken()
+		gConfig = loadCachedConfig()
+		if onConfigChanged != nil {
+			onConfigChanged(gConfig)
 		}
+	case "show_notification":
+		var n struct {
+			Title string `json:"title"`
+			Body  string `json:"body"`
+		}
+		_ = json.Unmarshal(msg.Payload, &n)
+		showOSNotification(n.Title, n.Body)
 	}
 }
 
