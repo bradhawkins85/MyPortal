@@ -68,9 +68,5 @@ func trmmScriptSuccessMessage(label string, serverMessage string) string {
 	if serverMessage != "" {
 		return serverMessage
 	}
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return "Your requested script has been scheduled and will run shortly."
-	}
-	return fmt.Sprintf("The script %q has been scheduled and will run shortly.", label)
+	return "The requested automation has been scheduled and will run in the background shortly."
 }

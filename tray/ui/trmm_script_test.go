@@ -2,9 +2,9 @@ package main
 
 import "testing"
 
-func TestTRMMScriptSuccessMessageIncludesScheduledScriptNotice(t *testing.T) {
+func TestTRMMScriptSuccessMessageUsesAutomationScheduledNotice(t *testing.T) {
 	msg := trmmScriptSuccessMessage("Nightly Maintenance", "")
-	want := `The script "Nightly Maintenance" has been scheduled and will run shortly.`
+	want := "The requested automation has been scheduled and will run in the background shortly."
 	if msg != want {
 		t.Fatalf("unexpected success message:\n got: %q\nwant: %q", msg, want)
 	}
@@ -20,7 +20,7 @@ func TestTRMMScriptSuccessMessageUsesServerMessage(t *testing.T) {
 
 func TestTRMMScriptSuccessMessageTrimsBlankLabel(t *testing.T) {
 	msg := trmmScriptSuccessMessage("  \t", "")
-	want := "Your requested script has been scheduled and will run shortly."
+	want := "The requested automation has been scheduled and will run in the background shortly."
 	if msg != want {
 		t.Fatalf("unexpected success message for blank label:\n got: %q\nwant: %q", msg, want)
 	}
