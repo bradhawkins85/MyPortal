@@ -117,7 +117,8 @@
           {% set can_access_m365_licenses = is_super_admin or menu_access.get('menu.m365.licenses') in ['read', 'write'] %}
           {% set can_access_m365_diagnostics = is_super_admin or menu_access.get('menu.m365.diagnostics') in ['read', 'write'] %}
           {% set can_access_compliance_checks_library = is_super_admin or menu_access.get('menu.compliance_checks.library') in ['read', 'write'] %}
-          {% set can_access_tickets = (can_access_tickets | default(false)) or is_super_admin or (is_helpdesk_technician | default(false)) or menu_access.get('menu.tickets') in ['read', 'write'] %}
+          {% set can_access_all_tickets = (can_access_all_tickets | default(false)) or is_super_admin or menu_access.get('menu.tickets') == 'write' %}
+          {% set can_access_tickets = (can_access_tickets | default(false)) or is_super_admin or menu_access.get('menu.tickets') in ['read', 'write'] %}
           {% set can_access_shop = (can_access_shop | default(false)) or is_super_admin or membership.get('can_access_shop') or menu_access.get('menu.shop') in ['read', 'write'] %}
           {% set can_access_cart = (can_access_cart | default(false)) or is_super_admin or membership.get('can_access_cart') %}
           {% set can_access_quotes = (can_access_quotes | default(false)) or is_super_admin or membership.get('can_access_quotes') or menu_access.get('menu.quotes') in ['read', 'write'] %}
@@ -128,7 +129,8 @@
           {% set can_manage_subscriptions = (can_manage_subscriptions | default(false)) or is_super_admin or (membership.get('can_manage_licenses') and membership.get('can_access_cart')) or menu_access.get('menu.subscriptions') in ['read', 'write'] %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') or menu_access.get('menu.invoices') in ['read', 'write'] %}
           {% set has_staff_menu_access = menu_access.get('menu.staff') in ['read', 'write'] %}
-          {% set can_manage_staff = is_super_admin or (has_staff_menu_access and ((can_manage_staff | default(false)) or (staff_permission > 0))) %}
+          {% set staff_menu_is_explicit = 'menu.staff' in menu_access %}
+          {% set can_manage_staff = is_super_admin or (staff_permission > 0 and not staff_menu_is_explicit) or ((can_manage_staff | default(false)) and has_staff_menu_access) or (has_staff_menu_access and staff_permission > 0) %}
           {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) or menu_access.get('menu.issues') in ['read', 'write'] %}
           {% set can_view_compliance = (can_view_compliance | default(false)) or is_super_admin or membership.get('can_view_compliance') or menu_access.get('menu.compliance') in ['read', 'write'] %}
           {% set can_view_m365_best_practices = (can_view_m365_best_practices | default(false)) or is_super_admin or membership.get('can_view_m365_best_practices') or menu_access.get('menu.m365.best_practices') in ['read', 'write'] %}
@@ -138,10 +140,11 @@
           {% set can_view_m365_shared_mailboxes = (can_view_m365_shared_mailboxes | default(false)) or is_super_admin or membership.get('can_view_m365_shared_mailboxes') or menu_access.get('menu.m365.shared_mailboxes') in ['read', 'write'] %}
           {% set can_access_chat = (can_access_chat | default(false)) or is_super_admin or membership.get('can_access_chat') or menu_access.get('menu.chat') in ['read', 'write'] %}
           {% set can_access_marketing = (can_access_marketing | default(false)) or is_super_admin or menu_access.get('menu.marketing') in ['read', 'write'] %}
+          {% set can_access_admin_profile = is_super_admin or menu_access.get('menu.admin.profile') in ['read', 'write'] %}
           {% set can_access_admin_backup_summary = is_super_admin or menu_access.get('menu.admin.backup_summary') in ['read', 'write'] %}
           {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes %}
           {% set is_company_admin = membership.get('is_admin') %}
-          {% set has_admin_access = is_super_admin or is_company_admin or can_access_admin_backup_summary %}
+          {% set has_admin_access = is_super_admin or is_company_admin or can_access_admin_profile or can_access_admin_backup_summary %}
           {% if can_access_dashboard %}
           <li class="menu__item">
             <a href="/" {% if current_path == '/' %}aria-current="page"{% endif %}>
@@ -211,7 +214,7 @@
           {% endif %}
           {% endif %}
           {% if can_access_tickets %}
-            {% set show_admin_tickets = (is_helpdesk_technician | default(false)) or (is_super_admin | default(false)) %}
+            {% set show_admin_tickets = (can_access_all_tickets | default(false)) or (is_super_admin | default(false)) %}
             {% if show_admin_tickets %}
               {% set ticket_href = '/admin/tickets' %}
               {% set ticket_active = current_path.startswith('/admin/tickets') and not current_path.startswith('/admin/tickets/syncro-import') %}

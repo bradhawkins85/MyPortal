@@ -1210,11 +1210,11 @@ async def _require_helpdesk_page(request: Request) -> tuple[dict[str, Any] | Non
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return None, redirect
-    has_access = await _is_helpdesk_technician(user, request)
+    has_access = await _has_menu_page_access(request, user, "menu.tickets", write=True)
     if not has_access:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Helpdesk technician privileges required",
+            detail="All tickets permission required",
         )
     return user, None
 
@@ -1804,10 +1804,7 @@ def _build_menu_access_map(
     if membership_data.get("can_manage_licenses") and membership_data.get("can_access_cart"):
         promote("menu.subscriptions", "write")
     if is_helpdesk_technician:
-        promote("menu.tickets", "write")
         promote("menu.reporting", "write")
-    else:
-        promote("menu.tickets", "read")
     if has_issue_tracker_access:
         promote("menu.issues", "write")
     if has_marketing_access:
@@ -1842,7 +1839,17 @@ async def _has_menu_page_access(request: Request, user: Mapping[str, Any], key: 
         if membership is not None:
             request.state.active_membership = membership
 
-    menu_access = normalize_menu_permissions((membership or {}).get("menu_permissions"))
+    membership_data = membership or {}
+    is_helpdesk_technician = await _is_helpdesk_technician(user, request)
+    has_issue_tracker_access = await _has_issue_tracker_access(user, request)
+    has_marketing_access = await _has_marketing_access(user, request)
+    menu_access = _build_menu_access_map(
+        is_super_admin=False,
+        membership_data=membership_data,
+        is_helpdesk_technician=is_helpdesk_technician,
+        has_issue_tracker_access=has_issue_tracker_access,
+        has_marketing_access=has_marketing_access,
+    )
     return _menu_can(menu_access, key, write=write)
 
 
@@ -2068,6 +2075,7 @@ async def _build_base_context(
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
         "can_access_tickets": _menu_can(menu_access, "menu.tickets"),
+        "can_access_all_tickets": _menu_can(menu_access, "menu.tickets", write=True),
         "plausible_config": plausible_config,
     }
     context.update(permission_flags)

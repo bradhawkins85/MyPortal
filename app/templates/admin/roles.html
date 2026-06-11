@@ -113,6 +113,7 @@
                   </td>
                   <td data-label="Group">{{ permission.group }}</td>
                   <td data-label="Access level">
+                    {% set is_ticket_permission = permission.key == 'menu.tickets' %}
                     <div class="permission-level" role="radiogroup" aria-label="{{ permission.label }} access level">
                       <label>
                         <input type="radio" name="permission_level_{{ loop.index }}" value="none" data-permission-level data-permission-key="{{ permission.key }}" checked />
@@ -120,11 +121,11 @@
                       </label>
                       <label>
                         <input type="radio" name="permission_level_{{ loop.index }}" value="read" data-permission-level data-permission-key="{{ permission.key }}" />
-                        <span>Read Only</span>
+                        <span>{{ 'Own' if is_ticket_permission else 'Read Only' }}</span>
                       </label>
                       <label>
                         <input type="radio" name="permission_level_{{ loop.index }}" value="write" data-permission-level data-permission-key="{{ permission.key }}" />
-                        <span>Read/Write</span>
+                        <span>{{ 'All' if is_ticket_permission else 'Read/Write' }}</span>
                       </label>
                     </div>
                   </td>
@@ -133,7 +134,7 @@
             </tbody>
           </table>
         </div>
-        <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct access, Read Only to view information without actions, or Read/Write to allow permitted actions.</p>
+        <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct access, Read Only/Own to view permitted information, or Read/Write/All to allow permitted actions.</p>
       </div>
       <div class="form-actions">
         <button type="button" class="button button--ghost" data-role-reset>Clear form</button>
@@ -177,7 +178,8 @@
       <h3>Assignable menu permissions</h3>
       <p>
         Every left-menu item is available in the permission catalogue with three levels: <strong>No Access</strong>,
-        <strong>Read Only</strong>, and <strong>Read/Write</strong>. Use Read Only for mailbox visibility without
+        <strong>Read Only</strong>, and <strong>Read/Write</strong>. Tickets use the same stored levels with labels
+        <strong>No Access</strong>, <strong>Own</strong>, and <strong>All</strong>: Own opens <code>/tickets</code> for the user's tickets, while All opens <code>/admin/tickets</code> for technicians. Use Read Only for mailbox visibility without
         mailbox actions, and No Access to hide sensitive menus such as Office 365 configuration.
       </p>
       <dl class="definition-list">
