@@ -33,6 +33,8 @@ type chatMessagePayload struct {
 }
 
 var (
+	showChatSessionNotificationFunc = showChatSessionNotification
+
 	notificationActionOnce    sync.Once
 	notificationActionBaseURL string
 	notificationActionMu      sync.Mutex
@@ -51,7 +53,7 @@ func handleChatOpen(payload chatOpenPayload) {
 	}
 
 	title, body := chatNotificationText(payload)
-	showChatSessionNotification(title, body, actionURL)
+	showChatSessionNotificationFunc(title, body, actionURL)
 }
 
 func handleChatMessage(payload chatMessagePayload) {
@@ -61,7 +63,7 @@ func handleChatMessage(payload chatMessagePayload) {
 	}
 
 	title, body := chatMessageNotificationText(payload)
-	showChatSessionNotification(title, body, actionURL)
+	showChatSessionNotificationFunc(title, body, actionURL)
 }
 
 func chatMessageNotificationText(payload chatMessagePayload) (string, string) {
