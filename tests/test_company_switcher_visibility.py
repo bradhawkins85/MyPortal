@@ -83,6 +83,9 @@ def single_company_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False},
+            "enable_auto_refresh": False,
+            "is_impersonating": False,
         }
         if extra:
             context.update(extra)
@@ -129,6 +132,9 @@ def multiple_companies_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False},
+            "enable_auto_refresh": False,
+            "is_impersonating": False,
         }
         if extra:
             context.update(extra)
@@ -165,6 +171,9 @@ def no_companies_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False},
+            "enable_auto_refresh": False,
+            "is_impersonating": False,
         }
         if extra:
             context.update(extra)
@@ -184,6 +193,7 @@ def test_company_switcher_hidden_with_single_company(single_company_context):
     from pathlib import Path
     template_path = Path(__file__).resolve().parent.parent / "app" / "templates"
     main_module.templates = Jinja2Templates(directory=str(template_path))
+    main_module.templates.env.globals["static_url"] = main_module._static_url
     
     with TestClient(app) as client:
         response = client.get("/")
