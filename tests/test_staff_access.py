@@ -33,6 +33,7 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
             "can_access_shop": True,
             "can_access_cart": False,
             "can_access_orders": False,
+            "can_access_quotes": True,
             "can_access_forms": True,
             "is_admin": True,
             "role_id": 7,
@@ -49,6 +50,7 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
             "can_access_shop": False,
             "can_access_cart": True,
             "can_access_orders": True,
+            "can_access_quotes": False,
             "can_access_forms": False,
             "is_admin": False,
             "role_id": None,
@@ -125,6 +127,7 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
         "can_access_shop": True,
         "can_access_cart": False,
         "can_access_orders": False,
+        "can_access_quotes": True,
         "can_access_forms": True,
         "is_admin": True,
     }
@@ -143,6 +146,7 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
         "can_access_shop": False,
         "can_access_cart": True,
         "can_access_orders": True,
+        "can_access_quotes": False,
         "can_access_forms": False,
         "is_admin": False,
     }
