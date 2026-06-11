@@ -47,7 +47,7 @@
                 {% if role.permissions %}
                   <span class="tag-list">
                     {% for perm, level in role.permissions.items() %}
-                      <span class="tag">{{ perm }}: {{ 'Read/Write' if level == 'write' else 'Read Only' }}</span>
+                      <span class="tag">{{ perm }}: {{ 'Yes' if perm == 'menu.admin.technician' else ('Read/Write' if level == 'write' else 'Read Only') }}</span>
                     {% endfor %}
                   </span>
                 {% else %}
@@ -114,18 +114,21 @@
                   <td data-label="Group">{{ permission.group }}</td>
                   <td data-label="Access level">
                     {% set is_ticket_permission = permission.key == 'menu.tickets' %}
+                    {% set is_boolean_permission = permission.key == 'menu.admin.technician' %}
                     <div class="permission-level" role="radiogroup" aria-label="{{ permission.label }} access level">
                       <label>
                         <input type="radio" name="permission_level_{{ loop.index }}" value="none" data-permission-level data-permission-key="{{ permission.key }}" checked />
-                        <span>No Access</span>
+                        <span>{{ 'No' if is_boolean_permission else 'No Access' }}</span>
                       </label>
-                      <label>
-                        <input type="radio" name="permission_level_{{ loop.index }}" value="read" data-permission-level data-permission-key="{{ permission.key }}" />
-                        <span>{{ 'Own' if is_ticket_permission else 'Read Only' }}</span>
-                      </label>
+                      {% if not is_boolean_permission %}
+                        <label>
+                          <input type="radio" name="permission_level_{{ loop.index }}" value="read" data-permission-level data-permission-key="{{ permission.key }}" />
+                          <span>{{ 'Own' if is_ticket_permission else 'Read Only' }}</span>
+                        </label>
+                      {% endif %}
                       <label>
                         <input type="radio" name="permission_level_{{ loop.index }}" value="write" data-permission-level data-permission-key="{{ permission.key }}" />
-                        <span>{{ 'All' if is_ticket_permission else 'Read/Write' }}</span>
+                        <span>{{ 'All' if is_ticket_permission else ('Yes' if is_boolean_permission else 'Read/Write') }}</span>
                       </label>
                     </div>
                   </td>
@@ -134,7 +137,7 @@
             </tbody>
           </table>
         </div>
-        <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct access, Read Only/Own to view permitted information, or Read/Write/All to allow permitted actions.</p>
+        <p class="form-help" id="role-permissions-help">Choose No Access to hide a menu and block direct access, Read Only/Own to view permitted information, or Read/Write/All to allow permitted actions. The Technician permission is a Yes/No setting.</p>
       </div>
       <div class="form-actions">
         <button type="button" class="button button--ghost" data-role-reset>Clear form</button>
@@ -177,8 +180,8 @@
       </p>
       <h3>Assignable menu permissions</h3>
       <p>
-        Every left-menu item is available in the permission catalogue with three levels: <strong>No Access</strong>,
-        <strong>Read Only</strong>, and <strong>Read/Write</strong>. Tickets use the same stored levels with labels
+        Most left-menu items are available in the permission catalogue with three levels: <strong>No Access</strong>,
+        <strong>Read Only</strong>, and <strong>Read/Write</strong>. The Technician administration permission is a two-state <strong>No</strong>/<strong>Yes</strong> control. Tickets use the same stored levels with labels
         <strong>No Access</strong>, <strong>Own</strong>, and <strong>All</strong>: Own opens <code>/tickets</code> for the user's tickets, while All opens <code>/admin/tickets</code> for technicians. Use Read Only for mailbox visibility without
         mailbox actions, and No Access to hide sensitive menus such as Office 365 configuration.
       </p>

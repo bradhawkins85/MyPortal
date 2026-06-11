@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 AccessLevel = Literal["none", "read", "write"]
 ACCESS_LEVELS: tuple[AccessLevel, ...] = ("none", "read", "write")
+BOOLEAN_MENU_PERMISSIONS: frozenset[str] = frozenset({"menu.admin.technician"})
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,16 @@ for item in MENU_PERMISSIONS:
 
 
 def catalogue_for_api() -> list[dict[str, Any]]:
-    return [asdict(item) | {"levels": list(ACCESS_LEVELS)} for item in MENU_PERMISSIONS]
+    return [
+        asdict(item) | {"levels": list(_access_levels_for_permission(item.key))}
+        for item in MENU_PERMISSIONS
+    ]
+
+
+def _access_levels_for_permission(key: str) -> tuple[AccessLevel, ...]:
+    if key in BOOLEAN_MENU_PERMISSIONS:
+        return ("none", "write")
+    return ACCESS_LEVELS
 
 
 def normalize_access_level(value: Any) -> AccessLevel:
@@ -107,6 +117,13 @@ def normalize_access_level(value: Any) -> AccessLevel:
     return value_str  # type: ignore[return-value]
 
 
+def normalize_menu_permission_level(key: str, value: Any) -> AccessLevel:
+    level = normalize_access_level(value)
+    if key in BOOLEAN_MENU_PERMISSIONS and level == "read":
+        return "write"
+    return level
+
+
 def merge_access(existing: AccessLevel, new: AccessLevel) -> AccessLevel:
     rank = {"none": 0, "read": 1, "write": 2}
     return new if rank[new] > rank[existing] else existing
@@ -122,13 +139,13 @@ def normalize_menu_permissions(raw: Any) -> dict[str, AccessLevel]:
         source = raw.get("menu") if isinstance(raw.get("menu"), dict) else raw
         for key, value in source.items():
             if key in MENU_PERMISSION_MAP:
-                normalized[key] = normalize_access_level(value)
+                normalized[key] = normalize_menu_permission_level(key, value)
         # Also accept a legacy list nested under permissions for compatibility.
         legacy = raw.get("legacy") or raw.get("permissions")
         if isinstance(legacy, list):
             legacy_map = normalize_menu_permissions(legacy)
             for key, level in legacy_map.items():
-                normalized[key] = merge_access(normalized[key], level)
+                normalized[key] = merge_access(normalized[key], normalize_menu_permission_level(key, level))
         return normalized
 
     if isinstance(raw, list):
@@ -136,11 +153,11 @@ def normalize_menu_permissions(raw: Any) -> dict[str, AccessLevel]:
             if not isinstance(permission, str):
                 continue
             if permission in MENU_PERMISSION_MAP:
-                normalized[permission] = merge_access(normalized[permission], "write")
+                normalized[permission] = merge_access(normalized[permission], normalize_menu_permission_level(permission, "write"))
                 continue
             mapped_items = LEGACY_TO_MENU.get(permission, [])
             for key, level in mapped_items:
-                normalized[key] = merge_access(normalized[key], level)
+                normalized[key] = merge_access(normalized[key], normalize_menu_permission_level(key, level))
         return normalized
 
     return normalized
@@ -168,5 +185,5 @@ def menu_permissions_to_legacy(menu_permissions: Any) -> list[str]:
 def menu_has_access(menu_access: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
     if not menu_access:
         return False
-    level = normalize_access_level(menu_access.get(key, "none"))
+    level = normalize_menu_permission_level(key, menu_access.get(key, "none"))
     return level == "write" if write else level in {"read", "write"}
