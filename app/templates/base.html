@@ -112,6 +112,9 @@
           {% set can_access_forms = (can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') %}
           {% set can_manage_assets = (can_manage_assets | default(false)) or is_super_admin or membership.get('can_manage_assets') %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') %}
+          {% set can_view_m365_configuration = (can_view_m365_configuration | default(false)) or can_manage_licenses %}
+          {% set can_view_m365_licenses = (can_view_m365_licenses | default(false)) or can_manage_licenses %}
+          {% set can_view_m365_diagnostics = (can_view_m365_diagnostics | default(false)) or is_super_admin %}
           {% set can_manage_subscriptions = (can_manage_subscriptions | default(false)) or is_super_admin or (membership.get('can_manage_licenses') and membership.get('can_access_cart')) %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') %}
           {% set can_manage_staff = (can_manage_staff | default(false)) or is_super_admin or membership.get('can_manage_staff') or (staff_permission > 0) %}
@@ -124,7 +127,8 @@
           {% set can_view_m365_shared_mailboxes = (can_view_m365_shared_mailboxes | default(false)) or is_super_admin or membership.get('can_view_m365_shared_mailboxes') %}
           {% set can_access_chat = (can_access_chat | default(false)) or is_super_admin or membership.get('can_access_chat') %}
           {% set can_access_marketing = (can_access_marketing | default(false)) or is_super_admin %}
-          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes %}
+          {% set has_m365_menu = can_view_m365_configuration or can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_view_m365_licenses or can_view_m365_diagnostics %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or has_m365_menu or can_view_compliance_checks %}
           {% set is_company_admin = membership.get('is_admin') %}
           {% set has_admin_access = is_super_admin or is_company_admin %}
           <li class="menu__item">
@@ -275,7 +279,7 @@
               </a>
             </li>
           {% endif %}
-          {% if can_manage_licenses %}
+          {% if has_m365_menu %}
             {% set m365_active = current_path.startswith('/m365') or current_path.startswith('/licenses') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
@@ -288,44 +292,11 @@
                 </span>
               </button>
               <ul class="menu__submenu {% if m365_active %}menu__submenu--expanded{% endif %}">
+                {% if can_view_m365_configuration %}
                 <li class="menu__subitem">
                   <a href="/m365" {% if current_path == '/m365' %}aria-current="page"{% endif %}>Configuration</a>
                 </li>
-                {% if can_view_m365_best_practices %}
-                <li class="menu__subitem">
-                  <a href="/m365/best-practices" {% if current_path.startswith('/m365/best-practices') %}aria-current="page"{% endif %}>Best Practices</a>
-                </li>
                 {% endif %}
-                <li class="menu__subitem">
-                  <a href="/m365/mailboxes/users" {% if current_path.startswith('/m365/mailboxes/users') %}aria-current="page"{% endif %}>User Mailboxes</a>
-                </li>
-                <li class="menu__subitem">
-                  <a href="/m365/mailboxes/shared" {% if current_path.startswith('/m365/mailboxes/shared') %}aria-current="page"{% endif %}>Shared Mailboxes</a>
-                </li>
-                <li class="menu__subitem">
-                  <a href="/licenses" {% if current_path.startswith('/licenses') %}aria-current="page"{% endif %}>Licenses</a>
-                </li>
-                {% if is_super_admin %}
-                <li class="menu__subitem">
-                  <a href="/m365/diagnostics" {% if current_path.startswith('/m365/diagnostics') %}aria-current="page"{% endif %}>Diagnostics</a>
-                </li>
-                {% endif %}
-              </ul>
-            </li>
-          {% endif %}
-          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes) %}
-            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') %}
-            <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
-              <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
-                <span class="menu__icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false"><path d="M21 3H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 13-5-5 1.41-1.41L12 13.17l7.59-7.59L21 7z"/></svg>
-                </span>
-                <span class="menu__label">Office 365</span>
-                <span class="menu__expand-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10l5 5 5-5z"/></svg>
-                </span>
-              </button>
-              <ul class="menu__submenu {% if m365_active %}menu__submenu--expanded{% endif %}">
                 {% if can_view_m365_best_practices %}
                 <li class="menu__subitem">
                   <a href="/m365/best-practices" {% if current_path.startswith('/m365/best-practices') %}aria-current="page"{% endif %}>Best Practices</a>
@@ -339,6 +310,16 @@
                 {% if can_view_m365_shared_mailboxes %}
                 <li class="menu__subitem">
                   <a href="/m365/mailboxes/shared" {% if current_path.startswith('/m365/mailboxes/shared') %}aria-current="page"{% endif %}>Shared Mailboxes</a>
+                </li>
+                {% endif %}
+                {% if can_view_m365_licenses %}
+                <li class="menu__subitem">
+                  <a href="/licenses" {% if current_path.startswith('/licenses') %}aria-current="page"{% endif %}>Licenses</a>
+                </li>
+                {% endif %}
+                {% if can_view_m365_diagnostics %}
+                <li class="menu__subitem">
+                  <a href="/m365/diagnostics" {% if current_path.startswith('/m365/diagnostics') %}aria-current="page"{% endif %}>Diagnostics</a>
                 </li>
                 {% endif %}
               </ul>

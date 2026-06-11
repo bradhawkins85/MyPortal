@@ -154,6 +154,7 @@ from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
+from app.security.menu_permissions import ACCESS_LEVEL_LABELS, MENU_PERMISSIONS
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -1795,6 +1796,10 @@ async def _build_base_context(
                 log_error("Failed to check BCP edit permissions", error=str(exc))
                 can_edit_bcp = False
 
+    can_manage_licenses = is_super_admin or _has_permission("can_manage_licenses")
+    can_view_m365_best_practices = is_super_admin or _has_permission("can_view_m365_best_practices")
+    can_view_m365_user_mailboxes = is_super_admin or _has_permission("can_view_m365_user_mailboxes")
+    can_view_m365_shared_mailboxes = is_super_admin or _has_permission("can_view_m365_shared_mailboxes")
     permission_flags = {
         "can_access_shop": is_super_admin or _has_permission("can_access_shop"),
         "can_access_cart": is_super_admin or _has_permission("can_access_cart"),
@@ -1802,7 +1807,13 @@ async def _build_base_context(
         "can_access_quotes": is_super_admin or _has_permission("can_access_quotes"),
         "can_access_forms": is_super_admin or _has_permission("can_access_forms"),
         "can_manage_assets": is_super_admin or _has_permission("can_manage_assets"),
-        "can_manage_licenses": is_super_admin or _has_permission("can_manage_licenses"),
+        "can_manage_licenses": can_manage_licenses,
+        "can_view_m365_configuration": can_manage_licenses,
+        "can_view_m365_best_practices": can_view_m365_best_practices,
+        "can_view_m365_user_mailboxes": can_view_m365_user_mailboxes,
+        "can_view_m365_shared_mailboxes": can_view_m365_shared_mailboxes,
+        "can_view_m365_licenses": can_manage_licenses,
+        "can_view_m365_diagnostics": is_super_admin,
         "can_manage_invoices": is_super_admin or _has_permission("can_manage_invoices"),
         "can_manage_staff": (
             is_super_admin
@@ -1813,11 +1824,8 @@ async def _build_base_context(
         "can_view_compliance": is_super_admin or _has_permission("can_view_compliance"),
         "can_view_bcp": can_view_bcp,
         "can_edit_bcp": can_edit_bcp,
-        "can_view_m365_best_practices": is_super_admin or _has_permission("can_view_m365_best_practices"),
         "can_view_compliance_checks": is_super_admin or _has_permission("can_view_compliance_checks"),
         "can_manage_compliance_checks": is_super_admin or _has_permission("can_manage_compliance_checks"),
-        "can_view_m365_user_mailboxes": is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
-        "can_view_m365_shared_mailboxes": is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
         "can_access_chat": is_super_admin or _has_permission("can_access_chat"),
         "can_access_marketing": has_marketing_access,
     }
@@ -1914,6 +1922,8 @@ async def _build_base_context(
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
         "can_access_tickets": True,
+        "menu_permission_catalogue": MENU_PERMISSIONS,
+        "menu_access_level_labels": ACCESS_LEVEL_LABELS,
         "plausible_config": plausible_config,
     }
     context.update(permission_flags)
