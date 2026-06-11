@@ -23,7 +23,7 @@ class RoleBase(BaseModel):
         default_factory=dict,
         description=(
             "Tri-state menu permissions keyed by menu permission id. "
-            "Allowed levels are none, read, and write. Legacy string lists are accepted for compatibility."
+            "Allowed levels are none, read, and write; menu.admin.technician accepts none/write and treats existing read values as write. Legacy string lists are accepted for compatibility."
         ),
         examples=[
             {
@@ -50,7 +50,7 @@ class RoleUpdate(BaseModel):
     description: Optional[str] = None
     permissions: Optional[dict[str, str] | list[str]] = Field(
         default=None,
-        description="Tri-state menu permission updates. Use none, read, or write for each supplied menu key.",
+        description="Menu permission updates. Use none, read, or write for each supplied menu key; menu.admin.technician accepts none/write and treats read as write.",
     )
 
     @field_validator("permissions")
