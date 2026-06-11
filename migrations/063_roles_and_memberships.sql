@@ -27,6 +27,12 @@ VALUES
     'Standard access for day-to-day work.',
     JSON_ARRAY('portal.access'),
     1
+  ),
+  (
+    'Technician',
+    'Can switch between all companies and act using the permissions assigned to the Technician role.',
+    '{"menu.admin.technician":"write","menu.tickets":"write","menu.reporting":"write"}',
+    1
   );
 
 CREATE TABLE IF NOT EXISTS company_memberships (
