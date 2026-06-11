@@ -3,6 +3,7 @@
 {% block header_title %}Profile{% endblock %}
 
 {% block content %}
+{% set show_technician_profile_fields = is_super_admin or is_helpdesk_technician %}
 <div
   class="management management--single"
   data-layout
@@ -14,11 +15,12 @@
     <header class="management__header">
       <div>
         <h1 class="management__title">My profile</h1>
-        <p class="management__subtitle">Manage your account security, sidebar preferences, and email signature.</p>
+        <p class="management__subtitle">Manage your account security{% if show_technician_profile_fields %}, notification contact, booking links, chat details, email signature{% endif %}, and sidebar preferences.</p>
       </div>
     </header>
 
-    <div class="management__body management__body--columns profile-columns">
+    <div class="management__body management__body--columns profile-columns{% if not show_technician_profile_fields %} profile-columns--standard{% endif %}">
+      {% if show_technician_profile_fields %}
       <div class="management__column profile-columns__column">
         <section class="card card--panel">
           <header class="card__header card__header--stacked">
@@ -221,6 +223,7 @@
           </div>
         </section>
       </div>
+      {% endif %}
 
       <div class="management__column profile-columns__column">
         <section class="card card--panel">
@@ -360,6 +363,8 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  {% if is_super_admin or is_helpdesk_technician %}
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
+  {% endif %}
   <script src="{{ static_url('/static/js/profile.js') }}" defer></script>
 {% endblock %}
