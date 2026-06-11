@@ -70,12 +70,25 @@ async def staff_page(
 
     is_super_admin = bool(user.get("is_super_admin"))
     is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
-    membership_permissions = set((membership or {}).get("combined_permissions") or (membership or {}).get("permissions") or [])
-    can_approve_onboarding = bool(
+    is_helpdesk_technician = await main_module._is_helpdesk_technician(user, request)
+    membership_data = membership or {}
+    raw_staff_menu_access = main_module.normalize_menu_permissions(
+        membership_data.get("menu_permissions")
+    ).get("menu.staff", "none")
+    has_readonly_staff_menu_access = raw_staff_menu_access == "read"
+    has_write_staff_menu_access = raw_staff_menu_access == "write"
+    can_edit_staff = bool(
         is_super_admin
-        or "staff.manage" in membership_permissions
-        or bool(membership and membership.get("can_manage_staff"))
+        or has_write_staff_menu_access
+        or (
+            not has_readonly_staff_menu_access
+            and (
+                bool(membership_data.get("can_manage_staff"))
+                or int(membership_data.get("staff_permission") or 0) > 0
+            )
+        )
     )
+    can_approve_onboarding = bool(is_super_admin or is_helpdesk_technician)
 
     enabled_value = enabled.strip()
     enabled_filter: bool | None
@@ -303,7 +316,9 @@ async def staff_page(
         "title": "Staff",
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
+        "is_helpdesk_technician": is_helpdesk_technician,
         "staff_permission": staff_permission,
+        "can_edit_staff": can_edit_staff,
         "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
         "staff_members": cast(list[dict[str, Any]], _serialise_for_json(staff_members)),

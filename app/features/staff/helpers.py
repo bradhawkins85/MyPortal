@@ -43,12 +43,32 @@ async def _load_staff_context(
             detail="Invalid company identifier",
         ) from exc
     membership = await main_module.user_company_repo.get_user_company(user["id"], company_id)
-    staff_permission = int(membership.get("staff_permission", 0)) if membership else 0
-    if not is_super_admin and staff_permission <= 0:
+    membership_data = membership or {}
+    staff_permission = int(membership_data.get("staff_permission", 0)) if membership else 0
+    raw_staff_menu_access = main_module.normalize_menu_permissions(
+        membership_data.get("menu_permissions")
+    ).get("menu.staff", "none")
+    has_readonly_staff_menu_access = raw_staff_menu_access == "read"
+    has_write_staff_menu_access = raw_staff_menu_access == "write"
+    legacy_staff_menu_access = main_module._membership_menu_can(
+        user, membership, "menu.staff", write=require_admin or require_super_admin
+    )
+    has_staff_menu_access = (
+        has_write_staff_menu_access
+        if require_admin or require_super_admin
+        else raw_staff_menu_access in {"read", "write"} or legacy_staff_menu_access
+    )
+    if has_readonly_staff_menu_access and (require_admin or require_super_admin):
+        has_staff_menu_access = False
+    if not is_super_admin and staff_permission <= 0 and not has_staff_menu_access:
         return user, membership, None, staff_permission, company_id, RedirectResponse(
             url="/", status_code=status.HTTP_303_SEE_OTHER
         )
-    if require_admin and not (is_super_admin or (membership and membership.get("is_admin"))):
+    if require_admin and not (
+        is_super_admin
+        or has_staff_menu_access
+        or (not has_readonly_staff_menu_access and membership and membership.get("is_admin"))
+    ):
         return user, membership, None, staff_permission, company_id, RedirectResponse(
             url="/", status_code=status.HTTP_303_SEE_OTHER
         )
