@@ -94,7 +94,7 @@
         </thead>
         <tbody>
           {% for quote in quotes %}
-            {% set is_admin = current_user and (current_user.is_super_admin or membership.is_admin) %}
+            {% set is_admin = is_company_admin|default(false) %}
             {% set has_actions = (not quote.is_expired) or is_admin %}
             <tr data-status="{{ quote.status_value }}">
               <td data-label="Quote">
