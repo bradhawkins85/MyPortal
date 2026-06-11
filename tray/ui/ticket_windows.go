@@ -352,7 +352,7 @@ $form.CancelButton = $btnCancel
 $form.Controls.Add($btnCancel)
 
 $btnSubmit = New-Object System.Windows.Forms.Button
-$btnSubmit.Text = "Send Request  ›"
+$btnSubmit.Text = "Send Request"
 $btnSubmit.Location = New-Object System.Drawing.Point(($fieldX + $fieldW - 190), ($y + 18))
 $btnSubmit.Size = New-Object System.Drawing.Size(190, 40)
 Set-ButtonStyle $btnSubmit $true
