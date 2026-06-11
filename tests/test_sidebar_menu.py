@@ -207,7 +207,7 @@ def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):
     membership = {
         "company_id": 10,
         "is_admin": False,
-        "menu_permissions": {"menu.admin.profile": "read"},
+        "menu_permissions": {"menu.admin.profile": "read", "menu.tickets": "read"},
     }
 
     async def fake_require_user(request):
@@ -279,7 +279,7 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
     membership = {
         "company_id": 10,
         "is_admin": False,
-        "menu_permissions": {"menu.admin.profile": "read"},
+        "menu_permissions": {"menu.admin.profile": "read", "menu.tickets": "read"},
     }
 
     async def fake_require_user(request):
@@ -308,7 +308,7 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
                 membership_data=membership,
             ),
             "is_super_admin": False,
-            "is_helpdesk_technician": False,
+            "is_helpdesk_technician": True,
             "matrix_chat_enabled": False,
             "plausible_config": {"enabled": False, "site_domain": "", "base_url": ""},
         }
@@ -330,6 +330,7 @@ def test_non_admin_with_profile_permission_can_open_profile_page(monkeypatch):
 
     assert response.status_code == 200
     assert "Manage your account security" in response.text
+    assert response.text.count("rich_text_editor.js") == 0
     assert "Notification Contact" not in response.text
     assert "Booking Link" not in response.text
     assert "Matrix Username" not in response.text
@@ -350,7 +351,7 @@ def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypa
     membership = {
         "company_id": 10,
         "is_admin": False,
-        "menu_permissions": {"menu.admin.profile": "read"},
+        "menu_permissions": {"menu.admin.profile": "read", "menu.tickets": "write"},
     }
 
     async def fake_require_user(request):
@@ -405,6 +406,7 @@ def test_technician_with_profile_permission_keeps_profile_contact_tools(monkeypa
     assert "Booking Link" in response.text
     assert "Matrix Username" in response.text
     assert "Email signature" in response.text
+    assert response.text.count("rich_text_editor.js") == 1
     assert "profile-columns--standard" not in response.text
 
 
