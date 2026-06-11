@@ -5,6 +5,7 @@ from contextlib import suppress
 from typing import Any, List, Optional
 
 from app.core.database import db
+from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import roles as role_repo
 from app.security.menu_permissions import menu_has_access, menu_permissions_to_legacy, normalize_menu_permissions
@@ -12,6 +13,7 @@ from app.security.menu_permissions import menu_has_access, menu_permissions_to_l
 _STAFF_PERMISSION_NONE = 0
 _STAFF_PERMISSION_DEPARTMENT = 1
 _STAFF_PERMISSION_ALL = 3
+TECHNICIAN_SWITCH_ALL_PERMISSION = "company.switch_all"
 
 
 def _normalize_staff_access_scope(value: Any) -> int:
@@ -182,22 +184,68 @@ async def _suspend_company_membership(company_id: int, user_id: int) -> None:
             await membership_repo.update_membership(int(membership_id), status="suspended")
 
 
-def _membership_row_to_user_company(row: dict[str, Any]) -> dict[str, Any]:
-    """Build a legacy user_company-shaped record from an active role membership."""
+def build_user_company_from_role_permissions(
+    *,
+    user_id: Any,
+    company: dict[str, Any],
+    role_permissions: Any,
+    role_id: Any | None = None,
+    role_name: str | None = None,
+    is_global_access: bool = False,
+) -> dict[str, Any]:
+    """Build a legacy user_company-shaped record from role permissions.
+
+    This is used for role-only memberships and for Technician users who are
+    allowed to switch into every company without writing a per-company
+    ``user_companies`` row. The returned payload keeps all legacy booleans
+    denied by default and only enables capabilities granted by the designated
+    role permissions.
+    """
+
+    company_id_raw = company.get("id") or company.get("company_id")
+    try:
+        company_id = int(company_id_raw)
+    except (TypeError, ValueError):
+        return {}
 
     data: dict[str, Any] = {
-        "user_id": row.get("user_id"),
-        "company_id": row.get("company_id"),
-        "company_name": row.get("company_name"),
-        "syncro_company_id": row.get("syncro_company_id"),
+        "user_id": user_id,
+        "company_id": company_id,
+        "company_name": company.get("name") or company.get("company_name"),
+        "syncro_company_id": company.get("syncro_company_id"),
         "staff_permission": _STAFF_PERMISSION_NONE,
     }
     for field in _BOOLEAN_FIELDS:
         data.setdefault(field, False)
 
     normalised = _normalise(data)
-    _enrich_with_role_permissions(normalised, row.get("role_permissions"))
+    _enrich_with_role_permissions(normalised, role_permissions)
+    if role_id is not None:
+        try:
+            normalised["membership_role_id"] = int(role_id)
+        except (TypeError, ValueError):
+            normalised["membership_role_id"] = role_id
+    if role_name is not None:
+        normalised["membership_role_name"] = role_name
+    if is_global_access:
+        normalised["is_global_company_access"] = True
     return normalised
+
+
+def _membership_row_to_user_company(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a legacy user_company-shaped record from an active role membership."""
+
+    return build_user_company_from_role_permissions(
+        user_id=row.get("user_id"),
+        company={
+            "company_id": row.get("company_id"),
+            "company_name": row.get("company_name"),
+            "syncro_company_id": row.get("syncro_company_id"),
+        },
+        role_permissions=row.get("role_permissions"),
+        role_id=row.get("role_id"),
+        role_name=row.get("role_name"),
+    )
 
 
 async def _get_active_membership_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
@@ -208,6 +256,8 @@ async def _get_active_membership_company(user_id: int, company_id: int) -> Optio
             m.company_id,
             c.name AS company_name,
             c.syncro_company_id,
+            m.role_id,
+            r.name AS role_name,
             r.permissions AS role_permissions
         FROM company_memberships AS m
         INNER JOIN companies AS c ON c.id = m.company_id
@@ -219,6 +269,27 @@ async def _get_active_membership_company(user_id: int, company_id: int) -> Optio
     if not row:
         return None
     return _membership_row_to_user_company(row)
+
+
+async def _get_technician_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
+    technician_membership = await membership_repo.get_first_membership_with_permission(
+        user_id, TECHNICIAN_SWITCH_ALL_PERMISSION
+    )
+    if not technician_membership:
+        return None
+
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        return None
+
+    return build_user_company_from_role_permissions(
+        user_id=user_id,
+        company=company,
+        role_permissions=technician_membership.get("permissions"),
+        role_id=technician_membership.get("role_id"),
+        role_name=technician_membership.get("role_name"),
+        is_global_access=True,
+    )
 
 
 async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, Any]]:
@@ -236,7 +307,10 @@ async def get_user_company(user_id: int, company_id: int) -> Optional[dict[str, 
         (user_id, company_id),
     )
     if not row:
-        return await _get_active_membership_company(user_id, company_id)
+        membership_company = await _get_active_membership_company(user_id, company_id)
+        if membership_company is not None:
+            return membership_company
+        return await _get_technician_company(user_id, company_id)
     
     normalised = _normalise(row)
     _enrich_with_role_permissions(normalised, row.get("role_permissions"))

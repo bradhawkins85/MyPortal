@@ -168,6 +168,21 @@ async def delete_membership(membership_id: int) -> None:
     await db.execute("DELETE FROM company_memberships WHERE id = %s", (membership_id,))
 
 
+async def get_first_membership_with_permission(user_id: int, permission: str) -> Optional[dict[str, Any]]:
+    """Return the first active membership whose role grants ``permission``.
+
+    Role permissions may be stored as legacy string lists or as the newer
+    tri-state menu permission map, so this uses the same permission matching
+    logic as :func:`user_has_permission`.
+    """
+
+    memberships = await list_memberships_for_user(user_id, status="active")
+    for membership in memberships:
+        if _permission_matches(membership.get("permissions") or [], permission):
+            return membership
+    return None
+
+
 async def user_has_permission(user_id: int, permission: str) -> bool:
     # Check if user is super admin first
     user_record = await user_repo.get_user_by_id(user_id)
