@@ -47,7 +47,7 @@ def _main():
 
 @router.get("/tickets/new", response_class=HTMLResponse)
 async def portal_tickets_new_redirect(request: Request):
-    user, redirect = await _main()._require_authenticated_user(request)
+    user, redirect = await _main()._require_menu_page_access(request, "menu.tickets")
     if redirect:
         return redirect
     return RedirectResponse(url="/tickets", status_code=status.HTTP_303_SEE_OTHER)
@@ -55,7 +55,7 @@ async def portal_tickets_new_redirect(request: Request):
 
 @router.get("/tickets", response_class=HTMLResponse)
 async def portal_tickets_page(request: Request):
-    user, redirect = await _main()._require_authenticated_user(request)
+    user, redirect = await _main()._require_menu_page_access(request, "menu.tickets")
     if redirect:
         return redirect
 
@@ -97,7 +97,7 @@ async def portal_tickets_page(request: Request):
 @router.post("/tickets", response_class=HTMLResponse)
 async def portal_create_ticket(request: Request):
     main_module = _main()
-    user, redirect = await main_module._require_authenticated_user(request)
+    user, redirect = await main_module._require_menu_page_access(request, "menu.tickets")
     if redirect:
         return redirect
 
@@ -204,7 +204,7 @@ async def portal_create_ticket(request: Request):
 @router.get("/tickets/{ticket_id}", response_class=HTMLResponse)
 async def portal_ticket_detail(request: Request, ticket_id: int):
     main_module = _main()
-    user, redirect = await main_module._require_authenticated_user(request)
+    user, redirect = await main_module._require_menu_page_access(request, "menu.tickets")
     if redirect:
         return redirect
 
@@ -224,7 +224,7 @@ async def portal_ticket_detail(request: Request, ticket_id: int):
 @router.post("/tickets/{ticket_id}/replies", response_class=HTMLResponse)
 async def portal_ticket_reply(request: Request, ticket_id: int):
     main_module = _main()
-    user, redirect = await main_module._require_authenticated_user(request)
+    user, redirect = await main_module._require_menu_page_access(request, "menu.tickets")
     if redirect:
         return redirect
 

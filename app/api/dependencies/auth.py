@@ -55,7 +55,7 @@ async def require_helpdesk_technician(current_user: dict = Depends(get_current_u
     if not has_permission:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Helpdesk technician privileges required",
+            detail="All tickets permission required",
         )
     return current_user
 
