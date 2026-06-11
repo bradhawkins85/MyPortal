@@ -141,6 +141,7 @@ from app.repositories import automations as automation_repo
 from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_menu_permissions
 from app.repositories import issues as issues_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
@@ -1730,6 +1731,88 @@ async def _resolve_initial_company_id(user: dict[str, Any]) -> int | None:
     return await company_access.first_accessible_company_id(user)
 
 
+
+
+def _build_menu_access_map(
+    *,
+    is_super_admin: bool,
+    membership_data: dict[str, Any],
+    is_helpdesk_technician: bool = False,
+    has_issue_tracker_access: bool = False,
+    has_marketing_access: bool = False,
+) -> dict[str, str]:
+    if is_super_admin:
+        return {item.key: "write" for item in MENU_PERMISSIONS}
+
+    role_menu_permissions = normalize_menu_permissions(membership_data.get("menu_permissions"))
+    menu_access = {item.key: role_menu_permissions.get(item.key, "none") for item in MENU_PERMISSIONS}
+
+    def promote(key: str, level: str = "write") -> None:
+        rank = {"none": 0, "read": 1, "write": 2}
+        if rank[level] > rank[menu_access.get(key, "none")]:
+            menu_access[key] = level
+
+    # Baseline authenticated pages remain readable unless explicitly controlled by a role.
+    for key in ("menu.dashboard", "menu.service_status", "menu.knowledge_base", "menu.help", "menu.reports", "menu.admin.profile"):
+        promote(key, "read")
+
+    legacy_boolean_to_menu = {
+        "can_access_shop": "menu.shop",
+        "can_access_cart": "menu.shop",
+        "can_access_orders": "menu.orders",
+        "can_access_quotes": "menu.quotes",
+        "can_access_forms": "menu.forms",
+        "can_manage_assets": "menu.assets",
+        "can_manage_licenses": "menu.m365.licenses",
+        "can_manage_invoices": "menu.invoices",
+        "can_manage_staff": "menu.staff",
+        "can_view_compliance": "menu.compliance",
+        "can_view_bcp": "menu.continuity",
+        "can_view_m365_best_practices": "menu.m365.best_practices",
+        "can_view_compliance_checks": "menu.compliance_checks",
+        "can_manage_compliance_checks": "menu.compliance_checks.library",
+        "can_view_m365_user_mailboxes": "menu.m365.user_mailboxes",
+        "can_view_m365_shared_mailboxes": "menu.m365.shared_mailboxes",
+        "can_access_chat": "menu.chat",
+        "is_admin": "menu.admin.company",
+    }
+    for boolean_key, menu_key in legacy_boolean_to_menu.items():
+        if membership_data.get(boolean_key):
+            promote(menu_key, "write" if boolean_key.startswith("can_manage") or boolean_key == "is_admin" else "read")
+
+    if membership_data.get("can_manage_licenses"):
+        promote("menu.m365.configuration", "write")
+    if membership_data.get("can_manage_licenses") and membership_data.get("can_access_cart"):
+        promote("menu.subscriptions", "write")
+    if is_helpdesk_technician:
+        promote("menu.tickets", "write")
+        promote("menu.reporting", "write")
+    else:
+        promote("menu.tickets", "read")
+    if has_issue_tracker_access:
+        promote("menu.issues", "write")
+    if has_marketing_access:
+        promote("menu.marketing", "write")
+    if int(membership_data.get("staff_permission") or 0) > 0:
+        promote("menu.staff", "write")
+
+    return menu_access
+
+
+def _menu_can(menu_access: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
+    return menu_has_access(menu_access, key, write=write)
+
+
+def _membership_menu_can(user: dict[str, Any], membership: dict[str, Any] | None, key: str, *, write: bool = False) -> bool:
+    if user.get("is_super_admin"):
+        return True
+    menu_access = _build_menu_access_map(
+        is_super_admin=False,
+        membership_data=membership or {},
+    )
+    return _menu_can(menu_access, key, write=write)
+
+
 async def _build_base_context(
     request: Request,
     user: dict[str, Any],
@@ -1778,6 +1861,13 @@ async def _build_base_context(
     is_helpdesk_technician = await _is_helpdesk_technician(user, request)
     has_issue_tracker_access = await _has_issue_tracker_access(user, request)
     has_marketing_access = await _has_marketing_access(user, request)
+    menu_access = _build_menu_access_map(
+        is_super_admin=is_super_admin,
+        membership_data=membership_data,
+        is_helpdesk_technician=is_helpdesk_technician,
+        has_issue_tracker_access=has_issue_tracker_access,
+        has_marketing_access=has_marketing_access,
+    )
 
     def _has_permission(flag: str) -> bool:
         return bool(membership_data.get(flag))
@@ -1796,30 +1886,35 @@ async def _build_base_context(
                 can_edit_bcp = False
 
     permission_flags = {
-        "can_access_shop": is_super_admin or _has_permission("can_access_shop"),
+        "can_access_shop": _menu_can(menu_access, "menu.shop") or is_super_admin or _has_permission("can_access_shop"),
         "can_access_cart": is_super_admin or _has_permission("can_access_cart"),
-        "can_access_orders": is_super_admin or _has_permission("can_access_orders"),
-        "can_access_quotes": is_super_admin or _has_permission("can_access_quotes"),
-        "can_access_forms": is_super_admin or _has_permission("can_access_forms"),
-        "can_manage_assets": is_super_admin or _has_permission("can_manage_assets"),
-        "can_manage_licenses": is_super_admin or _has_permission("can_manage_licenses"),
-        "can_manage_invoices": is_super_admin or _has_permission("can_manage_invoices"),
+        "can_access_orders": _menu_can(menu_access, "menu.orders") or is_super_admin or _has_permission("can_access_orders"),
+        "can_access_quotes": _menu_can(menu_access, "menu.quotes") or is_super_admin or _has_permission("can_access_quotes"),
+        "can_access_forms": _menu_can(menu_access, "menu.forms") or is_super_admin or _has_permission("can_access_forms"),
+        "can_manage_assets": _menu_can(menu_access, "menu.assets", write=True) or is_super_admin or _has_permission("can_manage_assets"),
+        "can_manage_licenses": _menu_can(menu_access, "menu.m365.licenses", write=True) or is_super_admin or _has_permission("can_manage_licenses"),
+        "can_manage_invoices": _menu_can(menu_access, "menu.invoices", write=True) or is_super_admin or _has_permission("can_manage_invoices"),
         "can_manage_staff": (
             is_super_admin
             or _has_permission("can_manage_staff")
             or staff_permission_level > 0
         ),
-        "can_manage_issues": has_issue_tracker_access,
-        "can_view_compliance": is_super_admin or _has_permission("can_view_compliance"),
-        "can_view_bcp": can_view_bcp,
+        "can_manage_issues": _menu_can(menu_access, "menu.issues", write=True) or has_issue_tracker_access,
+        "can_view_compliance": _menu_can(menu_access, "menu.compliance") or is_super_admin or _has_permission("can_view_compliance"),
+        "can_view_bcp": _menu_can(menu_access, "menu.continuity") or can_view_bcp,
         "can_edit_bcp": can_edit_bcp,
-        "can_view_m365_best_practices": is_super_admin or _has_permission("can_view_m365_best_practices"),
-        "can_view_compliance_checks": is_super_admin or _has_permission("can_view_compliance_checks"),
-        "can_manage_compliance_checks": is_super_admin or _has_permission("can_manage_compliance_checks"),
-        "can_view_m365_user_mailboxes": is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
-        "can_view_m365_shared_mailboxes": is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
-        "can_access_chat": is_super_admin or _has_permission("can_access_chat"),
-        "can_access_marketing": has_marketing_access,
+        "can_view_m365_best_practices": _menu_can(menu_access, "menu.m365.best_practices") or is_super_admin or _has_permission("can_view_m365_best_practices"),
+        "can_view_compliance_checks": _menu_can(menu_access, "menu.compliance_checks") or is_super_admin or _has_permission("can_view_compliance_checks"),
+        "can_manage_compliance_checks": _menu_can(menu_access, "menu.compliance_checks.library", write=True) or is_super_admin or _has_permission("can_manage_compliance_checks"),
+        "can_view_m365_user_mailboxes": _menu_can(menu_access, "menu.m365.user_mailboxes") or is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
+        "can_view_m365_shared_mailboxes": _menu_can(menu_access, "menu.m365.shared_mailboxes") or is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
+        "can_access_chat": _menu_can(menu_access, "menu.chat") or is_super_admin or _has_permission("can_access_chat"),
+        "can_access_marketing": _menu_can(menu_access, "menu.marketing") or has_marketing_access,
+        "can_manage_subscriptions": _menu_can(menu_access, "menu.subscriptions", write=True),
+        "can_access_reports": _menu_can(menu_access, "menu.reports"),
+        "can_access_reporting": _menu_can(menu_access, "menu.reporting"),
+        "menu_access": menu_access,
+        "menu_permission_catalogue": catalogue_for_api(),
     }
 
     module_lookup = getattr(request.state, "module_lookup", None)
@@ -1913,7 +2008,7 @@ async def _build_base_context(
         "impersonator_user": impersonator_user,
         "impersonation_started_at": impersonation_started_at,
         "has_issue_tracker_access": has_issue_tracker_access,
-        "can_access_tickets": True,
+        "can_access_tickets": _menu_can(menu_access, "menu.tickets"),
         "plausible_config": plausible_config,
     }
     context.update(permission_flags)
@@ -2106,7 +2201,9 @@ async def _load_license_context(
     membership = await user_company_repo.get_user_company(user["id"], company_id)
     can_manage = bool(membership and membership.get("can_manage_licenses"))
     can_order = bool(membership and membership.get("can_order_licenses"))
-    if require_manage and not (is_super_admin or can_manage):
+    can_view_licenses = _membership_menu_can(user, membership, "menu.m365.licenses")
+    can_write_licenses = _membership_menu_can(user, membership, "menu.m365.licenses", write=True)
+    if require_manage and not (is_super_admin or can_manage or can_view_licenses):
         return (
             user,
             membership,
@@ -2114,7 +2211,7 @@ async def _load_license_context(
             company_id,
             RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER),
         )
-    if require_order and not (is_super_admin or can_order):
+    if require_order and not (is_super_admin or can_order or can_write_licenses):
         return (
             user,
             membership,
@@ -2936,6 +3033,8 @@ async def m365_page(request: Request):
     user, membership, company, company_id, redirect = await _load_license_context(request)
     if redirect:
         return redirect
+    if not _membership_menu_can(user, membership, "menu.m365.configuration"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Office 365 configuration access required")
     credentials = await m365_service.get_credentials(company_id)
     credential_view = None
     if credentials:
@@ -3271,10 +3370,12 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
     membership = await user_company_repo.get_user_company(user["id"], company_id)
+    mailbox_menu_key = "menu.m365.user_mailboxes" if mailbox_permission == "can_view_m365_user_mailboxes" else "menu.m365.shared_mailboxes"
     can_access = bool(
         is_super_admin
         or (membership and membership.get("can_manage_licenses"))
         or (membership and membership.get(mailbox_permission))
+        or _membership_menu_can(user, membership, mailbox_menu_key)
     )
     if not can_access:
         return (
@@ -3362,8 +3463,12 @@ async def enable_m365_user_archive(request: Request):
     user, membership, company, company_id, redirect = await _load_license_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    if not (
+        user.get("is_super_admin")
+        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True)
+        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mailbox read/write permission required")
 
     try:
         body = await request.json()
@@ -5137,6 +5242,7 @@ async def admin_roles(request: Request):
     extra = {
         "title": "Role management",
         "roles": roles_list,
+        "menu_permission_catalogue": catalogue_for_api(),
     }
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
 
