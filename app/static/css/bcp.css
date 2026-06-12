@@ -900,13 +900,28 @@
 .bcp-theme .modal-close,
 .bcp-theme .modal-header button,
 .bcp-theme .close {
+  position: static;
+  inset: auto;
+  width: auto;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: none;
+  box-shadow: none;
   color: var(--bcp-text-soft);
   font-size: 1.4rem;
+  line-height: 1;
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 0.5rem;
+}
+
+.bcp-theme .modal-close::before,
+.bcp-theme .modal-header button::before,
+.bcp-theme .close::before {
+  content: none;
 }
 
 .bcp-theme .modal-close:hover,
