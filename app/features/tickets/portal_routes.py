@@ -241,10 +241,37 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
 
-    has_helpdesk_access = await main_module._is_helpdesk_technician(user, request)
+    has_helpdesk_access = await main_module._has_admin_technician_access(user, request)
     is_super_admin = bool(user.get("is_super_admin"))
     is_requester = ticket.get("requester_id") == user_id
+
+    has_company_ticket_access = False
     if not (has_helpdesk_access or is_super_admin or is_requester):
+        has_all_ticket_access = await main_module._has_menu_page_access(
+            request, user, "menu.tickets", write=True
+        )
+        if has_all_ticket_access:
+            available_companies = await main_module.company_access.list_accessible_companies(user)
+            active_company_id = getattr(request.state, "active_company_id", None)
+            allowed_company_ids: set[int] = set()
+            if active_company_id is not None:
+                try:
+                    allowed_company_ids.add(int(active_company_id))
+                except (TypeError, ValueError):
+                    pass
+            if not allowed_company_ids:
+                for entry in available_companies:
+                    try:
+                        allowed_company_ids.add(int(entry.get("company_id")))
+                    except (AttributeError, TypeError, ValueError):
+                        continue
+            try:
+                ticket_company_id = int(ticket.get("company_id"))
+            except (TypeError, ValueError):
+                ticket_company_id = 0
+            has_company_ticket_access = ticket_company_id in allowed_company_ids
+
+    if not (has_helpdesk_access or is_super_admin or is_requester or has_company_ticket_access):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
