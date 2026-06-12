@@ -40,6 +40,7 @@ email_service = main_module.email_service
 log_error = main_module.log_error
 log_info = main_module.log_info
 m365_service = main_module.m365_service
+message_templates_service = main_module.message_templates_service
 modules_service = main_module.modules_service
 settings = main_module.settings
 staff_access_service = main_module.staff_access_service
@@ -52,6 +53,27 @@ staff_workflow_repo = main_module.staff_workflow_repo
 tickets_service = main_module.tickets_service
 user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
+
+
+def _html_to_text(html: str) -> str:
+    import re
+
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.replace("&nbsp;", " ").strip()
+
+
+async def _render_message_email(slug: str, context: dict[str, Any], default_html: str) -> tuple[str, str]:
+    rendered, content_type = await message_templates_service.render_template_content(
+        slug,
+        context,
+        default_content=default_html,
+        default_content_type="text/html",
+    )
+    if content_type == "text/html":
+        return rendered, _html_to_text(rendered)
+    return "<p>" + escape(rendered).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>", rendered
 
 
 _STAFF_EDIT_REQUEST_FIELDS: tuple[tuple[str, str, str, str], ...] = (
@@ -2886,17 +2908,29 @@ async def invite_staff_member(staff_id: int, request: Request):
 
     existing_user = await user_repo.get_user_by_email(staff["email"])
     if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists")
-
-    temp_password = secrets.token_urlsafe(12)
-    created_user = await user_repo.create_user(
-        email=staff["email"],
-        password=temp_password,
-        first_name=staff.get("first_name"),
-        last_name=staff.get("last_name"),
-        mobile_phone=staff.get("mobile_phone"),
-        company_id=staff.get("company_id"),
-    )
+        created_user = existing_user
+        updates: dict[str, Any] = {}
+        if not created_user.get("first_name") and staff.get("first_name"):
+            updates["first_name"] = staff.get("first_name")
+        if not created_user.get("last_name") and staff.get("last_name"):
+            updates["last_name"] = staff.get("last_name")
+        if not created_user.get("mobile_phone") and staff.get("mobile_phone"):
+            updates["mobile_phone"] = staff.get("mobile_phone")
+        if int(created_user.get("is_active", 1)) != 1:
+            updates["is_active"] = 1
+            updates["email_verified_at"] = datetime.utcnow()
+        if updates:
+            created_user = await user_repo.update_user(created_user["id"], **updates)
+    else:
+        temp_password = secrets.token_urlsafe(12)
+        created_user = await user_repo.create_user(
+            email=staff["email"],
+            password=temp_password,
+            first_name=staff.get("first_name"),
+            last_name=staff.get("last_name"),
+            mobile_phone=staff.get("mobile_phone"),
+            company_id=staff.get("company_id"),
+        )
     await staff_access_service.apply_pending_access_for_user(created_user)
     await user_repo.update_user(created_user["id"], force_password_change=1)
     await user_company_repo.upsert_user_company(
@@ -2919,21 +2953,30 @@ async def invite_staff_member(staff_id: int, request: Request):
     inviter_email = user.get("email") or settings.smtp_user or None
     staff_name = staff.get("first_name") or staff.get("last_name") or "there"
     company_name = (company or {}).get("name") if company else None
-    company_phrase = f" for {company_name}" if company_name else ""
-    company_phrase_html = f" for {escape(company_name)}" if company_name else ""
-    text_body = (
-        f"Hello {staff_name},\n\n"
-        f"You've been invited to access {settings.app_name}{company_phrase}. "
-        f"Use the link below to set your password and activate your account:\n\n"
-        f"{reset_link}\n\n"
-        "The link expires in one hour. If you were not expecting this invitation you can ignore this email."
-    )
-    html_body = (
-        f"<p>Hello {escape(staff_name)},</p>"
-        f"<p>You've been invited to access {escape(settings.app_name)}{company_phrase_html}.</p>"
-        f"<p><a href=\"{escape(reset_link)}\">Set your password and activate your account</a></p>"
+    portal_url = str(settings.portal_url).rstrip("/") if settings.portal_url else ""
+    template_context = {
+        "app": {"name": settings.app_name},
+        "portal": {"url": portal_url, "login_url": f"{portal_url}/login" if portal_url else "/login"},
+        "user": {
+            "email": staff.get("email") or "",
+            "first_name": staff.get("first_name") or "",
+            "last_name": staff.get("last_name") or "",
+            "name": staff_name,
+        },
+        "staff": staff,
+        "company": {"name": company_name or ""},
+        "invitation": {"link": reset_link, "token": token},
+        "link": reset_link,
+        "token": token,
+    }
+    company_sentence = " for {{ company.name }}" if company_name else ""
+    default_html = (
+        "<p>Hello {{ user.name }},</p>"
+        f"<p>You've been invited to access {{{{ app.name }}}}{company_sentence}.</p>"
+        "<p><a href=\"{{ invitation.link }}\">Set your password and activate your account</a></p>"
         "<p>The link expires in one hour. If you were not expecting this invitation you can ignore this email.</p>"
     )
+    html_body, text_body = await _render_message_email("staff_invitation", template_context, default_html)
     try:
         sent, event_metadata = await email_service.send_email(
             subject=f"You're invited to {settings.app_name}",
