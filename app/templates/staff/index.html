@@ -748,8 +748,8 @@
         <div class="form-actions form-actions--inline staff-actions">
           <button type="button" class="button button--ghost" id="edit-action-invite" data-edit-action="invite">Invite</button>
           <button type="button" class="button button--ghost" id="edit-action-offboarding-request" data-edit-action="offboarding-request">Request Offboarding</button>
-          <button type="button" class="button button--ghost" id="edit-action-approve" data-edit-action="approve">Approve</button>
-          <button type="button" class="button button--ghost" id="edit-action-deny" data-edit-action="deny">Deny</button>
+          <button type="button" class="button button--ghost" id="edit-action-approve" data-edit-action="approve" hidden>Approve</button>
+          <button type="button" class="button button--ghost" id="edit-action-deny" data-edit-action="deny" hidden>Deny</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-rerun" data-edit-action="workflow-rerun">Workflow rerun</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-retry" data-edit-action="workflow-retry">Workflow retry</button>
           <button type="button" class="button button--ghost" id="edit-action-workflow-resume" data-edit-action="workflow-resume">Workflow resume</button>
@@ -758,7 +758,7 @@
           <button type="button" class="button button--ghost" id="edit-action-m365-enable-sign-in" data-edit-action="m365-enable-sign-in" hidden>Enable O365 Sign-in</button>
           <button type="button" class="button button--ghost" id="edit-action-m365-disable-sign-in" data-edit-action="m365-disable-sign-in" hidden>Disable O365 Sign-in</button>
         </div>
-        {% if is_super_admin or is_helpdesk_technician %}
+        {% if is_super_admin %}
         <div class="staff-danger-panel" id="edit-danger-zone">
           <h3 class="staff-danger-panel__title">Danger zone</h3>
           <p class="form-help">Delete permanently removes the staff record and cannot be undone.</p>

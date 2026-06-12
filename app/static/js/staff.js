@@ -816,7 +816,7 @@
       setActionVisibility(editActionButtons.m365ResetPassword, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365EnableSignIn, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365DisableSignIn, { visible: canM365Actions, disabled: false });
-      const canSeeDangerZone = Boolean(flags && (flags.isSuperAdmin || flags.isHelpdeskTechnician));
+      const canSeeDangerZone = Boolean(flags && flags.isSuperAdmin);
       if (editDangerZone) {
         editDangerZone.hidden = !canSeeDangerZone;
       }
