@@ -230,20 +230,65 @@ async def list_staff(
 
 
 async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
+    """Return enabled staff requester options for a company.
+
+    The ticket requester selector is staff-driven, not portal-user-driven.
+    Registered MyPortal users are still linked when their email matches the
+    staff record so existing requester permissions and notifications continue
+    to work, while unregistered staff can be selected by their staff ID.
+    """
     rows = await db.fetch_all(
         """
-        SELECT DISTINCT u.*
+        SELECT
+            s.id AS staff_id,
+            u.id AS user_id,
+            COALESCE(NULLIF(u.email, ''), s.email) AS email,
+            COALESCE(NULLIF(u.first_name, ''), s.first_name) AS first_name,
+            COALESCE(NULLIF(u.last_name, ''), s.last_name) AS last_name,
+            s.company_id AS company_id,
+            u.created_at AS created_at,
+            u.updated_at AS updated_at,
+            COALESCE(u.is_super_admin, 0) AS is_super_admin
         FROM staff AS s
-        INNER JOIN users AS u
+        LEFT JOIN users AS u
             ON LOWER(u.email) = LOWER(s.email)
+           AND u.company_id = s.company_id
         WHERE s.company_id = %s
           AND s.enabled = 1
-          AND u.company_id = s.company_id
-        ORDER BY LOWER(u.email), u.id
+        ORDER BY LOWER(COALESCE(NULLIF(u.email, ''), s.email)), s.id
         """,
         (company_id,),
     )
-    return [dict(row) for row in rows]
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        staff_id = record.get("staff_id")
+        user_id = record.get("user_id")
+        try:
+            staff_id_int = int(staff_id) if staff_id is not None else None
+        except (TypeError, ValueError):
+            staff_id_int = None
+        try:
+            user_id_int = int(user_id) if user_id is not None else None
+        except (TypeError, ValueError):
+            user_id_int = None
+        record["staff_id"] = staff_id_int
+        record["user_id"] = user_id_int
+        record["id"] = user_id_int if user_id_int is not None else staff_id_int
+        record["requester_value"] = (
+            f"user:{user_id_int}" if user_id_int is not None else f"staff:{staff_id_int}"
+        )
+        record["is_registered_user"] = user_id_int is not None
+        results.append(record)
+    return results
+
+
+async def get_enabled_staff_requester(company_id: int, staff_id: int) -> dict[str, Any] | None:
+    options = await list_enabled_staff_users(company_id)
+    for option in options:
+        if option.get("staff_id") == staff_id:
+            return option
+    return None
 
 
 async def list_staff_with_users(company_id: int) -> list[dict[str, Any]]:

@@ -18,7 +18,7 @@ from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemResponse,
     RecurringInvoiceItemUpdate,
 )
-from app.schemas.users import UserResponse
+from app.schemas.users import StaffRequesterOption, UserResponse
 from app.services import audit as audit_service
 from app.services import company_id_lookup
 
@@ -198,7 +198,7 @@ async def unarchive_company(
     return updated
 
 
-@router.get("/{company_id}/staff-users", response_model=list[UserResponse])
+@router.get("/{company_id}/staff-users", response_model=list[StaffRequesterOption])
 async def list_company_staff_users(
     company_id: int,
     _: None = Depends(require_database),
@@ -213,7 +213,7 @@ async def list_company_staff_users(
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     users = await staff_repo.list_enabled_staff_users(company_id)
-    return [UserResponse.model_validate(user) for user in users]
+    return [StaffRequesterOption.model_validate(user) for user in users]
 
 
 
