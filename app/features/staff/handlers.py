@@ -55,6 +55,9 @@ user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
 
 
+STAFF_INVITATION_LINK_TTL = timedelta(days=7)
+
+
 def _html_to_text(html: str) -> str:
     import re
 
@@ -2941,7 +2944,7 @@ async def invite_staff_member(staff_id: int, request: Request):
         is_admin=False,
     )
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=1)
+    expires_at = datetime.utcnow() + STAFF_INVITATION_LINK_TTL
     await auth_repo.create_password_reset_token(
         user_id=created_user["id"],
         token=token,
@@ -2974,7 +2977,7 @@ async def invite_staff_member(staff_id: int, request: Request):
         "<p>Hello {{ user.name }},</p>"
         f"<p>You've been invited to access {{{{ app.name }}}}{company_sentence}.</p>"
         "<p><a href=\"{{ invitation.link }}\">Set your password and activate your account</a></p>"
-        "<p>The link expires in one hour. If you were not expecting this invitation you can ignore this email.</p>"
+        "<p>The link expires in 7 days. If you were not expecting this invitation you can ignore this email.</p>"
     )
     html_body, text_body = await _render_message_email("staff_invitation", template_context, default_html)
     try:

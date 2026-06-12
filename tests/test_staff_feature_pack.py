@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
 from fastapi import FastAPI
 
 import app.main as main_module
@@ -163,3 +167,103 @@ def test_staff_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+@pytest.mark.anyio("asyncio")
+async def test_staff_invitation_link_expires_after_seven_days(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_load_staff_context(request, require_admin=False):
+        return (
+            {"id": 10, "email": "admin@example.com", "is_super_admin": True},
+            None,
+            {"id": 20, "name": "Example Co"},
+            None,
+            20,
+            None,
+        )
+
+    async def fake_get_staff_by_id(staff_id: int):
+        return {
+            "id": staff_id,
+            "email": "invitee@example.com",
+            "first_name": "Invitee",
+            "last_name": "User",
+            "mobile_phone": None,
+            "company_id": 20,
+        }
+
+    async def fake_get_user_by_email(email: str):
+        return None
+
+    async def fake_create_user(**kwargs):
+        return {"id": 30, **kwargs}
+
+    async def fake_update_user(user_id: int, **kwargs):
+        captured["force_password_change"] = kwargs
+        return {"id": user_id, **kwargs}
+
+    async def fake_apply_pending_access_for_user(user):
+        captured["pending_access_user"] = user
+
+    async def fake_upsert_user_company(**kwargs):
+        captured["company_assignment"] = kwargs
+
+    async def fake_create_password_reset_token(
+        *, user_id: int, token: str, expires_at: datetime
+    ):
+        captured["token_user_id"] = user_id
+        captured["token"] = token
+        captured["expires_at"] = expires_at
+
+    async def fake_render_message_email(slug, context, default_html):
+        captured["template_slug"] = slug
+        captured["default_html"] = default_html
+        return default_html, default_html
+
+    async def fake_send_email(**kwargs):
+        captured["email"] = kwargs
+        return True, {"id": "event-1"}
+
+    monkeypatch.setattr(staff_handlers, "_load_staff_context", fake_load_staff_context)
+    monkeypatch.setattr(
+        staff_handlers.staff_repo, "get_staff_by_id", fake_get_staff_by_id
+    )
+    monkeypatch.setattr(
+        staff_handlers.user_repo, "get_user_by_email", fake_get_user_by_email
+    )
+    monkeypatch.setattr(staff_handlers.user_repo, "create_user", fake_create_user)
+    monkeypatch.setattr(staff_handlers.user_repo, "update_user", fake_update_user)
+    monkeypatch.setattr(
+        staff_handlers.staff_access_service,
+        "apply_pending_access_for_user",
+        fake_apply_pending_access_for_user,
+    )
+    monkeypatch.setattr(
+        staff_handlers.user_company_repo, "upsert_user_company", fake_upsert_user_company
+    )
+    monkeypatch.setattr(
+        staff_handlers.auth_repo,
+        "create_password_reset_token",
+        fake_create_password_reset_token,
+    )
+    monkeypatch.setattr(staff_handlers, "_render_message_email", fake_render_message_email)
+    monkeypatch.setattr(
+        staff_handlers,
+        "email_service",
+        SimpleNamespace(send_email=fake_send_email, EmailDispatchError=Exception),
+    )
+    monkeypatch.setattr(
+        staff_handlers.secrets, "token_urlsafe", lambda length: "fixedtoken"
+    )
+
+    before = datetime.utcnow()
+    response = await staff_handlers.invite_staff_member(123, request=None)
+    after = datetime.utcnow()
+
+    assert response.status_code == 200
+    expires_at = captured["expires_at"]
+    assert isinstance(expires_at, datetime)
+    assert before + timedelta(days=7) <= expires_at <= after + timedelta(days=7)
+    assert "The link expires in 7 days." in captured["default_html"]
+    assert captured["token"] == "fixedtoken"
