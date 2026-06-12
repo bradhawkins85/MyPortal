@@ -7080,7 +7080,7 @@ async def _render_portal_tickets_page(
     effective_search = search_value or None
 
     has_all_ticket_access = await _has_menu_page_access(request, user, "menu.tickets", write=True)
-    has_platform_ticket_access = await _is_helpdesk_technician(user, request)
+    has_platform_ticket_access = await _has_admin_technician_access(user, request)
 
     try:
         if has_platform_ticket_access:
@@ -7274,7 +7274,7 @@ async def _render_portal_ticket_detail(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
-    has_helpdesk_access = await _is_helpdesk_technician(user, request)
+    has_helpdesk_access = await _has_admin_technician_access(user, request)
     is_super_admin = bool(user.get("is_super_admin"))
 
     user_id = user.get("id")
