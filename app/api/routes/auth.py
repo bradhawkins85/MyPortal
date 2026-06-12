@@ -304,9 +304,21 @@ async def register(
     summary="Verify a signup email address",
 )
 async def verify_email(token: str, _: None = Depends(require_database)) -> Response:
+    token = token.strip()
     record = await auth_repo.get_account_verification_token(token)
-    if not record or int(record.get("used", 0)) == 1:
+    if not record:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+
+    user = await user_repo.get_user_by_id(record["user_id"])
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+
+    if user.get("email_verified_at"):
+        return RedirectResponse(url="/login?verified=1", status_code=status.HTTP_303_SEE_OTHER)
+
+    if int(record.get("used", 0)) == 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+
     expires_at = record.get("expires_at")
     if expires_at and datetime.utcnow() > ensure_datetime(expires_at):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
