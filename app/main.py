@@ -8484,14 +8484,44 @@ async def login_page(request: Request):
     if user_count == 0:
         return RedirectResponse(url="/register", status_code=status.HTTP_303_SEE_OTHER)
 
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
-        "title": "Sign in",
-        "plausible_config": {"enabled": False},
-    }
+    context = await _build_public_context(
+        request,
+        extra={
+            "title": "Sign in",
+        },
+    )
     return templates.TemplateResponse(context["request"], "auth/login.html", context)
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(request: Request):
+    session = await session_manager.load_session(request)
+    if session:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    context = await _build_public_context(
+        request,
+        extra={
+            "title": "Forgot password",
+        },
+    )
+    return templates.TemplateResponse(context["request"], "auth/forgot_password.html", context)
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page(request: Request, token: str = ""):
+    session = await session_manager.load_session(request)
+    if session:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    context = await _build_public_context(
+        request,
+        extra={
+            "title": "Reset password",
+            "reset_token": token.strip(),
+        },
+    )
+    return templates.TemplateResponse(context["request"], "auth/reset_password.html", context)
 
 
 @app.get("/register", response_class=HTMLResponse)
@@ -8508,14 +8538,13 @@ async def register_page(request: Request):
 
     is_first_user = user_count == 0
 
-    context = {
-        "request": request,
-        "app_name": settings.app_name,
-        "current_year": datetime.utcnow().year,
-        "title": "Create super administrator" if is_first_user else "Create your account",
-        "is_first_user": is_first_user,
-        "plausible_config": {"enabled": False},
-    }
+    context = await _build_public_context(
+        request,
+        extra={
+            "title": "Create super administrator" if is_first_user else "Create your account",
+            "is_first_user": is_first_user,
+        },
+    )
     return templates.TemplateResponse(context["request"], "auth/register.html", context)
 
 
