@@ -150,7 +150,12 @@
     {% else %}
     <p class="form-help">After signing in you'll be able to submit tickets and follow your own conversations with the team.</p>
     {% endif %}
+    <div class="form-success" role="status" data-auth-success hidden></div>
     <div class="form-error" role="alert" data-auth-error hidden></div>
+    <div class="form-reset-prompt" role="status" data-account-setup-reset hidden>
+      <p data-account-setup-reset-message></p>
+      <button type="button" class="button button--secondary" data-account-setup-reset-submit>Send password reset</button>
+    </div>
     <div class="form-actions">
       <button type="submit" class="button" data-auth-submit>Create account</button>
     </div>
