@@ -79,3 +79,40 @@ def test_password_forgot_sends_email(monkeypatch):
     assert email_payload["recipients"] == ["user@example.com"]
     assert "fixedtoken" in email_payload["text_body"]
     assert "https://portal.example.com/reset-password?token=fixedtoken" in email_payload["text_body"]
+
+
+def test_reset_password_page_accepts_email_token_link(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "enable_csrf", False)
+
+    async def fake_load_session(request):
+        return None
+
+    monkeypatch.setattr("app.main.session_manager.load_session", fake_load_session)
+
+    with TestClient(app) as client:
+        response = client.get("/reset-password?token=fixedtoken")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert "Choose a new password" in response.text
+    assert 'value="fixedtoken"' in response.text
+    assert 'data-endpoint="/auth/password/reset"' in response.text
+
+
+def test_forgot_password_page_loads_form(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "enable_csrf", False)
+
+    async def fake_load_session(request):
+        return None
+
+    monkeypatch.setattr("app.main.session_manager.load_session", fake_load_session)
+
+    with TestClient(app) as client:
+        response = client.get("/forgot-password")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert "Reset your password" in response.text
+    assert 'data-endpoint="/auth/password/forgot"' in response.text
