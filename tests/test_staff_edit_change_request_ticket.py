@@ -79,6 +79,7 @@ async def test_staff_rw_edit_creates_ticket_instead_of_updating_staff(monkeypatc
     create_kwargs = create_ticket_mock.await_args.kwargs
     assert create_kwargs["requester_id"] == 7
     assert create_kwargs["company_id"] == 9
+    assert create_kwargs["status"] == "new"
     assert create_kwargs["module_slug"] == "staff"
     assert "Staff member being edited" in create_kwargs["description"]
     assert "Requested by" in create_kwargs["description"]
