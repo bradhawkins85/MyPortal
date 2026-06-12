@@ -246,7 +246,7 @@ async def _create_staff_edit_request_ticket(
         company_id=int(existing.get("company_id") or user.get("company_id") or 0) or None,
         assigned_user_id=None,
         priority="normal",
-        status="open",
+        status="new",
         category="Staff Change Request",
         module_slug="staff",
         external_reference=f"staff-change-request:{existing.get('id')}",
