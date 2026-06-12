@@ -365,8 +365,11 @@ async def staff_page(
         )
         custom_field_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
         staff_members = await staff_repo.list_staff(
-            company_id, enabled=enabled_filter, exclude_ex_staff=not show_ex_staff_flag,
-            exclude_package_staff=not show_ex_staff_flag
+            company_id,
+            enabled=enabled_filter,
+            exclude_ex_staff=not show_ex_staff_flag,
+            exclude_package_staff=not show_ex_staff_flag,
+            include_portal_last_login=is_super_admin,
         )
         company_record = await company_repo.get_company_by_id(company_id)
         active_staff_for_offboarding = _filter_staff_for_offboarding_choices(

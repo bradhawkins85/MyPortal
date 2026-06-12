@@ -35,6 +35,7 @@ class UserResponse(UserBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    last_login_at: Optional[datetime] = None
     force_password_change: Optional[int] = None
     is_super_admin: bool = False
     matrix_user_id: Optional[str] = None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from app.repositories import staff
@@ -122,6 +124,41 @@ async def test_list_staff_supports_polling_filters_and_cursor(monkeypatch):
     assert "ORDER BY s.updated_at ASC, s.id ASC" in (dummy_db.last_sql or "")
     assert "LIMIT %s" in (dummy_db.last_sql or "")
     assert dummy_db.last_params[-1] == 100
+
+
+@pytest.mark.anyio
+async def test_list_staff_can_include_portal_last_login(monkeypatch):
+    last_login = datetime(2026, 6, 12, 8, 30)
+    dummy_rows = [
+        {
+            "id": 1,
+            "company_id": 3,
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "email": "alice@example.com",
+            "enabled": 1,
+            "is_ex_staff": 0,
+            "date_onboarded": None,
+            "date_offboarded": None,
+            "m365_last_sign_in": None,
+            "portal_last_login_at": last_login,
+            "created_at": None,
+            "updated_at": None,
+            "onboarding_complete": 0,
+            "onboarding_completed_at": None,
+            "onboarding_status": None,
+        },
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+    monkeypatch.setattr(staff, "staff_custom_fields_repo", _DummyCustomFieldsRepo())
+
+    result = await staff.list_staff(3, include_portal_last_login=True)
+
+    assert "u.last_login_at AS portal_last_login_at" in (dummy_db.last_sql or "")
+    assert "LEFT JOIN users AS u" in (dummy_db.last_sql or "")
+    assert "LOWER(u.email) = LOWER(s.email)" in (dummy_db.last_sql or "")
+    assert result[0]["portal_last_login_at"] == "2026-06-12T08:30:00+00:00"
 
 
 @pytest.mark.anyio

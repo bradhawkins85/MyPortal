@@ -17,7 +17,7 @@ JS_PATH = (
     / "app" / "static" / "js" / "staff_columns.js"
 )
 
-EXPECTED_COLUMNS = ["last-name", "email", "mobile", "code", "onboarded", "m365-sign-in", "enabled"]
+EXPECTED_COLUMNS = ["last-name", "email", "mobile", "code", "onboarded", "m365-sign-in", "portal-last-login", "enabled"]
 ALWAYS_VISIBLE_COLUMNS = ["first-name"]
 
 
@@ -112,3 +112,13 @@ def test_custom_field_column_toggle_loop_in_panel():
     assert 'staff_custom_field_definitions' in html
     # The loop generates custom-prefixed column toggles matching the table cells
     assert 'data-column="custom-' in html or 'data-column="custom-{{ field.name }}"' in html
+
+
+def test_portal_last_login_column_restricted_to_super_admins():
+    """The MyPortal login column is available only within super-admin template branches."""
+    html = _template_html()
+    assert 'data-column="portal-last-login"' in html
+    assert 'MyPortal Last Login' in html
+    portal_index = html.index('data-column="portal-last-login"')
+    guard_index = html.rfind('{% if is_super_admin %}', 0, portal_index)
+    assert guard_index != -1
