@@ -674,3 +674,73 @@ def test_tickets_role_ui_labels_are_no_access_own_all():
     assert "{{ 'Own' if is_ticket_permission else 'Read Only' }}" in template
     assert "{{ 'All' if is_ticket_permission else ('Yes' if is_boolean_permission else 'Read/Write') }}" in template
     assert "All opens <code>/tickets</code> for company tickets" in template
+
+
+@pytest.mark.anyio
+async def test_admin_ticket_access_requires_technician_admin_permission(monkeypatch):
+    async def fake_user_has_permission(user_id: int, permission: str) -> bool:
+        return permission == "helpdesk.technician"
+
+    monkeypatch.setattr(
+        main_module.membership_repo,
+        "user_has_permission",
+        fake_user_has_permission,
+    )
+
+    user = {"id": 42, "is_super_admin": False}
+
+    assert await main_module._is_helpdesk_technician(user) is True
+    assert await main_module._has_admin_technician_access(user) is False
+
+
+def test_all_tickets_without_technician_admin_permission_links_to_portal_tickets():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(
+        loader=FileSystemLoader("app/templates"),
+        autoescape=select_autoescape(["html"]),
+    )
+    env.globals["static_url"] = lambda path: path
+    template = env.get_template("base.html")
+    html = template.render(
+        request=type("Request", (), {"url": type("Url", (), {"path": "/tickets"})()})(),
+        current_user={"id": 2, "is_super_admin": False},
+        active_membership={},
+        menu_access={
+            "menu.dashboard": "read",
+            "menu.tickets": "write",
+        },
+        is_helpdesk_technician=True,
+        has_admin_technician_access=False,
+        available_companies=[],
+        cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+        notification_unread_count=0,
+        plausible_config={"enabled": False},
+        csrf_token="csrf-token",
+    )
+
+    assert 'href="/tickets"' in html
+    assert 'href="/admin/tickets"' not in html
+
+
+@pytest.mark.anyio
+async def test_require_helpdesk_page_denies_all_tickets_without_admin_technician(monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    async def fake_require_authenticated_user(request):
+        return {"id": 42, "is_super_admin": False}, None
+
+    async def fake_has_admin_technician_access(user, request=None):
+        return False
+
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
+    monkeypatch.setattr(main_module, "_has_admin_technician_access", fake_has_admin_technician_access)
+
+    request = Request({"type": "http", "method": "GET", "path": "/admin/tickets", "headers": []})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await main_module._require_helpdesk_page(request)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Access denied"
