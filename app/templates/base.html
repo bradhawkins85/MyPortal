@@ -215,7 +215,7 @@
           {% endif %}
           {% endif %}
           {% if can_access_tickets %}
-            {% set show_admin_tickets = (is_super_admin | default(false)) or (is_helpdesk_technician | default(false)) %}
+            {% set show_admin_tickets = (is_super_admin | default(false)) or (has_admin_technician_access | default(false)) %}
             {% if show_admin_tickets %}
               {% set ticket_href = '/admin/tickets' %}
               {% set ticket_active = current_path.startswith('/admin/tickets') and not current_path.startswith('/admin/tickets/syncro-import') %}
