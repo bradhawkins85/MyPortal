@@ -40,6 +40,10 @@ async def test_list_enabled_staff_users_returns_rows(monkeypatch):
 
     assert dummy_db.last_params == (3,)
     assert "FROM staff AS s" in (dummy_db.last_sql or "")
+    assert "s.created_at AS created_at" in (dummy_db.last_sql or "")
+    assert "s.updated_at AS updated_at" in (dummy_db.last_sql or "")
+    assert "u.created_at" not in (dummy_db.last_sql or "")
+    assert "u.updated_at" not in (dummy_db.last_sql or "")
     assert result[0]["id"] == 101
     assert result[0]["requester_value"] == "user:101"
     assert result[0]["is_registered_user"] is True
