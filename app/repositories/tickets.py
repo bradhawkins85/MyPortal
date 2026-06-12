@@ -174,7 +174,7 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
     record = dict(row)
-    for key in ("id", "company_id", "requester_id", "assigned_user_id", "merged_into_ticket_id", "split_from_ticket_id"):
+    for key in ("id", "company_id", "requester_id", "requester_staff_id", "assigned_user_id", "merged_into_ticket_id", "split_from_ticket_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     for key in ("created_at", "updated_at", "closed_at", "ai_summary_updated_at"):
@@ -221,6 +221,7 @@ async def create_ticket(
     description: str | None,
     requester_id: int | None,
     company_id: int | None,
+    requester_staff_id: int | None = None,
     assigned_user_id: int | None,
     priority: str,
     status: str,
@@ -235,6 +236,7 @@ async def create_ticket(
         subject=subject,
         company_id=company_id,
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
         assigned_user_id=assigned_user_id,
         status=status,
         priority=priority,
@@ -246,13 +248,14 @@ async def create_ticket(
         ticket_id = await db.execute_returning_lastrowid(
             """
             INSERT INTO tickets
-                (id, company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (id, company_id, requester_id, requester_staff_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 id,
                 company_id,
                 requester_id,
+                requester_staff_id,
                 assigned_user_id,
                 subject,
                 description,
@@ -282,12 +285,13 @@ async def create_ticket(
         ticket_id = await db.execute_returning_lastrowid(
             """
             INSERT INTO tickets
-                (company_id, requester_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (company_id, requester_id, requester_staff_id, assigned_user_id, subject, description, status, priority, category, module_slug, external_reference, ticket_number)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 company_id,
                 requester_id,
+                requester_staff_id,
                 assigned_user_id,
                 subject,
                 description,
@@ -308,6 +312,7 @@ async def create_ticket(
         "id": ticket_id,
         "company_id": company_id,
         "requester_id": requester_id,
+        "requester_staff_id": requester_staff_id,
         "assigned_user_id": assigned_user_id,
         "subject": subject,
         "description": description,
@@ -591,11 +596,12 @@ async def list_tickets_in_companies(
     query = f"""
         SELECT
             t.*,
-            requester.first_name AS requester_first_name,
-            requester.last_name AS requester_last_name,
-            requester.email AS requester_email
+            COALESCE(requester.first_name, staff_requester.first_name) AS requester_first_name,
+            COALESCE(requester.last_name, staff_requester.last_name) AS requester_last_name,
+            COALESCE(requester.email, staff_requester.email) AS requester_email
         FROM tickets AS t
         LEFT JOIN users AS requester ON requester.id = t.requester_id
+        LEFT JOIN staff AS staff_requester ON staff_requester.id = t.requester_staff_id
         WHERE {' AND '.join(where_clauses)}
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT %s OFFSET %s

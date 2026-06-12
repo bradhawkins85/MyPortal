@@ -3105,8 +3105,9 @@
 
         users.forEach((user) => {
           const option = document.createElement('option');
-          option.value = user.id;
-          option.textContent = `${user.first_name} ${user.last_name} (${user.email})`;
+          option.value = user.requester_value || (user.user_id ? `user:${user.user_id}` : `staff:${user.staff_id || user.id}`);
+          const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+          option.textContent = fullName ? `${fullName} (${user.email})` : user.email;
           requesterSelect.appendChild(option);
         });
       } catch (error) {
