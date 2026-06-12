@@ -41,3 +41,17 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+
+class StaffRequesterOption(UserBase):
+    id: int
+    staff_id: int
+    user_id: Optional[int] = None
+    requester_value: str
+    is_registered_user: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    is_super_admin: bool = False
+
+    class Config:
+        from_attributes = True

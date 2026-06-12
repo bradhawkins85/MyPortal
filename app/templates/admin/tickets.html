@@ -464,7 +464,7 @@
                     <td data-label="Category" data-column="category" class="tickets-table__cell tickets-table__cell--category">{{ ticket.category or '—' }}</td>
                     {% set requester = user_lookup.get(ticket.requester_id) %}
                     {% set requester_name = ([requester.first_name, requester.last_name] | select | join(' ')) | trim if requester else '' %}
-                    {% set requester_label = requester_name or (requester.email if requester else '—') %}
+                    {% set requester_label = ticket.requester_label or requester_name or (requester.email if requester else '—') %}
                     <td data-label="Requester" data-column="requester" class="tickets-table__cell tickets-table__cell--requester">{{ requester_label }}</td>
                     <td data-label="Module" data-column="module" class="tickets-table__cell tickets-table__cell--module">{{ ticket.module_slug or '—' }}</td>
                     <td data-label="External Ref" data-column="external-ref" class="tickets-table__cell tickets-table__cell--external-ref">{{ ticket.external_reference or '—' }}</td>

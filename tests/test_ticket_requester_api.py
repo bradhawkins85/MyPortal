@@ -11,8 +11,8 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_list_company_staff_users_returns_user_ids(monkeypatch):
-    """Verify that the staff-users endpoint returns user records with user IDs."""
+async def test_list_company_staff_users_returns_all_enabled_staff(monkeypatch):
+    """Verify that the staff-users endpoint returns registered and unregistered staff."""
     from app.api.routes import companies
     from app.repositories import companies as company_repo
     from app.repositories import staff as staff_repo
@@ -28,7 +28,11 @@ async def test_list_company_staff_users_returns_user_ids(monkeypatch):
         if company_id == 1:
             return [
                 {
-                    "id": 100,  # This is a USER ID from users table
+                    "id": 100,  # Registered users keep the user ID for compatibility
+                    "staff_id": 10,
+                    "user_id": 100,
+                    "requester_value": "user:100",
+                    "is_registered_user": True,
                     "email": "john@example.com",
                     "first_name": "John",
                     "last_name": "Doe",
@@ -38,7 +42,11 @@ async def test_list_company_staff_users_returns_user_ids(monkeypatch):
                     "is_super_admin": False,
                 },
                 {
-                    "id": 101,  # This is a USER ID from users table
+                    "id": 11,  # Unregistered staff use the staff ID as their option ID
+                    "staff_id": 11,
+                    "user_id": None,
+                    "requester_value": "staff:11",
+                    "is_registered_user": False,
                     "email": "jane@example.com",
                     "first_name": "Jane",
                     "last_name": "Smith",
@@ -60,11 +68,17 @@ async def test_list_company_staff_users_returns_user_ids(monkeypatch):
         __={"id": 1, "is_super_admin": True},  # Mock current user
     )
 
-    # Verify we get UserResponse objects with the correct user IDs
+    # Verify we get requester options for both registered and unregistered staff.
     assert len(result) == 2
     assert result[0].id == 100
+    assert result[0].staff_id == 10
+    assert result[0].user_id == 100
+    assert result[0].requester_value == "user:100"
     assert result[0].email == "john@example.com"
-    assert result[1].id == 101
+    assert result[1].id == 11
+    assert result[1].staff_id == 11
+    assert result[1].user_id is None
+    assert result[1].requester_value == "staff:11"
     assert result[1].email == "jane@example.com"
 
 

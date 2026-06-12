@@ -17,6 +17,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import ticket_statuses as ticket_status_repo
+from app.repositories import staff as staff_repo
 from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
@@ -456,9 +457,26 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         enriched["requester_email"] = requester_snapshot.get("email")
         enriched["requester_display_name"] = requester_snapshot.get("display_name")
     else:
-        enriched.setdefault("requester", None)
-        enriched["requester_email"] = None
-        enriched["requester_display_name"] = None
+        staff_snapshot = None
+        requester_staff_id = enriched.get("requester_staff_id")
+        try:
+            staff_record = (
+                await staff_repo.get_staff_by_id(int(requester_staff_id))
+                if requester_staff_id is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            staff_record = None
+        if isinstance(staff_record, Mapping):
+            staff_snapshot = _build_user_snapshot(staff_record)
+        if staff_snapshot:
+            enriched["requester"] = staff_snapshot
+            enriched["requester_email"] = staff_snapshot.get("email")
+            enriched["requester_display_name"] = staff_snapshot.get("display_name")
+        else:
+            enriched.setdefault("requester", None)
+            enriched["requester_email"] = None
+            enriched["requester_display_name"] = None
 
     ticket_id = enriched.get("id")
     watchers: list[Mapping[str, Any]] = []
@@ -1166,6 +1184,7 @@ async def create_ticket(
     description: str | None,
     requester_id: int | None,
     company_id: int | None,
+    requester_staff_id: int | None = None,
     assigned_user_id: int | None,
     priority: str,
     status: str,
@@ -1193,6 +1212,7 @@ async def create_ticket(
         subject=subject,
         description=truncated_description,
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
         priority=priority,
@@ -1762,6 +1782,45 @@ async def load_dashboard_state(
         status_counts[slug] += 1
 
     available_statuses = sorted({*definition_slugs, *status_counts.keys()})
+
+    requester_staff_ids: set[int] = set()
+    for ticket in tickets:
+        identifier = ticket.get("requester_staff_id")
+        try:
+            if identifier is not None:
+                requester_staff_ids.add(int(identifier))
+        except (TypeError, ValueError):
+            continue
+    staff_lookup: dict[int, dict[str, Any]] = {}
+    if requester_staff_ids:
+        staff_results = await asyncio.gather(
+            *(staff_repo.get_staff_by_id(staff_id) for staff_id in requester_staff_ids),
+            return_exceptions=True,
+        )
+        for record in staff_results:
+            if not isinstance(record, Mapping) or record.get("id") is None:
+                continue
+            try:
+                staff_lookup[int(record["id"])] = dict(record)
+            except (TypeError, ValueError):
+                continue
+    for ticket in tickets:
+        requester_staff_id = ticket.get("requester_staff_id")
+        try:
+            staff_record = staff_lookup.get(int(requester_staff_id)) if requester_staff_id is not None else None
+        except (TypeError, ValueError):
+            staff_record = None
+        if staff_record:
+            name = " ".join(
+                part
+                for part in (
+                    str(staff_record.get("first_name") or "").strip(),
+                    str(staff_record.get("last_name") or "").strip(),
+                )
+                if part
+            )
+            ticket["requester_label"] = name or str(staff_record.get("email") or "").strip() or None
+            ticket["requester_email"] = str(staff_record.get("email") or "").strip() or None
 
     modules: list[Mapping[str, Any]] = []
     companies: list[Mapping[str, Any]] = []

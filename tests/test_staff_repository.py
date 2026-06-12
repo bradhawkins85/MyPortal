@@ -30,8 +30,8 @@ def anyio_backend():
 @pytest.mark.anyio
 async def test_list_enabled_staff_users_returns_rows(monkeypatch):
     dummy_rows = [
-        {"id": 11, "email": "bravo@example.com"},
-        {"id": 5, "email": "alpha@example.com"},
+        {"staff_id": 11, "user_id": 101, "email": "bravo@example.com"},
+        {"staff_id": 5, "user_id": None, "email": "alpha@example.com"},
     ]
     dummy_db = _DummyStaffDB(dummy_rows)
     monkeypatch.setattr(staff, "db", dummy_db)
@@ -40,7 +40,12 @@ async def test_list_enabled_staff_users_returns_rows(monkeypatch):
 
     assert dummy_db.last_params == (3,)
     assert "FROM staff AS s" in (dummy_db.last_sql or "")
-    assert result == dummy_rows
+    assert result[0]["id"] == 101
+    assert result[0]["requester_value"] == "user:101"
+    assert result[0]["is_registered_user"] is True
+    assert result[1]["id"] == 5
+    assert result[1]["requester_value"] == "staff:5"
+    assert result[1]["is_registered_user"] is False
     assert result is not dummy_rows
 
 
