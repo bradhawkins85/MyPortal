@@ -246,8 +246,8 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
             COALESCE(NULLIF(u.first_name, ''), s.first_name) AS first_name,
             COALESCE(NULLIF(u.last_name, ''), s.last_name) AS last_name,
             s.company_id AS company_id,
-            u.created_at AS created_at,
-            u.updated_at AS updated_at,
+            s.created_at AS created_at,
+            s.updated_at AS updated_at,
             COALESCE(u.is_super_admin, 0) AS is_super_admin
         FROM staff AS s
         LEFT JOIN users AS u
