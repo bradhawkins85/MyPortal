@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any
 
@@ -387,6 +387,9 @@ async def login(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
     await auth_repo.clear_login_attempts(identifier)
+
+    login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = await user_repo.record_login(user["id"], login_timestamp)
 
     active_company_id = await _determine_active_company_id(user)
     session = await session_manager.create_session(

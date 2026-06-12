@@ -86,6 +86,8 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
     mapped["requested_at"] = _serialize_datetime(mapped.get("requested_at"))
     mapped["approved_at"] = _serialize_datetime(mapped.get("approved_at"))
     mapped["m365_last_sign_in"] = _serialize_datetime(mapped.get("m365_last_sign_in"))
+    if "portal_last_login_at" in mapped:
+        mapped["portal_last_login_at"] = _serialize_datetime(mapped.get("portal_last_login_at"))
     mapped["created_at"] = _serialize_datetime(mapped.get("created_at"))
     mapped["updated_at"] = _serialize_datetime(mapped.get("updated_at"))
     mapped["onboarding_complete"] = bool(int(mapped.get("onboarding_complete", 0)))
@@ -131,6 +133,7 @@ async def list_staff(
     scheduled_from: datetime | None = None,
     scheduled_to: datetime | None = None,
     due_only: bool = False,
+    include_portal_last_login: bool = False,
     cursor: str | None = None,
     page_size: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -195,14 +198,27 @@ async def list_staff(
         )
         params.extend([cursor_updated_at, cursor_updated_at, cursor_staff_id])
     where_clause = " AND ".join(conditions)
+    portal_last_login_select = (
+        ", u.last_login_at AS portal_last_login_at" if include_portal_last_login else ""
+    )
+    portal_last_login_join = (
+        """
+        LEFT JOIN users AS u
+            ON LOWER(u.email) = LOWER(s.email)
+           AND (u.company_id = s.company_id OR COALESCE(u.is_super_admin, 0) = 1)
+        """
+        if include_portal_last_login
+        else ""
+    )
     if page_size is None:
         page_size = 200
     safe_page_size = max(1, min(int(page_size), 500))
     rows = await db.fetch_all(
         """
-        SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
+        SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name{portal_last_login_select}
         FROM staff AS s
         LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        {portal_last_login_join}
         LEFT JOIN (
             SELECT e1.* FROM staff_onboarding_workflow_executions AS e1
             INNER JOIN (
@@ -214,7 +230,11 @@ async def list_staff(
         WHERE {where}
         ORDER BY s.updated_at ASC, s.id ASC
         LIMIT %s
-        """.format(where=where_clause),
+        """.format(
+            where=where_clause,
+            portal_last_login_select=portal_last_login_select,
+            portal_last_login_join=portal_last_login_join,
+        ),
         tuple([*params, safe_page_size]),
     )
     mapped_rows = [_map_staff_row(row) for row in rows]

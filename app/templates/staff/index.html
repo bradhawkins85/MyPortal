@@ -151,6 +151,12 @@
                 <input type="checkbox" class="staff-column-toggle" data-column="m365-sign-in" checked />
                 O365 Last Sign In
               </label>
+              {% if is_super_admin %}
+                <label class="ticket-columns__option">
+                  <input type="checkbox" class="staff-column-toggle" data-column="portal-last-login" checked />
+                  MyPortal Last Login
+                </label>
+              {% endif %}
               <label class="ticket-columns__option">
                 <input type="checkbox" class="staff-column-toggle" data-column="onboarding-workflow" checked />
                 Onboarding Workflow
@@ -181,6 +187,9 @@
             <th scope="col" data-sort="string" data-column="code">Code</th>
             <th scope="col" data-sort="date" data-column="onboarded" data-mobile-priority="supporting">Onboarded</th>
             <th scope="col" data-sort="date" data-column="m365-sign-in">O365 Last Sign In</th>
+            {% if is_super_admin %}
+              <th scope="col" data-sort="date" data-column="portal-last-login">MyPortal Last Login</th>
+            {% endif %}
             <th scope="col" data-sort="string" data-column="onboarding-workflow">Onboarding Workflow</th>
             {% for field in staff_custom_field_definitions %}
               <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
@@ -213,6 +222,15 @@
                   <span class="text-muted">—</span>
                 {% endif %}
               </td>
+              {% if is_super_admin %}
+                <td data-label="MyPortal Last Login" data-column="portal-last-login" data-value="{{ member.portal_last_login_at or '' }}" data-utc="{{ member.portal_last_login_at or '' }}">
+                  {% if member.portal_last_login_at %}
+                    {{ member.portal_last_login_at }}
+                  {% else %}
+                    <span class="text-muted">Never</span>
+                  {% endif %}
+                </td>
+              {% endif %}
               <td data-label="Onboarding Workflow" data-column="onboarding-workflow">
                 {% set workflow = member.workflow_status or {} %}
                 {% set workflow_state = workflow.get('state') or member.onboarding_status or 'requested' %}

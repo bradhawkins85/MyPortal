@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, List, Optional
 
 from app.core.database import db
@@ -97,6 +98,10 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
         raise ValueError("User not found after update")
     log_info("User updated successfully", user_id=user_id)
     return updated
+
+
+async def record_login(user_id: int, logged_in_at: datetime) -> dict[str, Any]:
+    return await update_user(user_id, last_login_at=logged_in_at)
 
 
 async def delete_user(user_id: int) -> None:
