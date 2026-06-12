@@ -206,6 +206,17 @@ async def register(
 
     existing_user = await user_repo.get_user_by_email(payload.email)
     if existing_user:
+        if int(existing_user.get("force_password_change") or 0) == 1:
+            return JSONResponse(
+                content={
+                    "detail": (
+                        "An account already exists for this email. "
+                        "Send a password reset link to finish setting it up."
+                    ),
+                    "account_setup_reset_available": True,
+                },
+                status_code=status.HTTP_409_CONFLICT,
+            )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     matched_company_id: int | None = None
