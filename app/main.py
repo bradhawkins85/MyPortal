@@ -1084,6 +1084,24 @@ MARKETING_PERMISSION_KEY = "marketing.access"
 _PHONE_SEARCH_LIMIT = 100
 
 
+TOTP_ENROLLMENT_PAGE_PATH = "/security/2fa"
+TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS = frozenset(
+    {
+        TOTP_ENROLLMENT_PAGE_PATH,
+        "/admin/profile",
+    }
+)
+
+
+async def _user_requires_totp_enrollment(user: Mapping[str, Any]) -> bool:
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        return True
+    return not await auth_repo.user_has_totp_authenticator(user_id_int)
+
+
 async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
     session = await session_manager.load_session(request)
     if not session:
@@ -1091,6 +1109,11 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None, RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    if (
+        request.url.path not in TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS
+        and await _user_requires_totp_enrollment(user)
+    ):
+        return None, RedirectResponse(url=TOTP_ENROLLMENT_PAGE_PATH, status_code=status.HTTP_303_SEE_OTHER)
     active_company_id = session.active_company_id
     if active_company_id is None:
         active_company_id = await _resolve_initial_company_id(user)
@@ -8469,10 +8492,32 @@ def _form_bool(form: Mapping[str, Any], key: str) -> bool:
     return bool(value)
 
 
+@app.get(TOTP_ENROLLMENT_PAGE_PATH, response_class=HTMLResponse)
+async def totp_enrollment_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    assert user is not None
+    if not await _user_requires_totp_enrollment(user):
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    context = await _build_base_context(
+        request,
+        user,
+        extra={
+            "title": "Set up two-factor authentication",
+        },
+    )
+    return templates.TemplateResponse(context["request"], "auth/totp_enrol.html", context)
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     session = await session_manager.load_session(request)
     if session:
+        user = await user_repo.get_user_by_id(session.user_id)
+        if user and await _user_requires_totp_enrollment(user):
+            return RedirectResponse(url=TOTP_ENROLLMENT_PAGE_PATH, status_code=status.HTTP_303_SEE_OTHER)
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     try:

@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, Request, status
 from app.core.logging import set_request_context
 from app.repositories import company_memberships as membership_repo
 from app.repositories import tray as tray_repo
+from app.repositories import auth as auth_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.security.session import SessionData, session_manager
@@ -19,7 +20,26 @@ async def get_current_session(request: Request) -> SessionData:
     return session
 
 
+TOTP_ENROLLMENT_EXEMPT_PATHS = frozenset(
+    {
+        "/auth/logout",
+        "/auth/session",
+        "/auth/totp",
+        "/auth/totp/setup",
+        "/auth/totp/verify",
+        "/auth/password/change",
+    }
+)
+
+
+def _is_totp_enrollment_exempt_path(path: str) -> bool:
+    if path in TOTP_ENROLLMENT_EXEMPT_PATHS:
+        return True
+    return path.startswith("/auth/totp/")
+
+
 async def get_current_user(
+    request: Request,
     session: SessionData = Depends(get_current_session),
 ) -> dict:
     user = await user_repo.get_user_by_id(session.user_id)
@@ -31,6 +51,14 @@ async def get_current_user(
     user_id = user.get("id")
     if isinstance(user_id, int):
         set_request_context(user_id=user_id)
+        if not _is_totp_enrollment_exempt_path(request.url.path):
+            has_totp = await auth_repo.user_has_totp_authenticator(user_id)
+            if not has_totp:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Two-factor authentication enrolment is required before continuing",
+                    headers={"X-MyPortal-2FA-Enrolment-Required": "true"},
+                )
     return user
 
 
