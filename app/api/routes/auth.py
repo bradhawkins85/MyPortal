@@ -146,10 +146,18 @@ def _serialize_session(session: SessionData) -> SessionInfo:
     )
 
 
-def _build_login_response(user: dict, session: SessionData) -> LoginResponse:
+def _build_login_response(
+    user: dict,
+    session: SessionData,
+    *,
+    requires_totp_enrollment: bool = False,
+    redirect: str | None = None,
+) -> LoginResponse:
     return LoginResponse(
         user=UserResponse.model_validate(user),
         session=_serialize_session(session),
+        requires_totp_enrollment=requires_totp_enrollment,
+        redirect=redirect,
     )
 
 
@@ -300,7 +308,12 @@ async def register(
     )
     if active_company_id is not None:
         created["company_id"] = active_company_id
-    response_model = _build_login_response(created, session)
+    response_model = _build_login_response(
+        created,
+        session,
+        requires_totp_enrollment=True,
+        redirect="/security/2fa",
+    )
     response = JSONResponse(
         content=response_model.model_dump(mode="json"),
         status_code=status.HTTP_201_CREATED,
@@ -372,6 +385,7 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+    requires_totp_enrollment = not bool(totp_devices)
     if totp_devices:
         if not payload.totp_code:
             _log_login_failure(request, payload.email, "totp_required")
@@ -397,7 +411,12 @@ async def login(
     )
     if active_company_id is not None:
         user["company_id"] = active_company_id
-    response_model = _build_login_response(user, session)
+    response_model = _build_login_response(
+        user,
+        session,
+        requires_totp_enrollment=requires_totp_enrollment,
+        redirect="/security/2fa" if requires_totp_enrollment else None,
+    )
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session, request)
     _log_login_success(request, user)
@@ -697,5 +716,10 @@ async def delete_totp(
     authenticator_id: int,
     current_user: dict = Depends(get_current_user),
 ) -> Response:
+    if await auth_repo.count_totp_authenticators(current_user["id"]) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one authenticator is required for every account",
+        )
     await auth_repo.delete_totp_authenticator(current_user["id"], authenticator_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

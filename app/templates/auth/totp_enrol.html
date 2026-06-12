@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block header_title %}Secure your account{% endblock %}
+
+{% block content %}
+<div class="management management--single" data-layout id="totp-enrol-root">
+  <section class="management__content">
+    <header class="management__header">
+      <div>
+        <h1 class="management__title">Set up two-factor authentication</h1>
+        <p class="management__subtitle">Two-factor authentication is required for every MyPortal account before accessing portal data.</p>
+      </div>
+    </header>
+
+    <div class="management__body management__body--columns profile-columns profile-columns--standard">
+      <div class="management__column profile-columns__column">
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
+              <h2 class="card__title">Authenticator app enrolment</h2>
+              <p class="card__subtitle">Add MyPortal to an authenticator app, then enter the six-digit code to finish enrolment.</p>
+            </div>
+          </header>
+          <div class="card__body card__body--stacked">
+            <div class="callout callout--warning" role="status">
+              <strong>Required security step.</strong>
+              Access to the portal is paused until this account has at least one authenticator registered.
+            </div>
+
+            <div data-totp-setup>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="totp-secret">Secret</label>
+                  <div class="inline-form inline-form--stacked">
+                    <input class="form-input" id="totp-secret" name="totpSecret" readonly />
+                    <button type="button" class="button button--ghost" data-copy-target="totp-secret">Copy</button>
+                  </div>
+                  <p class="form-help">Enter this secret manually if your authenticator cannot open setup links.</p>
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-link">Setup link</label>
+                  <div class="inline-form inline-form--stacked">
+                    <input class="form-input" id="totp-link" name="totpLink" readonly />
+                    <button type="button" class="button button--ghost" data-copy-target="totp-link">Copy</button>
+                  </div>
+                  <p class="form-help">Open or paste this link in compatible desktop authenticator applications.</p>
+                </div>
+              </div>
+
+              <form class="form" id="totp-enrol-form">
+                <div class="form-field">
+                  <label class="form-label" for="totp-name">Device name</label>
+                  <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="totp-code">Authenticator code</label>
+                  <input class="form-input" id="totp-code" name="totpCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autocorrect="off" autocapitalize="none" required />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button" data-totp-submit>Verify and continue</button>
+                  <button type="button" class="button button--ghost" data-totp-refresh>Generate new secret</button>
+                  <button type="button" class="button button--secondary" data-logout>Sign out</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="{{ static_url('/static/js/totp_enrol.js') }}"></script>
+{% endblock %}

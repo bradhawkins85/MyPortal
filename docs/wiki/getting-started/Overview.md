@@ -10,7 +10,7 @@ There are no default login credentials; the first visit will prompt you to regis
 
 - Session-based authentication with secure cookies and sliding expiration
 - Built-in rate limiting, CSRF protection, and password reset flows
-- Optional TOTP multi-factor authentication with QR-code provisioning
+- Mandatory TOTP multi-factor authentication enrolment for every user with setup-link provisioning
 - Business information summary tab to confirm the logged-in company
 - Licenses tab showing license name, SKU, count, allocated staff, expiry date and contract term
 - Centralised company membership management with reusable roles and real-time audit logging
@@ -330,9 +330,9 @@ All authentication routes are documented in the interactive Swagger UI and summa
 - `POST /auth/password/reset` – Validates the token and updates the user password with bcrypt hashing.
 - `POST /auth/password/change` – Allows an authenticated user to rotate their password after validating the current credential.
 - `GET /auth/totp` – Lists active TOTP authenticators for the current user.
-- `POST /auth/totp/setup` – Generates a pending TOTP secret and provisioning URI for enrolment.
+- `POST /auth/totp/setup` – Generates a pending TOTP secret and provisioning URI for mandatory enrolment.
 - `POST /auth/totp/verify` – Confirms the authenticator code and persists it for future logins.
-- `DELETE /auth/totp/{id}` – Removes an existing authenticator.
+- `DELETE /auth/totp/{id}` – Removes an existing authenticator when another authenticator remains on the account.
 
 ## API Key Management
 
