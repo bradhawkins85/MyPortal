@@ -7,10 +7,16 @@ class AuthForm {
   constructor(form) {
     this.form = form;
     this.endpoint = form.dataset.endpoint;
-    this.successRedirect = form.dataset.successRedirect || '/';
+    this.successRedirect = Object.prototype.hasOwnProperty.call(form.dataset, 'successRedirect')
+      ? form.dataset.successRedirect
+      : '/';
     this.loadingText = form.dataset.loadingText || 'Submitting…';
+    this.successMessage = form.dataset.successMessage || '';
+    this.successDelay = Number(form.dataset.successDelay || 0);
+    this.shouldResetOnSuccess = form.dataset.successReset === 'true';
     this.submitButton = form.querySelector('[data-auth-submit]');
     this.errorContainer = form.querySelector('[data-auth-error]');
+    this.successContainer = form.querySelector('[data-auth-success]');
     this.totpField = form.querySelector('[data-totp-field]');
     this.totpToggle = form.querySelector('[data-auth-toggle-totp]');
     this.defaultButtonLabel = this.submitButton ? this.submitButton.textContent : '';
@@ -41,6 +47,7 @@ class AuthForm {
     }
 
     this.showError('');
+    this.showSuccess('');
 
     const payload = this.buildPayload();
     if (!payload) {
@@ -78,7 +85,24 @@ class AuthForm {
         return;
       }
 
-      window.location.assign((result && result.redirect) || this.successRedirect);
+      const detail = this.extractDetail(result);
+      const message = this.successMessage || detail;
+      if (message) {
+        this.showSuccess(message);
+      }
+
+      if (this.shouldResetOnSuccess) {
+        this.form.reset();
+      }
+
+      const redirectTarget = (result && result.redirect) || this.successRedirect;
+      if (redirectTarget) {
+        if (this.successDelay > 0 && message) {
+          window.setTimeout(() => window.location.assign(redirectTarget), this.successDelay);
+        } else {
+          window.location.assign(redirectTarget);
+        }
+      }
     } catch (error) {
       console.error('Authentication request failed', error);
       this.showError('A network error occurred while contacting the server. Please try again.');
@@ -97,6 +121,10 @@ class AuthForm {
       }
 
       if (!value && key !== 'password') {
+        continue;
+      }
+
+      if (key === 'confirm_password') {
         continue;
       }
 
@@ -124,6 +152,13 @@ class AuthForm {
       }
 
       payload[key] = trimmed;
+    }
+
+    const passwordInput = this.form.querySelector('input[name="password"]');
+    const confirmPasswordInput = this.form.querySelector('input[name="confirm_password"]');
+    if (passwordInput && confirmPasswordInput && passwordInput.value !== confirmPasswordInput.value) {
+      this.showError('Passwords do not match.');
+      return null;
     }
 
     const totpInput = this.form.querySelector('input[name="totp_code"]');
@@ -173,18 +208,26 @@ class AuthForm {
   }
 
   showError(message) {
-    if (!this.errorContainer) {
+    this.showMessage(this.errorContainer, message);
+  }
+
+  showSuccess(message) {
+    this.showMessage(this.successContainer, message);
+  }
+
+  showMessage(container, message) {
+    if (!container) {
       return;
     }
 
     if (!message) {
-      this.errorContainer.setAttribute('hidden', '');
-      this.errorContainer.textContent = '';
+      container.setAttribute('hidden', '');
+      container.textContent = '';
       return;
     }
 
-    this.errorContainer.removeAttribute('hidden');
-    this.errorContainer.textContent = message;
+    container.removeAttribute('hidden');
+    container.textContent = message;
   }
 
   setLoading(isLoading) {

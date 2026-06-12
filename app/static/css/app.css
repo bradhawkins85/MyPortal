@@ -832,16 +832,27 @@ html {
   }
 }
 
-.form-error {
+.form-error,
+.form-success {
   border-radius: 0.85rem;
   padding: var(--space-gap-tight) var(--space-gap-base);
-  background: rgba(248, 113, 113, 0.15);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  color: #fecaca;
   font-weight: 600;
 }
 
-.form-error[hidden] {
+.form-error {
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+}
+
+.form-success {
+  background: rgba(134, 239, 172, 0.16);
+  border: 1px solid rgba(134, 239, 172, 0.38);
+  color: #bbf7d0;
+}
+
+.form-error[hidden],
+.form-success[hidden] {
   display: none;
 }
 
