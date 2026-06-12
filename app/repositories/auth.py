@@ -262,6 +262,20 @@ async def get_totp_authenticators(user_id: int) -> list[dict[str, Any]]:
     return decoded
 
 
+async def count_totp_authenticators(user_id: int) -> int:
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM user_totp_authenticators WHERE user_id = %s",
+        (user_id,),
+    )
+    if not row:
+        return 0
+    return int(row.get("count") or 0)
+
+
+async def user_has_totp_authenticator(user_id: int) -> bool:
+    return await count_totp_authenticators(user_id) > 0
+
+
 async def create_totp_authenticator(
     *, user_id: int, name: str, secret: str
 ) -> dict[str, Any]:

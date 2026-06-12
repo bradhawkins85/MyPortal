@@ -69,6 +69,8 @@ class SessionInfo(BaseModel):
 class LoginResponse(BaseModel):
     session: SessionInfo
     user: UserResponse
+    requires_totp_enrollment: bool = False
+    redirect: Optional[str] = None
 
 
 class SessionResponse(LoginResponse):
