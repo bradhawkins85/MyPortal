@@ -137,6 +137,62 @@ async def test_render_portal_tickets_page_formats_results(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_render_portal_tickets_page_own_scope_ignores_legacy_helpdesk_mapping(monkeypatch):
+    request = _make_request()
+    request.state.active_company_id = 22
+    request.state.active_membership = {"menu_permissions": {"menu.tickets": "read"}}
+    user = {"id": 5, "company_id": 22, "is_super_admin": False}
+
+    statuses = [TicketStatusDefinition(tech_status="open", tech_label="Open", public_status="Open")]
+    listed_tickets = [
+        {
+            "id": 41,
+            "subject": "Own ticket",
+            "status": "open",
+            "priority": "normal",
+            "company_id": 22,
+            "updated_at": datetime(2025, 1, 10, 9, 30, tzinfo=timezone.utc),
+            "created_at": datetime(2025, 1, 9, 16, 45, tzinfo=timezone.utc),
+        }
+    ]
+
+    monkeypatch.setattr(
+        main.company_access,
+        "list_accessible_companies",
+        AsyncMock(return_value=[{"company_id": 22, "company_name": "Example"}]),
+    )
+    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=True))
+    monkeypatch.setattr(main, "_has_admin_technician_access", AsyncMock(return_value=False))
+    company_list_mock = AsyncMock(return_value=[])
+    company_count_mock = AsyncMock(return_value=0)
+    user_list_mock = AsyncMock(return_value=listed_tickets)
+    user_count_mock = AsyncMock(return_value=1)
+    monkeypatch.setattr(main.tickets_repo, "list_tickets_in_companies", company_list_mock)
+    monkeypatch.setattr(main.tickets_repo, "count_tickets_in_companies", company_count_mock)
+    monkeypatch.setattr(main.tickets_repo, "list_tickets_for_user", user_list_mock)
+    monkeypatch.setattr(main.tickets_repo, "count_tickets_for_user", user_count_mock)
+    monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    await main._render_portal_tickets_page(request, user)
+
+    user_list_mock.assert_awaited_once()
+    user_count_mock.assert_awaited_once()
+    company_list_mock.assert_not_awaited()
+    company_count_mock.assert_not_awaited()
+    assert user_list_mock.await_args.args == (5,)
+    assert user_list_mock.await_args.kwargs["company_ids"] == [22]
+    assert captured["extra"]["tickets"][0]["subject"] == "Own ticket"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_render_portal_tickets_page_company_all_scope_includes_requestor(monkeypatch):
     request = _make_request()
     request.state.active_company_id = 22
@@ -530,7 +586,8 @@ async def test_render_portal_ticket_detail_denies_unrelated_user(monkeypatch):
     monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
     monkeypatch.setattr(main.tickets_repo, "list_replies", list_replies_mock)
     monkeypatch.setattr(main.tickets_repo, "is_ticket_watcher", AsyncMock(return_value=False))
-    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=False))
+    monkeypatch.setattr(main, "_is_helpdesk_technician", AsyncMock(return_value=True))
+    monkeypatch.setattr(main, "_has_admin_technician_access", AsyncMock(return_value=False))
 
     with pytest.raises(main.HTTPException) as exc_info:
         await main._render_portal_ticket_detail(request, user, ticket_id=41)
