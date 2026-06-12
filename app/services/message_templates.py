@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import json
+from html import escape as html_escape
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from threading import RLock
@@ -38,6 +39,48 @@ _CONTENT_TYPE_MAP = {
 _CACHE_LOCK = RLock()
 _TEMPLATE_CACHE: dict[str, MessageTemplate] = {}
 _REDIS_CACHE_KEY = "message-templates:records"
+
+
+
+_TOKEN_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_.-]+)\s*}}")
+
+
+def _resolve_context_value(context: Mapping[str, Any], path: str) -> Any:
+    current: Any = context
+    for part in path.split("."):
+        if isinstance(current, Mapping):
+            current = current.get(part)
+        else:
+            current = getattr(current, part, None)
+        if current is None:
+            return ""
+    return current
+
+
+def render_content(content: str, context: Mapping[str, Any], *, escape_html: bool = False) -> str:
+    """Render ``{{ dotted.path }}`` tokens using the supplied context."""
+
+    def replace(match: re.Match[str]) -> str:
+        value = _resolve_context_value(context, match.group(1))
+        rendered = "" if value is None else str(value)
+        return html_escape(rendered, quote=True) if escape_html else rendered
+
+    return _TOKEN_PATTERN.sub(replace, content)
+
+
+async def render_template_content(
+    slug: str,
+    context: Mapping[str, Any],
+    *,
+    default_content: str,
+    default_content_type: str = "text/html",
+) -> tuple[str, str]:
+    """Render a stored message template or a caller-provided default."""
+
+    template = await get_template_by_slug(slug)
+    content = str((template or {}).get("content") or default_content)
+    content_type = _normalise_content_type((template or {}).get("content_type") or default_content_type)
+    return render_content(content, context, escape_html=content_type == "text/html"), content_type
 
 
 def _normalise_slug(slug: str) -> str:

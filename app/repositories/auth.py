@@ -223,6 +223,33 @@ async def mark_password_reset_token_used(token: str) -> None:
     )
 
 
+async def create_account_verification_token(
+    *, user_id: int, token: str, expires_at: datetime
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO account_verification_tokens (token, user_id, expires_at, used)
+        VALUES (%s, %s, %s, 0)
+        """,
+        (token, user_id, expires_at),
+    )
+
+
+async def get_account_verification_token(token: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM account_verification_tokens WHERE token = %s",
+        (token,),
+    )
+    return row
+
+
+async def mark_account_verification_token_used(token: str) -> None:
+    await db.execute(
+        "UPDATE account_verification_tokens SET used = 1 WHERE token = %s",
+        (token,),
+    )
+
+
 async def get_totp_authenticators(user_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT id, name, secret FROM user_totp_authenticators WHERE user_id = %s",

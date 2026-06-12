@@ -72,7 +72,13 @@ class AuthForm {
         return;
       }
 
-      window.location.assign(this.successRedirect);
+      if (result && result.verification_required) {
+        this.showError(this.extractDetail(result) || 'Check your email to verify your account before signing in.');
+        this.form.reset();
+        return;
+      }
+
+      window.location.assign((result && result.redirect) || this.successRedirect);
     } catch (error) {
       console.error('Authentication request failed', error);
       this.showError('A network error occurred while contacting the server. Please try again.');

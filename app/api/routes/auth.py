@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import datetime, timedelta
 from html import escape
@@ -20,6 +21,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import auth as auth_repo
 from app.repositories import companies as company_repo
+from app.repositories import staff as staff_repo
 from app.repositories import users as user_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.auth import (
@@ -43,6 +45,7 @@ from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
 from app.services import impersonation as impersonation_service
+from app.services import message_templates as message_templates_service
 from app.services import email as email_service
 from app.services import staff_access as staff_access_service
 
@@ -51,6 +54,79 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 LOGIN_RATE_LIMIT_WINDOW = 300  # 5 minutes
 LOGIN_RATE_LIMIT_ATTEMPTS = 5
+
+
+
+def _html_to_text(html: str) -> str:
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.replace("&nbsp;", " ").strip()
+
+
+def _template_context(*, user: dict[str, Any], token: str, link: str, company: dict[str, Any] | None = None) -> dict[str, Any]:
+    first_name = user.get("first_name") or ""
+    last_name = user.get("last_name") or ""
+    full_name = " ".join(part for part in (first_name, last_name) if part).strip() or user.get("email") or "there"
+    portal_url = str(settings.portal_url).rstrip("/") if settings.portal_url else ""
+    return {
+        "app": {"name": settings.app_name},
+        "portal": {"url": portal_url, "login_url": f"{portal_url}/login" if portal_url else "/login"},
+        "user": {
+            "email": user.get("email") or "",
+            "first_name": first_name,
+            "last_name": last_name,
+            "name": full_name,
+        },
+        "company": {"name": (company or {}).get("name") or ""},
+        "token": token,
+        "link": link,
+        "verification": {"link": link, "token": token},
+        "invitation": {"link": link, "token": token},
+    }
+
+
+async def _render_email_template(slug: str, context: dict[str, Any], default_html: str) -> tuple[str, str]:
+    rendered, content_type = await message_templates_service.render_template_content(
+        slug,
+        context,
+        default_content=default_html,
+        default_content_type="text/html",
+    )
+    if content_type == "text/html":
+        return rendered, _html_to_text(rendered)
+    text_body = rendered
+    html_body = "<p>" + escape(text_body).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+    return html_body, text_body
+
+
+async def _send_signup_verification_email(user: dict[str, Any], token: str) -> None:
+    base_url = str(settings.portal_url).rstrip("/") if settings.portal_url else None
+    verify_path = f"/auth/verify-email?token={token}"
+    verify_link = f"{base_url}{verify_path}" if base_url else verify_path
+    context = _template_context(user=user, token=token, link=verify_link)
+    default_html = (
+        "<p>Hello {{ user.name }},</p>"
+        "<p>Thanks for signing up for {{ app.name }}. Please verify your email address before signing in.</p>"
+        "<p><a href=\"{{ verification.link }}\">Verify your signup</a></p>"
+        "<p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>"
+    )
+    html_body, text_body = await _render_email_template("signup_verification", context, default_html)
+    try:
+        sent, event_metadata = await email_service.send_email(
+            subject=f"Verify your {settings.app_name} signup",
+            recipients=[user["email"]],
+            text_body=text_body,
+            html_body=html_body,
+        )
+        if not sent:
+            logger.warning(
+                "Signup verification email skipped because SMTP is not configured",
+                user_id=user["id"],
+                event_id=(event_metadata or {}).get("id") if isinstance(event_metadata, dict) else None,
+            )
+    except email_service.EmailDispatchError as exc:  # pragma: no cover - log and continue
+        logger.error("Failed to dispatch signup verification email", user_id=user["id"], error=str(exc))
 
 
 def _serialize_session(session: SessionData) -> SessionInfo:
@@ -116,7 +192,7 @@ def _log_login_success(request: Request, user: dict[str, Any]) -> None:
 
 @router.post(
     "/register",
-    response_model=LoginResponse,
+    response_model=None,
     status_code=status.HTTP_201_CREATED,
     summary="Register a new account",
 )
@@ -133,40 +209,52 @@ async def register(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     matched_company_id: int | None = None
+    matched_staff: dict[str, Any] | None = None
     if not is_first_user:
-        domain = payload.email.split("@")[-1].strip().lower()
-        matched = await company_repo.get_company_by_email_domain(domain)
-        if not matched:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Registration is restricted to approved company domains",
-            )
+        staff_matches = await staff_repo.list_staff_by_email(payload.email)
+        active_staff_matches = [staff for staff in staff_matches if bool(staff.get("enabled", True))]
+        if active_staff_matches:
+            matched_staff = active_staff_matches[0]
+            raw_staff_company_id = matched_staff.get("company_id")
+            try:
+                matched_company_id = int(raw_staff_company_id) if raw_staff_company_id is not None else None
+            except (TypeError, ValueError):
+                matched_company_id = None
 
-        raw_company_id = matched.get("id")
-        if raw_company_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Registration is restricted to approved company domains",
-            )
+        if matched_company_id is None:
+            domain = payload.email.split("@")[-1].strip().lower()
+            matched = await company_repo.get_company_by_email_domain(domain)
+            if not matched:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Registration is restricted to approved company domains or existing staff records",
+                )
 
-        try:
-            matched_company_id = int(raw_company_id)
-        except (TypeError, ValueError) as exc:
-            log_error(
-                "Failed to coerce matched company identifier during registration",
-                error=str(exc),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Registration is restricted to approved company domains",
-            ) from exc
+            raw_company_id = matched.get("id")
+            if raw_company_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Registration is restricted to approved company domains or existing staff records",
+                )
+
+            try:
+                matched_company_id = int(raw_company_id)
+            except (TypeError, ValueError) as exc:
+                log_error(
+                    "Failed to coerce matched company identifier during registration",
+                    error=str(exc),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Registration is restricted to approved company domains or existing staff records",
+                ) from exc
 
     created = await user_repo.create_user(
         email=payload.email,
         password=payload.password,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        mobile_phone=payload.mobile_phone,
+        first_name=payload.first_name or (matched_staff or {}).get("first_name"),
+        last_name=payload.last_name or (matched_staff or {}).get("last_name"),
+        mobile_phone=payload.mobile_phone or (matched_staff or {}).get("mobile_phone"),
         company_id=payload.company_id if is_first_user else matched_company_id,
         is_super_admin=is_first_user,
     )
@@ -178,6 +266,22 @@ async def register(
         )
 
     await staff_access_service.apply_pending_access_for_user(created)
+
+    if not is_first_user:
+        await user_repo.update_user(created["id"], is_active=0, email_verified_at=None)
+        token = secrets.token_hex(32)
+        expires_at = datetime.utcnow() + timedelta(hours=24)
+        await auth_repo.create_account_verification_token(
+            user_id=created["id"], token=token, expires_at=expires_at
+        )
+        await _send_signup_verification_email(created, token)
+        return JSONResponse(
+            content={
+                "detail": "Account created. Check your email to verify your signup before signing in.",
+                "verification_required": True,
+            },
+            status_code=status.HTTP_202_ACCEPTED,
+        )
 
     active_company_id = await _determine_active_company_id(created)
     session = await session_manager.create_session(
@@ -192,6 +296,24 @@ async def register(
     )
     session_manager.apply_session_cookies(response, session, request)
     return response
+
+
+
+@router.get(
+    "/verify-email",
+    summary="Verify a signup email address",
+)
+async def verify_email(token: str, _: None = Depends(require_database)) -> Response:
+    record = await auth_repo.get_account_verification_token(token)
+    if not record or int(record.get("used", 0)) == 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+    expires_at = record.get("expires_at")
+    if expires_at and datetime.utcnow() > ensure_datetime(expires_at):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification link")
+
+    await user_repo.update_user(record["user_id"], is_active=1, email_verified_at=datetime.utcnow())
+    await auth_repo.mark_account_verification_token_used(token)
+    return RedirectResponse(url="/login?verified=1", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post(
@@ -223,7 +345,8 @@ async def login(
 
     if int(user.get("is_active", 1)) != 1:
         _log_login_failure(request, payload.email, "account_disabled")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
+        detail = "Please verify your email address before signing in." if not user.get("email_verified_at") else "Account is disabled"
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
     if totp_devices:
