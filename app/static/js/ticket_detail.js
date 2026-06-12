@@ -818,8 +818,9 @@
             return;
           }
           const option = document.createElement('option');
-          option.value = String(user.id);
-          option.textContent = user.email;
+          option.value = user.requester_value || (user.user_id ? `user:${user.user_id}` : `staff:${user.staff_id || user.id}`);
+          const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+          option.textContent = fullName ? `${fullName} (${user.email})` : user.email;
           requesterSelect.appendChild(option);
         });
         requesterSelect.disabled = false;

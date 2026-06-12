@@ -51,6 +51,24 @@ def _main():
     return main_module
 
 
+
+
+def _parse_requester_value(raw: Any) -> tuple[str | None, int | None]:
+    value = str(raw or "").strip()
+    if not value:
+        return None, None
+    if ":" in value:
+        prefix, identifier = value.split(":", 1)
+        prefix = prefix.strip().lower()
+    else:
+        prefix, identifier = "user", value
+    if prefix not in {"user", "staff"}:
+        raise ValueError("Unsupported requester selector value.")
+    numeric_id = int(identifier)
+    if numeric_id <= 0:
+        raise ValueError("Requester ID must be positive.")
+    return prefix, numeric_id
+
 def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
     candidate = (raw or "").strip()
     if not candidate:
@@ -118,28 +136,54 @@ async def admin_create_ticket(request: Request):
         assigned_user_id = int(assigned_raw) if assigned_raw else None
     except (TypeError, ValueError):
         assigned_user_id = None
-    try:
-        requester_id = int(requester_raw) if requester_raw else current_user.get("id")
-    except (TypeError, ValueError):
-        requester_id = current_user.get("id")
-
-    if requester_id and company_id and requester_id != current_user.get("id"):
+    requester_id: int | None = None
+    requester_staff_id: int | None = None
+    if requester_raw:
         try:
-            staff_member = await staff_repo.get_staff_by_id(requester_id)
-            if not staff_member or staff_member.get("company_id") != company_id:
-                return await main_module._render_tickets_dashboard(
-                    request,
-                    current_user,
-                    error_message="The selected requester does not belong to the selected company.",
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
-        except Exception:
+            requester_kind, requester_identifier = _parse_requester_value(requester_raw)
+        except (TypeError, ValueError):
             return await main_module._render_tickets_dashboard(
                 request,
                 current_user,
                 error_message="Invalid requester selection.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
+        if requester_kind == "staff":
+            requester_staff_id = requester_identifier
+        elif requester_kind == "user":
+            requester_id = requester_identifier
+    else:
+        requester_id = current_user.get("id")
+
+    if requester_staff_id and company_id is None:
+        return await main_module._render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Link the ticket to a company before selecting a requester.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if requester_staff_id and company_id:
+        staff_member = await staff_repo.get_enabled_staff_requester(company_id, requester_staff_id)
+        if not staff_member:
+            return await main_module._render_tickets_dashboard(
+                request,
+                current_user,
+                error_message="The selected requester is not an enabled staff member for the selected company.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        requester_id = staff_member.get("user_id")
+    elif requester_id and company_id and requester_id != current_user.get("id"):
+        allowed_requesters = await staff_repo.list_enabled_staff_users(company_id)
+        matched = next((option for option in allowed_requesters if option.get("user_id") == requester_id), None)
+        if not matched:
+            return await main_module._render_tickets_dashboard(
+                request,
+                current_user,
+                error_message="The selected requester is not an enabled staff member for the selected company.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        requester_staff_id = matched.get("staff_id")
 
     if not subject:
         return await main_module._render_tickets_dashboard(
@@ -157,6 +201,7 @@ async def admin_create_ticket(request: Request):
             subject=subject,
             description=description,
             requester_id=requester_id,
+            requester_staff_id=requester_staff_id,
             company_id=company_id,
             assigned_user_id=assigned_user_id,
             priority=priority,
@@ -537,9 +582,12 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         )
 
     requester_id: int | None = None
+    requester_staff_id: int | None = None
+    requester_kind: str | None = None
+    requester_identifier: int | None = None
     if requester_raw:
         try:
-            requester_id = int(requester_raw)
+            requester_kind, requester_identifier = _parse_requester_value(requester_raw)
         except (TypeError, ValueError):
             return await main_module._render_ticket_detail(
                 request,
@@ -548,15 +596,19 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 error_message="Select a valid requester.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-        requester = await user_repo.get_user_by_id(requester_id)
-        if not requester:
-            return await main_module._render_ticket_detail(
-                request,
-                current_user,
-                ticket_id=ticket_id,
-                error_message="Select a valid requester.",
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
+        if requester_kind == "user":
+            requester_id = requester_identifier
+            requester = await user_repo.get_user_by_id(requester_id)
+            if not requester:
+                return await main_module._render_ticket_detail(
+                    request,
+                    current_user,
+                    ticket_id=ticket_id,
+                    error_message="Select a valid requester.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+        elif requester_kind == "staff":
+            requester_staff_id = requester_identifier
 
     assigned_user_id: int | None = None
     if assigned_raw:
@@ -609,7 +661,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     if company_raw is None:
         final_company_id = existing_company_id
 
-    if requester_id is not None:
+    if requester_id is not None or requester_staff_id is not None:
         if final_company_id is None:
             return await main_module._render_ticket_detail(
                 request,
@@ -619,12 +671,12 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
         allowed_requesters = await staff_repo.list_enabled_staff_users(final_company_id)
-        allowed_ids = {
-            int(option.get("id"))
-            for option in allowed_requesters
-            if option.get("id") is not None
-        }
-        if requester_id not in allowed_ids:
+        matched: dict[str, Any] | None = None
+        if requester_kind == "staff":
+            matched = next((option for option in allowed_requesters if option.get("staff_id") == requester_staff_id), None)
+        else:
+            matched = next((option for option in allowed_requesters if option.get("user_id") == requester_id), None)
+        if not matched:
             return await main_module._render_ticket_detail(
                 request,
                 current_user,
@@ -632,10 +684,13 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 error_message="Select a requester from the linked company's enabled staff list.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
+        requester_id = matched.get("user_id")
+        requester_staff_id = matched.get("staff_id")
 
     update_fields: dict[str, Any] = {
         "priority": priority_value,
         "requester_id": requester_id,
+        "requester_staff_id": requester_staff_id,
         "assigned_user_id": assigned_user_id,
         "company_id": company_id,
         "category": category_value,

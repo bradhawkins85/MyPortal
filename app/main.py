@@ -7424,6 +7424,13 @@ async def _render_portal_ticket_detail(
         return email or "System"
 
     requester_record = user_lookup.get(ticket.get("requester_id"))
+    requester_staff_record = None
+    requester_staff_id = ticket.get("requester_staff_id")
+    if requester_staff_id is not None:
+        try:
+            requester_staff_record = await staff_repo.get_staff_by_id(int(requester_staff_id))
+        except (TypeError, ValueError):
+            requester_staff_record = None
     assigned_record = user_lookup.get(ticket.get("assigned_user_id"))
 
     timeline_entries: list[dict[str, Any]] = []
@@ -7629,7 +7636,11 @@ async def _render_portal_ticket_detail(
             "company": company_record,
             "company_name": company_name,
             "requester": requester_record,
-            "requester_label": _format_user_label(requester_record) if requester_record else None,
+            "requester_label": (
+                _format_user_label(requester_staff_record)
+                if requester_staff_record
+                else (_format_user_label(requester_record) if requester_record else None)
+            ),
             "assigned_user": assigned_record,
             "assigned_label": _format_user_label(assigned_record) if assigned_record else None,
             "created_iso": created_iso,

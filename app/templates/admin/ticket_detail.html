@@ -146,8 +146,9 @@
                 >
                   <option value="">Not set</option>
                   {% for requester in ticket_requester_options %}
-                    <option value="{{ requester.id }}" {% if requester.id == ticket.requester_id %}selected{% endif %}>
-                      {{ requester.email }}
+                    {% set requester_value = requester.requester_value or ('user:' ~ requester.id) %}
+                    <option value="{{ requester_value }}" {% if requester.staff_id == ticket.requester_staff_id or (requester.user_id and requester.user_id == ticket.requester_id) %}selected{% endif %}>
+                      {{ ([requester.first_name, requester.last_name] | select | join(' ')) | trim or requester.email }}{% if requester.email %} ({{ requester.email }}){% endif %}
                     </option>
                   {% endfor %}
                 </select>
