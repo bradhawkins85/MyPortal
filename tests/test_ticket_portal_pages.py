@@ -43,6 +43,13 @@ def test_portal_tickets_template_hides_priority_company_and_auto_applies_status(
     assert 'colspan="4"' in template
 
 
+def test_portal_ticket_detail_template_hides_priority():
+    template = Path("app/templates/tickets/detail.html").read_text()
+
+    assert "ticket.priority_label" not in template
+    assert "<dt>Priority</dt>" not in template
+
+
 @pytest.mark.anyio("asyncio")
 async def test_render_portal_tickets_page_formats_results(monkeypatch):
     request = _make_request()
