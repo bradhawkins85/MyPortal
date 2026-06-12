@@ -1142,6 +1142,42 @@ async def _is_helpdesk_technician(user: Mapping[str, Any], request: Request | No
     return bool(result)
 
 
+async def _has_admin_technician_access(user: Mapping[str, Any], request: Request | None = None) -> bool:
+    """Return whether the user may access technician-only admin ticket pages.
+
+    ``menu.tickets`` write access allows a company user to see all tickets for
+    their company in the portal. It intentionally maps to the legacy
+    ``helpdesk.technician`` permission for older ticket workflows, so it must
+    not be used as the gate for ``/admin/tickets``. The admin ticket workspace
+    is reserved for super administrators and roles with the explicit
+    ``menu.admin.technician``/``company.switch_all`` technician switch access.
+    """
+    if user.get("is_super_admin"):
+        if request is not None:
+            request.state.has_admin_technician_access = True
+        return True
+    if request is not None:
+        cached = getattr(request.state, "has_admin_technician_access", None)
+        if cached is not None:
+            return bool(cached)
+    user_id = user.get("id")
+    try:
+        user_id_int = int(user_id)
+    except (TypeError, ValueError):
+        result = False
+    else:
+        try:
+            result = await membership_repo.user_has_permission(
+                user_id_int, "company.switch_all"
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback for tests without DB
+            log_error("Failed to determine admin technician access", error=str(exc))
+            result = False
+    if request is not None:
+        request.state.has_admin_technician_access = bool(result)
+    return bool(result)
+
+
 async def _has_issue_tracker_access(user: Mapping[str, Any], request: Request | None = None) -> bool:
     if user.get("is_super_admin"):
         if request is not None:
@@ -1210,10 +1246,10 @@ async def _require_helpdesk_page(request: Request) -> tuple[dict[str, Any] | Non
     user, redirect = await _require_authenticated_user(request)
     if redirect:
         return None, redirect
-    if not await _is_helpdesk_technician(user, request):
+    if not await _has_admin_technician_access(user, request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Helpdesk technician privileges required",
+            detail="Access denied",
         )
     return user, None
 
@@ -1943,6 +1979,7 @@ async def _build_base_context(
     is_super_admin = bool(user.get("is_super_admin"))
     staff_permission_level = int(membership_data.get("staff_permission") or 0)
     is_helpdesk_technician = await _is_helpdesk_technician(user, request)
+    has_admin_technician_access = await _has_admin_technician_access(user, request)
     has_issue_tracker_access = await _has_issue_tracker_access(user, request)
     has_marketing_access = await _has_marketing_access(user, request)
     menu_access = _build_menu_access_map(
@@ -2086,6 +2123,7 @@ async def _build_base_context(
         "staff_permission": staff_permission_level,
         "is_super_admin": is_super_admin,
         "is_helpdesk_technician": is_helpdesk_technician,
+        "has_admin_technician_access": has_admin_technician_access,
         "is_company_admin": is_super_admin or _menu_can(menu_access, "menu.admin.company"),
         "integration_modules": module_lookup,
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),

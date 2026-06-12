@@ -129,6 +129,7 @@ def test_admin_tickets_page_with_phone_search(monkeypatch, active_session, helpd
         return user.get("id") == helpdesk_user["id"]
     
     monkeypatch.setattr(main_module, "_is_helpdesk_technician", fake_is_helpdesk_technician)
+    monkeypatch.setattr(main_module, "_has_admin_technician_access", fake_is_helpdesk_technician)
     
     # Mock ticket search by phone using the shared sample ticket
     sample_tickets = [sample_ticket]
@@ -204,6 +205,7 @@ def test_admin_tickets_page_with_empty_phone_search(monkeypatch, active_session,
         return user.get("id") == helpdesk_user["id"]
     
     monkeypatch.setattr(main_module, "_is_helpdesk_technician", fake_is_helpdesk_technician)
+    monkeypatch.setattr(main_module, "_has_admin_technician_access", fake_is_helpdesk_technician)
     
     # Mock ticket search by phone - returns empty list
     async def fake_list_tickets_by_phone(phone_number: str, limit: int = 100):
@@ -275,6 +277,7 @@ def test_admin_tickets_page_without_phone_search(monkeypatch, active_session, he
         return user.get("id") == helpdesk_user["id"]
     
     monkeypatch.setattr(main_module, "_is_helpdesk_technician", fake_is_helpdesk_technician)
+    monkeypatch.setattr(main_module, "_has_admin_technician_access", fake_is_helpdesk_technician)
     
     # Mock dashboard service using the shared sample ticket
     from app.services import tickets as tickets_service
