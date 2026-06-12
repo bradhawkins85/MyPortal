@@ -17,11 +17,19 @@ class AuthForm {
     this.submitButton = form.querySelector('[data-auth-submit]');
     this.errorContainer = form.querySelector('[data-auth-error]');
     this.successContainer = form.querySelector('[data-auth-success]');
+    this.accountSetupResetPrompt = form.querySelector('[data-account-setup-reset]');
+    this.accountSetupResetMessage = form.querySelector('[data-account-setup-reset-message]');
+    this.accountSetupResetButton = form.querySelector('[data-account-setup-reset-submit]');
+    this.accountSetupResetEmail = '';
     this.totpField = form.querySelector('[data-totp-field]');
     this.totpToggle = form.querySelector('[data-auth-toggle-totp]');
     this.defaultButtonLabel = this.submitButton ? this.submitButton.textContent : '';
 
     form.addEventListener('submit', (event) => this.handleSubmit(event));
+
+    if (this.accountSetupResetButton) {
+      this.accountSetupResetButton.addEventListener('click', () => this.sendAccountSetupReset());
+    }
 
     if (this.totpToggle && this.totpField) {
       this.syncTotpVisibility();
@@ -48,6 +56,7 @@ class AuthForm {
 
     this.showError('');
     this.showSuccess('');
+    this.hideAccountSetupReset();
 
     const payload = this.buildPayload();
     if (!payload) {
@@ -71,6 +80,10 @@ class AuthForm {
 
       if (!response.ok) {
         const detail = this.extractDetail(result) || 'Unable to complete the request. Check your credentials and try again.';
+        if (result && result.account_setup_reset_available) {
+          this.showAccountSetupReset(detail, payload.email);
+          return;
+        }
         if (detail && /totp/i.test(detail)) {
           const shouldSelect = /invalid/i.test(detail);
           this.revealTotpField({ focus: true, select: shouldSelect });
@@ -213,6 +226,76 @@ class AuthForm {
 
   showSuccess(message) {
     this.showMessage(this.successContainer, message);
+  }
+
+  showAccountSetupReset(message, email) {
+    this.showError('');
+    this.showSuccess('');
+    this.accountSetupResetEmail = email || '';
+
+    if (!this.accountSetupResetPrompt || !this.accountSetupResetButton) {
+      this.showError(message);
+      return;
+    }
+
+    if (this.accountSetupResetMessage) {
+      this.accountSetupResetMessage.textContent = message;
+    }
+
+    this.accountSetupResetPrompt.removeAttribute('hidden');
+  }
+
+  hideAccountSetupReset() {
+    if (this.accountSetupResetPrompt) {
+      this.accountSetupResetPrompt.setAttribute('hidden', '');
+    }
+    if (this.accountSetupResetMessage) {
+      this.accountSetupResetMessage.textContent = '';
+    }
+    this.accountSetupResetEmail = '';
+  }
+
+  async sendAccountSetupReset() {
+    if (!this.accountSetupResetEmail) {
+      this.showError('Enter your email address and try again.');
+      return;
+    }
+
+    const defaultLabel = this.accountSetupResetButton ? this.accountSetupResetButton.textContent : '';
+    if (this.accountSetupResetButton) {
+      this.accountSetupResetButton.disabled = true;
+      this.accountSetupResetButton.textContent = 'Sending reset link…';
+    }
+
+    try {
+      const response = await fetch('/auth/password/forgot', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ email: this.accountSetupResetEmail }),
+      });
+      const result = await this.parseJson(response);
+      const detail = this.extractDetail(result) || 'If the email is registered, reset instructions have been sent.';
+
+      if (!response.ok) {
+        this.showError(detail);
+        return;
+      }
+
+      this.hideAccountSetupReset();
+      this.showSuccess(detail);
+    } catch (error) {
+      console.error('Password reset request failed', error);
+      this.showError('A network error occurred while sending the reset link. Please try again.');
+    } finally {
+      if (this.accountSetupResetButton) {
+        this.accountSetupResetButton.disabled = false;
+        this.accountSetupResetButton.textContent = defaultLabel;
+      }
+    }
   }
 
   showMessage(container, message) {
