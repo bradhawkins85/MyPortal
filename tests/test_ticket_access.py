@@ -118,6 +118,11 @@ def test_register_rejects_unapproved_domain_after_first_user(monkeypatch, active
     monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
     monkeypatch.setattr(auth_routes.user_repo, "create_user", fake_create_user)
     monkeypatch.setattr(
+        auth_routes.staff_repo,
+        "list_staff_by_email",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
         auth_routes.company_repo,
         "get_company_by_email_domain",
         AsyncMock(return_value=None),
@@ -149,7 +154,55 @@ def test_register_rejects_unapproved_domain_after_first_user(monkeypatch, active
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
     data = response.json()
-    assert data["detail"] == "Registration is restricted to approved company domains"
+    assert data["detail"] == "Registration is restricted to approved company domains or existing staff records"
+
+
+def test_register_existing_invited_user_offers_password_reset(monkeypatch):
+    existing_user = {
+        "id": 44,
+        "email": "invited.user@example.com",
+        "first_name": "Invited",
+        "last_name": "User",
+        "force_password_change": 1,
+    }
+
+    async def fake_count_users():
+        return 3
+
+    async def fake_get_user_by_email(email: str):
+        assert email == existing_user["email"]
+        return existing_user
+
+    async def fake_create_user(**kwargs):
+        raise AssertionError("create_user should not be called for an existing invited user")
+
+    monkeypatch.setattr(auth_routes.user_repo, "count_users", fake_count_users)
+    monkeypatch.setattr(auth_routes.user_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(auth_routes.user_repo, "create_user", fake_create_user)
+
+    app.dependency_overrides[database_dependencies.require_database] = lambda: None
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/auth/register",
+                json={
+                    "email": existing_user["email"],
+                    "password": "strong-password",
+                    "first_name": existing_user["first_name"],
+                    "last_name": existing_user["last_name"],
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    data = response.json()
+    assert data["account_setup_reset_available"] is True
+    assert data["detail"] == (
+        "An account already exists for this email. "
+        "Send a password reset link to finish setting it up."
+    )
 
 
 def test_register_assigns_company_by_email_domain(monkeypatch, active_session):

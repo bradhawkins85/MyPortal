@@ -833,7 +833,8 @@ html {
 }
 
 .form-error,
-.form-success {
+.form-success,
+.form-reset-prompt {
   border-radius: 0.85rem;
   padding: var(--space-gap-tight) var(--space-gap-base);
   font-weight: 600;
@@ -845,6 +846,20 @@ html {
   color: #fecaca;
 }
 
+.form-reset-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  background: rgba(96, 165, 250, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.38);
+  color: #dbeafe;
+}
+
+.form-reset-prompt p {
+  margin: 0;
+}
+
 .form-success {
   background: rgba(134, 239, 172, 0.16);
   border: 1px solid rgba(134, 239, 172, 0.38);
@@ -852,7 +867,8 @@ html {
 }
 
 .form-error[hidden],
-.form-success[hidden] {
+.form-success[hidden],
+.form-reset-prompt[hidden] {
   display: none;
 }
 
