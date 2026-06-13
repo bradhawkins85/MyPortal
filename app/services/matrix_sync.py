@@ -10,6 +10,7 @@ from app.repositories import chat as chat_repo
 from app.services import matrix as matrix_service
 from app.services import chat_ticket_sync
 from app.services import tray_chat_notifications
+from app.services import matrix_ai_waiting_assistant
 
 _settings = get_settings()
 _running = False
@@ -72,6 +73,12 @@ async def process_sync_response(sync_data: dict[str, Any]) -> None:
             )
 
             await chat_repo.update_room(room["id"], last_message_at=sent_at, updated_at=sent_at)
+            participants = await chat_repo.get_participants(room["id"])
+            participant = next((p for p in participants if p.get("matrix_user_id") == sender), None)
+            sender_role = (participant or {}).get("role")
+            is_waiting_user = sender != (_settings.matrix_bot_user_id or "") and sender_role not in ("technician", "admin")
+            if is_waiting_user:
+                await matrix_ai_waiting_assistant.handle_user_message(room["id"], sent_at)
             await tray_chat_notifications.notify_tray_device_of_chat_message(
                 room=room,
                 message=message,

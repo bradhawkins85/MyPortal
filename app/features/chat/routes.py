@@ -136,6 +136,10 @@ async def chat_room_page(
     room_dict = dict(room)
     room_dict["assigned_tech_display_name"] = assigned_tech_display_name
     room_dict["creator_display_name"] = creator_display_name
+    if is_staff:
+        room_dict["ai_extracted_keywords_list"] = chat_repo.decode_ai_json_field(room.get("ai_extracted_keywords")) or []
+        room_dict["ai_matched_articles_list"] = chat_repo.decode_ai_json_field(room.get("ai_matched_articles")) or []
+        room_dict["ai_show_match_tags"] = settings.matrixbot_ai_show_match_tags
 
     main_module = _main()
     extra = {

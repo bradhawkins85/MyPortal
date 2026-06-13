@@ -2733,9 +2733,10 @@ async def on_startup() -> None:
 
     await scheduler_service.start()
     if settings.matrix_enabled:
-        from app.services import matrix_sync
+        from app.services import matrix_sync, matrix_ai_waiting_assistant
         import asyncio as _asyncio
         _asyncio.create_task(matrix_sync.run_sync_loop())
+        _asyncio.create_task(matrix_ai_waiting_assistant.run_worker_loop())
 
     # Load feature packs.  Empty by default; populated as areas of the
     # app are migrated under ``app/features/`` in follow-up PRs.
@@ -2772,8 +2773,9 @@ async def on_shutdown() -> None:
     global _app_ready
     _app_ready = False
     if settings.matrix_enabled:
-        from app.services import matrix_sync
+        from app.services import matrix_sync, matrix_ai_waiting_assistant
         matrix_sync.stop_sync_loop()
+        matrix_ai_waiting_assistant.stop_worker_loop()
     if _feature_pack_watcher is not None:
         await _feature_pack_watcher.stop()
     await feature_registry.unload_all()
