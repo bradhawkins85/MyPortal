@@ -17,6 +17,7 @@ from app.repositories import chat as chat_repo
 from app.repositories import knowledge_base as kb_repo
 from app.services import audit as audit_service
 from app.services import matrix as matrix_service
+from app.services import webhook_monitor
 from app.services.realtime import refresh_notifier
 
 _running = False
@@ -24,6 +25,8 @@ _stop = False
 _WORD_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._/-]{2,}")
 _ACK_MESSAGE = "Thanks — your request has been received. A technician will be assigned shortly."
 _AI_DISCLAIMER = "This recommendation was generated using AI and may not apply to your specific issue."
+_MONITOR_PROMPT_PREVIEW_LIMIT = 2000
+_MONITOR_RESPONSE_PREVIEW_LIMIT = 2000
 
 
 def _utcnow() -> datetime:
@@ -49,6 +52,115 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(v) for v in value]
     return value
+
+
+def _truncate_text(value: Any, *, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _monitor_payload(payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key, value in dict(payload or {}).items():
+        if key in {"prompt", "transcript"}:
+            # Prompts can include complete chat transcripts, so avoid persisting
+            # customer-provided content in the webhook monitor.
+            safe[f"{key}_length"] = len(str(value or ""))
+        elif key in {"body", "message"}:
+            safe[f"{key}_preview"] = _truncate_text(
+                bleach.clean(str(value or ""), tags=[], strip=True),
+                limit=_MONITOR_PROMPT_PREVIEW_LIMIT,
+            )
+        else:
+            safe[key] = _json_safe(value)
+    return safe
+
+
+async def _create_monitor_event(
+    name: str,
+    target_url: str,
+    payload: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        return await webhook_monitor.create_manual_event(
+            name=name,
+            target_url=target_url,
+            payload=_monitor_payload(payload),
+            max_attempts=1,
+            backoff_seconds=0,
+        )
+    except Exception as exc:
+        log_error(
+            "AI waiting assistant webhook monitor create failed",
+            name=name,
+            error=str(exc),
+        )
+        return {}
+
+
+async def _record_monitor_success(
+    event: Mapping[str, Any] | None,
+    *,
+    response_status: int | None = None,
+    response_body: Any = None,
+    request_body: Mapping[str, Any] | None = None,
+) -> None:
+    event_id = (event or {}).get("id")
+    if not event_id:
+        return
+    try:
+        await webhook_monitor.record_manual_success(
+            int(event_id),
+            attempt_number=1,
+            response_status=response_status,
+            response_body=_truncate_text(
+                response_body,
+                limit=_MONITOR_RESPONSE_PREVIEW_LIMIT,
+            ),
+            request_body=_monitor_payload(request_body),
+        )
+    except Exception as exc:
+        log_error(
+            "AI waiting assistant webhook monitor success update failed",
+            event_id=event_id,
+            error=str(exc),
+        )
+
+
+async def _record_monitor_failure(
+    event: Mapping[str, Any] | None,
+    *,
+    error_message: Any,
+    response_status: int | None = None,
+    response_body: Any = None,
+    request_body: Mapping[str, Any] | None = None,
+) -> None:
+    event_id = (event or {}).get("id")
+    if not event_id:
+        return
+    try:
+        await webhook_monitor.record_manual_failure(
+            int(event_id),
+            attempt_number=1,
+            status="error",
+            error_message=_truncate_text(error_message, limit=1000),
+            response_status=response_status,
+            response_body=_truncate_text(
+                response_body,
+                limit=_MONITOR_RESPONSE_PREVIEW_LIMIT,
+            ),
+            request_body=_monitor_payload(request_body),
+        )
+    except Exception as exc:
+        log_error(
+            "AI waiting assistant webhook monitor failure update failed",
+            event_id=event_id,
+            error=str(exc),
+        )
 
 
 def _enabled() -> bool:
@@ -98,11 +210,40 @@ async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
     body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
     if json_format:
         body["format"] = "json"
-    async with httpx.AsyncClient(timeout=45) as client:
-        response = await client.post(urljoin(f"{base_url}/", "api/generate"), json=body)
-    response.raise_for_status()
-    payload = response.json()
-    return str(payload.get("response") or "").strip()
+    target_url = urljoin(f"{base_url}/", "api/generate")
+    monitor_event = await _create_monitor_event(
+        "MATRIXBOT_AI Ollama generate",
+        target_url,
+        {"model": model, "json_format": json_format, "prompt": prompt},
+    )
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(target_url, json=body)
+        response.raise_for_status()
+        payload = response.json()
+        result = str(payload.get("response") or "").strip()
+        await _record_monitor_success(
+            monitor_event,
+            response_status=response.status_code,
+            response_body=result,
+            request_body={
+                "model": model,
+                "json_format": json_format,
+                "prompt": prompt,
+            },
+        )
+        return result
+    except Exception as exc:
+        await _record_monitor_failure(
+            monitor_event,
+            error_message=str(exc),
+            request_body={
+                "model": model,
+                "json_format": json_format,
+                "prompt": prompt,
+            },
+        )
+        raise
 
 
 async def _chat_transcript(room_id: int) -> str:
@@ -179,11 +320,44 @@ async def _audit(action: str, room_id: int, value: Mapping[str, Any] | None = No
 
 
 async def _send_bot_message(room: Mapping[str, Any], body: str) -> bool:
+    matrix_room_id = str(room["matrix_room_id"])
+    monitor_event = await _create_monitor_event(
+        "MATRIXBOT_AI Matrix message",
+        f"matrix://{matrix_room_id}",
+        {
+            "room_id": room.get("id"),
+            "matrix_room_id": matrix_room_id,
+            "message": body,
+        },
+    )
     try:
-        response = await matrix_service.send_message(str(room["matrix_room_id"]), body)
+        response = await matrix_service.send_message(matrix_room_id, body)
         event_id = response.get("event_id")
+        await _record_monitor_success(
+            monitor_event,
+            response_status=200,
+            response_body={"event_id": event_id},
+            request_body={
+                "room_id": room.get("id"),
+                "matrix_room_id": matrix_room_id,
+                "message": body,
+            },
+        )
     except Exception as exc:
-        log_error("AI waiting assistant Matrix send failed", room_id=room.get("id"), error=str(exc))
+        await _record_monitor_failure(
+            monitor_event,
+            error_message=str(exc),
+            request_body={
+                "room_id": room.get("id"),
+                "matrix_room_id": matrix_room_id,
+                "message": body,
+            },
+        )
+        log_error(
+            "AI waiting assistant Matrix send failed",
+            room_id=room.get("id"),
+            error=str(exc),
+        )
         return False
     now = _utcnow()
     msg = await chat_repo.add_message(
