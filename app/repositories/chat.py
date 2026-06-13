@@ -116,6 +116,9 @@ async def create_room(
 _ROOM_UPDATABLE_FIELDS = frozenset({
     "status", "updated_at", "last_message_at", "subject", "linked_ticket_id",
     "assigned_tech_user_id",
+    "ai_bot_response_count", "ai_last_bot_response_at", "ai_last_analysis_at",
+    "ai_last_user_message_at", "ai_extracted_keywords", "ai_matched_articles",
+    "ai_last_confidence",
 })
 
 _INVITE_UPDATABLE_FIELDS = frozenset({
@@ -481,3 +484,165 @@ async def save_sync_state(next_batch: str) -> None:
                ON DUPLICATE KEY UPDATE next_batch = VALUES(next_batch), updated_at = VALUES(updated_at)""",
             (next_batch, now),
         )
+
+_AI_QUEUE_ACTIVE_STATUSES = ("queued", "processing")
+
+
+def _json_dumps(value: Any) -> str | None:
+    if value is None:
+        return None
+    import json
+    return json.dumps(value)
+
+
+def _json_loads(value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    import json
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def mark_user_activity(room_id: int, when: datetime | None = None) -> None:
+    when = when or datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        """UPDATE chat_rooms
+           SET last_message_at = %s, updated_at = %s, ai_last_user_message_at = %s
+           WHERE id = %s""",
+        (when, when, when, room_id),
+    )
+
+
+async def increment_ai_bot_response(room_id: int, when: datetime | None = None) -> None:
+    when = when or datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        """UPDATE chat_rooms
+           SET ai_bot_response_count = COALESCE(ai_bot_response_count, 0) + 1,
+               ai_last_bot_response_at = %s,
+               updated_at = %s
+           WHERE id = %s""",
+        (when, when, room_id),
+    )
+
+
+async def update_ai_analysis(
+    room_id: int,
+    *,
+    extracted_keywords: list[str] | None = None,
+    matched_articles: list[dict[str, Any]] | None = None,
+    confidence: float | None = None,
+    analysed_at: datetime | None = None,
+) -> None:
+    analysed_at = analysed_at or datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.execute(
+        """UPDATE chat_rooms
+           SET ai_extracted_keywords = %s,
+               ai_matched_articles = %s,
+               ai_last_confidence = %s,
+               ai_last_analysis_at = %s,
+               updated_at = %s
+           WHERE id = %s""",
+        (_json_dumps(extracted_keywords or []), _json_dumps(matched_articles or []), confidence, analysed_at, analysed_at, room_id),
+    )
+
+
+async def list_ai_waiting_candidate_rooms(due_before: datetime) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """SELECT * FROM chat_rooms
+           WHERE status = 'open'
+             AND assigned_tech_user_id IS NULL
+             AND ai_last_user_message_at IS NOT NULL
+             AND ai_last_user_message_at <= %s
+             AND COALESCE(ai_bot_response_count, 0) < 100
+           ORDER BY ai_last_user_message_at ASC
+           LIMIT 250""",
+        (due_before,),
+    )
+    return [dict(r) for r in rows]
+
+
+async def create_ai_queue_item(
+    *,
+    chat_room_id: int,
+    queue_identifier: str,
+    expires_at: datetime,
+    next_attempt_at: datetime,
+    created_for_response_number: int = 2,
+    analysis_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if db.is_sqlite():
+        await db.execute(
+            """INSERT OR IGNORE INTO matrix_ai_analysis_queue
+               (queue_identifier, chat_room_id, created_at, expires_at, status, next_attempt_at,
+                created_for_response_number, analysis_payload)
+               VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)""",
+            (queue_identifier, chat_room_id, now, expires_at, next_attempt_at, created_for_response_number, _json_dumps(analysis_payload)),
+        )
+    else:
+        await db.execute(
+            """INSERT IGNORE INTO matrix_ai_analysis_queue
+               (queue_identifier, chat_room_id, created_at, expires_at, status, next_attempt_at,
+                created_for_response_number, analysis_payload)
+               VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s)""",
+            (queue_identifier, chat_room_id, now, expires_at, next_attempt_at, created_for_response_number, _json_dumps(analysis_payload)),
+        )
+    row = await db.fetch_one("SELECT * FROM matrix_ai_analysis_queue WHERE queue_identifier = %s", (queue_identifier,))
+    return dict(row) if row else {}
+
+
+async def get_active_ai_queue_item(chat_room_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """SELECT * FROM matrix_ai_analysis_queue
+           WHERE chat_room_id = %s AND status IN ('queued','processing')
+           ORDER BY created_at DESC LIMIT 1""",
+        (chat_room_id,),
+    )
+    return dict(row) if row else None
+
+
+async def list_due_ai_queue_items(due_before: datetime, limit: int = 25) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """SELECT * FROM matrix_ai_analysis_queue
+           WHERE status IN ('queued','processing') AND next_attempt_at <= %s
+           ORDER BY next_attempt_at ASC LIMIT %s""",
+        (due_before, limit),
+    )
+    return [dict(r) for r in rows]
+
+
+async def update_ai_queue_item(queue_id: int, **fields: Any) -> None:
+    allowed = {"last_attempt_at", "retry_count", "status", "cancellation_reason", "next_attempt_at", "result_payload"}
+    invalid = set(fields) - allowed
+    if invalid:
+        raise ValueError(f"Cannot update matrix_ai_analysis_queue fields: {invalid}")
+    if "result_payload" in fields:
+        fields["result_payload"] = _json_dumps(fields["result_payload"])
+    set_clauses = ", ".join(f"{key} = %s" for key in fields)
+    await db.execute(f"UPDATE matrix_ai_analysis_queue SET {set_clauses} WHERE id = %s", tuple(fields.values()) + (queue_id,))
+
+
+async def cancel_active_ai_queue_for_room(chat_room_id: int, reason: str) -> None:
+    await db.execute(
+        """UPDATE matrix_ai_analysis_queue
+           SET status = 'cancelled', cancellation_reason = %s
+           WHERE chat_room_id = %s AND status IN ('queued','processing')""",
+        (reason[:255], chat_room_id),
+    )
+
+
+def decode_ai_json_field(value: Any) -> Any:
+    return _json_loads(value)
+
+
+async def cancel_all_active_ai_queue(reason: str) -> None:
+    await db.execute(
+        """UPDATE matrix_ai_analysis_queue
+           SET status = 'cancelled', cancellation_reason = %s
+           WHERE status IN ('queued','processing')""",
+        (reason[:255],),
+    )
