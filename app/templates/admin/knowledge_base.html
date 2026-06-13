@@ -42,6 +42,7 @@
             <th scope="col" data-sort="string" data-column-key="title">Title</th>
             <th scope="col" data-sort="string" data-column-key="scope">Scope</th>
             <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="string" data-column-key="ai-tags">AI tags</th>
             <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
           </tr>
         </thead>
@@ -73,13 +74,16 @@
                 <span class="status status--warning">Draft</span>
               {% endif %}
             </td>
+            <td data-label="AI tags" data-value="{{ (article.ai_tags or []) | join(', ') }}" data-column-key="ai-tags">
+              {% for tag in article.ai_tags or [] %}<span class="tag tag--muted">{{ tag }}</span>{% else %}<span class="text-muted">—</span>{% endfor %}
+            </td>
             <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}" data-column-key="updated">
               <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>
             </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="4" class="table__empty">No knowledge base articles are available yet.</td>
+            <td colspan="5" class="table__empty">No knowledge base articles are available yet.</td>
           </tr>
           {% endfor %}
         </tbody>
