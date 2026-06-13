@@ -22,6 +22,7 @@ from app.services import chat_ticket_sync
 from app.services import tray_chat_notifications
 from app.services import matrix as matrix_service
 from app.services import matrix_admin
+from app.services import matrix_ai_waiting_assistant
 from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
 
@@ -208,6 +209,8 @@ async def send_message(
     )
 
     await chat_repo.update_room(room_id, last_message_at=now)
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        await matrix_ai_waiting_assistant.handle_user_message(room_id, now)
 
     try:
         await chat_ticket_sync.sync_chat_message_to_ticket(
@@ -307,6 +310,7 @@ async def join_room(
     # Auto-assign this tech if the room has no assigned technician yet
     if not room.get("assigned_tech_user_id"):
         await chat_repo.assign_tech(room_id, user_id)
+        await matrix_ai_waiting_assistant.handle_technician_takeover(room_id, user_id)
 
     await audit_service.log_action(
         action="join",
@@ -342,6 +346,7 @@ async def assign_room(
         raise HTTPException(status_code=409, detail="Room is already assigned to another technician")
 
     await chat_repo.reassign_tech(room_id, user_id)
+    await matrix_ai_waiting_assistant.handle_technician_takeover(room_id, user_id)
 
     tech_mxid = current_user.get("matrix_user_id") or ""
     bot_mxid = _settings.matrix_bot_user_id or ""
@@ -392,6 +397,7 @@ async def close_room(
         raise HTTPException(status_code=403, detail="Not authorized to close this room")
 
     await chat_repo.update_room(room_id, status="closed", updated_at=datetime.utcnow())
+    await matrix_ai_waiting_assistant.handle_chat_closed(room_id)
 
     try:
         await matrix_service.send_message(

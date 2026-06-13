@@ -1,0 +1,427 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
+from urllib.parse import urljoin
+
+import bleach
+import httpx
+
+from app.core.config import get_settings
+from app.core.logging import log_error
+from app.repositories import chat as chat_repo
+from app.repositories import knowledge_base as kb_repo
+from app.services import audit as audit_service
+from app.services import matrix as matrix_service
+from app.services import webhook_monitor
+from app.services.realtime import refresh_notifier
+
+_running = False
+_stop = False
+_WORD_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._/-]{2,}")
+_ACK_MESSAGE = "Thanks — your request has been received. A technician will be assigned shortly."
+_AI_DISCLAIMER = "This recommendation was generated using AI and may not apply to your specific issue."
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def _enabled() -> bool:
+    settings = get_settings()
+    return bool(
+        settings.matrix_enabled
+        and settings.matrixbot_ai_waiting_assistant_enabled
+        and settings.matrixbot_ai_ollama_enabled
+        and (settings.matrixbot_ai_ollama_url or settings.matrixbot_ai_ollama_model)
+        and settings.matrixbot_ai_max_responses > 0
+    )
+
+
+def _normalise_tags(tags: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for tag in tags:
+        text = str(tag or "").strip().lower()
+        if not text or text in seen or len(text) > 80:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result[:40]
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
+    settings = get_settings()
+    base_url = (settings.matrixbot_ai_ollama_url or "http://127.0.0.1:11434").rstrip("/")
+    model = (settings.matrixbot_ai_ollama_model or "llama3").strip()
+    endpoint = urljoin(f"{base_url}/", "api/generate")
+    body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+    if json_format:
+        body["format"] = "json"
+    request_headers = {"Content-Type": "application/json"}
+
+    event_id: int | None = None
+    try:
+        event = await webhook_monitor.create_manual_event(
+            name="matrixbot.ai_waiting_assistant.ollama.generate",
+            target_url=endpoint,
+            payload={"request_body": body},
+            headers=request_headers,
+            max_attempts=1,
+            backoff_seconds=max(60, settings.matrixbot_ai_queue_retry_minutes * 60),
+        )
+        if event and event.get("id") is not None:
+            event_id = int(event["id"])
+    except Exception as exc:  # pragma: no cover - monitoring must not block AI work
+        log_error("AI waiting assistant failed to create webhook monitor event", error=str(exc))
+
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(endpoint, json=body, headers=request_headers)
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="failed",
+                    error_message=f"HTTP {exc.response.status_code}",
+                    response_status=exc.response.status_code,
+                    response_body=exc.response.text,
+                    request_headers=request_headers,
+                    request_body=body,
+                    response_headers=dict(exc.response.headers),
+                )
+            except Exception as monitor_exc:  # pragma: no cover - monitoring must not mask Ollama failures
+                log_error("AI waiting assistant failed to record Ollama failure", error=str(monitor_exc))
+        raise
+    except Exception as exc:
+        if event_id is not None:
+            try:
+                await webhook_monitor.record_manual_failure(
+                    event_id,
+                    attempt_number=1,
+                    status="error",
+                    error_message=str(exc),
+                    response_status=None,
+                    response_body=None,
+                    request_headers=request_headers,
+                    request_body=body,
+                )
+            except Exception as monitor_exc:  # pragma: no cover
+                log_error("AI waiting assistant failed to record Ollama error", error=str(monitor_exc))
+        raise
+
+    response_body = response.text
+    if event_id is not None:
+        try:
+            await webhook_monitor.record_manual_success(
+                event_id,
+                attempt_number=1,
+                response_status=response.status_code,
+                response_body=response_body,
+                request_headers=request_headers,
+                request_body=body,
+                response_headers=dict(response.headers),
+            )
+        except Exception as exc:  # pragma: no cover
+            log_error("AI waiting assistant failed to record Ollama success", error=str(exc))
+    payload = response.json()
+    return str(payload.get("response") or "").strip()
+
+
+async def _chat_transcript(room_id: int) -> str:
+    messages = await chat_repo.get_messages(room_id, limit=200)
+    lines: list[str] = []
+    for msg in messages:
+        body = bleach.clean(str(msg.get("body") or ""), tags=[], strip=True)
+        if not body.strip():
+            continue
+        sender = msg.get("sender_display_name") or msg.get("sender_matrix_id") or "Participant"
+        lines.append(f"{sender}: {' '.join(body.split())}")
+    return "\n".join(lines)[-12000:]
+
+
+async def _extract_keywords(transcript: str) -> list[str]:
+    prompt = f"""Extract keywords, products, technologies, error messages, categories, and other concepts from this support chat.
+Return JSON only with a key named keywords containing an array of lowercase strings. Do not include personal names, email addresses, phone numbers, or secrets.
+
+Chat transcript:
+{transcript}
+"""
+    text = await _ollama_generate(prompt, json_format=True)
+    data = _extract_json_object(text)
+    keywords = data.get("keywords") if isinstance(data, dict) else []
+    if isinstance(keywords, list):
+        parsed = _normalise_tags(keywords)
+        if parsed:
+            return parsed
+    return _normalise_tags(_WORD_RE.findall(transcript.lower()))[:20]
+
+
+async def _article_relevant(transcript: str, article: Mapping[str, Any]) -> bool:
+    content = bleach.clean(str(article.get("content") or ""), tags=[], strip=True)
+    prompt = f"""Decide whether this knowledge base article is genuinely relevant to the user's support issue.
+Return JSON only: {{"relevant": true}} or {{"relevant": false}}.
+
+Support chat:
+{transcript[:6000]}
+
+Article title: {article.get('title') or ''}
+Article summary: {article.get('summary') or ''}
+Article content excerpt: {content[:5000]}
+"""
+    text = await _ollama_generate(prompt, json_format=True)
+    data = _extract_json_object(text)
+    return bool(data.get("relevant"))
+
+
+async def _summarise_article(article: Mapping[str, Any]) -> str:
+    content = bleach.clean(str(article.get("content") or ""), tags=[], strip=True)
+    prompt = f"""Summarize this knowledge base article in plain language for a user waiting for support.
+Use no more than three concise sentences. Focus on the article purpose or resolution steps.
+
+Title: {article.get('title') or ''}
+Summary: {article.get('summary') or ''}
+Content: {content[:6000]}
+"""
+    summary = await _ollama_generate(prompt)
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(summary.split()))
+    return " ".join(sentences[:3]).strip()[:900]
+
+
+async def _audit(action: str, room_id: int, value: Mapping[str, Any] | None = None) -> None:
+    try:
+        await audit_service.log_action(
+            action=action,
+            entity_type="chat_room",
+            entity_id=room_id,
+            user_id=None,
+            new_value=dict(value or {}),
+        )
+    except Exception as exc:
+        log_error("AI waiting assistant audit failed", action=action, room_id=room_id, error=str(exc))
+
+
+async def _send_bot_message(room: Mapping[str, Any], body: str) -> bool:
+    try:
+        response = await matrix_service.send_message(str(room["matrix_room_id"]), body)
+        event_id = response.get("event_id")
+    except Exception as exc:
+        log_error("AI waiting assistant Matrix send failed", room_id=room.get("id"), error=str(exc))
+        return False
+    now = _utcnow()
+    msg = await chat_repo.add_message(
+        room_id=int(room["id"]),
+        matrix_event_id=event_id,
+        sender_matrix_id=get_settings().matrix_bot_user_id or "@myportal-ai-waiting-assistant",
+        body=body,
+        sender_user_id=None,
+        sender_display_name="AI Waiting Assistant",
+        sent_at=now,
+    )
+    await chat_repo.increment_ai_bot_response(int(room["id"]), now)
+    await refresh_notifier.broadcast_refresh(
+        topics=[f"chat:room:{int(room['id'])}"],
+        data={"message": _json_safe({**msg, "sent_at": now.isoformat()}), "room_id": int(room["id"])},
+    )
+    return True
+
+
+async def handle_user_message(room_id: int, sent_at: datetime | None = None) -> None:
+    await chat_repo.mark_user_activity(room_id, sent_at)
+    await chat_repo.cancel_active_ai_queue_for_room(room_id, "new_user_message_timer_reset")
+    await _audit("matrix_ai_waiting_assistant.user_activity", room_id)
+
+
+async def handle_technician_takeover(room_id: int, user_id: int | None = None) -> None:
+    await chat_repo.cancel_active_ai_queue_for_room(room_id, "technician_assigned")
+    await _audit("matrix_ai_waiting_assistant.technician_takeover", room_id, {"user_id": user_id})
+
+
+async def handle_chat_closed(room_id: int) -> None:
+    await chat_repo.cancel_active_ai_queue_for_room(room_id, "chat_closed")
+    await _audit("matrix_ai_waiting_assistant.queue_cancelled", room_id, {"reason": "chat_closed"})
+
+
+async def _eligible_room(room: Mapping[str, Any]) -> bool:
+    if not _enabled():
+        return False
+    if room.get("status") != "open" or room.get("assigned_tech_user_id"):
+        return False
+    return int(room.get("ai_bot_response_count") or 0) < get_settings().matrixbot_ai_max_responses
+
+
+async def scan_waiting_rooms_once() -> None:
+    if not _enabled():
+        return
+    settings = get_settings()
+    due_before = _utcnow() - timedelta(minutes=settings.matrixbot_ai_response_delay_minutes)
+    rooms = await chat_repo.list_ai_waiting_candidate_rooms(due_before)
+    for room in rooms:
+        if not await _eligible_room(room):
+            continue
+        count = int(room.get("ai_bot_response_count") or 0)
+        if count == 0:
+            if await _send_bot_message(room, _ACK_MESSAGE):
+                await _audit("matrix_ai_waiting_assistant.acknowledgement_sent", int(room["id"]))
+            continue
+        if count == 1 and settings.matrixbot_ai_max_responses >= 2:
+            active = await chat_repo.get_active_ai_queue_item(int(room["id"]))
+            if active:
+                continue
+            now = _utcnow()
+            queue = await chat_repo.create_ai_queue_item(
+                chat_room_id=int(room["id"]),
+                queue_identifier=uuid.uuid4().hex,
+                expires_at=now + timedelta(minutes=settings.matrixbot_ai_queue_timeout_minutes),
+                next_attempt_at=now,
+                created_for_response_number=2,
+            )
+            await _audit("matrix_ai_waiting_assistant.analysis_queued", int(room["id"]), {"queue_id": queue.get("id")})
+
+
+async def _process_queue_item(item: Mapping[str, Any]) -> None:
+    room_id = int(item["chat_room_id"])
+    room = await chat_repo.get_room(room_id)
+    settings = get_settings()
+    now = _utcnow()
+    if not room or not await _eligible_room(room):
+        await chat_repo.update_ai_queue_item(int(item["id"]), status="cancelled", cancellation_reason="room_no_longer_eligible")
+        await _audit("matrix_ai_waiting_assistant.queue_cancelled", room_id, {"reason": "room_no_longer_eligible"})
+        return
+    expires_at = _as_datetime(item.get("expires_at"))
+    if expires_at and expires_at <= now:
+        await chat_repo.update_ai_queue_item(int(item["id"]), status="timed_out", cancellation_reason="maximum_lifetime_exceeded")
+        await _audit("matrix_ai_waiting_assistant.queue_timed_out", room_id, {"queue_id": item.get("id")})
+        return
+    await chat_repo.update_ai_queue_item(int(item["id"]), status="processing", last_attempt_at=now, retry_count=int(item.get("retry_count") or 0) + 1)
+    await _audit("matrix_ai_waiting_assistant.analysis_requested", room_id, {"queue_id": item.get("id")})
+    try:
+        transcript = await _chat_transcript(room_id)
+        keywords = await _extract_keywords(transcript)
+        keyword_set = set(keywords)
+        candidates: list[dict[str, Any]] = []
+        for article in await kb_repo.list_articles(include_unpublished=False):
+            tags = _normalise_tags(article.get("ai_tags") or [])
+            if not tags:
+                continue
+            matched = sorted(keyword_set & set(tags))
+            confidence = (len(matched) / len(tags)) * 100 if tags else 0.0
+            if confidence >= settings.matrixbot_ai_kb_confidence_threshold:
+                relevant = await _article_relevant(transcript, article)
+                candidates.append({
+                    "id": article.get("id"), "slug": article.get("slug"), "title": article.get("title"),
+                    "article_tags": tags, "matched_tags": matched, "confidence": round(confidence, 2),
+                    "semantic_relevant": relevant, "sent": False, "analysed_at": now.isoformat(),
+                })
+        eligible = [c for c in candidates if c["semantic_relevant"]]
+        eligible.sort(key=lambda c: c["confidence"], reverse=True)
+        sent = False
+        if eligible and int(room.get("ai_bot_response_count") or 0) < settings.matrixbot_ai_max_responses:
+            already = chat_repo.decode_ai_json_field(room.get("ai_matched_articles")) or []
+            sent_ids = {str(a.get("id") or a.get("slug")) for a in already if a.get("sent")}
+            selected = next((c for c in eligible if str(c.get("id") or c.get("slug")) not in sent_ids), None)
+            if selected:
+                article = await kb_repo.get_article_by_id(int(selected["id"]))
+                if article:
+                    summary = await _summarise_article(article)
+                    base = str(settings.public_base_url or settings.portal_url or "").rstrip("/")
+                    path = f"/knowledge-base/articles/{article['slug']}"
+                    link = f"{base}{path}" if base else path
+                    message = f"While you wait, this article may help: {article['title']}\n{link}\n\n{summary}\n\n{_AI_DISCLAIMER}"
+                    if await _send_bot_message(room, message):
+                        selected["sent"] = True
+                        selected["sent_at"] = _utcnow().isoformat()
+                        sent = True
+                        await _audit("matrix_ai_waiting_assistant.article_recommendation_sent", room_id, selected)
+        latest_confidence = eligible[0]["confidence"] if eligible else (max((c["confidence"] for c in candidates), default=None))
+        await chat_repo.update_ai_analysis(room_id, extracted_keywords=keywords, matched_articles=candidates, confidence=latest_confidence)
+        await chat_repo.update_ai_queue_item(int(item["id"]), status="completed", result_payload={"keywords": keywords, "matches": candidates, "sent": sent})
+        await _audit("matrix_ai_waiting_assistant.analysis_completed", room_id, {"matches": len(candidates), "sent": sent})
+    except Exception as exc:
+        log_error("AI waiting assistant Ollama analysis failed", room_id=room_id, error=str(exc))
+        retry_at = now + timedelta(minutes=settings.matrixbot_ai_queue_retry_minutes)
+        if expires_at and retry_at >= expires_at:
+            await chat_repo.update_ai_queue_item(int(item["id"]), status="timed_out", cancellation_reason="ollama_unavailable_timeout")
+            await _audit("matrix_ai_waiting_assistant.queue_timed_out", room_id, {"error": str(exc)[:200]})
+        else:
+            await chat_repo.update_ai_queue_item(int(item["id"]), status="queued", next_attempt_at=retry_at)
+            await _audit("matrix_ai_waiting_assistant.ollama_retry_queued", room_id, {"error": str(exc)[:200], "retry_at": retry_at.isoformat()})
+
+
+async def process_queue_once() -> None:
+    if not _enabled():
+        return
+    due = await chat_repo.list_due_ai_queue_items(_utcnow(), limit=25)
+    await asyncio.gather(*(_process_queue_item(item) for item in due))
+
+
+async def run_worker_loop() -> None:
+    global _running, _stop
+    if _running:
+        return
+    _running = True
+    _stop = False
+    try:
+        while not _stop:
+            try:
+                if not _enabled():
+                    await chat_repo.cancel_all_active_ai_queue("feature_or_ollama_disabled")
+                    await asyncio.sleep(60)
+                    continue
+                await scan_waiting_rooms_once()
+                await process_queue_once()
+            except Exception as exc:
+                log_error("AI waiting assistant worker error", error=str(exc))
+            await asyncio.sleep(60)
+    finally:
+        _running = False
+
+
+def stop_worker_loop() -> None:
+    global _stop
+    _stop = True

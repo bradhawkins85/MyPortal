@@ -72,6 +72,53 @@
   {% endif %}
 </div>
 {% endif %}
+
+{% if room.ai_show_match_tags %}
+<section class="chat-ai-diagnostics card card--panel" aria-labelledby="chat-ai-diagnostics-title">
+  <div class="card__header">
+    <div>
+      <h2 class="card__title" id="chat-ai-diagnostics-title">AI Waiting Assistant analysis</h2>
+      <p class="card__subtitle">Technician-only visibility into extracted chat tags, article tag matches, confidence scoring, and sent recommendations.</p>
+    </div>
+  </div>
+  <div class="chat-ai-diagnostics__grid">
+    <div>
+      <strong>Extracted chat keywords</strong>
+      <div class="tag-list chat-ai-diagnostics__tags">
+        {% for keyword in room.ai_extracted_keywords_list %}<span class="tag">{{ keyword | e }}</span>{% endfor %}
+        {% if not room.ai_extracted_keywords_list %}<span class="card__empty">No AI keywords extracted yet.</span>{% endif %}
+      </div>
+    </div>
+    <dl class="chat-ai-diagnostics__stats">
+      <dt>Responses sent</dt><dd>{{ room.ai_bot_response_count or 0 }}</dd>
+      <dt>Last response</dt><dd>{% if room.ai_last_bot_response_at %}<span data-utc="{{ room.ai_last_bot_response_at }}">{{ room.ai_last_bot_response_at }}</span>{% else %}—{% endif %}</dd>
+      <dt>Last analysis</dt><dd>{% if room.ai_last_analysis_at %}<span data-utc="{{ room.ai_last_analysis_at }}">{{ room.ai_last_analysis_at }}</span>{% else %}—{% endif %}</dd>
+      <dt>Latest confidence</dt><dd>{% if room.ai_last_confidence is not none %}{{ '%.2f'|format(room.ai_last_confidence) }}%{% else %}—{% endif %}</dd>
+    </dl>
+  </div>
+  <div class="table-responsive">
+    <table class="table chat-ai-diagnostics__table">
+      <thead><tr><th>Suggested article</th><th>Confidence</th><th>Matched tags</th><th>Article tags</th><th>Semantic</th><th>Timestamp</th><th>Sent</th></tr></thead>
+      <tbody>
+        {% for match in room.ai_matched_articles_list %}
+        <tr>
+          <td>{% if match.slug %}<a href="/knowledge-base/articles/{{ match.slug }}" target="_blank" rel="noopener">{{ match.title or match.slug }}</a>{% else %}{{ match.title or 'Article #' ~ match.id }}{% endif %}</td>
+          <td>{{ '%.2f'|format(match.confidence or 0) }}%</td>
+          <td>{% for tag in match.matched_tags or [] %}<span class="tag tag--success">{{ tag | e }}</span>{% else %}—{% endfor %}</td>
+          <td>{% for tag in match.article_tags or [] %}<span class="tag tag--muted">{{ tag | e }}</span>{% else %}—{% endfor %}</td>
+          <td>{{ 'Relevant' if match.semantic_relevant else 'Not relevant' }}</td>
+          <td>{% if match.analysed_at %}<span data-utc="{{ match.analysed_at }}">{{ match.analysed_at }}</span>{% else %}—{% endif %}</td>
+          <td>{{ 'Yes' if match.sent else 'No' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="card__empty">No article matches recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
 <div class="chat-layout">
   <div class="chat-messages" id="chat-messages">
     {% for msg in messages %}
@@ -171,6 +218,13 @@
 .chat-meta-bar__link { color: #bfdbfe; font-weight: 600; text-decoration: none; }
 .chat-meta-bar__link:hover { text-decoration: underline; }
 .chat-layout { display: flex; flex-direction: column; height: calc(100vh - 12rem); }
+.chat-ai-diagnostics { margin: 0 0 1rem; }
+.chat-ai-diagnostics__grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; margin-bottom: 1rem; }
+.chat-ai-diagnostics__tags { margin-top: 0.5rem; }
+.chat-ai-diagnostics__stats { display: grid; grid-template-columns: auto auto; gap: 0.35rem 0.75rem; margin: 0; }
+.chat-ai-diagnostics__stats dt { font-weight: 700; color: var(--color-text-muted, #6b7280); }
+.chat-ai-diagnostics__table th, .chat-ai-diagnostics__table td { vertical-align: top; }
+@media (max-width: 800px) { .chat-ai-diagnostics__grid { grid-template-columns: 1fr; } }
 .chat-messages { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
 .chat-message { padding: 0.5rem 0.75rem; border-radius: 0.5rem; background: var(--color-surface-raised, #f8fafc); max-width: 80%; color: var(--color-text, #111827); }
 .chat-message--self { align-self: flex-end; background: var(--color-primary-subtle, #eff6ff); }
