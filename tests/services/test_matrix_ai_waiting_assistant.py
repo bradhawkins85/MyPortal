@@ -97,3 +97,91 @@ def test_scan_waiting_rooms_queues_second_response_analysis(monkeypatch):
 
     assert created[0]["chat_room_id"] == 42
     assert created[0]["created_for_response_number"] == 2
+
+
+def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
+    settings = SimpleNamespace(
+        matrixbot_ai_ollama_url="http://ollama.test",
+        matrixbot_ai_ollama_model="llama3",
+    )
+    events: list[dict] = []
+    successes: list[dict] = []
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+
+    async def fake_create_manual_event(**kwargs):
+        events.append(kwargs)
+        return {"id": 123}
+
+    async def fake_record_manual_success(event_id, **kwargs):
+        successes.append({"event_id": event_id, **kwargs})
+        return {"id": event_id, "status": "succeeded"}
+
+    monkeypatch.setattr(assistant.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(assistant.webhook_monitor, "record_manual_success", fake_record_manual_success)
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": "ok"}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json):
+            return FakeResponse()
+
+    monkeypatch.setattr(assistant.httpx, "AsyncClient", FakeClient)
+
+    result = asyncio.run(assistant._ollama_generate("secret transcript", json_format=True))
+
+    assert result == "ok"
+    assert events[0]["name"] == "MATRIXBOT_AI Ollama generate"
+    assert events[0]["target_url"] == "http://ollama.test/api/generate"
+    assert events[0]["payload"]["prompt_length"] == len("secret transcript")
+    assert "prompt_preview" not in events[0]["payload"]
+    assert successes[0]["event_id"] == 123
+    assert successes[0]["response_status"] == 200
+
+
+def test_send_bot_message_records_webhook_monitor_failure(monkeypatch):
+    settings = SimpleNamespace(matrix_bot_user_id="@bot:example.test")
+    events: list[dict] = []
+    failures: list[dict] = []
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+
+    async def fake_create_manual_event(**kwargs):
+        events.append(kwargs)
+        return {"id": 456}
+
+    async def fake_record_manual_failure(event_id, **kwargs):
+        failures.append({"event_id": event_id, **kwargs})
+        return {"id": event_id, "status": "failed"}
+
+    async def fake_send_message(room_id, body):
+        raise RuntimeError("matrix unavailable")
+
+    monkeypatch.setattr(assistant.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(assistant.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
+    monkeypatch.setattr(assistant.matrix_service, "send_message", fake_send_message)
+
+    sent = asyncio.run(assistant._send_bot_message({"id": 42, "matrix_room_id": "!room:id"}, "hello"))
+
+    assert sent is False
+    assert events[0]["name"] == "MATRIXBOT_AI Matrix message"
+    assert events[0]["target_url"] == "matrix://!room:id"
+    assert events[0]["payload"]["message_preview"] == "hello"
+    assert failures[0]["event_id"] == 456
+    assert failures[0]["error_message"] == "matrix unavailable"
