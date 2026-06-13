@@ -60,6 +60,7 @@ from app.schemas.tray import (
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
 from app.services import matrix as matrix_service
+from app.services import matrix_ai_waiting_assistant
 from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tickets as tickets_service
 from app.services import tray as tray_service
@@ -1611,6 +1612,7 @@ async def popup_chat_send_message(
         sent_at=sent_at,
     )
     await chat_repo.update_room(room_id, last_message_at=sent_at, updated_at=sent_at)
+    await matrix_ai_waiting_assistant.handle_user_message(room_id, sent_at)
 
     try:
         await chat_ticket_sync.sync_chat_message_to_ticket(
