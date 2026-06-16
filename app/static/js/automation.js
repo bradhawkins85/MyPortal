@@ -130,6 +130,22 @@
       }),
     },
     {
+      label: 'Reply is an internal note',
+      value: toJsonTemplate({
+        match: {
+          'reply.is_internal': true,
+        },
+      }),
+    },
+    {
+      label: 'Reply is a public message',
+      value: toJsonTemplate({
+        match: {
+          'reply.is_internal': false,
+        },
+      }),
+    },
+    {
       label: 'Module equals Trello',
       value: toJsonTemplate({
         match: {
@@ -1655,7 +1671,27 @@
         const fieldInput = document.createElement('input');
         fieldInput.className = 'form-input';
         fieldInput.type = 'text';
-        fieldInput.placeholder = 'ticket.status';
+        fieldInput.placeholder = 'ticket.status or reply.is_internal';
+        fieldInput.setAttribute('list', 'automation-filter-field-suggestions');
+        if (!document.getElementById('automation-filter-field-suggestions')) {
+          const datalist = document.createElement('datalist');
+          datalist.id = 'automation-filter-field-suggestions';
+          [
+            'ticket.status',
+            'ticket.priority',
+            'ticket.age_days',
+            'ticket.updated_age_hours',
+            'ticket.last_reply_age_hours',
+            'ticket_update.actor_type',
+            'reply.is_internal',
+            'reply.kind',
+          ].forEach((field) => {
+            const option = document.createElement('option');
+            option.value = field;
+            datalist.appendChild(option);
+          });
+          document.body.appendChild(datalist);
+        }
         fieldInput.value = row.fieldPath || '';
         fieldInput.addEventListener('input', () => handleRowChange(index, 'fieldPath', fieldInput.value));
 
@@ -1784,17 +1820,6 @@
         advancedEditor.value = initialRaw;
         modeInput.value = 'advanced';
         setAdvancedMode(true);
-      }
-    } else if (FILTER_SNIPPETS.length > 0) {
-      try {
-        const defaultSnippet = FILTER_SNIPPETS[0];
-        const parsed = JSON.parse(defaultSnippet.value);
-        const rows = filtersToRows(parsed);
-        if (rows.length) {
-          builderState = { all: rows };
-        }
-      } catch (error) {
-        // Ignore malformed fallback snippet.
       }
     }
 
