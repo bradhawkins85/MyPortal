@@ -649,3 +649,52 @@ async def test_execute_policy_step_disable_myportal_account_missing_email(monkey
         )
 
     get_user.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_run_offboarding_step_converts_mailbox_before_license_removal(monkeypatch):
+    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+    )
+    call_order: list[str] = []
+
+    async def _convert(company_id: int, upn: str) -> None:
+        call_order.append("convert")
+        assert company_id == 9
+        assert upn == "offboard.user@example.com"
+
+    async def _graph_get(_token: str, url: str) -> dict[str, object]:
+        call_order.append("get_licenses")
+        assert url.endswith("/users/user-2/licenseDetails")
+        return {"value": [{"skuId": "sku-1"}]}
+
+    async def _graph_post(_token: str, url: str, payload: dict[str, object]) -> dict[str, object]:
+        call_order.append("remove_licenses")
+        assert url.endswith("/users/user-2/assignLicense")
+        assert payload == {"addLicenses": [], "removeLicenses": ["sku-1"]}
+        return {}
+
+    monkeypatch.setattr(workflows.m365_service, "convert_mailbox_to_shared", AsyncMock(side_effect=_convert))
+    monkeypatch.setattr(workflows.m365_service, "_graph_get", AsyncMock(side_effect=_graph_get))
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", AsyncMock(side_effect=_graph_post))
+
+    result = await workflows._run_offboarding_step(
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        step_config={
+            "disable_sign_in": False,
+            "convert_to_shared_mailbox": True,
+            "revoke_licenses": True,
+            "remove_from_groups": False,
+        },
+        vars_map={},
+    )
+
+    assert call_order == ["convert", "get_licenses", "remove_licenses"]
+    assert "convert_to_shared_mailbox" in result["steps_executed"]
+    assert result["converted_to_shared_mailbox"] is True
+    assert result["licenses_removed"] == 1

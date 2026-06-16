@@ -1942,6 +1942,12 @@ async def _run_offboarding_step(
     disable_sign_in = bool(
         _step.get("disable_sign_in", policy_config.get("offboarding_disable_sign_in", True))
     )
+    convert_to_shared_mailbox = bool(
+        _step.get(
+            "convert_to_shared_mailbox",
+            policy_config.get("offboarding_convert_to_shared_mailbox", False),
+        )
+    )
     remove_licenses = bool(
         _step.get("revoke_licenses", policy_config.get("offboarding_remove_licenses", True))
     )
@@ -2083,6 +2089,20 @@ async def _run_offboarding_step(
             else:
                 raise
 
+    if convert_to_shared_mailbox and user_upn:
+        try:
+            await m365_service.convert_mailbox_to_shared(company_id, user_upn)
+            steps_executed.append("convert_to_shared_mailbox")
+        except M365Error as exc:
+            if exc.http_status == 404:
+                log_warning(
+                    "Offboarding: mailbox conversion skipped (mailbox not found)",
+                    user_id=user_id,
+                    user_upn=user_upn,
+                )
+            else:
+                raise
+
     if remove_licenses:
         license_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
             access_token,
@@ -2151,6 +2171,7 @@ async def _run_offboarding_step(
         "licenses_removed": removed_license_count,
         "groups_removed": removed_group_count,
         "mailbox_rules_disabled": mailbox_rules_disabled_count,
+        "converted_to_shared_mailbox": "convert_to_shared_mailbox" in steps_executed,
         "out_of_office_set": "set_out_of_office" in steps_executed,
         "email_forwarding_set": "set_email_forwarding" in steps_executed,
         "mailbox_access_requested_for": mailbox_grant_email_list,

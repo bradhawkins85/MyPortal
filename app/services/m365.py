@@ -4963,6 +4963,32 @@ async def get_shared_mailboxes(company_id: int) -> list[dict[str, Any]]:
     ]
 
 
+async def convert_mailbox_to_shared(company_id: int, upn: str) -> None:
+    """Convert a user mailbox to a shared mailbox using Exchange Online.
+
+    Issues ``Set-Mailbox -Identity <upn> -Type Shared`` via the Exchange Online
+    PowerShell REST ``InvokeCommand`` API. This should be completed before
+    license removal in offboarding workflows so Exchange Online can access the
+    mailbox while it is still licensed.
+    """
+    normalised = str(upn or "").strip()
+    if not normalised:
+        raise M365Error("A user principal name is required", http_status=400)
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Set-Mailbox",
+        {"Identity": normalised, "Type": "Shared"},
+    )
+    log_info(
+        "M365 mailbox converted to shared for offboarded user",
+        company_id=company_id,
+        upn=normalised,
+    )
+
+
 async def enable_user_archive(company_id: int, upn: str) -> None:
     """Enable the in-place (online) archive mailbox for ``upn``.
 
