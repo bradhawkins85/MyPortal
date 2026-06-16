@@ -4,6 +4,12 @@ from app.services import automations as automations_service
 from app.services.tickets import _extract_sms_recipient_from_external_reference
 
 
+def test_ticket_reply_repository_does_not_auto_send_sms():
+    source = Path("app/repositories/tickets.py").read_text()
+    assert "send_sms(" not in source
+    assert "sms_ticket_links" not in source
+
+
 def test_ticket_replied_trigger_event_is_available():
     values = {item["value"] for item in automations_service.list_trigger_events()}
     assert "tickets.replied" in values
