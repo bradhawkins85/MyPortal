@@ -17,6 +17,21 @@ from starlette.datastructures import URL
 router = APIRouter(tags=["Cart"])
 
 
+def _quantize_money(value: Any) -> Decimal:
+    """Return *value* as a two-decimal Decimal for cart money calculations."""
+    if isinstance(value, Decimal):
+        raw = value
+    else:
+        try:
+            raw = Decimal(str(value or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            raw = Decimal("0")
+    try:
+        return raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0.00")
+
+
 @lru_cache(maxsize=1)
 def _main():
     from app import main as main_module
@@ -395,21 +410,10 @@ async def view_cart(
             }
 
     def _resolve_product_price(product: Mapping[str, Any]) -> Decimal:
-        try:
-            value = main_module.shop_service.get_product_price(product, is_vip=is_vip).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-        except (InvalidOperation, TypeError, ValueError):
-            value = Decimal("0.00")
-        return value
+        return _quantize_money(main_module.shop_service.get_product_price(product, is_vip=is_vip))
 
     def _normalise_price(value: Any) -> Decimal:
-        if isinstance(value, Decimal):
-            return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        try:
-            return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        except (InvalidOperation, TypeError, ValueError):
-            return Decimal("0.00")
+        return _quantize_money(value)
 
     for item in items:
         quantity = int(item.get("quantity") or 0)
@@ -507,7 +511,7 @@ async def view_cart(
             product_lookup,
             active_freight_rules,
         )
-        freight_total = freight_summary["freight_total"]
+        freight_total = _quantize_money(freight_summary["freight_total"])
         freight_breakdown = freight_summary["breakdown"]
 
     cart_subtotal = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -596,13 +600,9 @@ async def view_cart(
                     stock_level = 0
                 if stock_level <= 0:
                     return
-                try:
-                    price_value = main_module.shop_service.get_product_price(product, is_vip=is_vip).quantize(
-                        Decimal("0.01"),
-                        rounding=ROUND_HALF_UP,
-                    )
-                except (InvalidOperation, TypeError, ValueError):
-                    price_value = Decimal("0.00")
+                price_value = _quantize_money(
+                    main_module.shop_service.get_product_price(product, is_vip=is_vip)
+                )
                 entry = {
                     "product_id": target_id,
                     "name": product.get("name"),
