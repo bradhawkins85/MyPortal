@@ -1,5 +1,6 @@
 """Tests for the 'Require PO' option on company edit and cart place-order."""
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -9,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from app import main
+from app.repositories import freight_rules as freight_rules_repo
 from app.core.database import db
 from app.security.session import SessionData
 
@@ -232,6 +234,10 @@ def _cart_view_test(monkeypatch, active_session, require_po_value) -> Any:
         captured["extra"] = extra
         return HTMLResponse("ok")
 
+    async def fake_list_rules(*, active_only=False):
+        return []
+
+    monkeypatch.setattr(freight_rules_repo, "list_rules", fake_list_rules)
     monkeypatch.setattr(main, "_load_company_section_context", fake_ctx)
     monkeypatch.setattr(main.cart_repo, "list_items", fake_list_items)
     monkeypatch.setattr(main, "_render_template", fake_render)
@@ -252,6 +258,64 @@ def test_cart_view_passes_require_po_true(monkeypatch, active_session):
 
 def test_cart_view_defaults_require_po_false_when_missing(monkeypatch, active_session):
     assert _cart_view_test(monkeypatch, active_session, None) is False
+
+
+def test_cart_view_accepts_integer_catalog_prices(monkeypatch, active_session):
+    captured: dict[str, Any] = {}
+
+    async def fake_ctx(request, *, permission_field):
+        company = {"id": 1, "name": "E", "is_vip": 0, "payment_method": "invoice_prepay"}
+        return ({"id": 10}, {"company_id": 1, "can_access_cart": True}, company, 1, None)
+
+    async def fake_list_items(session_id):
+        return [
+            {
+                "product_id": 42,
+                "quantity": 2,
+                "unit_price": 9,
+                "product_name": "Widget",
+                "product_sku": "W42",
+            }
+        ]
+
+    async def fake_list_products_by_ids(product_ids, *, company_id=None):
+        return [
+            {
+                "id": 42,
+                "name": "Widget",
+                "sku": "W42",
+                "price": 10,
+                "stock": 5,
+                "cross_sell_products": [],
+                "upsell_products": [],
+            }
+        ]
+
+    async def fake_upsert_item(**kwargs):
+        return None
+
+    async def fake_render(template_name, request_obj, user_obj, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("ok")
+
+    async def fake_list_rules(*, active_only=False):
+        return []
+
+    monkeypatch.setattr(freight_rules_repo, "list_rules", fake_list_rules)
+    monkeypatch.setattr(main, "_load_company_section_context", fake_ctx)
+    monkeypatch.setattr(main.cart_repo, "list_items", fake_list_items)
+    monkeypatch.setattr(main.cart_repo, "upsert_item", fake_upsert_item)
+    monkeypatch.setattr(main.shop_repo, "list_products_by_ids", fake_list_products_by_ids)
+    monkeypatch.setattr(main.shop_service, "get_product_price", lambda product, *, is_vip=False: 10)
+    monkeypatch.setattr(main, "_render_template", fake_render)
+
+    with TestClient(main.app, follow_redirects=False) as client:
+        response = client.get("/cart")
+
+    assert response.status_code == 200
+    assert captured["extra"]["cart_subtotal"] == Decimal("20.00")
+    assert captured["extra"]["cart_total"] == Decimal("20.00")
+    assert captured["extra"]["cart_items"][0]["unit_price"] == Decimal("10.00")
 
 
 # ---------------------------------------------------------------------------
