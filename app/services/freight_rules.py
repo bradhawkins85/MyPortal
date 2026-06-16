@@ -29,8 +29,8 @@ def _to_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _quantize_money(amount: Decimal) -> Decimal:
-    return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+def _quantize_money(amount: Any) -> Decimal:
+    return _to_decimal(amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _classify_item_size(product: Mapping[str, Any]) -> str:
