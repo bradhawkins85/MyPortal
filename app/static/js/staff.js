@@ -1537,5 +1537,55 @@
       });
     });
 
+
+    function removeApprovalRow(button, tableSelector) {
+      const row = button.closest('tr');
+      if (row) {
+        row.remove();
+      }
+      const tbody = document.querySelector(`${tableSelector} tbody`);
+      if (tbody && !tbody.querySelector('tr')) {
+        const section = document.querySelector(tableSelector)?.closest('section');
+        if (section) {
+          section.remove();
+        }
+      }
+    }
+
+    container.querySelectorAll('[data-offboarding-approve]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-offboarding-approve');
+        if (!id) {
+          return;
+        }
+        const comment = window.prompt('Approval comment (optional):') ?? '';
+        try {
+          await approveOffboarding(id, comment);
+          removeApprovalRow(button, '#staff-offboarding-requests-table');
+        } catch (error) {
+          alert(`Failed to approve offboarding request: ${error.message}`);
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-offboarding-deny]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-offboarding-deny');
+        if (!id) {
+          return;
+        }
+        const reason = window.prompt('Deny reason (required):');
+        if (!reason) {
+          return;
+        }
+        try {
+          await denyOffboarding(id, reason);
+          removeApprovalRow(button, '#staff-offboarding-requests-table');
+        } catch (error) {
+          alert(`Failed to deny offboarding request: ${error.message}`);
+        }
+      });
+    });
+
   });
 })();
