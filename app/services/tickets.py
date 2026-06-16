@@ -402,6 +402,27 @@ def _build_user_snapshot(user: Mapping[str, Any] | None) -> Mapping[str, Any] | 
     return snapshot
 
 
+
+def _extract_sms_recipient_from_external_reference(value: Any) -> str | None:
+    """Return the mobile number embedded in an SMS ticket external reference."""
+
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw.lower().startswith("sms:"):
+        return None
+    parts = raw.split(":", 2)
+    if len(parts) < 2:
+        return None
+    recipient = parts[1].strip()
+    return recipient or None
+
+
+def _attach_sms_context(ticket: TicketRecord) -> None:
+    recipient = _extract_sms_recipient_from_external_reference(ticket.get("external_reference"))
+    ticket["sms"] = {"recipient": recipient} if recipient else None
+
+
 async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched: TicketRecord = dict(ticket)
 
@@ -532,6 +553,7 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         )
         latest_reply = reply
     enriched["latest_reply"] = latest_reply
+    _attach_sms_context(enriched)
 
     return enriched
 
@@ -640,6 +662,24 @@ async def _emit_ticket_event(
         return
 
     await automations_service.handle_event(event_name, context)
+
+
+async def emit_ticket_replied_event(
+    ticket: Mapping[str, Any] | int,
+    *,
+    actor_type: str | None = None,
+    actor: Mapping[str, Any] | None = None,
+    trigger_automations: bool = True,
+) -> None:
+    """Emit a ``tickets.replied`` automation event with actor metadata."""
+
+    await _emit_ticket_event(
+        "tickets.replied",
+        ticket,
+        actor_type=actor_type,
+        actor=actor,
+        trigger_automations=trigger_automations,
+    )
 
 
 async def emit_ticket_updated_event(
