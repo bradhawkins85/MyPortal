@@ -353,6 +353,7 @@ async def staff_page(
 
     staff_members: list[dict[str, Any]] = []
     staff_pending_requests: list[dict[str, Any]] = []
+    staff_pending_offboarding_requests: list[dict[str, Any]] = []
     departments: list[str] = []
     field_config: list[dict[str, Any]] = []
     custom_field_definitions: list[dict[str, Any]] = []
@@ -437,7 +438,7 @@ async def staff_page(
             for entry in audit_logs:
                 action = str(entry.get("action") or "").strip()
                 metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
-                if action == "staff.onboarding.requested":
+                if action in {"staff.onboarding.requested", "staff.offboarding.requested"}:
                     raw_ids = metadata.get("approver_user_ids")
                     if isinstance(raw_ids, list):
                         approver_user_ids = [
@@ -498,7 +499,7 @@ async def staff_page(
                     f"Waiting for external completion: callback pending for step "
                     f"{current_step.replace('_', ' ')}."
                 )
-            elif workflow_state == "awaiting_approval":
+            elif workflow_state in {"awaiting_approval", "offboarding_awaiting_approval"}:
                 if approver_emails:
                     member["onboarding_pending_details"] = (
                         "Waiting for approval from: " + ", ".join(approver_emails)
@@ -508,6 +509,12 @@ async def staff_page(
             else:
                 member["onboarding_pending_details"] = None
         company_email_domains = list((company or {}).get("email_domains") or [])
+        staff_pending_offboarding_requests = [
+            member
+            for member in staff_members
+            if str(member.get("account_action") or "").strip().lower() == "offboard requested"
+            or str(member.get("onboarding_status") or "").strip().lower() == staff_onboarding_workflow_service.STATE_OFFBOARDING_AWAITING_APPROVAL
+        ]
         staff_members = [
             member
             for member in staff_members
@@ -560,6 +567,7 @@ async def staff_page(
         "departments": departments,
         "staff_members": cast(list[dict[str, Any]], _serialise_for_json(staff_members)),
         "staff_pending_requests": cast(list[dict[str, Any]], _serialise_for_json(staff_pending_requests)),
+        "staff_pending_offboarding_requests": cast(list[dict[str, Any]], _serialise_for_json(staff_pending_offboarding_requests)),
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
         "show_ex_staff": show_ex_staff_flag,
