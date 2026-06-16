@@ -848,3 +848,21 @@ async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tic
     assert captured[0][1]["ticket_id"] == 1
     assert captured[0][1]["status"] == "closed"
     assert captured[0][1]["context"]["ticket"]["id"] == 1
+
+
+def test_filters_match_supports_reply_internal_note_context():
+    internal_context = {"reply": {"is_internal": True, "kind": "internal_note"}}
+    public_context = {"reply": {"is_internal": False, "kind": "message"}}
+
+    assert automations_service._filters_match(
+        {"match": {"reply.is_internal": True}},
+        internal_context,
+    )
+    assert automations_service._filters_match(
+        {"match": {"reply.kind": "message"}},
+        public_context,
+    )
+    assert not automations_service._filters_match(
+        {"match": {"reply.is_internal": True}},
+        public_context,
+    )

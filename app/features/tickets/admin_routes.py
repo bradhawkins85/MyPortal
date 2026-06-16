@@ -1028,7 +1028,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
                 author_id = int(author_id)
             except (TypeError, ValueError, AttributeError):
                 author_id = None
-        await tickets_repo.create_reply(
+        created_reply = await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=author_id,
             body=sanitized_body.html,
@@ -1077,6 +1077,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             ticket_id,
             actor_type="technician",
             actor=current_user,
+            reply=created_reply,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))

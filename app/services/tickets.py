@@ -605,6 +605,7 @@ async def _emit_ticket_event(
     *,
     actor_type: str | None = None,
     actor: Mapping[str, Any] | None = None,
+    reply: Mapping[str, Any] | None = None,
     trigger_automations: bool = True,
 ) -> None:
     """Shared helper that builds ticket context and fires an automation event."""
@@ -657,6 +658,12 @@ async def _emit_ticket_event(
         "ticket": enriched,
         "ticket_update": metadata,
     }
+    if isinstance(reply, Mapping):
+        is_internal = bool(reply.get("is_internal"))
+        reply_context = dict(reply)
+        reply_context["is_internal"] = is_internal
+        reply_context["kind"] = "internal_note" if is_internal else "message"
+        context["reply"] = reply_context
 
     if not trigger_automations:
         return
@@ -669,6 +676,7 @@ async def emit_ticket_replied_event(
     *,
     actor_type: str | None = None,
     actor: Mapping[str, Any] | None = None,
+    reply: Mapping[str, Any] | None = None,
     trigger_automations: bool = True,
 ) -> None:
     """Emit a ``tickets.replied`` automation event with actor metadata."""
@@ -678,6 +686,7 @@ async def emit_ticket_replied_event(
         ticket,
         actor_type=actor_type,
         actor=actor,
+        reply=reply,
         trigger_automations=trigger_automations,
     )
 

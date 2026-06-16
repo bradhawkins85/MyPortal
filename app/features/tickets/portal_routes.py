@@ -290,7 +290,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
         )
 
     try:
-        await tickets_repo.create_reply(
+        created_reply = await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=user_id,
             body=sanitized_body.html,
@@ -348,6 +348,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
         ticket_id,
         actor_type=actor_type,
         actor=user,
+        reply=created_reply,
     )
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
 
