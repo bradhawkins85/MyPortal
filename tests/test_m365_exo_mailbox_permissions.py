@@ -1059,3 +1059,21 @@ async def test_exo_get_mailbox_permission_returns_empty_when_pwsh_not_found():
             )
 
     assert result == []
+
+
+@pytest.mark.anyio
+async def test_convert_mailbox_to_shared_invokes_set_mailbox(monkeypatch):
+    acquire = AsyncMock(return_value=("exo-token", "tenant-1"))
+    invoke = AsyncMock(return_value={})
+    monkeypatch.setattr(m365_service, "_acquire_exo_access_token", acquire)
+    monkeypatch.setattr(m365_service, "_exo_invoke_command", invoke)
+
+    await m365_service.convert_mailbox_to_shared(42, " user@example.com ")
+
+    acquire.assert_awaited_once_with(42)
+    invoke.assert_awaited_once_with(
+        "exo-token",
+        "tenant-1",
+        "Set-Mailbox",
+        {"Identity": "user@example.com", "Type": "Shared"},
+    )

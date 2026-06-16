@@ -615,7 +615,7 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "offboard_account",
         "name": "Disable sign-in & remove access",
         "description": (
-            "Disables sign-in and optionally removes licenses/group membership. "
+            "Disables sign-in and optionally converts the mailbox to shared before removing licenses/group membership. "
             "Can also optionally cancel future Exchange calendar events, set out-of-office reply, and configure email forwarding using "
             "${vars.offboarding.*} variables from the request."
         ),
@@ -1078,6 +1078,13 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     "offboard_account": {
         "fields": [
             {"name": "disable_sign_in", "label": "Disable sign-in", "type": "checkbox", "default": True},
+            {
+                "name": "convert_to_shared_mailbox",
+                "label": "Convert to shared mailbox",
+                "type": "checkbox",
+                "default": False,
+                "description": "Converts the Exchange Online mailbox to Shared before assigned licenses are removed.",
+            },
             {"name": "revoke_licenses", "label": "Remove assigned licenses", "type": "checkbox", "default": False},
             {
                 "name": "remove_from_groups",
