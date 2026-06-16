@@ -1073,6 +1073,11 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             actor_type="technician",
             actor=current_user,
         )
+        await tickets_service.emit_ticket_replied_event(
+            ticket_id,
+            actor_type="technician",
+            actor=current_user,
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))
         return await main_module._render_ticket_detail(

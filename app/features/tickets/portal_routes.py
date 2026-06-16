@@ -344,6 +344,11 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
         actor_type=actor_type,
         actor=user,
     )
+    await tickets_service.emit_ticket_replied_event(
+        ticket_id,
+        actor_type=actor_type,
+        actor=user,
+    )
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
 
     return flash_redirect(f"/tickets/{ticket_id}", "Reply posted.", "success")

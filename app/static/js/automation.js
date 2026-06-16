@@ -226,6 +226,22 @@
         }),
       },
     ],
+    'sms-gateway': [
+      {
+        label: 'Send technician reply to SMS requester',
+        value: toJsonTemplate({
+          message: '{{ ticket.latest_reply.body }}',
+          phoneNumbers: ['{{ ticket.sms.recipient }}'],
+        }),
+      },
+      {
+        label: 'Send custom SMS update',
+        value: toJsonTemplate({
+          message: 'Ticket {{ ticket.number }} has been updated: {{ ticket.latest_reply.body }}',
+          phoneNumbers: ['{{ ticket.sms.recipient }}'],
+        }),
+      },
+    ],
     ntfy: [
       {
         label: 'Publish high priority ntfy alert',
