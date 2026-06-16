@@ -848,3 +848,43 @@ async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tic
     assert captured[0][1]["ticket_id"] == 1
     assert captured[0][1]["status"] == "closed"
     assert captured[0][1]["context"]["ticket"]["id"] == 1
+
+
+@pytest.mark.anyio
+async def test_handle_event_deduplicates_reply_backed_ticket_events(monkeypatch):
+    captured: list[int] = []
+
+    async def fake_list_event_automations(event_name):
+        if event_name == "tickets.updated":
+            return [{"id": 900, "trigger_filters": None, "action_payload": {}}]
+        return []
+
+    def fake_schedule(coro, *, automation_id):
+        captured.append(automation_id)
+        coro.close()
+        return None
+
+    monkeypatch.setattr(
+        automations_service.automation_repo,
+        "list_event_automations",
+        fake_list_event_automations,
+    )
+    monkeypatch.setattr(
+        automations_service,
+        "_schedule_background_execution",
+        fake_schedule,
+    )
+    automations_service._RECENT_REPLY_EVENT_EXECUTIONS.clear()
+
+    context = {"ticket": {"id": 123, "latest_reply": {"id": 456, "body": "Hello"}}}
+
+    first = await automations_service.handle_event("tickets.updated", context)
+    second = await automations_service.handle_event("tickets.updated", context)
+
+    assert captured == [900]
+    assert first == [{"automation_id": 900, "status": "queued"}]
+    assert second == [
+        {"automation_id": 900, "status": "skipped", "reason": "duplicate_reply_event"}
+    ]
+
+    automations_service._RECENT_REPLY_EVENT_EXECUTIONS.clear()
