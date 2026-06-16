@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 import re
 from functools import lru_cache
+from time import monotonic
 from typing import Any
 
 from croniter import croniter
@@ -46,6 +47,60 @@ def list_trigger_events() -> list[dict[str, str]]:
 
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+_RECENT_REPLY_EVENT_SECONDS = 10.0
+_RECENT_REPLY_EVENT_EXECUTIONS: dict[tuple[int, int, int], float] = {}
+
+
+def _reply_event_dedupe_key(
+    automation_id: int,
+    event_key: str,
+    context: Mapping[str, Any] | None,
+) -> tuple[int, int, int] | None:
+    """Return a short-lived idempotency key for reply-backed ticket events."""
+
+    if event_key not in {"tickets.updated", "ticket.updated", "tickets.replied", "ticket.replied"}:
+        return None
+    if not isinstance(context, Mapping):
+        return None
+    ticket = context.get("ticket")
+    if not isinstance(ticket, Mapping):
+        return None
+    latest_reply = ticket.get("latest_reply")
+    if not isinstance(latest_reply, Mapping):
+        return None
+    try:
+        ticket_id = int(ticket.get("id"))
+        reply_id = int(latest_reply.get("id"))
+    except (TypeError, ValueError):
+        return None
+    if ticket_id <= 0 or reply_id <= 0:
+        return None
+    return (automation_id, ticket_id, reply_id)
+
+
+def _claim_reply_event_execution(
+    automation_id: int,
+    event_key: str,
+    context: Mapping[str, Any] | None,
+) -> bool:
+    """Prevent duplicate automation runs caused by paired reply/update events."""
+
+    dedupe_key = _reply_event_dedupe_key(automation_id, event_key, context)
+    if dedupe_key is None:
+        return True
+
+    now = monotonic()
+    expired_before = now - _RECENT_REPLY_EVENT_SECONDS
+    for key, seen_at in list(_RECENT_REPLY_EVENT_EXECUTIONS.items()):
+        if seen_at < expired_before:
+            _RECENT_REPLY_EVENT_EXECUTIONS.pop(key, None)
+
+    previous = _RECENT_REPLY_EVENT_EXECUTIONS.get(dedupe_key)
+    if previous is not None and previous >= expired_before:
+        return False
+
+    _RECENT_REPLY_EVENT_EXECUTIONS[dedupe_key] = now
+    return True
 
 
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
@@ -797,6 +852,13 @@ async def handle_event(
         if not _filters_match(filters_mapping, context):
             continue
         automation_id = int(automation.get("id"))
+        if not _claim_reply_event_execution(automation_id, event_key, context):
+            matched.append({
+                "automation_id": automation_id,
+                "status": "skipped",
+                "reason": "duplicate_reply_event",
+            })
+            continue
         _schedule_background_execution(
             _execute_automation(automation, context=context),
             automation_id=automation_id,
