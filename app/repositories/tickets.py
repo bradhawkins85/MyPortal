@@ -1095,7 +1095,8 @@ async def create_reply(
         )
         if row:
             normalised = _normalise_reply(row)
-            if not normalised.get("is_internal") and not str(normalised.get("external_reference") or "").startswith("chat:"):
+            reply_external = str(normalised.get("external_reference") or "")
+            if not normalised.get("is_internal") and not reply_external.startswith("chat:"):
                 try:
                     from app.services import chat_ticket_sync
 
@@ -1106,6 +1107,28 @@ async def create_reply(
                 except Exception as exc:  # pragma: no cover - defensive logging
                     log_error(
                         "Failed to sync public ticket reply to linked chat",
+                        ticket_id=ticket_id,
+                        reply_id=normalised.get("id"),
+                        error=str(exc),
+                    )
+            if not normalised.get("is_internal") and not reply_external.startswith("sms:"):
+                try:
+                    ticket_row = await get_ticket(ticket_id)
+                    if ticket_row and ticket_row.get("module_slug") == "receive_sms":
+                        sms_link = await db.fetch_one(
+                            "SELECT from_number FROM sms_ticket_links WHERE ticket_id = %s ORDER BY id DESC LIMIT 1",
+                            (ticket_id,),
+                        )
+                        if sms_link and sms_link.get("from_number"):
+                            from app.services import sms as sms_service
+
+                            await sms_service.send_sms(
+                                message=str(body or ""),
+                                phone_numbers=[str(sms_link["from_number"])],
+                            )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    log_error(
+                        "Failed to send SMS for public ticket reply",
                         ticket_id=ticket_id,
                         reply_id=normalised.get("id"),
                         error=str(exc),
