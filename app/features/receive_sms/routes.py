@@ -23,17 +23,33 @@ class ReceiveSMSPayload(BaseModel):
     from_number: str = Field(..., alias="from", description="Sender phone number.")
     name: str | None = Field(default=None, description="Sender display name supplied by the phone.")
     message: str = Field(..., description="Base64 encoded SMS body.")
-    date: str = Field(..., description="SMS sent date from the Android device.")
-    time: str | None = Field(default=None, description="SMS sent time from the Android device.")
+    date: str | None = Field(default=None, description="SMS sent date from the Android device. Defaults to current UTC date when omitted.")
+    time: str | None = Field(default=None, description="SMS sent time from the Android device. Defaults to current UTC time when omitted.")
 
 
 def _normalise_phone(value: str) -> str:
     return re.sub(r"\D+", "", (value or "").strip())
 
 
-def _parse_sms_datetime(date_value: str, time_value: str | None) -> tuple[datetime, date]:
+def _parse_sms_datetime(
+    date_value: str | None,
+    time_value: str | None,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime, date]:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+
     raw_date = (date_value or "").strip()
     raw_time = (time_value or "").strip()
+    if not raw_date and not raw_time:
+        return current, current.date()
+
+    if not raw_date:
+        raw_date = current.date().isoformat()
+
     candidates = []
     if raw_time:
         candidates.extend([f"{raw_date} {raw_time}", f"{raw_date}T{raw_time}"])
