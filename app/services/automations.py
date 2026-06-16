@@ -22,6 +22,7 @@ from app.services import value_templates
 TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.created", "label": "Ticket created"},
     {"value": "tickets.updated", "label": "Ticket updated"},
+    {"value": "tickets.replied", "label": "Ticket reply added"},
     {"value": "tickets.details_updated", "label": "Ticket Details Updated"},
     {"value": "tickets.closed", "label": "Ticket closed"},
     {"value": "tickets.assigned", "label": "Ticket assigned"},
@@ -32,6 +33,7 @@ _EVENT_ALIASES: dict[str, tuple[str, ...]] = {
     # Backward compatibility for legacy singular ticket event names.
     "tickets.created": ("ticket.created",),
     "tickets.updated": ("ticket.updated",),
+    "tickets.replied": ("ticket.replied",),
     "tickets.closed": ("ticket.closed",),
     "tickets.assigned": ("ticket.assigned",),
 }
