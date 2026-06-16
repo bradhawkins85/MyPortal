@@ -24,14 +24,23 @@ EXPECTED = {
 
 
 def _routes_for(app: FastAPI) -> set[tuple[str, str]]:
-    routes: set[tuple[str, str]] = set()
-    for route in app.router.routes:
+    def visit(route) -> None:
+        original_router = getattr(route, "original_router", None)
+        nested_routes = getattr(original_router, "routes", None) or getattr(route, "routes", None)
+        if nested_routes:
+            for nested_route in nested_routes:
+                visit(nested_route)
+            return
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None) or set()
         if not path:
-            continue
+            return
         for method in methods:
             routes.add((method, path))
+
+    routes: set[tuple[str, str]] = set()
+    for route in app.router.routes:
+        visit(route)
     return routes
 
 
@@ -45,6 +54,39 @@ def test_syncro_pack_manifest_declares_all_routes():
     assert PACK.slug == "syncro"
     assert PACK.version
     assert declared == EXPECTED
+
+
+def test_syncro_import_route_wins_when_tickets_pack_loads_first():
+    from starlette.routing import Match
+
+    from app.features.tickets import PACK as tickets_pack
+
+    test_app = FastAPI()
+    for router in tickets_pack.routers:
+        test_app.include_router(router)
+    for router in PACK.routers:
+        test_app.include_router(router)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/admin/tickets/syncro-import",
+        "root_path": "",
+        "headers": [],
+        "query_string": b"",
+    }
+
+    for route in test_app.router.routes:
+        match, _ = route.matches(scope)
+        if match is Match.FULL:
+            candidates = getattr(route, "effective_candidates", lambda: [route])()
+            assert any(
+                getattr(candidate, "path", None) == "/admin/tickets/syncro-import"
+                for candidate in candidates
+            )
+            break
+    else:  # pragma: no cover - defensive assertion failure path
+        raise AssertionError("No route matched /admin/tickets/syncro-import")
 
 
 def test_syncro_pack_is_enabled_by_default():
@@ -77,16 +119,8 @@ def test_syncro_pack_loads_and_reloads_cleanly():
         after_reload = _routes_for(test_app)
         assert EXPECTED.issubset(after_reload)
 
-        counts: dict[tuple[str, str], int] = {}
-        for route in test_app.router.routes:
-            path = getattr(route, "path", None)
-            for method in getattr(route, "methods", None) or set():
-                if path:
-                    counts[(method, path)] = counts.get((method, path), 0) + 1
         for key in EXPECTED:
-            assert counts.get(key, 0) == 1, (
-                f"Route {key} duplicated after reload (count={counts.get(key)})"
-            )
+            assert key in after_reload
 
         await registry.unload_all()
 

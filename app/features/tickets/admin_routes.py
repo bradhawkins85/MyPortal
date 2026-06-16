@@ -97,7 +97,7 @@ async def admin_tickets_page(
     )
 
 
-@router.get("/admin/tickets/{ticket_id}", response_class=HTMLResponse)
+@router.get("/admin/tickets/{ticket_id:int}", response_class=HTMLResponse)
 async def admin_ticket_detail(
     ticket_id: int,
     request: Request,
@@ -233,7 +233,7 @@ async def admin_create_ticket(request: Request):
     return flash_redirect("/admin/tickets", "Ticket created.", "success")
 
 
-@router.post("/admin/tickets/{ticket_id}/status", response_class=HTMLResponse)
+@router.post("/admin/tickets/{ticket_id:int}/status", response_class=HTMLResponse)
 async def admin_update_ticket_status(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -404,7 +404,7 @@ async def admin_replace_labour_types(request: Request):
     return flash_redirect("/admin/tickets", "Labour types updated.", "success")
 
 
-@router.post("/admin/tickets/{ticket_id}/description", response_class=HTMLResponse)
+@router.post("/admin/tickets/{ticket_id:int}/description", response_class=HTMLResponse)
 async def admin_update_ticket_description(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -442,7 +442,7 @@ async def admin_update_ticket_description(ticket_id: int, request: Request):
     return flash_redirect(destination, message, "success")
 
 
-@router.post("/admin/tickets/{ticket_id}/description/replace", response_class=JSONResponse)
+@router.post("/admin/tickets/{ticket_id:int}/description/replace", response_class=JSONResponse)
 async def admin_replace_ticket_description(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -486,7 +486,7 @@ async def admin_replace_ticket_description(ticket_id: int, request: Request):
     )
 
 
-@router.post("/admin/tickets/{ticket_id}/details", response_class=HTMLResponse)
+@router.post("/admin/tickets/{ticket_id:int}/details", response_class=HTMLResponse)
 async def admin_update_ticket_details(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -759,7 +759,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     return flash_redirect(destination, message, "success")
 
 
-@router.post("/admin/tickets/{ticket_id}/ai/reprocess", response_class=JSONResponse)
+@router.post("/admin/tickets/{ticket_id:int}/ai/reprocess", response_class=JSONResponse)
 async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -806,7 +806,7 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     )
 
 
-@router.post("/admin/tickets/{ticket_id}/delete", response_class=HTMLResponse)
+@router.post("/admin/tickets/{ticket_id:int}/delete", response_class=HTMLResponse)
 async def admin_delete_ticket(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -919,7 +919,7 @@ async def admin_bulk_delete_tickets(request: Request):
     return flash_redirect(destination, redirect_message, "success")
 
 
-@router.post("/admin/tickets/{ticket_id}/replies", response_class=HTMLResponse)
+@router.post("/admin/tickets/{ticket_id:int}/replies", response_class=HTMLResponse)
 async def admin_create_ticket_reply(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
