@@ -571,6 +571,86 @@ async def test_sync_ticket_to_project_records_error_on_api_failure(
 
 
 @pytest.mark.anyio
+async def test_sync_ticket_to_project_links_existing_project_on_duplicate_create(
+    reset_solidtime_caches,
+):
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+                "sync_tickets_to_projects": True,
+                "default_client_id": "client-uuid",
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    async def fake_get_ticket(ticket_id):
+        return {
+            "id": ticket_id,
+            "ticket_number": "T-422",
+            "subject": "Existing upstream project",
+            "company_id": None,
+            "status": "open",
+        }
+
+    reset_solidtime_caches.setattr(
+        solidtime.tickets_repo, "get_ticket", fake_get_ticket
+    )
+
+    async def fake_get_project_link(ticket_id):
+        return None
+
+    upserts: list[dict[str, object]] = []
+    captured_errors: list[tuple[int, str]] = []
+
+    async def fake_upsert_project_link(**kwargs):
+        upserts.append(kwargs)
+        return {"ticket_id": kwargs["ticket_id"], **kwargs}
+
+    async def fake_mark_project_error(ticket_id, error):
+        captured_errors.append((ticket_id, error))
+
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "get_project_link", fake_get_project_link
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "upsert_project_link", fake_upsert_project_link
+    )
+    reset_solidtime_caches.setattr(
+        solidtime.links_repo, "mark_project_link_error", fake_mark_project_error
+    )
+
+    async def fake_create_project(org_id, *, body):
+        raise SolidtimeAPIError(
+            '{"message":"A project with the same name and client already exists '
+            'in the organization."}'
+        )
+
+    async def fake_list_projects(org_id):
+        return [
+            {
+                "id": "existing-project-uuid",
+                "name": "#T-422 – Existing upstream project",
+                "client_id": "client-uuid",
+            }
+        ]
+
+    reset_solidtime_caches.setattr(solidtime, "create_project", fake_create_project)
+    reset_solidtime_caches.setattr(solidtime, "list_projects", fake_list_projects)
+
+    link = await solidtime.sync_ticket_to_project(422)
+
+    assert link is not None
+    assert link["solidtime_project_id"] == "existing-project-uuid"
+    assert upserts and upserts[0]["sync_status"] == "synced"
+    assert captured_errors == []
+
+
+@pytest.mark.anyio
 async def test_sync_ticket_skips_when_module_disabled(reset_solidtime_caches):
     async def fake_get_module(slug):
         return {"enabled": False, "settings": {}}
