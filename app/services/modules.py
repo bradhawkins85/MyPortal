@@ -756,7 +756,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Automatically assign new Matrix chat rooms to technicians based on configurable rules (customer name, contact name, subject, time of day, day of week). Includes a default fallback rule.",
         "icon": "💬",
         "settings": {
-            "manage_url": "/admin/modules/matrix-chat-assign",
+            "manage_url": "/chat/auto-assign",
         },
     },
 ]
