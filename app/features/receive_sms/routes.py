@@ -128,6 +128,16 @@ async def _find_sms_ticket(normalised_phone: str, sms_day: date) -> dict[str, An
     return await tickets_repo.get_ticket(int(row["id"]))
 
 
+async def _refresh_sms_ticket_ai(ticket_id: int) -> None:
+    """Run the same AI enrichment pipeline used by standard ticket creation/reply flows."""
+
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket_id)
+    except RuntimeError as exc:
+        log_error("Failed to refresh AI summary for SMS ticket", ticket_id=ticket_id, error=str(exc))
+    await tickets_service.refresh_ticket_ai_tags(ticket_id)
+
+
 @router.post("/inbound", status_code=status.HTTP_201_CREATED)
 async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_record: dict = Depends(require_api_key)) -> dict[str, Any]:
     if payload.type != "SMSIn":
@@ -173,6 +183,8 @@ async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_reco
                 """,
                 (ticket["id"], payload.from_number, normalised_phone, sms_day),
             )
+        ticket_id = int(ticket["id"])
+        await _refresh_sms_ticket_ai(ticket_id)
         await tickets_service.emit_ticket_updated_event(ticket, actor_type="api_key", actor={"id": api_key_record.get("id")})
     except Exception as exc:
         log_error("Failed to process inbound SMS", error=str(exc), from_number=payload.from_number)
