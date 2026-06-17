@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from html import escape, unescape
 from typing import Any, Mapping
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import chat as chat_repo
 from app.repositories import tickets as tickets_repo
@@ -105,6 +106,12 @@ async def sync_chat_message_to_ticket(
         return
     chat_message_id = message.get("id")
     if isinstance(chat_message_id, int) and await get_link_by_chat_message_id(chat_message_id):
+        return
+
+    settings = get_settings()
+    bot_user_id = str(settings.matrix_bot_user_id or "").strip()
+    sender_matrix_id = str(message.get("sender_matrix_id") or "").strip()
+    if bot_user_id and sender_matrix_id == bot_user_id:
         return
 
     body = str(message.get("body") or "").strip()
