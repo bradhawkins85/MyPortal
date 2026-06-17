@@ -319,7 +319,7 @@ async def _audit(action: str, room_id: int, value: Mapping[str, Any] | None = No
         log_error("AI waiting assistant audit failed", action=action, room_id=room_id, error=str(exc))
 
 
-async def _send_bot_message(room: Mapping[str, Any], body: str) -> bool:
+async def _send_bot_message(room: Mapping[str, Any], body: str, *, response_count: int | None = None) -> bool:
     matrix_room_id = str(room["matrix_room_id"])
     monitor_event = await _create_monitor_event(
         "MATRIXBOT_AI Matrix message",
@@ -369,7 +369,8 @@ async def _send_bot_message(room: Mapping[str, Any], body: str) -> bool:
         sender_display_name="AI Waiting Assistant",
         sent_at=now,
     )
-    await chat_repo.increment_ai_bot_response(int(room["id"]), now)
+    if response_count is None:
+        await chat_repo.increment_ai_bot_response(int(room["id"]), now)
     await refresh_notifier.broadcast_refresh(
         topics=[f"chat:room:{int(room['id'])}"],
         data={"message": _json_safe({**msg, "sent_at": now.isoformat()}), "room_id": int(room["id"])},
@@ -431,8 +432,13 @@ async def scan_waiting_rooms_once() -> None:
             continue
         count = int(room.get("ai_bot_response_count") or 0)
         if count == 0:
-            if await _send_bot_message(room, _ACK_MESSAGE):
+            reserved = await chat_repo.reserve_ai_bot_response(int(room["id"]), expected_count=0, when=_utcnow())
+            if not reserved:
+                continue
+            if await _send_bot_message(room, _ACK_MESSAGE, response_count=1):
                 await _audit("matrix_ai_waiting_assistant.acknowledgement_sent", int(room["id"]))
+            else:
+                await chat_repo.release_ai_bot_response_reservation(int(room["id"]), reserved_count=1)
             continue
         if count == 1 and settings.matrixbot_ai_max_responses >= 2:
             active = await chat_repo.get_active_ai_queue_item(int(room["id"]))
@@ -475,7 +481,8 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
             if not tags:
                 continue
             matched = sorted(keyword_set & set(tags))
-            confidence = (len(matched) / len(tags)) * 100 if tags else 0.0
+            confidence_base = max(1, min(len(tags), len(keyword_set))) if tags else 1
+            confidence = min(100.0, (len(matched) / confidence_base) * 100) if tags else 0.0
             if confidence >= settings.matrixbot_ai_kb_confidence_threshold:
                 relevant = await _article_relevant(transcript, article)
                 candidates.append({
@@ -498,11 +505,16 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
                     path = f"/knowledge-base/articles/{article['slug']}"
                     link = f"{base}{path}" if base else path
                     message = f"While you wait, this article may help: {article['title']}\n{link}\n\n{summary}\n\n{_AI_DISCLAIMER}"
-                    if await _send_bot_message(room, message):
+                    expected_count = int(room.get("ai_bot_response_count") or 0)
+                    reserved_count = expected_count + 1
+                    reserved = await chat_repo.reserve_ai_bot_response(room_id, expected_count=expected_count, when=_utcnow())
+                    if reserved and await _send_bot_message(room, message, response_count=reserved_count):
                         selected["sent"] = True
                         selected["sent_at"] = _utcnow().isoformat()
                         sent = True
                         await _audit("matrix_ai_waiting_assistant.article_recommendation_sent", room_id, selected)
+                    elif reserved:
+                        await chat_repo.release_ai_bot_response_reservation(room_id, reserved_count=reserved_count)
         latest_confidence = eligible[0]["confidence"] if eligible else (max((c["confidence"] for c in candidates), default=None))
         await chat_repo.update_ai_analysis(room_id, extracted_keywords=keywords, matched_articles=candidates, confidence=latest_confidence)
         await chat_repo.update_ai_queue_item(int(item["id"]), status="completed", result_payload={"keywords": keywords, "matches": candidates, "sent": sent})
