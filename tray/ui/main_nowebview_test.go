@@ -15,6 +15,7 @@ import (
 func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 	previousNotify := showChatSessionNotificationFunc
 	previousOpen := openChatWindowFunc
+	previousRequest := requestChatTokenFunc
 	previousPortalURL := gPortalURL
 	gPortalURL = "https://portal.example.test"
 	var gotTitle string
@@ -25,6 +26,9 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 		gotBody = body
 		gotURL = chatURL
 	}
+	requestChatTokenFunc = func(roomID int) string {
+		return gPortalURL + "/tray/chat?token=test-token&room=" + itoa(roomID)
+	}
 	opened := make(chan string, 1)
 	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) {
 		opened <- chatURL
@@ -32,6 +36,7 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 	t.Cleanup(func() {
 		showChatSessionNotificationFunc = previousNotify
 		openChatWindowFunc = previousOpen
+		requestChatTokenFunc = previousRequest
 		gPortalURL = previousPortalURL
 	})
 
@@ -60,22 +65,55 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 	}
 	select {
 	case chatURL := <-opened:
-		if !strings.Contains(chatURL, "/tray/chat?room=42") {
-			t.Fatalf("opened chatURL = %q, want room-specific tray chat URL", chatURL)
+		if !strings.Contains(chatURL, "/tray/chat?token=test-token&room=42") {
+			t.Fatalf("opened chatURL = %q, want room-specific authenticated tray chat URL", chatURL)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected chat_message to launch the chat window automatically")
 	}
 }
 
+func TestHandleIPCMessageDoesNotLaunchChatWhenRoomTokenRejected(t *testing.T) {
+	previousNotify := showChatSessionNotificationFunc
+	previousOpen := openChatWindowFunc
+	previousRequest := requestChatTokenFunc
+	defer func() {
+		showChatSessionNotificationFunc = previousNotify
+		openChatWindowFunc = previousOpen
+		requestChatTokenFunc = previousRequest
+	}()
+
+	showChatSessionNotificationFunc = func(title, body, chatURL string) {}
+	requestChatTokenFunc = func(roomID int) string { return "" }
+	opened := make(chan string, 1)
+	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) {
+		opened <- chatURL
+	}
+
+	payload, err := json.Marshal(chatMessagePayload{RoomID: 42})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	handleIPCMessage(ipc.Message{Type: "chat_message", Payload: payload})
+
+	select {
+	case chatURL := <-opened:
+		t.Fatalf("chat window launched with %q after room token was rejected", chatURL)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: closed/stale rooms do not launch the chat shell.
+	}
+}
+
 func TestHandleIPCMessageDispatchesChatOpenNotificationAndLaunchesChatShell(t *testing.T) {
 	previousNotify := showChatSessionNotificationFunc
 	previousOpen := openChatWindowFunc
+	previousRequest := requestChatTokenFunc
 	previousPortalURL := gPortalURL
 	gPortalURL = "https://portal.example.test"
 	defer func() {
 		showChatSessionNotificationFunc = previousNotify
 		openChatWindowFunc = previousOpen
+		requestChatTokenFunc = previousRequest
 		gPortalURL = previousPortalURL
 	}()
 
@@ -88,6 +126,9 @@ func TestHandleIPCMessageDispatchesChatOpenNotificationAndLaunchesChatShell(t *t
 		gotActionURL = chatURL
 	}
 
+	requestChatTokenFunc = func(roomID int) string {
+		return gPortalURL + "/tray/chat?token=test-token&room=" + itoa(roomID)
+	}
 	opened := make(chan string, 1)
 	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) {
 		opened <- chatURL
@@ -107,8 +148,8 @@ func TestHandleIPCMessageDispatchesChatOpenNotificationAndLaunchesChatShell(t *t
 
 	select {
 	case chatURL := <-opened:
-		if !strings.Contains(chatURL, "/tray/chat?room=77") {
-			t.Fatalf("opened chatURL = %q, want room-specific tray chat URL", chatURL)
+		if !strings.Contains(chatURL, "/tray/chat?token=test-token&room=77") {
+			t.Fatalf("opened chatURL = %q, want room-specific authenticated tray chat URL", chatURL)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected chat_open to launch the chat window automatically")

@@ -249,3 +249,102 @@ async def test_tray_chat_popup_reuses_existing_open_room_from_unbound_token(monk
     assert response.body == b"room=42"
     create_matrix_mock.assert_not_called()
     create_room_mock.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_tray_chat_popup_rejects_closed_explicit_room_without_creating_new_room(monkeypatch):
+    import app.features.chat.routes as chat_routes
+    import app.repositories.chat as chat_repo
+    import app.repositories.companies as companies_repo
+    import app.repositories.tray as tray_repo
+    from app.services import matrix as matrix_service
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(
+        chat_routes,
+        "get_settings",
+        lambda: type("Settings", (), {"matrix_enabled": True, "environment": "development"})(),
+    )
+    monkeypatch.setattr(chat_routes.tray_service, "hash_token", lambda token: f"hash:{token}")
+    monkeypatch.setattr(
+        tray_repo,
+        "get_chat_token_by_hash",
+        AsyncMock(
+            return_value={
+                "id": 11,
+                "device_id": 7,
+                "room_id": 42,
+                "expires_at": None,
+                "used_at": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        tray_repo,
+        "get_device_by_id",
+        AsyncMock(
+            return_value={
+                "id": 7,
+                "device_uid": "dev-7",
+                "status": "active",
+                "company_id": 3,
+                "hostname": "PC-7",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        companies_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 3, "tray_chat_enabled": True}),
+    )
+    monkeypatch.setattr(tray_repo, "mark_chat_token_used", AsyncMock())
+    monkeypatch.setattr(
+        chat_repo,
+        "get_room",
+        AsyncMock(return_value={"id": 42, "status": "closed", "tray_device_id": 7}),
+    )
+    get_open_mock = AsyncMock()
+    create_matrix_mock = AsyncMock(return_value={"room_id": "!new:example"})
+    create_room_mock = AsyncMock()
+    monkeypatch.setattr(chat_repo, "get_open_room_by_device_id", get_open_mock)
+    monkeypatch.setattr(matrix_service, "create_room", create_matrix_mock)
+    monkeypatch.setattr(chat_repo, "create_room", create_room_mock)
+
+    request = _make_request("/tray/chat", method="GET")
+    with pytest.raises(HTTPException) as exc:
+        await chat_routes.tray_chat_popup(request, None, token="abc", room=None)
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Chat room is closed"
+    get_open_mock.assert_not_called()
+    create_matrix_mock.assert_not_called()
+    create_room_mock.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_issue_chat_token_rejects_closed_explicit_room(monkeypatch):
+    import app.api.routes.tray as tray_routes
+    import app.repositories.chat as chat_repo
+    import app.repositories.companies as companies_repo
+    import app.repositories.tray as tray_repo
+    from fastapi import HTTPException
+
+    class JsonRequest:
+        async def json(self):
+            return {"room_id": 42}
+
+    monkeypatch.setattr(tray_routes._settings, "matrix_enabled", True)
+    monkeypatch.setattr(companies_repo, "get_company_by_id", AsyncMock(return_value={"id": 3, "tray_chat_enabled": True}))
+    monkeypatch.setattr(chat_repo, "get_room", AsyncMock(return_value={"id": 42, "status": "closed"}))
+    create_token_mock = AsyncMock()
+    monkeypatch.setattr(tray_repo, "create_chat_token", create_token_mock)
+
+    with pytest.raises(HTTPException) as exc:
+        await tray_routes.issue_chat_token(
+            JsonRequest(),
+            {"id": 7, "device_uid": "dev-7", "company_id": 3, "status": "active"},
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Chat room is closed"
+    create_token_mock.assert_not_called()
