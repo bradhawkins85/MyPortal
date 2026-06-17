@@ -32,6 +32,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -51,6 +52,8 @@ const (
 	configCacheName   = "tray-config.json"
 	stateFileName     = "tray-state.json"
 )
+
+var launchTrayUIForActiveUserFunc = launchTrayUIForActiveUser
 
 // -----------------------------------------------------------------
 // Persistent state (auth token between restarts)
@@ -104,6 +107,9 @@ type daemon struct {
 	client *api.Client
 	ipcSrv *ipc.Server
 	stopCh chan struct{}
+
+	pendingUIMu      sync.Mutex
+	pendingUIMessage *ipc.Message
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -148,6 +154,10 @@ func (d *daemon) run() {
 		d.ipcSrv.OnConnect(func(send func(ipc.Message)) {
 			logger.Debug("ipc onConnect: replaying config_changed to new UI client")
 			send(ipc.Message{Type: "config_changed"})
+			if msg := d.consumePendingUIMessage(); msg != nil {
+				logger.Info("ipc onConnect: replaying pending %s to newly launched UI client", msg.Type)
+				send(*msg)
+			}
 		})
 	}
 
@@ -297,22 +307,18 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 		}
 	case "chat_open":
 		logger.Info("chat_open received")
-		if d.ipcSrv != nil {
-			rawPayload, _ := json.Marshal(msg)
-			d.ipcSrv.Broadcast(ipc.Message{
-				Type:    "chat_open",
-				Payload: json.RawMessage(rawPayload),
-			})
-		}
+		rawPayload, _ := json.Marshal(msg)
+		d.deliverUserSessionMessage(ipc.Message{
+			Type:    "chat_open",
+			Payload: json.RawMessage(rawPayload),
+		})
 	case "chat_message":
 		logger.Info("chat_message received")
-		if d.ipcSrv != nil {
-			rawPayload, _ := json.Marshal(msg)
-			d.ipcSrv.Broadcast(ipc.Message{
-				Type:    "chat_message",
-				Payload: json.RawMessage(rawPayload),
-			})
-		}
+		rawPayload, _ := json.Marshal(msg)
+		d.deliverUserSessionMessage(ipc.Message{
+			Type:    "chat_message",
+			Payload: json.RawMessage(rawPayload),
+		})
 	case "show_notification":
 		if d.ipcSrv != nil {
 			payload := msg["payload"]
@@ -322,6 +328,37 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 			}
 		}
 	}
+}
+
+func (d *daemon) deliverUserSessionMessage(msg ipc.Message) {
+	delivered := 0
+	if d.ipcSrv != nil {
+		delivered = d.ipcSrv.Broadcast(msg)
+	}
+	if delivered > 0 {
+		return
+	}
+
+	d.pendingUIMu.Lock()
+	pending := msg
+	d.pendingUIMessage = &pending
+	d.pendingUIMu.Unlock()
+
+	logger.Warn("%s received but no UI agent is connected; attempting to launch per-user tray UI", msg.Type)
+	if err := launchTrayUIForActiveUserFunc(); err != nil {
+		logger.Warn("launchTrayUIForActiveUser failed: %v", err)
+	}
+}
+
+func (d *daemon) consumePendingUIMessage() *ipc.Message {
+	d.pendingUIMu.Lock()
+	defer d.pendingUIMu.Unlock()
+	if d.pendingUIMessage == nil {
+		return nil
+	}
+	msg := *d.pendingUIMessage
+	d.pendingUIMessage = nil
+	return &msg
 }
 
 func (d *daemon) heartbeatLoop() {

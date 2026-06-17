@@ -3,9 +3,12 @@
 //
 // Protocol: newline-delimited JSON messages sent over a local socket.
 // On Windows the socket is emulated via a named pipe
-//   \\.\pipe\myportal-tray-<install-id>
+//
+//	\\.\pipe\myportal-tray-<install-id>
+//
 // On other platforms a Unix domain socket is used
-//   /tmp/myportal-tray.sock (macOS: /var/run/myportal-tray.sock)
+//
+//	/tmp/myportal-tray.sock (macOS: /var/run/myportal-tray.sock)
 //
 // The service listens; the UI agent connects.  Only a single UI agent
 // per socket is expected at any time (multi-user / RDP is handled by
@@ -97,11 +100,12 @@ func sendOne(conn net.Conn, msg Message) error {
 	return err
 }
 
-// Broadcast sends a message to all connected UI agents.
-func (s *Server) Broadcast(msg Message) {
+// Broadcast sends a message to all connected UI agents and returns the number
+// of clients that accepted the message.
+func (s *Server) Broadcast(msg Message) int {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return
+		return 0
 	}
 	data = append(data, '\n')
 
@@ -120,6 +124,7 @@ func (s *Server) Broadcast(msg Message) {
 	s.clients = active
 	s.mu.Unlock()
 	logger.Debug("ipc: broadcast %q delivered=%d dropped=%d", msg.Type, delivered, dropped)
+	return delivered
 }
 
 // Close shuts down the server.
