@@ -35,6 +35,23 @@ class RemoveTagRequest(BaseModel):
     exclude_globally: bool = Field(False, description="Also add the tag to the shared AI tag exclusion list")
 
 
+def _remove_matching_ai_tag(ai_tags: list[Any], normalized_slug: str) -> tuple[list[Any], bool]:
+    """Remove AI tags whose slugified value matches ``normalized_slug``.
+
+    Older generated tags may be stored with display casing or spaces. The UI sends
+    the visible tag value, so compare normalized forms while preserving all
+    unrelated stored tag values.
+    """
+    removed = False
+    updated_tags: list[Any] = []
+    for tag in ai_tags:
+        if normalized_slug and slugify_tag(str(tag)) == normalized_slug:
+            removed = True
+            continue
+        updated_tags.append(tag)
+    return updated_tags, removed
+
+
 @router.get("", response_model=TagExclusionListResponse)
 async def list_tag_exclusions(
     current_user: dict = Depends(require_super_admin),
@@ -128,8 +145,8 @@ async def remove_ticket_tag(
         ai_tags = []
     
     normalized_slug = slugify_tag(request.tag_slug)
-    if normalized_slug and normalized_slug in ai_tags:
-        updated_tags = [tag for tag in ai_tags if tag != normalized_slug]
+    updated_tags, removed = _remove_matching_ai_tag(ai_tags, normalized_slug)
+    if removed:
         await tickets_repo.update_ticket(ticket_id, ai_tags=updated_tags)
         return {"success": True, "removed": normalized_slug, "remaining_tags": updated_tags}
     
@@ -162,10 +179,10 @@ async def remove_kb_article_tag(
         excluded_ai_tags = []
     
     normalized_slug = slugify_tag(request.tag_slug)
-    if normalized_slug and normalized_slug in ai_tags:
-        updated_tags = [tag for tag in ai_tags if tag != normalized_slug]
+    updated_tags, removed = _remove_matching_ai_tag(ai_tags, normalized_slug)
+    if removed:
         # Add to excluded list to prevent re-adding on refresh
-        if normalized_slug not in excluded_ai_tags:
+        if normalized_slug not in {slugify_tag(str(tag)) for tag in excluded_ai_tags}:
             excluded_ai_tags.append(normalized_slug)
         if request.exclude_globally and not await tag_exclusions_repo.is_tag_excluded(normalized_slug):
             user_id = current_user.get("id")
