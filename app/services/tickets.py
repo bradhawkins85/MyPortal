@@ -79,8 +79,9 @@ _PROMPT_HEADER = (
 )
 
 _TAGS_PROMPT_HEADER = (
-    "You are an AI assistant that analyses helpdesk tickets and suggests between five and ten short tags. "
-    "Tags must describe the issues, affected systems, troubleshooting steps, impacted users, and requested actions. "
+    "You are an AI assistant that analyses customer helpdesk ticket messages and suggests between five and ten short tags. "
+    "Tags must describe the customer-reported issues, affected systems, impacted users, and requested actions. "
+    "Do not use technician replies, internal notes, automated assistant replies, or support-side troubleshooting steps as tag evidence. "
     "Respond ONLY with JSON shaped as {\"tags\": [\"tag-one\", \"tag-two\", ...]} using lowercase kebab-case tags."
 )
 
@@ -1392,6 +1393,38 @@ def _render_prompt(
     return "\n".join(lines)
 
 
+def _is_customer_tag_reply(
+    reply: Mapping[str, Any],
+    ticket: Mapping[str, Any],
+    user_lookup: Mapping[int, Mapping[str, Any]],
+) -> bool:
+    """Return whether a reply should be used as customer evidence for AI tags."""
+
+    if reply.get("is_internal"):
+        return False
+
+    settings = get_settings()
+    bot_user_id = str(settings.matrix_bot_user_id or "").strip()
+    sender_matrix_id = str(reply.get("sender_matrix_id") or "").strip()
+    if bot_user_id and sender_matrix_id and sender_matrix_id == bot_user_id:
+        return False
+
+    author_id = reply.get("author_id")
+    requester_id = ticket.get("requester_id")
+    if isinstance(requester_id, int):
+        return author_id == requester_id
+
+    author_record = user_lookup.get(author_id) if isinstance(author_id, int) else None
+    if author_record:
+        is_super_admin = bool(author_record.get("is_super_admin"))
+        permissions = author_record.get("permissions") or []
+        if isinstance(permissions, str):
+            permissions = [permissions]
+        if is_super_admin or HELPDESK_PERMISSION_KEY in set(permissions):
+            return False
+
+    return True
+
 def _render_tags_prompt(
     ticket: Mapping[str, Any],
     replies: list[Mapping[str, Any]],
@@ -1413,9 +1446,10 @@ def _render_tags_prompt(
     lines.append("Ticket description:")
     lines.append(description)
     lines.append("")
-    lines.append("Conversation highlights (newest first):")
+    lines.append("Customer conversation highlights (newest first):")
 
-    trimmed = list(replies[-12:])
+    customer_replies = [reply for reply in replies if _is_customer_tag_reply(reply, ticket, user_lookup)]
+    trimmed = list(customer_replies[-12:])
     trimmed.reverse()
     if not trimmed:
         lines.append("- No replies have been posted yet.")
