@@ -44,15 +44,23 @@ def test_scan_waiting_rooms_sends_ack_before_analysis(monkeypatch):
 
     monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
 
-    async def fake_send(room, body):
+    async def fake_send(room, body, **kwargs):
         sent.append(body)
         return True
+
+    async def fake_reserve(room_id, expected_count, when=None):
+        return True
+
+    async def fake_release(room_id, reserved_count):
+        raise AssertionError("successful acknowledgement should not release reservation")
 
     async def fake_active(room_id):
         queued.append(room_id)
         return None
 
     monkeypatch.setattr(assistant, "_send_bot_message", fake_send)
+    monkeypatch.setattr(assistant.chat_repo, "reserve_ai_bot_response", fake_reserve)
+    monkeypatch.setattr(assistant.chat_repo, "release_ai_bot_response_reservation", fake_release)
     async def fake_audit(*args, **kwargs):
         return None
 
@@ -63,6 +71,43 @@ def test_scan_waiting_rooms_sends_ack_before_analysis(monkeypatch):
 
     assert sent == [assistant._ACK_MESSAGE]
     assert queued == []
+
+
+def test_scan_waiting_rooms_skips_ack_when_response_slot_already_reserved(monkeypatch):
+    settings = SimpleNamespace(
+        matrix_enabled=True,
+        matrixbot_ai_waiting_assistant_enabled=True,
+        matrixbot_ai_ollama_enabled=True,
+        matrixbot_ai_ollama_url="http://ollama.test",
+        matrixbot_ai_ollama_model="llama3",
+        matrixbot_ai_max_responses=2,
+        matrixbot_ai_response_delay_minutes=5,
+    )
+    sent: list[str] = []
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+
+    async def fake_list(due_before):
+        return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 0}]
+
+    async def fake_has_technician_participant(room_id):
+        return False
+
+    async def fake_reserve(room_id, expected_count, when=None):
+        return False
+
+    async def fake_send(room, body, **kwargs):
+        sent.append(body)
+        return True
+
+    monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
+    monkeypatch.setattr(assistant.chat_repo, "reserve_ai_bot_response", fake_reserve)
+    monkeypatch.setattr(assistant, "_send_bot_message", fake_send)
+
+    asyncio.run(assistant.scan_waiting_rooms_once())
+
+    assert sent == []
 
 
 def test_scan_waiting_rooms_queues_second_response_analysis(monkeypatch):

@@ -539,6 +539,38 @@ async def increment_ai_bot_response(room_id: int, when: datetime | None = None) 
     )
 
 
+async def reserve_ai_bot_response(room_id: int, expected_count: int, when: datetime | None = None) -> bool:
+    """Atomically reserve the next waiting-assistant response slot.
+
+    Multiple app workers can scan the same unattended room at the same time.
+    Reserving with an expected response count ensures only one worker can claim
+    each response number before sending a Matrix message.
+    """
+    when = when or datetime.now(timezone.utc).replace(tzinfo=None)
+    rowcount = await db.execute_rowcount(
+        """UPDATE chat_rooms
+           SET ai_bot_response_count = COALESCE(ai_bot_response_count, 0) + 1,
+               ai_last_bot_response_at = %s,
+               updated_at = %s
+           WHERE id = %s AND COALESCE(ai_bot_response_count, 0) = %s""",
+        (when, when, room_id, expected_count),
+    )
+    return rowcount == 1
+
+
+async def release_ai_bot_response_reservation(room_id: int, reserved_count: int) -> None:
+    await db.execute(
+        """UPDATE chat_rooms
+           SET ai_bot_response_count = CASE
+                   WHEN COALESCE(ai_bot_response_count, 0) >= %s THEN ai_bot_response_count - 1
+                   ELSE ai_bot_response_count
+               END,
+               updated_at = %s
+           WHERE id = %s AND COALESCE(ai_bot_response_count, 0) = %s""",
+        (reserved_count, datetime.now(timezone.utc).replace(tzinfo=None), room_id, reserved_count),
+    )
+
+
 async def update_ai_analysis(
     room_id: int,
     *,
