@@ -14,7 +14,7 @@ from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
 from app.services import company_access
 from app.services import modules as modules_service
-from app.services.tagging import filter_helpful_texts
+from app.services.tagging import filter_helpful_texts, get_all_excluded_tags, slugify_tag
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services.knowledge_base_conditionals import (
     get_conditional_companies,
@@ -275,7 +275,12 @@ async def _schedule_article_ai_tags(
         if not text:
             log_error("Knowledge base AI tag generation returned empty response")
             return
-        tags = _parse_ai_tag_text(text)
+        try:
+            excluded_slugs = await get_all_excluded_tags()
+        except Exception as exc:
+            log_error("Knowledge base AI tag exclusion lookup failed", error=str(exc))
+            excluded_slugs = set()
+        tags = [tag for tag in _parse_ai_tag_text(text) if tag not in excluded_slugs]
         if not tags:
             log_error("Knowledge base AI tag parsing yielded no tags")
             return
@@ -283,9 +288,10 @@ async def _schedule_article_ai_tags(
         # Fetch the current article to get excluded tags
         article = await kb_repo.get_article_by_id(article_id)
         if article:
-            excluded_tags = article.get("excluded_ai_tags", [])
-            # Filter out any tags that have been manually excluded
-            tags = [tag for tag in tags if tag not in excluded_tags]
+            excluded_tags = {slugify_tag(str(tag)) for tag in article.get("excluded_ai_tags", [])}
+            manual_tags = {slugify_tag(str(tag)) for tag in article.get("manual_ai_tags", [])}
+            # Filter out article-specific excludes and preserve manual tags separately.
+            tags = [tag for tag in tags if tag not in excluded_tags and tag not in manual_tags]
         
         await kb_repo.update_article(article_id, ai_tags=tags)
         resolved_notifier = notifier or refresh_notifier
@@ -457,6 +463,7 @@ def _serialise_article(
         "summary": article.get("summary"),
         "ai_tags": list(article.get("ai_tags") or []),
         "excluded_ai_tags": list(article.get("excluded_ai_tags") or []),
+        "manual_ai_tags": list(article.get("manual_ai_tags") or []),
         "permission_scope": str(article.get("permission_scope")),
         "is_published": bool(article.get("is_published")),
         "updated_at": article.get("updated_at_utc"),

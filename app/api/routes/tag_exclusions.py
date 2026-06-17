@@ -32,6 +32,7 @@ class TagExclusionListResponse(BaseModel):
 
 class RemoveTagRequest(BaseModel):
     tag_slug: str = Field(..., min_length=1, max_length=48, description="Tag slug to remove")
+    exclude_globally: bool = Field(False, description="Also add the tag to the shared AI tag exclusion list")
 
 
 @router.get("", response_model=TagExclusionListResponse)
@@ -166,6 +167,13 @@ async def remove_kb_article_tag(
         # Add to excluded list to prevent re-adding on refresh
         if normalized_slug not in excluded_ai_tags:
             excluded_ai_tags.append(normalized_slug)
+        if request.exclude_globally and not await tag_exclusions_repo.is_tag_excluded(normalized_slug):
+            user_id = current_user.get("id")
+            try:
+                user_id_int = int(user_id) if user_id else None
+            except (TypeError, ValueError):
+                user_id_int = None
+            await tag_exclusions_repo.add_tag_exclusion(normalized_slug, user_id_int)
         await kb_repo.update_article(article_id, ai_tags=updated_tags, excluded_ai_tags=excluded_ai_tags)
         return {"success": True, "removed": normalized_slug, "remaining_tags": updated_tags}
     
