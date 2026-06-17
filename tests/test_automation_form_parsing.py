@@ -130,3 +130,45 @@ def test_parse_form_accepts_schema_payload():
     assert error_message is None
     assert status_code == 200
     assert data["action_payload"]["actions"][0]["payload"]["body"] == "Automated reply"
+
+
+def test_parse_event_form_rejects_non_object_trigger_filters():
+    form = FormData(
+        [
+            ("name", "Bad filter automation"),
+            ("kind", "event"),
+            ("status", "active"),
+            ("triggerEvent", "tickets.created"),
+            ("triggerFilters", json.dumps([{"match": {"ticket.status": "open"}}])),
+        ]
+    )
+
+    data, form_state, error_message, status_code = _parse_automation_form_submission(
+        form, kind="event"
+    )
+
+    assert data is None
+    assert status_code == 400
+    assert "object" in (error_message or "").lower()
+    assert form_state["triggerFiltersRaw"].startswith("[")
+
+
+def test_parse_event_form_treats_empty_trigger_filter_object_as_none():
+    form = FormData(
+        [
+            ("name", "Empty filter automation"),
+            ("kind", "event"),
+            ("status", "active"),
+            ("triggerEvent", "tickets.created"),
+            ("triggerFilters", "{}"),
+        ]
+    )
+
+    data, form_state, error_message, status_code = _parse_automation_form_submission(
+        form, kind="event"
+    )
+
+    assert error_message is None
+    assert status_code == 200
+    assert data["trigger_filters"] is None
+    assert form_state["triggerFiltersRaw"] == ""
