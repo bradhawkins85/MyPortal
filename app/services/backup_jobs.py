@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
-from app.core.database import db
 from app.core.logging import log_info, log_warning
 from app.repositories import backup_jobs as backup_jobs_repo
 

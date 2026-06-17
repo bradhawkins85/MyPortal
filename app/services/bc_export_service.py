@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from jinja2 import Environment, BaseLoader, select_autoescape
 try:  # pragma: no cover - import guard for optional dependency
     from weasyprint import HTML

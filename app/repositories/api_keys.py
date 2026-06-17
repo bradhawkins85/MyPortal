@@ -7,7 +7,7 @@ from typing import Any
 PermissionMapping = Sequence[dict[str, Any]]
 
 from app.core.database import db
-from app.core.logging import log_info, log_warning
+from app.core.logging import log_info
 from app.security.api_keys import GeneratedApiKey, generate_api_key, hash_api_key
 
 
@@ -354,8 +354,7 @@ async def _replace_api_key_permissions(
                 methods = entry.get("methods") or []
                 if not path or not methods:
                     continue
-                for method in methods:
-                    values.append((api_key_id, path, str(method).upper()))
+                values.extend((api_key_id, path, str(method).upper()) for method in methods)
             if values:
                 await cursor.executemany(
                     """

@@ -17,7 +17,6 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     CheckConstraint,
     Enum as SQLEnum,
@@ -27,7 +26,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from . import Base, TimestampMixin
 

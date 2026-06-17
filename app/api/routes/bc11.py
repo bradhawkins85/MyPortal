@@ -6,7 +6,6 @@ Implements CRUD operations with RBAC integration.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 

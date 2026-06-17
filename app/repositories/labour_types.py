@@ -155,8 +155,6 @@ async def replace_labour_types(definitions: Sequence[dict[str, Any]]) -> list[La
                 seen_codes: set[str] = set()
                 retained_ids: set[int] = set()
                 has_default = False
-                default_id: int | None = None
-
                 # First pass: validate and check for default
                 for entry in definitions:
                     raw_code = str(entry.get("code") or "").strip()
