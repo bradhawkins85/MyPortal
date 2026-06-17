@@ -282,6 +282,18 @@ def _parse_automation_form_submission(
             f"{invalid_section} is invalid JSON.",
             status.HTTP_400_BAD_REQUEST,
         )
+    if trigger_filters is not None:
+        if not isinstance(trigger_filters, dict):
+            invalid_section = "Advanced JSON trigger filters" if trigger_filters_mode == "advanced" else "Trigger filter builder payload"
+            return (
+                None,
+                form_state,
+                f"{invalid_section} must be a JSON object.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if not trigger_filters:
+            trigger_filters = None
+            form_state["triggerFiltersRaw"] = ""
 
     try:
         action_payload = json.loads(action_payload_raw) if action_payload_raw else None
