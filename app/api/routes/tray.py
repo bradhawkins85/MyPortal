@@ -59,6 +59,7 @@ from app.schemas.tray import (
 )
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
+from app.services import chat_ntfy_notifications
 from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import tacticalrmm as tacticalrmm_service
@@ -1655,7 +1656,10 @@ async def popup_chat_send_message(
     except Exception:
         pass
 
+    msg_data = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()}
+    await chat_ntfy_notifications.notify_chat_reply(room=room, message=msg_data, actor=None)
+
     return JSONResponse(
-        {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()},
+        msg_data,
         status_code=status.HTTP_201_CREATED,
     )
