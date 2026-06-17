@@ -1,4 +1,4 @@
-"""Admin routes for Matrix chat auto-assign rules."""
+"""Chat-section routes for Matrix chat auto-assign rules."""
 
 from __future__ import annotations
 
@@ -124,8 +124,8 @@ def _normalize_conditions(*, is_default: bool, conditions: list[dict[str, Any]])
     return conditions
 
 
-@router.get("/admin/modules/matrix-chat-assign", response_class=HTMLResponse)
-async def admin_matrix_chat_assign_page(
+@router.get("/chat/auto-assign", response_class=HTMLResponse)
+async def chat_auto_assign_page(
     request: Request,
     rule_id: int | None = Query(default=None, alias="ruleId"),
 ):
@@ -136,8 +136,8 @@ async def admin_matrix_chat_assign_page(
     return await _render_dashboard(request, current_user, editing_rule_id=rule_id)
 
 
-@router.post("/admin/modules/matrix-chat-assign/rules", response_class=HTMLResponse)
-async def admin_create_auto_assign_rule(request: Request):
+@router.post("/chat/auto-assign/rules", response_class=HTMLResponse)
+async def chat_create_auto_assign_rule(request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
@@ -184,15 +184,15 @@ async def admin_create_auto_assign_rule(request: Request):
         )
 
     return flash_redirect(
-        "/admin/modules/matrix-chat-assign", "Rule created successfully.", "success"
+        "/chat/auto-assign", "Rule created successfully.", "success"
     )
 
 
 @router.post(
-    "/admin/modules/matrix-chat-assign/rules/{rule_id}",
+    "/chat/auto-assign/rules/{rule_id}",
     response_class=HTMLResponse,
 )
-async def admin_update_auto_assign_rule(rule_id: int, request: Request):
+async def chat_update_auto_assign_rule(rule_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
@@ -201,7 +201,7 @@ async def admin_update_auto_assign_rule(rule_id: int, request: Request):
     existing = await assign_repo.get_rule(rule_id)
     if not existing:
         return flash_redirect(
-            "/admin/modules/matrix-chat-assign", "Rule not found.", "error"
+            "/chat/auto-assign", "Rule not found.", "error"
         )
 
     form = await request.form()
@@ -248,15 +248,15 @@ async def admin_update_auto_assign_rule(rule_id: int, request: Request):
         )
 
     return flash_redirect(
-        "/admin/modules/matrix-chat-assign", "Rule updated successfully.", "success"
+        "/chat/auto-assign", "Rule updated successfully.", "success"
     )
 
 
 @router.post(
-    "/admin/modules/matrix-chat-assign/rules/{rule_id}/delete",
+    "/chat/auto-assign/rules/{rule_id}/delete",
     response_class=HTMLResponse,
 )
-async def admin_delete_auto_assign_rule(rule_id: int, request: Request):
+async def chat_delete_auto_assign_rule(rule_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
@@ -267,11 +267,11 @@ async def admin_delete_auto_assign_rule(rule_id: int, request: Request):
     except Exception as exc:
         log_error("Failed to delete auto-assign rule", rule_id=rule_id, error=str(exc))
         return flash_redirect(
-            "/admin/modules/matrix-chat-assign",
+            "/chat/auto-assign",
             "Failed to delete rule.",
             "error",
         )
 
     return flash_redirect(
-        "/admin/modules/matrix-chat-assign", "Rule deleted.", "success"
+        "/chat/auto-assign", "Rule deleted.", "success"
     )

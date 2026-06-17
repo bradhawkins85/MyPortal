@@ -39,10 +39,10 @@ def test_scan_waiting_rooms_sends_ack_before_analysis(monkeypatch):
 
     monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
 
-    async def fake_has_technician_participant(room_id):
+    async def fake_has_technician_message(room_id):
         return False
 
-    monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_has_technician_message)
 
     async def fake_send(room, body, **kwargs):
         sent.append(body)
@@ -90,7 +90,7 @@ def test_scan_waiting_rooms_skips_ack_when_response_slot_already_reserved(monkey
     async def fake_list(due_before):
         return [{"id": 42, "status": "open", "assigned_tech_user_id": None, "ai_bot_response_count": 0}]
 
-    async def fake_has_technician_participant(room_id):
+    async def fake_has_technician_message(room_id):
         return False
 
     async def fake_reserve(room_id, expected_count, when=None):
@@ -101,7 +101,7 @@ def test_scan_waiting_rooms_skips_ack_when_response_slot_already_reserved(monkey
         return True
 
     monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
-    monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_has_technician_message)
     monkeypatch.setattr(assistant.chat_repo, "reserve_ai_bot_response", fake_reserve)
     monkeypatch.setattr(assistant, "_send_bot_message", fake_send)
 
@@ -133,10 +133,10 @@ def test_scan_waiting_rooms_queues_second_response_analysis(monkeypatch):
     monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
     monkeypatch.setattr(assistant.chat_repo, "get_active_ai_queue_item", fake_active)
 
-    async def fake_has_technician_participant(room_id):
+    async def fake_has_technician_message(room_id):
         return False
 
-    monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_has_technician_message)
 
     async def fake_create(**kwargs):
         created.append(kwargs)
@@ -313,8 +313,8 @@ def test_send_bot_message_records_webhook_monitor_failure(monkeypatch):
     assert failures[0]["error_message"] == "matrix unavailable"
 
 
-def test_handle_chat_opened_marks_unassigned_open_room(monkeypatch):
-    room = {"id": 42, "status": "open", "assigned_tech_user_id": None}
+def test_handle_chat_opened_marks_auto_assigned_room_without_technician_message(monkeypatch):
+    room = {"id": 42, "status": "open", "assigned_tech_user_id": 7}
     marked: list[int] = []
     cancelled: list[tuple[int, str]] = []
     audited: list[str] = []
@@ -328,7 +328,7 @@ def test_handle_chat_opened_marks_unassigned_open_room(monkeypatch):
     async def fake_cancel(room_id, reason):
         cancelled.append((room_id, reason))
 
-    async def fake_has_technician_participant(room_id):
+    async def fake_has_technician_message(room_id):
         return False
 
     async def fake_audit(action, room_id, value=None):
@@ -337,7 +337,7 @@ def test_handle_chat_opened_marks_unassigned_open_room(monkeypatch):
     monkeypatch.setattr(assistant.chat_repo, "get_room", fake_get_room)
     monkeypatch.setattr(assistant.chat_repo, "mark_user_activity", fake_mark)
     monkeypatch.setattr(assistant.chat_repo, "cancel_active_ai_queue_for_room", fake_cancel)
-    monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_has_technician_message)
     monkeypatch.setattr(assistant, "_audit", fake_audit)
 
     asyncio.run(assistant.handle_chat_opened(42))
@@ -347,7 +347,7 @@ def test_handle_chat_opened_marks_unassigned_open_room(monkeypatch):
     assert audited == ["matrix_ai_waiting_assistant.chat_opened"]
 
 
-def test_handle_chat_opened_ignores_room_with_technician_participant(monkeypatch):
+def test_handle_chat_opened_ignores_room_with_technician_message(monkeypatch):
     room = {"id": 42, "status": "open", "assigned_tech_user_id": 7}
     marked: list[int] = []
 
@@ -357,12 +357,12 @@ def test_handle_chat_opened_ignores_room_with_technician_participant(monkeypatch
     async def fake_mark(room_id, when=None):
         marked.append(room_id)
 
-    async def fake_has_technician_participant(room_id):
+    async def fake_has_technician_message(room_id):
         return True
 
     monkeypatch.setattr(assistant.chat_repo, "get_room", fake_get_room)
     monkeypatch.setattr(assistant.chat_repo, "mark_user_activity", fake_mark)
-    monkeypatch.setattr(assistant.chat_repo, "has_technician_participant", fake_has_technician_participant)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_has_technician_message)
 
     asyncio.run(assistant.handle_chat_opened(42))
 
