@@ -2102,12 +2102,27 @@ async def _run_offboarding_step(
                 except WorkflowStepError as exc:
                     if exc.http_status == 404:
                         continue
+                    if exc.http_status == 403:
+                        log_warning(
+                            "Offboarding: message rule disable skipped (Graph permission denied)",
+                            user_id=user_id,
+                            user_upn=user_upn,
+                            rule_id=rule_id,
+                        )
+                        continue
                     raise
-            steps_executed.append("disable_mailbox_rules")
+            if mailbox_rules_disabled_count:
+                steps_executed.append("disable_mailbox_rules")
         except M365Error as exc:
             if exc.http_status == 404:
                 log_warning(
                     "Offboarding: messageRules not available (no Exchange Online mailbox)",
+                    user_id=user_id,
+                    user_upn=user_upn,
+                )
+            elif exc.http_status == 403:
+                log_warning(
+                    "Offboarding: messageRules not accessible (Graph permission denied)",
                     user_id=user_id,
                     user_upn=user_upn,
                 )
