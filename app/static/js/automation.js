@@ -1575,12 +1575,12 @@
       if (!filters || typeof filters !== 'object') {
         return [];
       }
+      if (Array.isArray(filters.all)) {
+        return filters.all.map((node) => filterNodeToRow(node)).filter(Boolean);
+      }
       const asNode = filterNodeToRow(filters);
       if (asNode) {
         return [asNode];
-      }
-      if (Array.isArray(filters.all)) {
-        return filters.all.map((node) => filterNodeToRow(node)).filter(Boolean);
       }
       return [];
     };
