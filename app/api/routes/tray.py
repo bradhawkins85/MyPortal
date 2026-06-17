@@ -1456,9 +1456,20 @@ async def issue_chat_token(
             detail="Device has no associated company",
         )
 
-    # When no room was explicitly requested, reconnect to the device's existing
-    # open chat room (if any) so the user continues the same conversation.
-    if room_id is None:
+    # Explicit room requests come from technician-initiated chats and reply
+    # notifications. Never issue a token for a closed/stale room because the
+    # popup must not turn that stale launch into a brand-new user chat.
+    if room_id is not None:
+        requested_room = await chat_repo.get_room(int(room_id))
+        if not requested_room:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat room not found")
+        if requested_room.get("status") != "open":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed")
+    else:
+        # When no room was explicitly requested, reconnect to the device's
+        # existing open chat room (if any) so the user continues the same
+        # conversation. If none exists, the popup may create a user-initiated
+        # chat when the tray icon/menu action is used.
         existing = await chat_repo.get_open_room_by_device_id(int(device["id"]))
         if existing:
             room_id = int(existing["id"])
