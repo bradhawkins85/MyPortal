@@ -1923,6 +1923,7 @@ async def test_remove_calendar_events_invokes_exchange_cmdlet():
         {
             "Identity": "offboard.user@example.com",
             "CancelOrganizedMeetings": True,
+            "QueryWindowInDays": 1825,
         },
     )
 
