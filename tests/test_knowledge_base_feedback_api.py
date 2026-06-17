@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -178,3 +179,12 @@ def test_add_manual_ai_tag_persists_and_returns_refreshed_article(monkeypatch, a
     assert response.json()["manual_ai_tags"] == ["vpn"]
     assert stored_article["manual_ai_tags"] == ["vpn"]
     assert stored_article["excluded_ai_tags"] == []
+
+
+def test_manual_ai_tag_control_is_not_nested_form_submitter():
+    script = Path("app/static/js/knowledge_base_admin.js").read_text()
+
+    assert "data-kb-manual-tag-form" in script
+    assert "<form class=\"kb-admin__manual-tag-form" not in script
+    assert "data-kb-manual-tag-add" in script
+    assert "manualTagInput.addEventListener('keydown'" in script

@@ -122,7 +122,7 @@
         </span>`;
       })
       .join('');
-    const addHtml = `<form class="kb-admin__manual-tag-form" data-kb-manual-tag-form><input class="form-input" type="text" name="manual_tag" maxlength="48" placeholder="Add missed keyword" aria-label="Add manual AI tag"><button type="submit" class="button button--ghost button--sm">Add tag</button></form>`;
+    const addHtml = `<div class="kb-admin__manual-tag-form" data-kb-manual-tag-form><input class="form-input" type="text" name="manual_tag" maxlength="48" placeholder="Add missed keyword" aria-label="Add manual AI tag"><button type="button" class="button button--ghost button--sm" data-kb-manual-tag-add>Add tag</button></div>`;
     aiTagsContainer.innerHTML = emptyHtml + generatedHtml + manualHtml + addHtml;
 
     // Add click listeners to remove tags
@@ -144,13 +144,29 @@
         if (tagValue && confirm(`Remove manual tag "${tagValue}"?`)) await removeManualTag(tagValue);
       });
     });
-    const manualForm = aiTagsContainer.querySelector('[data-kb-manual-tag-form]');
-    if (manualForm) {
-      manualForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const value = new FormData(manualForm).get('manual_tag');
+    const manualTagWrapper = aiTagsContainer.querySelector('[data-kb-manual-tag-form]');
+    if (manualTagWrapper) {
+      const manualTagInput = manualTagWrapper.querySelector('input[name="manual_tag"]');
+      const manualTagButton = manualTagWrapper.querySelector('[data-kb-manual-tag-add]');
+      const submitManualTag = async () => {
+        const value = manualTagInput ? manualTagInput.value : '';
         await addManualTag(value);
-      });
+        if (manualTagInput) {
+          manualTagInput.value = '';
+          manualTagInput.focus();
+        }
+      };
+      if (manualTagButton) {
+        manualTagButton.addEventListener('click', submitManualTag);
+      }
+      if (manualTagInput) {
+        manualTagInput.addEventListener('keydown', async (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            await submitManualTag();
+          }
+        });
+      }
     }
   }
 
