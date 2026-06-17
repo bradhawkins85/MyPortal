@@ -75,7 +75,7 @@
               {% endif %}
             </td>
             <td data-label="AI tags" data-value="{{ (article.ai_tags or []) | join(', ') }}" data-column-key="ai-tags">
-              {% for tag in article.ai_tags or [] %}<span class="tag tag--muted">{{ tag }}</span>{% else %}<span class="text-muted">—</span>{% endfor %}
+              {% for tag in article.ai_tags or [] %}<span class="tag tag--muted">{{ tag }}</span>{% endfor %}{% for tag in article.manual_ai_tags or [] %}<span class="tag tag--manual" title="Manual admin-added AI tag">{{ tag }}</span>{% endfor %}{% if not article.ai_tags and not article.manual_ai_tags %}<span class="text-muted">—</span>{% endif %}
             </td>
             <td data-label="Updated" data-value="{{ article.updated_at_iso or '' }}" data-column-key="updated">
               <span data-utc="{{ article.updated_at_iso or '' }}">{{ article.updated_at_iso or '—' }}</span>

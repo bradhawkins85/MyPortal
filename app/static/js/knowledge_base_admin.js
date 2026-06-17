@@ -26,6 +26,8 @@
   const state = {
     activeSlug: null,
     activeId: null,
+    aiTags: [],
+    manualAiTags: [],
   };
 
   const table = document.getElementById('kb-admin-table');
@@ -94,40 +96,65 @@
     return div.innerHTML;
   }
 
-  function renderAiTags(tags) {
+  function renderAiTags(tags, manualTags) {
     if (!aiTagsContainer) {
       return;
     }
-    if (!Array.isArray(tags) || tags.length === 0) {
-      aiTagsContainer.innerHTML = '<span class="card__empty">No AI tags yet. Tags will be generated when you save the article.</span>';
-      return;
-    }
-    const html = tags
+    const generatedTags = Array.isArray(tags) ? tags : [];
+    const addedTags = Array.isArray(manualTags) ? manualTags : [];
+    const emptyHtml = generatedTags.length === 0 && addedTags.length === 0
+      ? '<span class="card__empty">No AI tags yet. Tags will be generated when you save the article.</span>'
+      : '';
+    const generatedHtml = generatedTags
       .map((tag) => {
-        return `<button type="button" class="tag tag--removable" data-tag-value="${escapeHtml(tag)}" title="Click to remove this tag">
+        return `<span class="tag tag--removable" data-tag-value="${escapeHtml(tag)}">
           ${escapeHtml(tag)}
-          <span class="tag__remove" aria-hidden="true">×</span>
-        </button>`;
+          <button type="button" class="tag__remove" data-tag-action="remove" aria-label="Remove tag ${escapeHtml(tag)}" title="Remove this tag">×</button>
+          <button type="button" class="tag__exclude" data-tag-action="exclude" aria-label="Exclude tag ${escapeHtml(tag)} from future use" title="Remove and exclude from future use"><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8.27 3 3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3H8.27zm4.5 13h-1.5v-1.5h1.5V16zm0-3h-1.5V8h1.5v5z"/></svg></button>
+        </span>`;
       })
       .join('');
-    aiTagsContainer.innerHTML = html;
+    const manualHtml = addedTags
+      .map((tag) => {
+        return `<span class="tag tag--manual" data-manual-tag-value="${escapeHtml(tag)}" title="Manual admin-added AI tag">
+          ${escapeHtml(tag)}
+          <button type="button" class="tag__remove" data-tag-action="remove-manual" aria-label="Remove manual tag ${escapeHtml(tag)}" title="Remove manual tag">×</button>
+        </span>`;
+      })
+      .join('');
+    const addHtml = `<form class="kb-admin__manual-tag-form" data-kb-manual-tag-form><input class="form-input" type="text" name="manual_tag" maxlength="48" placeholder="Add missed keyword" aria-label="Add manual AI tag"><button type="submit" class="button button--ghost button--sm">Add tag</button></form>`;
+    aiTagsContainer.innerHTML = emptyHtml + generatedHtml + manualHtml + addHtml;
 
     // Add click listeners to remove tags
-    aiTagsContainer.querySelectorAll('[data-tag-value]').forEach((button) => {
+    aiTagsContainer.querySelectorAll('[data-tag-action="remove"]').forEach((button) => {
       button.addEventListener('click', async () => {
-        const tagValue = button.dataset.tagValue;
-        if (!tagValue || !state.activeId) {
-          return;
-        }
-        if (!confirm(`Remove tag "${tagValue}"? This tag will not be automatically re-added.`)) {
-          return;
-        }
-        await removeTag(tagValue);
+        const tagValue = button.closest('[data-tag-value]')?.dataset.tagValue;
+        if (tagValue && confirm(`Remove tag "${tagValue}" from this article?`)) await removeTag(tagValue, false);
       });
     });
+    aiTagsContainer.querySelectorAll('[data-tag-action="exclude"]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const tagValue = button.closest('[data-tag-value]')?.dataset.tagValue;
+        if (tagValue && confirm(`Remove tag "${tagValue}" and add it to the shared exclusion list?`)) await removeTag(tagValue, true);
+      });
+    });
+    aiTagsContainer.querySelectorAll('[data-tag-action="remove-manual"]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const tagValue = button.closest('[data-manual-tag-value]')?.dataset.manualTagValue;
+        if (tagValue && confirm(`Remove manual tag "${tagValue}"?`)) await removeManualTag(tagValue);
+      });
+    });
+    const manualForm = aiTagsContainer.querySelector('[data-kb-manual-tag-form]');
+    if (manualForm) {
+      manualForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const value = new FormData(manualForm).get('manual_tag');
+        await addManualTag(value);
+      });
+    }
   }
 
-  async function removeTag(tagSlug) {
+  async function removeTag(tagSlug, excludeGlobally) {
     if (!state.activeId) {
       return;
     }
@@ -138,18 +165,66 @@
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ tag_slug: tagSlug }),
+        body: JSON.stringify({ tag_slug: tagSlug, exclude_globally: Boolean(excludeGlobally) }),
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
         throw new Error((detail && detail.detail) || `Failed to remove tag: ${response.status}`);
       }
       const result = await response.json();
-      renderAiTags(result.remaining_tags || []);
-      setStatus('Tag removed successfully.', 'success');
+      state.aiTags = result.remaining_tags || [];
+      renderAiTags(state.aiTags, state.manualAiTags);
+      setStatus(excludeGlobally ? 'Tag removed and added to the shared exclusion list.' : 'Tag removed successfully.', 'success');
       setTimeout(() => setStatus(''), 3000);
     } catch (error) {
       alert(error.message || 'Failed to remove tag. Please try again.');
+    }
+  }
+
+
+  async function addManualTag(tagSlug) {
+    if (!state.activeId || !tagSlug) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/manual-ai-tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ tag_slug: tagSlug }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error((detail && detail.detail) || `Failed to add manual tag: ${response.status}`);
+      }
+      const result = await response.json();
+      state.aiTags = result.ai_tags || state.aiTags;
+      state.manualAiTags = result.manual_ai_tags || [];
+      renderAiTags(state.aiTags, state.manualAiTags);
+      setStatus('Manual AI tag added.', 'success');
+    } catch (error) {
+      alert(error.message || 'Failed to add manual tag. Please try again.');
+    }
+  }
+
+  async function removeManualTag(tagSlug) {
+    if (!state.activeId || !tagSlug) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/manual-ai-tags/${encodeURIComponent(tagSlug)}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error((detail && detail.detail) || `Failed to remove manual tag: ${response.status}`);
+      }
+      const result = await response.json();
+      state.manualAiTags = result.manual_ai_tags || [];
+      renderAiTags(state.aiTags, state.manualAiTags);
+      setStatus('Manual AI tag removed.', 'success');
+    } catch (error) {
+      alert(error.message || 'Failed to remove manual tag. Please try again.');
     }
   }
 
@@ -906,7 +981,9 @@
     // Show and populate AI tags
     if (aiTagsSection && article.id) {
       aiTagsSection.hidden = false;
-      renderAiTags(article.ai_tags || []);
+      state.aiTags = article.ai_tags || [];
+      state.manualAiTags = article.manual_ai_tags || [];
+      renderAiTags(state.aiTags, state.manualAiTags);
     }
     
     if (deleteButton) {
