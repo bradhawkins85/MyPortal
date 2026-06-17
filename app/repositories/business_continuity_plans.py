@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from app.core.database import db
-from app.schemas.business_continuity_plans import PermissionLevel
 
 
 async def create_plan(

@@ -18,7 +18,7 @@ from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemResponse,
     RecurringInvoiceItemUpdate,
 )
-from app.schemas.users import StaffRequesterOption, UserResponse
+from app.schemas.users import StaffRequesterOption
 from app.services import audit as audit_service
 from app.services import company_id_lookup
 
@@ -250,13 +250,14 @@ async def list_company_members(
     memberships = await membership_repo.list_company_memberships(company_id)
     
     # Transform to the format expected by the frontend
-    members = []
-    for membership in memberships:
-        members.append({
+    members = [
+        {
             "user_id": membership.get("user_id"),
             "email": membership.get("user_email"),
-        })
-    
+        }
+        for membership in memberships
+    ]
+
     return {"members": members}
 @router.get("/{company_id}/assets", response_model=list[AssetResponse])
 async def list_company_assets(

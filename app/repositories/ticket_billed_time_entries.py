@@ -1,7 +1,6 @@
 """Repository for managing billed time entries in Xero."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from app.core.database import db

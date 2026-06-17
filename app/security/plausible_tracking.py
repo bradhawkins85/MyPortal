@@ -9,9 +9,7 @@ authenticated users, using privacy-conscious practices:
 
 from __future__ import annotations
 
-import hmac
 import os
-import hashlib
 from typing import Callable
 
 import httpx
@@ -20,7 +18,6 @@ from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Any
 
-from app.core.config import get_settings
 from app.security.session import session_manager
 
 
@@ -135,8 +132,6 @@ class PlausibleTrackingMiddleware(BaseHTTPMiddleware):
             request: The incoming request
             user_id: The authenticated user ID
         """
-        settings = get_settings()
-        
         # Get Plausible module configuration
         module_settings = {}
         if self.get_module_settings:

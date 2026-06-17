@@ -55,21 +55,19 @@ async def _assignment_is_accessible(assignment_id: int, allowed_company_ids: set
 
 
 def _format_issue_overview_for_template(overview: Any) -> dict[str, Any]:
-    from app.services import issues as issues_service
 
-    assignments = []
-    for assignment in overview.assignments:
-        assignments.append(
-            {
-                "assignment_id": assignment.assignment_id,
-                "issue_id": assignment.issue_id,
-                "company_id": assignment.company_id,
-                "company_name": assignment.company_name,
-                "status": assignment.status,
-                "status_label": assignment.status_label,
-                "updated_at_iso": assignment.updated_at_iso,
-            }
-        )
+    assignments = [
+        {
+            "assignment_id": assignment.assignment_id,
+            "issue_id": assignment.issue_id,
+            "company_id": assignment.company_id,
+            "company_name": assignment.company_name,
+            "status": assignment.status,
+            "status_label": assignment.status_label,
+            "updated_at_iso": assignment.updated_at_iso,
+        }
+        for assignment in overview.assignments
+    ]
     return {
         "issue_id": overview.issue_id,
         "name": overview.name,

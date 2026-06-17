@@ -45,7 +45,6 @@ def _main():
 
 
 async def _load_asset_context(request: Request):
-    main_module = _main()
     user, redirect = await main_module._require_authenticated_user(request)
     if redirect:
         return user, None, None, None, redirect
@@ -79,7 +78,6 @@ async def _load_asset_context(request: Request):
 
 @router.get("/assets", response_class=HTMLResponse)
 async def assets_page(request: Request):
-    main_module = _main()
     user, membership, company, company_id, redirect = await _load_asset_context(request)
     if redirect:
         return redirect
@@ -256,7 +254,6 @@ async def assets_page(request: Request):
 
 @router.get("/assets/settings", response_class=HTMLResponse)
 async def assets_settings_page(request: Request):
-    main_module = _main()
     user, _membership, _, _, redirect = await _load_asset_context(request)
     if redirect:
         return redirect
@@ -290,7 +287,6 @@ async def asset_detail_page(request: Request, asset_id: int):
 
 @router.delete("/assets/{asset_id}", response_class=JSONResponse)
 async def delete_asset(request: Request, asset_id: int):
-    main_module = _main()
     user, _membership, _, company_id, redirect = await _load_asset_context(request)
     if redirect:
         raise HTTPException(

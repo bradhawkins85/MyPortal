@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import Request, status
-from fastapi.responses import RedirectResponse
 from starlette.datastructures import FormData
 
 from app.security.flash import flash_redirect

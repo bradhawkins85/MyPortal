@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from app.core.database import db
-from app.core.logging import log_debug, log_info
+from app.core.logging import log_info
 from app.security.encryption import decrypt_secret, encrypt_secret
 
 

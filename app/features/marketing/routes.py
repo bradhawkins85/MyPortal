@@ -95,15 +95,13 @@ async def _build_essential8_help_mapping_controls() -> list[dict[str, Any]]:
             mapping["marketing_page_id"] if mapping else None
         )
         requirements_by_control.setdefault(requirement["control_id"], []).append(row)
-    result: list[dict[str, Any]] = []
-    for control in controls:
-        result.append(
-            {
-                **control,
-                "requirements": requirements_by_control.get(control["id"], []),
-            }
-        )
-    return result
+    return [
+        {
+            **control,
+            "requirements": requirements_by_control.get(control["id"], []),
+        }
+        for control in controls
+    ]
 
 
 @router.get("/marketing/{slug}", response_class=HTMLResponse)
