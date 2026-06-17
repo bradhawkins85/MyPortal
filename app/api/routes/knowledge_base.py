@@ -305,7 +305,14 @@ async def add_article_manual_ai_tag(
     if tag not in manual_tags:
         manual_tags.append(tag)
     await kb_repo.update_article(article_id, ai_tags=ai_tags, manual_ai_tags=manual_tags, excluded_ai_tags=excluded_tags)
-    return {"status": "updated", "manual_ai_tags": manual_tags, "ai_tags": ai_tags}
+    refreshed = await kb_repo.get_article_by_id(article_id)
+    if not refreshed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found after update")
+    return {
+        "status": "updated",
+        "manual_ai_tags": list(refreshed.get("manual_ai_tags") or []),
+        "ai_tags": list(refreshed.get("ai_tags") or []),
+    }
 
 
 @router.delete("/articles/{article_id}/manual-ai-tags/{tag_slug}", status_code=status.HTTP_200_OK)
@@ -323,7 +330,10 @@ async def remove_article_manual_ai_tag(
     tag = slugify_tag(tag_slug)
     manual_tags = [existing for existing in list(article.get("manual_ai_tags") or []) if existing != tag]
     await kb_repo.update_article(article_id, manual_ai_tags=manual_tags)
-    return {"status": "updated", "manual_ai_tags": manual_tags}
+    refreshed = await kb_repo.get_article_by_id(article_id)
+    if not refreshed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found after update")
+    return {"status": "updated", "manual_ai_tags": list(refreshed.get("manual_ai_tags") or [])}
 
 
 @router.post("/articles/{article_id}/refresh-ai-tags", status_code=status.HTTP_200_OK)

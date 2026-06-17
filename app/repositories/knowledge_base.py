@@ -450,7 +450,10 @@ async def find_relevant_articles_for_ticket(
     relevant_articles: list[tuple[dict[str, Any], int]] = []
     
     for article in all_articles:
-        article_tags = article.get("ai_tags") or []
+        article_tags = [
+            *(article.get("ai_tags") or []),
+            *(article.get("manual_ai_tags") or []),
+        ]
         excluded_tags = article.get("excluded_ai_tags") or []
         
         # Normalize article tags
@@ -487,4 +490,3 @@ async def find_relevant_articles_for_ticket(
         result.append(article_copy)
     
     return result
-

@@ -281,3 +281,28 @@ async def test_update_article_refreshes_ai_tags(monkeypatch):
     assert ai_tag_call["ai_tags"] == ["security", "hardening"]
     assert article["ai_tags"] == ["security", "hardening"]
     trigger_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_search_articles_matches_manual_ai_tags(monkeypatch):
+    articles = [
+        _article_factory(
+            id=41,
+            slug="manual-vpn",
+            title="Remote access guide",
+            summary="Client setup notes",
+            content="<p>Install the client.</p>",
+            ai_tags=[],
+            manual_ai_tags=["vpn", "remote-access"],
+        )
+    ]
+    monkeypatch.setattr(
+        knowledge_base_service.kb_repo,
+        "list_articles",
+        AsyncMock(return_value=articles),
+    )
+
+    context = await knowledge_base_service.build_access_context({"id": 2, "is_super_admin": False})
+    result = await knowledge_base_service.search_articles("vpn", context, use_ollama=False)
+
+    assert [item["slug"] for item in result["results"]] == ["manual-vpn"]
