@@ -392,7 +392,7 @@ async def handle_chat_opened(room_id: int, opened_at: datetime | None = None) ->
     technician has taken the chat.
     """
     room = await chat_repo.get_room(room_id)
-    if not room or room.get("status") != "open" or room.get("assigned_tech_user_id"):
+    if not room or room.get("status") != "open" or await chat_repo.has_technician_participant(room_id):
         return
     await chat_repo.mark_user_activity(room_id, opened_at)
     await chat_repo.cancel_active_ai_queue_for_room(room_id, "chat_opened_timer_reset")
@@ -412,7 +412,10 @@ async def handle_chat_closed(room_id: int) -> None:
 async def _eligible_room(room: Mapping[str, Any]) -> bool:
     if not _enabled():
         return False
-    if room.get("status") != "open" or room.get("assigned_tech_user_id"):
+    room_id = int(room.get("id") or 0)
+    if room.get("status") != "open" or not room_id:
+        return False
+    if await chat_repo.has_technician_participant(room_id):
         return False
     return int(room.get("ai_bot_response_count") or 0) < get_settings().matrixbot_ai_max_responses
 

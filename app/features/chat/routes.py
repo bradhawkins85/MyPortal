@@ -320,7 +320,7 @@ async def tray_chat_popup(
         # message activity.
         try:
             refreshed_room = await chat_repo.get_room(room_id_new)
-            if refreshed_room and not refreshed_room.get("assigned_tech_user_id"):
+            if refreshed_room:
                 chat_room = refreshed_room
                 await matrix_ai_waiting_assistant.handle_chat_opened(room_id_new)
         except Exception as exc:
