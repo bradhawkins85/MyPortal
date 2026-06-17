@@ -5073,6 +5073,17 @@ dialog.modal:not([open]) {
   align-items: flex-start;
 }
 
+.management__column--conversation,
+.management__column--activity {
+  min-width: 0;
+}
+
+@media (min-width: 1800px) {
+  .management__body--columns {
+    grid-template-columns: minmax(280px, 320px) minmax(360px, 1.15fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
 .management__column {
   display: flex;
   flex-direction: column;
