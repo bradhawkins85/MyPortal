@@ -120,6 +120,15 @@ async def create_room(
     except Exception as exc:
         log_error("create_room: auto-assign failed", room_id=room["id"], error=str(exc))
 
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        try:
+            refreshed_room = await chat_repo.get_room(int(room["id"]))
+            if refreshed_room:
+                room = refreshed_room
+                await matrix_ai_waiting_assistant.handle_chat_opened(int(room["id"]))
+        except Exception as exc:
+            log_error("create_room: AI waiting assistant open hook failed", room_id=room["id"], error=str(exc))
+
     await audit_service.log_action(
         action="create",
         entity_type="chat_room",

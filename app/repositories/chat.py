@@ -169,6 +169,16 @@ async def get_participants(room_id: int) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+async def has_technician_participant(room_id: int) -> bool:
+    row = await db.fetch_one(
+        """SELECT 1 FROM chat_room_participants
+           WHERE room_id = %s AND role IN ('technician', 'admin')
+           LIMIT 1""",
+        (room_id,),
+    )
+    return row is not None
+
+
 async def get_participant(
     room_id: int,
     *,
@@ -552,13 +562,16 @@ async def update_ai_analysis(
 
 async def list_ai_waiting_candidate_rooms(due_before: datetime) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        """SELECT * FROM chat_rooms
-           WHERE status = 'open'
-             AND assigned_tech_user_id IS NULL
-             AND ai_last_user_message_at IS NOT NULL
-             AND ai_last_user_message_at <= %s
-             AND COALESCE(ai_bot_response_count, 0) < 100
-           ORDER BY ai_last_user_message_at ASC
+        """SELECT * FROM chat_rooms r
+           WHERE r.status = 'open'
+             AND r.ai_last_user_message_at IS NOT NULL
+             AND r.ai_last_user_message_at <= %s
+             AND COALESCE(r.ai_bot_response_count, 0) < 100
+             AND NOT EXISTS (
+                 SELECT 1 FROM chat_room_participants p
+                 WHERE p.room_id = r.id AND p.role IN ('technician', 'admin')
+             )
+           ORDER BY r.ai_last_user_message_at ASC
            LIMIT 250""",
         (due_before,),
     )
