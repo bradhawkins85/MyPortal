@@ -4,10 +4,14 @@
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_actions %}
-  {{ page_header_actions([
+  {% set chat_actions = [
     {"label": "New chat", "variant": "primary", "type": "button",
      "attrs": {"data-create-chat-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-chat-modal"}},
-  ]) }}
+  ] %}
+  {% if is_super_admin | default(false) %}
+    {% set chat_actions = chat_actions + [{"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}] %}
+  {% endif %}
+  {{ page_header_actions(chat_actions) }}
 {% endblock %}
 
 {% block content %}

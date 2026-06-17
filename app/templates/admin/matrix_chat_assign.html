@@ -37,9 +37,9 @@
 
 {% block content %}
 {% set is_editing = editing_rule is not none %}
-{% set form_action = '/admin/modules/matrix-chat-assign/rules' %}
+{% set form_action = '/chat/auto-assign/rules' %}
 {% if is_editing %}
-  {% set form_action = '/admin/modules/matrix-chat-assign/rules/' ~ editing_rule.id %}
+  {% set form_action = '/chat/auto-assign/rules/' ~ editing_rule.id %}
 {% endif %}
 
 <div class="management management--single" data-layout>
@@ -153,7 +153,7 @@
                         >Edit</button>
                       </li>
                       <li class="header-title-menu__item" role="none">
-                        <form action="/admin/modules/matrix-chat-assign/rules/{{ rule.id }}/delete"
+                        <form action="/chat/auto-assign/rules/{{ rule.id }}/delete"
                               method="post" class="inline-form"
                               onsubmit="return confirm('Delete rule \'{{ rule.name | replace("'", "\\'") }}\'?');">
                           {% if csrf_token %}
@@ -338,7 +338,7 @@
     day_of_week: ['in'],
   };
   const STRING_OPERATORS = ['contains', 'equals', 'starts_with'];
-  const RULES_BASE_PATH = '/admin/modules/matrix-chat-assign/rules';
+  const RULES_BASE_PATH = '/chat/auto-assign/rules';
 
   const modal = document.getElementById('rule-modal');
   const form = document.getElementById('rule-form');
