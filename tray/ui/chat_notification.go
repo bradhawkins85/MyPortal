@@ -35,6 +35,7 @@ type chatMessagePayload struct {
 var (
 	showChatSessionNotificationFunc = showChatSessionNotification
 	openChatWindowFunc              = openChatWindow
+	requestChatTokenFunc            = requestChatTokenForRoom
 
 	notificationActionOnce    sync.Once
 	notificationActionBaseURL string
@@ -53,7 +54,9 @@ func handleChatOpen(payload chatOpenPayload) {
 		logger.Warn("handleChatOpen: could not register chat notification action for room_id=%d", payload.RoomID)
 	}
 
-	go openChatWindowFunc(chatOpenURL(payload.RoomID), gConfig)
+	if chatURL := chatOpenURL(payload.RoomID); chatURL != "" {
+		go openChatWindowFunc(chatURL, gConfig)
+	}
 
 	title, body := chatNotificationText(payload)
 	showChatSessionNotificationFunc(title, body, actionURL)
@@ -65,12 +68,12 @@ func handleChatMessage(payload chatMessagePayload) {
 		logger.Warn("handleChatMessage: could not register chat notification action for room_id=%d", payload.RoomID)
 	}
 
-	// Technician replies can arrive after the initial chat_open event, for
-	// example when the tray UI was started after the room was created or when a
-	// previous launch attempt failed. Treat every inbound chat message as a
-	// launch signal as well as a notification so the end user is never left with
-	// only a silent IPC event in ui.log.
-	go openChatWindowFunc(chatOpenURL(payload.RoomID), gConfig)
+	// Replies should bring an active chat back to the user's attention. Closed
+	// rooms are rejected by the popup/token endpoints so stale notifications do
+	// not create a fresh "Chat from <device>" room.
+	if chatURL := chatOpenURL(payload.RoomID); chatURL != "" {
+		go openChatWindowFunc(chatURL, gConfig)
+	}
 
 	title, body := chatMessageNotificationText(payload)
 	showChatSessionNotificationFunc(title, body, actionURL)
@@ -117,11 +120,11 @@ func chatNotificationText(payload chatOpenPayload) (string, string) {
 }
 
 func chatOpenURL(roomID int) string {
-	chatURL := requestChatTokenForRoom(roomID)
-	if chatURL == "" {
-		chatURL = buildChatURL(roomID)
-	}
-	return chatURL
+	// Room-specific tray launches require a one-time authenticated popup token.
+	// If the portal refuses to issue one (for example, because the chat room was
+	// closed), return an empty URL so the client does not open /tray/chat without
+	// a token and does not fall back to creating a new chat.
+	return requestChatTokenFunc(roomID)
 }
 
 func summarizeChatMessage(message string) string {
@@ -137,13 +140,13 @@ func summarizeChatMessage(message string) string {
 func registerChatOpenAction(roomID int) string {
 	startNotificationActionServer()
 	if notificationActionBaseURL == "" {
-		return buildChatURL(roomID)
+		return ""
 	}
 
 	id, err := randomActionID()
 	if err != nil {
 		logger.Warn("registerChatOpenAction: random action id failed: %v", err)
-		return buildChatURL(roomID)
+		return ""
 	}
 	notificationActionMu.Lock()
 	pruneExpiredNotificationActionsLocked(time.Now())
