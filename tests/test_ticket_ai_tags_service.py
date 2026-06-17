@@ -321,3 +321,60 @@ async def test_external_reference_not_generated_as_tag(monkeypatch):
     assert "abc-xyz-123" not in tags
     assert "example-com" not in tags
     assert "reply-456" not in tags
+
+
+def test_render_tags_prompt_uses_customer_replies_only(monkeypatch):
+    ticket = {
+        "id": 13,
+        "subject": "Email access issue",
+        "description": "Customer cannot access mailbox.",
+        "status": "open",
+        "priority": "normal",
+        "category": "Email",
+        "module_slug": "helpdesk",
+        "requester_id": 7,
+    }
+    replies = [
+        {
+            "ticket_id": 13,
+            "author_id": 7,
+            "body": "I get an MFA prompt loop when opening Outlook.",
+            "is_internal": False,
+            "created_at": None,
+        },
+        {
+            "ticket_id": 13,
+            "author_id": 3,
+            "body": "Technician reset conditional access and cleared sessions.",
+            "is_internal": False,
+            "created_at": None,
+        },
+        {
+            "ticket_id": 13,
+            "author_id": None,
+            "sender_matrix_id": "@supportbot:example.test",
+            "body": "Thanks — your request has been received. A technician will be assigned shortly.",
+            "is_internal": False,
+            "created_at": None,
+        },
+        {
+            "ticket_id": 13,
+            "author_id": 3,
+            "body": "Internal diagnostic note about Azure logs.",
+            "is_internal": True,
+            "created_at": None,
+        },
+    ]
+
+    class Settings:
+        matrix_bot_user_id = "@supportbot:example.test"
+
+    monkeypatch.setattr(tickets_service, "get_settings", lambda: Settings())
+
+    prompt = tickets_service._render_tags_prompt(ticket, replies, {})
+
+    assert "Customer conversation highlights" in prompt
+    assert "MFA prompt loop" in prompt
+    assert "conditional access" not in prompt
+    assert "request has been received" not in prompt
+    assert "Internal diagnostic" not in prompt
