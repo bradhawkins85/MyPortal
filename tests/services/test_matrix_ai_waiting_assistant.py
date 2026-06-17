@@ -210,6 +210,77 @@ def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
     assert successes[0]["response_status"] == 200
 
 
+def test_build_article_recommendation_message_formats_plain_text_and_html():
+    article = {"title": "TouchPad <setup>"}
+    link = "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2"
+    summary = " Enable the touchpad.\nUse Fn + F10. "
+
+    body, formatted_body = assistant._build_article_recommendation_message(article, link, summary)
+
+    assert body == (
+        "While you wait, this article may help: TouchPad <setup>\n\n"
+        "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2\n\n"
+        "Enable the touchpad. Use Fn + F10.\n\n"
+        f"{assistant._AI_DISCLAIMER}"
+    )
+    assert '<p>While you wait, this article may help: TouchPad &lt;setup&gt;</p>' in formatted_body
+    assert (
+        '<a href="https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2">'
+        'https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2</a>'
+    ) in formatted_body
+    assert '<p>Enable the touchpad. Use Fn + F10.</p>' in formatted_body
+
+
+def test_send_bot_message_forwards_formatted_body(monkeypatch):
+    settings = SimpleNamespace(matrix_bot_user_id="@bot:example.test")
+    calls: list[dict] = []
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+
+    async def fake_create_manual_event(**kwargs):
+        return {"id": 789}
+
+    async def fake_record_manual_success(event_id, **kwargs):
+        return {"id": event_id, "status": "succeeded"}
+
+    async def fake_send_message(room_id, body, **kwargs):
+        calls.append({"room_id": room_id, "body": body, **kwargs})
+        return {"event_id": "$event"}
+
+    async def fake_add_message(**kwargs):
+        return {"id": 10, **kwargs}
+
+    async def fake_increment(*args, **kwargs):
+        return None
+
+    async def fake_broadcast_refresh(**kwargs):
+        return None
+
+    monkeypatch.setattr(assistant.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(assistant.webhook_monitor, "record_manual_success", fake_record_manual_success)
+    monkeypatch.setattr(assistant.matrix_service, "send_message", fake_send_message)
+    monkeypatch.setattr(assistant.chat_repo, "add_message", fake_add_message)
+    monkeypatch.setattr(assistant.chat_repo, "increment_ai_bot_response", fake_increment)
+    monkeypatch.setattr(assistant.refresh_notifier, "broadcast_refresh", fake_broadcast_refresh)
+
+    sent = asyncio.run(
+        assistant._send_bot_message(
+            {"id": 42, "matrix_room_id": "!room:id"},
+            "plain",
+            formatted_body='<p><a href="https://example.test">https://example.test</a></p>',
+        )
+    )
+
+    assert sent is True
+    assert calls == [
+        {
+            "room_id": "!room:id",
+            "body": "plain",
+            "formatted_body": '<p><a href="https://example.test">https://example.test</a></p>',
+        }
+    ]
+
+
 def test_send_bot_message_records_webhook_monitor_failure(monkeypatch):
     settings = SimpleNamespace(matrix_bot_user_id="@bot:example.test")
     events: list[dict] = []
