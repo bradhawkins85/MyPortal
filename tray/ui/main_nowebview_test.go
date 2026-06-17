@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 )
 
@@ -43,6 +45,65 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 		}
 	}
 	if gotURL == "" {
+		t.Fatalf("chat notification action URL should not be empty")
+	}
+}
+
+func TestHandleIPCMessageDispatchesChatOpenNotificationAndLaunchesChatShell(t *testing.T) {
+	previousNotify := showChatSessionNotificationFunc
+	previousOpen := openChatWindowFunc
+	previousPortalURL := gPortalURL
+	gPortalURL = "https://portal.example.test"
+	defer func() {
+		showChatSessionNotificationFunc = previousNotify
+		openChatWindowFunc = previousOpen
+		gPortalURL = previousPortalURL
+	}()
+
+	var gotTitle string
+	var gotBody string
+	var gotActionURL string
+	showChatSessionNotificationFunc = func(title, body, chatURL string) {
+		gotTitle = title
+		gotBody = body
+		gotActionURL = chatURL
+	}
+
+	opened := make(chan string, 1)
+	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) {
+		opened <- chatURL
+	}
+
+	payload, err := json.Marshal(chatOpenPayload{
+		RoomID:      77,
+		Subject:     "Laptop support",
+		InitiatedBy: "Alex Tech",
+		Message:     "I am starting a support chat.",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	handleIPCMessage(ipc.Message{Type: "chat_open", Payload: payload})
+
+	select {
+	case chatURL := <-opened:
+		if !strings.Contains(chatURL, "/tray/chat?room=77") {
+			t.Fatalf("opened chatURL = %q, want room-specific tray chat URL", chatURL)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected chat_open to launch the chat window automatically")
+	}
+
+	if gotTitle != "New MyPortal chat" {
+		t.Fatalf("title = %q", gotTitle)
+	}
+	for _, want := range []string{"Alex Tech", "Laptop support", "I am starting a support chat."} {
+		if !strings.Contains(gotBody, want) {
+			t.Fatalf("body = %q, want it to contain %q", gotBody, want)
+		}
+	}
+	if gotActionURL == "" {
 		t.Fatalf("chat notification action URL should not be empty")
 	}
 }
