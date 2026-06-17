@@ -935,6 +935,48 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.sha256(serialised.encode("utf-8")).hexdigest()
 
 
+def _is_duplicate_project_error(exc: SolidtimeAPIError) -> bool:
+    """Return True when Solidtime rejected a project create as a duplicate."""
+    message = str(exc).lower()
+    return "project with the same name and client already exists" in message or (
+        "same name" in message and "client" in message and "already exists" in message
+    )
+
+
+def _project_client_id(project: Mapping[str, Any]) -> str | None:
+    """Extract a Solidtime project client ID from flat or expanded API shapes."""
+    return _extract_resource_id(project.get("client_id")) or _extract_resource_id(
+        project.get("client")
+    )
+
+
+async def _find_existing_project_by_name_and_client(
+    org_id: str,
+    *,
+    name: str,
+    client_id: str | None,
+) -> dict[str, Any] | None:
+    """Find an existing Solidtime project matching the unique name/client pair.
+
+    Solidtime enforces project uniqueness by organization, project name, and
+    client. If MyPortal loses or has not yet created the local link row, a
+    create attempt returns HTTP 422. Looking up the existing project lets the
+    sync become idempotent and rebuild the missing local link instead of
+    retrying the same failing create on every reconcile run.
+    """
+    projects = await list_projects(org_id)
+    expected_name = name.strip()
+    expected_client = str(client_id or "").strip() or None
+    for project in projects:
+        project_name = str(project.get("name") or "").strip()
+        if project_name != expected_name:
+            continue
+        project_client = _project_client_id(project)
+        if (project_client or None) == expected_client:
+            return project
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Outbound sync helpers
 # ---------------------------------------------------------------------------
@@ -1051,7 +1093,24 @@ async def sync_ticket_to_project(ticket_id: int) -> dict[str, Any] | None:
                 )
             await update_project(org_id, project_id, body=body)
         else:
-            created = await create_project(org_id, body=body)
+            try:
+                created = await create_project(org_id, body=body)
+            except SolidtimeAPIError as exc:
+                if not _is_duplicate_project_error(exc):
+                    raise
+                existing_project = await _find_existing_project_by_name_and_client(
+                    org_id,
+                    name=str(body.get("name") or ""),
+                    client_id=client_id,
+                )
+                if not existing_project:
+                    raise
+                created = existing_project
+                log_info(
+                    "Linked existing Solidtime project after duplicate create",
+                    ticket_id=ticket_id,
+                    project_id=str(existing_project.get("id") or ""),
+                )
             project_id = str(created.get("id") or "").strip()
             if not project_id:
                 raise SolidtimeAPIError("Solidtime did not return a project ID")
