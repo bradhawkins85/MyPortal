@@ -34,6 +34,7 @@ type chatMessagePayload struct {
 
 var (
 	showChatSessionNotificationFunc = showChatSessionNotification
+	openChatWindowFunc              = openChatWindow
 
 	notificationActionOnce    sync.Once
 	notificationActionBaseURL string
@@ -51,6 +52,8 @@ func handleChatOpen(payload chatOpenPayload) {
 	if actionURL == "" {
 		logger.Warn("handleChatOpen: could not register chat notification action for room_id=%d", payload.RoomID)
 	}
+
+	go openChatWindowFunc(chatOpenURL(payload.RoomID), gConfig)
 
 	title, body := chatNotificationText(payload)
 	showChatSessionNotificationFunc(title, body, actionURL)
@@ -104,6 +107,14 @@ func chatNotificationText(payload chatOpenPayload) (string, string) {
 		body += "\n" + message
 	}
 	return title, body
+}
+
+func chatOpenURL(roomID int) string {
+	chatURL := requestChatTokenForRoom(roomID)
+	if chatURL == "" {
+		chatURL = buildChatURL(roomID)
+	}
+	return chatURL
 }
 
 func summarizeChatMessage(message string) string {
@@ -177,16 +188,13 @@ func handleNotificationOpenChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chatURL := requestChatTokenForRoom(action.RoomID)
-	if chatURL == "" {
-		chatURL = buildChatURL(action.RoomID)
-	}
+	chatURL := chatOpenURL(action.RoomID)
 	if chatURL == "" {
 		http.Error(w, "Unable to open chat. Please try again from the MyPortal tray icon.", http.StatusBadGateway)
 		return
 	}
 
-	go openChatWindow(chatURL, gConfig)
+	go openChatWindowFunc(chatURL, gConfig)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprint(w, "<html><body><p>Opening MyPortal Chat…</p><script>window.close();</script></body></html>")
 }
