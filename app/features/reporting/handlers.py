@@ -136,6 +136,7 @@ def _validate_reporting_input(payload: dict[str, Any]) -> str | None:
 async def reporting_page(
     request: Request,
     report: int | None = Query(default=None),
+    error: str | None = Query(default=None),
 ):
     from app.repositories import reporting as reporting_repo
     from app.services import audit as audit_service
