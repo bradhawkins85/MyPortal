@@ -13,7 +13,10 @@ import (
 )
 
 func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
-	previous := showChatSessionNotificationFunc
+	previousNotify := showChatSessionNotificationFunc
+	previousOpen := openChatWindowFunc
+	previousPortalURL := gPortalURL
+	gPortalURL = "https://portal.example.test"
 	var gotTitle string
 	var gotBody string
 	var gotURL string
@@ -22,7 +25,15 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 		gotBody = body
 		gotURL = chatURL
 	}
-	t.Cleanup(func() { showChatSessionNotificationFunc = previous })
+	opened := make(chan string, 1)
+	openChatWindowFunc = func(chatURL string, _ *api.ConfigResponse) {
+		opened <- chatURL
+	}
+	t.Cleanup(func() {
+		showChatSessionNotificationFunc = previousNotify
+		openChatWindowFunc = previousOpen
+		gPortalURL = previousPortalURL
+	})
 
 	payload, err := json.Marshal(chatMessagePayload{
 		RoomID:  42,
@@ -46,6 +57,14 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 	}
 	if gotURL == "" {
 		t.Fatalf("chat notification action URL should not be empty")
+	}
+	select {
+	case chatURL := <-opened:
+		if !strings.Contains(chatURL, "/tray/chat?room=42") {
+			t.Fatalf("opened chatURL = %q, want room-specific tray chat URL", chatURL)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected chat_message to launch the chat window automatically")
 	}
 }
 
