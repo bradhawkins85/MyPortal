@@ -123,7 +123,7 @@ async def create_room(
     if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
         try:
             refreshed_room = await chat_repo.get_room(int(room["id"]))
-            if refreshed_room and not refreshed_room.get("assigned_tech_user_id"):
+            if refreshed_room:
                 room = refreshed_room
                 await matrix_ai_waiting_assistant.handle_chat_opened(int(room["id"]))
         except Exception as exc:
