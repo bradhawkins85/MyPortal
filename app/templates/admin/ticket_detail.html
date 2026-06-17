@@ -106,7 +106,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form">
+            <form id="ticket-details-form" action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form">
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
@@ -209,118 +209,6 @@
                   value="{{ ticket.external_reference or '' }}"
                   placeholder="Syncro ID or external case"
                 />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="ticket-assets">Assets</label>
-                <select
-                  id="ticket-assets"
-                  class="form-input"
-                  data-ticket-asset-selector
-                  data-assets-endpoint-template="/api/companies/{companyId}/assets"
-                  data-initial-options="{{ ticket_asset_options | tojson | forceescape }}"
-                  data-selected-assets="{{ ticket_asset_selection | tojson | forceescape }}"
-                  data-placeholder="Select an asset to link"
-                  data-initial-company-id="{{ ticket.company_id or '' }}"
-                  {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
-                >
-                  <option value="">Select an asset to link</option>
-                  {% for option in ticket_asset_options %}
-                    <option value="{{ option.id }}">{{ option.label }}</option>
-                  {% endfor %}
-                </select>
-                <p
-                  class="form-help"
-                  data-ticket-asset-help
-                  data-help-enabled="Choose an asset to link. Linked devices appear below."
-                  data-help-disabled="Link the ticket to a company before selecting assets."
-                  data-help-empty="No assets are available for the linked company."
-                  data-help-exhausted="All company assets are already linked to this ticket."
-                >
-                  {% if not ticket.company_id %}
-                    Link the ticket to a company before selecting assets.
-                  {% elif not ticket_asset_options %}
-                    No assets are available for the linked company.
-                  {% else %}
-                    Choose an asset to link. Linked devices appear below.
-                  {% endif %}
-                </p>
-                <div
-                  class="ticket-assets-linked"
-                  data-ticket-linked-assets
-                  data-initial-linked="{{ ticket_asset_linked_data | tojson | forceescape }}"
-                  data-tactical-base-url="{{ tacticalrmm_base_url or '' }}"
-                  data-empty-message="No assets are linked to this ticket yet."
-                >
-                  <ul class="ticket-assets-linked__list" data-linked-assets-list>
-                    {% for asset in ticket_assets %}
-                      {% set serial_value = asset.serial_number %}
-                      {% set status_value = asset.status %}
-                      {% set status_label = status_value.replace('_', ' ').title() if status_value %}
-                      {% set meta_parts = [] %}
-                      {% if status_label %}
-                        {% set _ = meta_parts.append(status_label) %}
-                      {% endif %}
-                      {% set base_name = asset.name or ('Asset ' ~ asset.asset_id) %}
-                      {% set display_name = base_name | trim %}
-                      {% if not display_name %}
-                        {% set display_name = 'Asset ' ~ asset.asset_id %}
-                      {% endif %}
-                      {% set tooltip_label = display_name %}
-                      {% if meta_parts %}
-                        {% set tooltip_label = display_name ~ ' · ' ~ (meta_parts | join(' · ')) %}
-                      {% endif %}
-                      {% set tactical_link = None %}
-                      {% if tacticalrmm_base_url and asset.name and asset.name | trim %}
-                        {% set tactical_link = tacticalrmm_base_url ~ '/?search=' ~ (asset.name | trim | urlencode) %}
-                      {% endif %}
-                      <li
-                        class="ticket-assets-linked__item"
-                        data-linked-asset
-                        data-asset-id="{{ asset.asset_id }}"
-                        data-tactical-id="{{ asset.tactical_asset_id or '' }}"
-                      >
-                        <input type="hidden" name="assetIds" value="{{ asset.asset_id }}" />
-                        {% if tactical_link %}
-                          <a
-                            href="{{ tactical_link }}"
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            class="ticket-assets-linked__name"
-                            data-linked-asset-name
-                            title="{{ tooltip_label }}"
-                          >
-                            {{ display_name }}
-                          </a>
-                        {% else %}
-                          <span class="ticket-assets-linked__name" data-linked-asset-name title="{{ tooltip_label }}">
-                            {{ display_name }}
-                          </span>
-                        {% endif %}
-                        {% if meta_parts %}
-                          <p class="ticket-assets-linked__meta">{{ meta_parts | join(' · ') }}</p>
-                        {% endif %}
-                        <button
-                          type="button"
-                          class="button button--ghost button--icon ticket-assets-linked__remove"
-                          data-linked-asset-remove
-                        >
-                          <span class="visually-hidden">Remove asset</span>
-                          ×
-                        </button>
-                      </li>
-                    {% endfor %}
-                  </ul>
-                  <p class="ticket-assets-linked__empty" data-linked-assets-empty {% if ticket_assets %}hidden{% endif %}>
-                    No assets are linked to this ticket yet.
-                  </p>
-                </div>
-              </div>
-              <div class="form-field">
-                <label class="form-label form-label--checkbox">
-                  <input type="checkbox" name="sendTrayNotification" value="1" />
-                  Send tray push notification
-                </label>
-                <p class="form-help">Optionally notify linked tray devices that this ticket was updated.</p>
               </div>
               <div class="form-actions">
                 <button type="submit" class="button button--primary">Save changes</button>
@@ -841,6 +729,171 @@
                   <!-- Tasks will be loaded dynamically -->
                 </ul>
                 <p class="card__empty" data-tasks-empty hidden>No tasks have been added yet.</p>
+              </div>
+            </div>
+          </details>
+
+          <details class="card card--panel card-collapsible" data-ticket-assets-card>
+            <summary class="card__header card__header--collapsible">
+              <h2 class="card__title">Assets</h2>
+              <div class="card__collapsible-meta">
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content">
+              <div class="card__body">
+                <div class="form-field">
+                  <label class="form-label" for="ticket-assets">Assets</label>
+                <select
+                  id="ticket-assets"
+                  class="form-input"
+                  data-ticket-asset-selector
+                  data-assets-endpoint-template="/api/companies/{companyId}/assets"
+                  data-initial-options="{{ ticket_asset_options | tojson | forceescape }}"
+                  data-selected-assets="{{ ticket_asset_selection | tojson | forceescape }}"
+                  data-placeholder="Select an asset to link"
+                  data-initial-company-id="{{ ticket.company_id or '' }}"
+                  {% if not ticket.company_id %}disabled aria-disabled="true"{% endif %}
+                >
+                  <option value="">Select an asset to link</option>
+                  {% for option in ticket_asset_options %}
+                    <option value="{{ option.id }}">{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+                <p
+                  class="form-help"
+                  data-ticket-asset-help
+                  data-help-enabled="Choose an asset to link. Linked devices appear below."
+                  data-help-disabled="Link the ticket to a company before selecting assets."
+                  data-help-empty="No assets are available for the linked company."
+                  data-help-exhausted="All company assets are already linked to this ticket."
+                >
+                  {% if not ticket.company_id %}
+                    Link the ticket to a company before selecting assets.
+                  {% elif not ticket_asset_options %}
+                    No assets are available for the linked company.
+                  {% else %}
+                    Choose an asset to link. Linked devices appear below.
+                  {% endif %}
+                </p>
+                <div
+                  class="ticket-assets-linked"
+                  data-ticket-linked-assets
+                  data-initial-linked="{{ ticket_asset_linked_data | tojson | forceescape }}"
+                  data-tactical-base-url="{{ tacticalrmm_base_url or '' }}"
+                  data-empty-message="No assets are linked to this ticket yet."
+                  data-details-form-id="ticket-details-form"
+                >
+                  <ul class="ticket-assets-linked__list" data-linked-assets-list>
+                    {% for asset in ticket_assets %}
+                      {% set serial_value = asset.serial_number %}
+                      {% set status_value = asset.status %}
+                      {% set status_label = status_value.replace('_', ' ').title() if status_value %}
+                      {% set meta_parts = [] %}
+                      {% if status_label %}
+                        {% set _ = meta_parts.append(status_label) %}
+                      {% endif %}
+                      {% set base_name = asset.name or ('Asset ' ~ asset.asset_id) %}
+                      {% set display_name = base_name | trim %}
+                      {% if not display_name %}
+                        {% set display_name = 'Asset ' ~ asset.asset_id %}
+                      {% endif %}
+                      {% set tooltip_label = display_name %}
+                      {% if meta_parts %}
+                        {% set tooltip_label = display_name ~ ' · ' ~ (meta_parts | join(' · ')) %}
+                      {% endif %}
+                      {% set tactical_link = None %}
+                      {% if tacticalrmm_base_url and asset.name and asset.name | trim %}
+                        {% set tactical_link = tacticalrmm_base_url ~ '/?search=' ~ (asset.name | trim | urlencode) %}
+                      {% endif %}
+                      <li
+                        class="ticket-assets-linked__item ticket-assets-linked__item--actions"
+                        data-linked-asset
+                        data-asset-id="{{ asset.asset_id }}"
+                        data-tactical-id="{{ asset.tactical_asset_id or '' }}"
+                      >
+                        <input type="hidden" name="assetIds" value="{{ asset.asset_id }}" form="ticket-details-form" />
+                        {% if tactical_link %}
+                          <a
+                            href="{{ tactical_link }}"
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            class="ticket-assets-linked__name"
+                            data-linked-asset-name
+                            title="{{ tooltip_label }}"
+                          >
+                            {{ display_name }}
+                          </a>
+                        {% else %}
+                          <span class="ticket-assets-linked__name" data-linked-asset-name title="{{ tooltip_label }}">
+                            {{ display_name }}
+                          </span>
+                        {% endif %}
+                        {% if meta_parts %}
+                          <p class="ticket-assets-linked__meta">{{ meta_parts | join(' · ') }}</p>
+                        {% endif %}
+                        <div class="ticket-assets-linked__actions">
+                          {% if tactical_link %}
+                            <a
+                              href="{{ tactical_link }}"
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              class="button button--ghost button--icon ticket-assets-linked__action"
+                              title="Open in Tactical RMM"
+                              aria-label="Open {{ display_name }} in Tactical RMM"
+                            >
+                              <span aria-hidden="true">🖥️</span>
+                            </a>
+                          {% else %}
+                            <button
+                              type="button"
+                              class="button button--ghost button--icon ticket-assets-linked__action"
+                              disabled
+                              aria-disabled="true"
+                              title="Tactical RMM search is not configured"
+                              aria-label="Tactical RMM search is not configured for {{ display_name }}"
+                            >
+                              <span aria-hidden="true">🖥️</span>
+                            </button>
+                          {% endif %}
+                          <button
+                            type="button"
+                            class="button button--ghost button--icon ticket-assets-linked__action"
+                            data-linked-asset-chat
+                            data-device-uid="{{ asset.tray_device_uid or '' }}"
+                            {% if not asset.tray_device_uid %}disabled aria-disabled="true"{% endif %}
+                            title="Open chat"
+                            aria-label="Open chat with {{ display_name }}"
+                          >
+                            <span aria-hidden="true">💬</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="button button--ghost button--icon ticket-assets-linked__remove"
+                            data-linked-asset-remove
+                          >
+                            <span class="visually-hidden">Remove asset</span>
+                            ×
+                          </button>
+                        </div>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                  <p class="ticket-assets-linked__empty" data-linked-assets-empty {% if ticket_assets %}hidden{% endif %}>
+                    No assets are linked to this ticket yet.
+                  </p>
+                </div>
+              </div>
+              <div class="form-field">
+                <label class="form-label form-label--checkbox">
+                  <input type="checkbox" name="sendTrayNotification" value="1" form="ticket-details-form" />
+                  Send tray push notification
+                </label>
+                <p class="form-help">Optionally notify linked tray devices that this ticket was updated.</p>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button button--primary" form="ticket-details-form">Save asset changes</button>
+              </div>
               </div>
             </div>
           </details>

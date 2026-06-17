@@ -295,6 +295,7 @@
     const initialSelection = normaliseIdList(parseJsonArray(select.dataset.selectedAssets, []));
     const initialLinkedRecords = parseJsonArray(linkedContainer.dataset.initialLinked, []);
     const emptyMessage = linkedContainer.dataset.emptyMessage || 'No assets are linked to this ticket yet.';
+    const detailsFormId = linkedContainer.dataset.detailsFormId || '';
     const tacticalBaseUrlRaw = linkedContainer.dataset.tacticalBaseUrl || '';
     const initialCompanyId = select.dataset.initialCompanyId || '';
 
@@ -443,7 +444,7 @@
 
       entries.forEach((record) => {
         const item = document.createElement('li');
-        item.className = 'ticket-assets-linked__item';
+        item.className = 'ticket-assets-linked__item ticket-assets-linked__item--actions';
         item.setAttribute('data-linked-asset', '');
         const assetIdValue = String(record.asset_id ?? record.id);
         item.setAttribute('data-asset-id', assetIdValue);
@@ -455,6 +456,9 @@
         hiddenInput.type = 'hidden';
         hiddenInput.name = 'assetIds';
         hiddenInput.value = assetIdValue;
+        if (detailsFormId) {
+          hiddenInput.setAttribute('form', detailsFormId);
+        }
         item.appendChild(hiddenInput);
 
         const label = formatAssetLabel(record);
@@ -492,12 +496,53 @@
           item.appendChild(metaElement);
         }
 
+        const actions = document.createElement('div');
+        actions.className = 'ticket-assets-linked__actions';
+
+        if (tacticalUrl) {
+          const tacticalAction = document.createElement('a');
+          tacticalAction.href = tacticalUrl;
+          tacticalAction.target = '_blank';
+          tacticalAction.rel = 'noreferrer noopener';
+          tacticalAction.className = 'button button--ghost button--icon ticket-assets-linked__action';
+          tacticalAction.title = 'Open in Tactical RMM';
+          tacticalAction.setAttribute('aria-label', `Open ${displayName} in Tactical RMM`);
+          tacticalAction.innerHTML = '<span aria-hidden="true">🖥️</span>';
+          actions.appendChild(tacticalAction);
+        } else {
+          const tacticalAction = document.createElement('button');
+          tacticalAction.type = 'button';
+          tacticalAction.className = 'button button--ghost button--icon ticket-assets-linked__action';
+          tacticalAction.disabled = true;
+          tacticalAction.setAttribute('aria-disabled', 'true');
+          tacticalAction.title = 'Tactical RMM search is not configured';
+          tacticalAction.setAttribute('aria-label', `Tactical RMM search is not configured for ${displayName}`);
+          tacticalAction.innerHTML = '<span aria-hidden="true">🖥️</span>';
+          actions.appendChild(tacticalAction);
+        }
+
+        const chatButton = document.createElement('button');
+        chatButton.type = 'button';
+        chatButton.className = 'button button--ghost button--icon ticket-assets-linked__action';
+        chatButton.setAttribute('data-linked-asset-chat', '');
+        chatButton.title = 'Open chat';
+        chatButton.setAttribute('aria-label', `Open chat with ${displayName}`);
+        if (record.tray_device_uid) {
+          chatButton.setAttribute('data-device-uid', record.tray_device_uid);
+        } else {
+          chatButton.disabled = true;
+          chatButton.setAttribute('aria-disabled', 'true');
+        }
+        chatButton.innerHTML = '<span aria-hidden="true">💬</span>';
+        actions.appendChild(chatButton);
+
         const removeButton = document.createElement('button');
         removeButton.type = 'button';
         removeButton.className = 'button button--ghost button--icon ticket-assets-linked__remove';
         removeButton.setAttribute('data-linked-asset-remove', '');
         removeButton.innerHTML = '<span class="visually-hidden">Remove asset</span>×';
-        item.appendChild(removeButton);
+        actions.appendChild(removeButton);
+        item.appendChild(actions);
 
         linkedList.appendChild(item);
       });
@@ -694,6 +739,41 @@
     linkedContainer.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
       if (!target) {
+        return;
+      }
+
+      const chatButton = target.closest('[data-linked-asset-chat]');
+      if (chatButton) {
+        const uid = chatButton.getAttribute('data-device-uid') || '';
+        if (!uid) {
+          return;
+        }
+        chatButton.disabled = true;
+        fetch(`/api/tray/${encodeURIComponent(uid)}/chat/start`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken(),
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ subject: 'Helpdesk chat' }),
+        })
+          .then(async (response) => {
+            if (!response.ok) {
+              throw new Error(await response.text());
+            }
+            return response.json();
+          })
+          .then((data) => {
+            if (data.room_id) {
+              window.location.href = `/chat?room=${encodeURIComponent(data.room_id)}`;
+            }
+          })
+          .catch((error) => {
+            console.error('Failed to open tray chat', error);
+            window.alert(`Failed to open chat: ${error.message || 'Unknown error'}`);
+            chatButton.disabled = false;
+          });
         return;
       }
 

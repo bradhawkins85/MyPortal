@@ -8250,6 +8250,7 @@ async def _render_ticket_detail(
                 "serial_number": (str(asset.get("serial_number") or "").strip() or None),
                 "status": (str(asset.get("status") or "").strip() or None),
                 "tactical_asset_id": (str(asset.get("tactical_asset_id") or "").strip() or None),
+                "tray_device_uid": (str(asset.get("tray_device_uid") or "").strip() or None),
             }
         )
 
