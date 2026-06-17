@@ -6518,15 +6518,7 @@ async def admin_tray_delete_ticket_question(question_id: int, request: Request):
 # Per-company tray settings
 # ---------------------------------------------------------------------------
 
-
-
-
-
-
-
-
-
-
+@app.get("/admin/audit-logs", response_class=HTMLResponse)
 async def admin_audit_logs(
     request: Request,
     entity_type: str | None = None,
