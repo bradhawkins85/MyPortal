@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import re
 import uuid
@@ -319,7 +320,13 @@ async def _audit(action: str, room_id: int, value: Mapping[str, Any] | None = No
         log_error("AI waiting assistant audit failed", action=action, room_id=room_id, error=str(exc))
 
 
-async def _send_bot_message(room: Mapping[str, Any], body: str, *, response_count: int | None = None) -> bool:
+async def _send_bot_message(
+    room: Mapping[str, Any],
+    body: str,
+    *,
+    formatted_body: str | None = None,
+    response_count: int | None = None,
+) -> bool:
     matrix_room_id = str(room["matrix_room_id"])
     monitor_event = await _create_monitor_event(
         "MATRIXBOT_AI Matrix message",
@@ -331,7 +338,10 @@ async def _send_bot_message(room: Mapping[str, Any], body: str, *, response_coun
         },
     )
     try:
-        response = await matrix_service.send_message(matrix_room_id, body)
+        send_kwargs: dict[str, Any] = {}
+        if formatted_body:
+            send_kwargs["formatted_body"] = formatted_body
+        response = await matrix_service.send_message(matrix_room_id, body, **send_kwargs)
         event_id = response.get("event_id")
         await _record_monitor_success(
             monitor_event,
@@ -376,6 +386,34 @@ async def _send_bot_message(room: Mapping[str, Any], body: str, *, response_coun
         data={"message": _json_safe({**msg, "sent_at": now.isoformat()}), "room_id": int(room["id"])},
     )
     return True
+
+
+def _build_article_recommendation_message(article: Mapping[str, Any], link: str, summary: str) -> tuple[str, str]:
+    title = str(article.get("title") or "Knowledge base article").strip() or "Knowledge base article"
+    clean_link = str(link).strip()
+    clean_summary = " ".join(str(summary or "").split())
+    body_parts = [
+        f"While you wait, this article may help: {title}",
+        clean_link,
+    ]
+    if clean_summary:
+        body_parts.append(clean_summary)
+    body_parts.append(_AI_DISCLAIMER)
+    body = "\n\n".join(body_parts)
+
+    safe_title = html.escape(title)
+    safe_link = html.escape(clean_link, quote=True)
+    safe_summary = html.escape(clean_summary)
+    safe_disclaimer = html.escape(_AI_DISCLAIMER)
+    formatted_parts = [
+        f"<p>While you wait, this article may help: {safe_title}</p>",
+        f'<p><a href="{safe_link}">{safe_link}</a></p>',
+    ]
+    if safe_summary:
+        formatted_parts.append(f"<p>{safe_summary}</p>")
+    formatted_parts.append(f"<p>{safe_disclaimer}</p>")
+    formatted_body = "".join(formatted_parts)
+    return body, formatted_body
 
 
 async def handle_user_message(room_id: int, sent_at: datetime | None = None) -> None:
@@ -504,11 +542,16 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
                     base = str(settings.public_base_url or settings.portal_url or "").rstrip("/")
                     path = f"/knowledge-base/articles/{article['slug']}"
                     link = f"{base}{path}" if base else path
-                    message = f"While you wait, this article may help: {article['title']}\n{link}\n\n{summary}\n\n{_AI_DISCLAIMER}"
+                    message, formatted_message = _build_article_recommendation_message(article, link, summary)
                     expected_count = int(room.get("ai_bot_response_count") or 0)
                     reserved_count = expected_count + 1
                     reserved = await chat_repo.reserve_ai_bot_response(room_id, expected_count=expected_count, when=_utcnow())
-                    if reserved and await _send_bot_message(room, message, response_count=reserved_count):
+                    if reserved and await _send_bot_message(
+                        room,
+                        message,
+                        formatted_body=formatted_message,
+                        response_count=reserved_count,
+                    ):
                         selected["sent"] = True
                         selected["sent_at"] = _utcnow().isoformat()
                         sent = True
