@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -11,6 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -57,6 +61,27 @@ def _default_workflow_key(direction: str) -> str:
         workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
         if direction == DIRECTION_OFFBOARDING
         else workflow_repo.DEFAULT_WORKFLOW_KEY
+    )
+
+
+def _workflow_webhook_secret(scope: str, *, length: int = 32) -> str:
+    settings = get_settings()
+    secret_key = str(settings.secret_key)
+    digest = hmac.new(secret_key.encode("utf-8"), scope.encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")[:length]
+
+
+def _build_static_workflow_webhook_credentials(
+    *,
+    company_id: int,
+    direction: str,
+    workflow_key: str,
+    step_name: str,
+) -> tuple[str, str]:
+    workflow_scope = f"staff-workflow-webhook:v1:{company_id}:{direction}:{workflow_key}:{step_name}"
+    return (
+        _workflow_webhook_secret(f"{workflow_scope}:url", length=32),
+        _workflow_webhook_secret(f"{workflow_scope}:post-key", length=43),
     )
 
 # Kid-friendly word list: words are stored exclusively in the database table
@@ -2285,20 +2310,36 @@ async def _execute_policy_steps(
         step_name = str(step.get("name") or f"step_{index + 1}")
         if step_name in succeeded_steps:
             continue
-        if str(step.get("type")).strip().lower() == "wait_external_checkpoint":
+        if str(step.get("type")).strip().lower() in {"wait_external_checkpoint", "wait_for_webhook"}:
             confirmation_token = secrets.token_urlsafe(32)
+            webhook_public_id, webhook_post_key = _build_static_workflow_webhook_credentials(
+                company_id=company_id,
+                direction=direction,
+                workflow_key=str(policy_config.get("workflow_key") or ""),
+                step_name=step_name,
+            )
             await workflow_repo.create_external_checkpoint(
                 execution_id=execution_id,
                 company_id=company_id,
                 staff_id=int(staff["id"]),
                 confirmation_token_hash=hash_api_key(confirmation_token),
+                webhook_public_id=webhook_public_id,
+                webhook_post_key_hash=hash_api_key(webhook_post_key),
             )
+            settings = get_settings()
+            base_url = str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+            webhook_path = f"/api/staff/workflow-webhooks/{webhook_public_id}"
             await workflow_repo.update_execution_state(
                 execution_id,
                 state=waiting_external_state,
                 current_step=f"{index}:{step_name}",
             )
-            return {"paused": True, "confirmation_token": confirmation_token}
+            return {
+                "paused": True,
+                "confirmation_token": confirmation_token,
+                "webhook_post_key": webhook_post_key,
+                "webhook_url": f"{base_url}{webhook_path}" if base_url else webhook_path,
+            }
 
         resolved_step = _resolve_template_value(step, vars_map=vars_map)
         if isinstance(resolved_step, dict):
@@ -2580,6 +2621,7 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     workflow_key = str(policy.get("workflow_key") or _default_workflow_key(direction))
     max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+    policy_config.setdefault("workflow_key", workflow_key)
     delay_type = str(policy.get("delay_type") or "scheduled").strip().lower()
     # "immediate" workflows do not control staff-level status transitions —
     # they run their configured steps (e.g. notifications) independently.
@@ -2697,6 +2739,8 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
                 "state": paused_state,
                 "execution_id": execution_id,
                 "confirmation_token": execution_result.get("confirmation_token"),
+                "webhook_url": execution_result.get("webhook_url"),
+                "webhook_post_key": execution_result.get("webhook_post_key"),
                 "helpdesk_ticket_id": ticket_id,
             }
 
@@ -3229,3 +3273,52 @@ async def confirm_external_checkpoint_and_resume(
         execution_id=int(execution["id"]),
         initiated_by_user_id=None,
     )
+
+
+async def confirm_webhook_checkpoint_and_resume(
+    *,
+    webhook_public_id: str,
+    post_key: str,
+    source: str,
+    callback_payload: dict[str, Any] | None,
+    company_id: int | None = None,
+    staff_id: int | None = None,
+) -> dict[str, Any]:
+    checkpoint = await workflow_repo.get_pending_external_checkpoint_by_webhook_id(
+        webhook_public_id=webhook_public_id,
+        company_id=company_id,
+        staff_id=staff_id,
+    )
+    if not checkpoint:
+        raise ValueError("Invalid or already completed webhook URL")
+    expected_hash = str(checkpoint.get("webhook_post_key_hash") or "")
+    if not expected_hash or not secrets.compare_digest(expected_hash, hash_api_key(post_key)):
+        raise ValueError("Invalid webhook POST key")
+    company_id = int(checkpoint["company_id"])
+    staff_id = int(checkpoint["staff_id"])
+    execution_id = int(checkpoint["execution_id"])
+    await workflow_repo.confirm_external_checkpoint(
+        int(checkpoint["id"]),
+        source=source[:128],
+        callback_timestamp=_utc_now_naive(),
+        proof_reference_id=webhook_public_id,
+        payload_hash=None,
+        callback_payload=callback_payload or {},
+        confirmed_by_api_key_id=None,
+    )
+    await audit_service.log_action(
+        user_id=None,
+        action="staff.workflow.webhook_confirmed",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={"company_id": company_id, "execution_id": execution_id, "webhook_public_id": webhook_public_id},
+    )
+    result = await resume_staff_onboarding_workflow_after_external_confirmation(
+        company_id=company_id,
+        staff_id=staff_id,
+        execution_id=execution_id,
+        initiated_by_user_id=None,
+    )
+    result.setdefault("company_id", company_id)
+    result.setdefault("staff_id", staff_id)
+    return result

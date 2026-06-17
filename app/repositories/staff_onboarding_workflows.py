@@ -691,18 +691,22 @@ async def create_external_checkpoint(
     company_id: int,
     staff_id: int,
     confirmation_token_hash: str,
+    webhook_public_id: str | None = None,
+    webhook_post_key_hash: str | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
         INSERT INTO staff_onboarding_external_checkpoints
-            (execution_id, company_id, staff_id, confirmation_token_hash, status, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, 'pending', %s, %s)
+            (execution_id, company_id, staff_id, confirmation_token_hash, webhook_public_id, webhook_post_key_hash, status, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s, %s)
         """,
         (
             execution_id,
             company_id,
             staff_id,
             confirmation_token_hash,
+            webhook_public_id,
+            webhook_post_key_hash,
             _utc_now_naive(),
             _utc_now_naive(),
         ),
@@ -740,6 +744,33 @@ async def get_pending_external_checkpoint(
         LIMIT 1
         """,
         (execution_id, company_id, staff_id, confirmation_token_hash),
+    )
+    return dict(row) if row else None
+
+
+async def get_pending_external_checkpoint_by_webhook_id(
+    *,
+    webhook_public_id: str,
+    company_id: int | None = None,
+    staff_id: int | None = None,
+) -> dict[str, Any] | None:
+    conditions = ["webhook_public_id = %s", "status = 'pending'"]
+    params: list[Any] = [webhook_public_id]
+    if company_id is not None:
+        conditions.append("company_id = %s")
+        params.append(int(company_id))
+    if staff_id is not None:
+        conditions.append("staff_id = %s")
+        params.append(int(staff_id))
+    row = await db.fetch_one(
+        f"""
+        SELECT *
+        FROM staff_onboarding_external_checkpoints
+        WHERE {' AND '.join(conditions)}
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        tuple(params),
     )
     return dict(row) if row else None
 

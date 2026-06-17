@@ -20,6 +20,7 @@ from app.schemas.staff import (
     StaffCreate,
     StaffExternalCheckpointCallback,
     StaffExternalCheckpointResponse,
+    StaffWorkflowWebhookCallback,
     StaffWorkflowManualActionRequest,
     StaffWorkflowManualActionResponse,
     StaffRequestCreate,
@@ -830,6 +831,42 @@ async def _confirm_external_checkpoint(
         response_status=status.HTTP_202_ACCEPTED,
         response_payload=response_payload,
     )
+    return StaffExternalCheckpointResponse.model_validate(response_payload)
+
+
+@router.post(
+    "/workflow-webhooks/{webhook_public_id}",
+    response_model=StaffExternalCheckpointResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Resume a staff workflow from a Wait For Webhook step",
+    description=(
+        "Receives POST callbacks for onboarding/offboarding Wait For Webhook steps. "
+        "The unique webhook URL identifies the pending workflow checkpoint and "
+        "the request body must include the matching postKey before the workflow resumes."
+    ),
+)
+async def confirm_workflow_webhook(
+    webhook_public_id: str,
+    payload: StaffWorkflowWebhookCallback,
+    _: None = Depends(require_database),
+):
+    try:
+        result = await staff_onboarding_workflow_service.confirm_webhook_checkpoint_and_resume(
+            webhook_public_id=webhook_public_id.strip(),
+            post_key=payload.post_key,
+            source=payload.source.strip(),
+            callback_payload=payload.payload,
+            company_id=payload.company_id,
+            staff_id=payload.staff_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    response_payload = {
+        "state": result.get("state") or "unknown",
+        "executionId": int(result.get("execution_id") or 0),
+        "staffId": int(result.get("staff_id") or 0),
+        "companyId": int(result.get("company_id") or 0),
+    }
     return StaffExternalCheckpointResponse.model_validate(response_payload)
 
 
