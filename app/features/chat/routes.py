@@ -248,18 +248,26 @@ async def tray_chat_popup(
     # 2. Resolve or create the chat room.
     # ------------------------------------------------------------------
     # Prefer room_id embedded in the token (technician-initiated), then
-    # the query-string ``room`` param, then create a new room.
+    # the query-string ``room`` param, then create a new room only for an
+    # unbound user-initiated tray action. Explicit room launches may come from
+    # technician replies or notification actions; if that room is now closed,
+    # do not silently create a new "Chat from <device>" room.
     resolved_room_id: int | None = token_record.get("room_id") or room
+    explicit_room_requested = resolved_room_id is not None
 
     chat_room: dict[str, Any] | None = None
     if resolved_room_id:
         chat_room = await chat_repo.get_room(int(resolved_room_id))
-        # If the resolved room is closed, ignore it and start a fresh one.
-        if chat_room and chat_room.get("status") != "open":
-            chat_room = None
+        if not chat_room:
+            raise HTTPException(status_code=404, detail="Chat room not found")
+        if chat_room.get("status") != "open":
+            raise HTTPException(status_code=409, detail="Chat room is closed")
 
     if not chat_room:
         chat_room = await chat_repo.get_open_room_by_device_id(device_id)
+
+    if not chat_room and explicit_room_requested:
+        raise HTTPException(status_code=409, detail="Chat room is closed")
 
     if not chat_room:
         # User-initiated chat: create a fresh room.

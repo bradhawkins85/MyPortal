@@ -65,11 +65,9 @@ func handleChatMessage(payload chatMessagePayload) {
 		logger.Warn("handleChatMessage: could not register chat notification action for room_id=%d", payload.RoomID)
 	}
 
-	// Technician replies can arrive after the initial chat_open event, for
-	// example when the tray UI was started after the room was created or when a
-	// previous launch attempt failed. Treat every inbound chat message as a
-	// launch signal as well as a notification so the end user is never left with
-	// only a silent IPC event in ui.log.
+	// Replies should bring an active chat back to the user's attention. Closed
+	// rooms are rejected by the popup/token endpoints so stale notifications do
+	// not create a fresh "Chat from <device>" room.
 	go openChatWindowFunc(chatOpenURL(payload.RoomID), gConfig)
 
 	title, body := chatMessageNotificationText(payload)
