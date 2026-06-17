@@ -815,6 +815,7 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
     content = article.get("content") or ""
     slug = article.get("slug") or ""
     ai_tags = article.get("ai_tags") or []
+    manual_ai_tags = article.get("manual_ai_tags") or []
     sections = article.get("sections") or []
 
     for value in (title, summary, content, slug):
@@ -823,6 +824,11 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
 
     if isinstance(ai_tags, Sequence) and not isinstance(ai_tags, (str, bytes)):
         for tag in ai_tags:
+            if isinstance(tag, str):
+                haystack_parts.append(tag.lower())
+
+    if isinstance(manual_ai_tags, Sequence) and not isinstance(manual_ai_tags, (str, bytes)):
+        for tag in manual_ai_tags:
             if isinstance(tag, str):
                 haystack_parts.append(tag.lower())
 
@@ -955,4 +961,3 @@ async def search_articles(
         "ollama_model": ollama_model,
         "ollama_summary": ollama_summary,
     }
-
