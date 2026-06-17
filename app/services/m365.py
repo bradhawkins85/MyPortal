@@ -5086,9 +5086,11 @@ async def start_managed_folder_assistant_all_mailboxes(company_id: int) -> dict[
 async def remove_calendar_events(company_id: int, upn: str) -> None:
     """Cancel organized meetings for ``upn`` using Exchange Online cmdlets.
 
-    Uses ``Remove-CalendarEvents`` with ``-CancelOrganizedMeetings`` so
-    future meetings owned by the departing user are cancelled as part of
-    offboarding.
+    Uses ``Remove-CalendarEvents`` with ``-CancelOrganizedMeetings`` and an
+    explicit ``QueryWindowInDays`` value so future meetings owned by the
+    departing user are cancelled as part of offboarding. Exchange Online treats
+    ``QueryWindowInDays`` as required for this cmdlet; omitting it causes the
+    REST InvokeCommand API to reject the request with HTTP 400.
     """
     normalised = str(upn or "").strip()
     if not normalised:
@@ -5102,6 +5104,8 @@ async def remove_calendar_events(company_id: int, upn: str) -> None:
         {
             "Identity": normalised,
             "CancelOrganizedMeetings": True,
+            # Maximum supported window: five years of future events.
+            "QueryWindowInDays": 1825,
         },
     )
     log_info(
