@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.dependencies.auth import get_current_user, require_super_admin
+from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import call_recordings as call_recordings_repo
 from app.schemas.call_recordings import (

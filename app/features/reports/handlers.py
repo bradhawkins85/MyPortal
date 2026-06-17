@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import File, HTTPException, Request, UploadFile, status

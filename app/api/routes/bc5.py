@@ -6,12 +6,11 @@ Implements RBAC with viewer, editor, approver, and admin roles.
 """
 from __future__ import annotations
 
-import hashlib
 import math
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from typing import Optional
 
 from app.api.dependencies.bc_rbac import (
@@ -41,7 +40,6 @@ from app.schemas.bc5_models import (
     BCPendingUser,
     BCPlanCreate,
     BCPlanDetail,
-    BCPlanListFilters,
     BCPlanListItem,
     BCPlanListStatus,
     BCPlanUpdate,
@@ -55,7 +53,6 @@ from app.schemas.bc5_models import (
     BCTemplateDetail,
     BCTemplateListItem,
     BCTemplateUpdate,
-    BCVersionActivate,
     BCVersionCreate,
     BCVersionDetail,
     BCVersionListItem,

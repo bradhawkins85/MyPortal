@@ -5,8 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.api.dependencies.auth import get_current_user, require_super_admin
-from app.core.logging import log_error
+from app.api.dependencies.auth import require_super_admin
 from app.repositories import tag_exclusions as tag_exclusions_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import knowledge_base as kb_repo

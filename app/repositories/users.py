@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from app.core.database import db
-from app.core.logging import log_debug, log_error, log_info
+from app.core.logging import log_error, log_info
 from app.security.passwords import hash_password
 
 

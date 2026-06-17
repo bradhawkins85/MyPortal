@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from app.core.database import db
-from app.core.logging import log_debug, log_error
+from app.core.logging import log_debug
 
 
 async def create_attachment(
