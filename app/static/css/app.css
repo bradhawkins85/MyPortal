@@ -3061,6 +3061,22 @@ button.header-title-menu__link {
   color: rgba(226, 232, 240, 0.85);
 }
 
+.tag--manual {
+  background: rgba(168, 85, 247, 0.24);
+  color: #e9d5ff;
+}
+
+.kb-admin__manual-tag-form {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-compact);
+}
+
+.kb-admin__manual-tag-form .form-input {
+  min-width: 12rem;
+  width: auto;
+}
+
 .status {
   display: inline-flex;
   align-items: center;

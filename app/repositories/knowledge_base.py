@@ -41,6 +41,7 @@ def _normalise_article(row: dict[str, Any]) -> dict[str, Any]:
     article["permission_scope"] = permission
     article["ai_tags"] = _normalise_tags(article.get("ai_tags"))
     article["excluded_ai_tags"] = _normalise_tags(article.get("excluded_ai_tags"))
+    article["manual_ai_tags"] = _normalise_tags(article.get("manual_ai_tags"))
     return article
 
 
@@ -284,8 +285,8 @@ async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
                 params.append(json.dumps([]))
             else:
                 params.append(json.dumps(list(value)))
-        elif column == "excluded_ai_tags":
-            columns.append("excluded_ai_tags = %s")
+        elif column in {"excluded_ai_tags", "manual_ai_tags"}:
+            columns.append(f"{column} = %s")
             if value is None:
                 params.append(json.dumps([]))
             else:

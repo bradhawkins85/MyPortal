@@ -56,6 +56,7 @@ class KnowledgeBaseArticleResponse(BaseModel):
     is_published: bool
     ai_tags: list[str]
     excluded_ai_tags: list[str] = Field(default_factory=list)
+    manual_ai_tags: list[str] = Field(default_factory=list)
     allowed_user_ids: list[int]
     allowed_company_ids: list[int]
     company_admin_ids: list[int]
@@ -75,6 +76,7 @@ class KnowledgeBaseArticleListItem(BaseModel):
     permission_scope: PermissionScope
     is_published: bool
     ai_tags: list[str]
+    manual_ai_tags: list[str] = Field(default_factory=list)
     updated_at: datetime | None
     updated_at_iso: str | None
     published_at_iso: str | None
