@@ -18,7 +18,8 @@ import html as _html
 import json
 import secrets
 import zlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -74,6 +75,21 @@ router = APIRouter(prefix="/api/tray", tags=["Tray App"])
 
 _settings = get_settings()
 
+
+def _serialise_popup_chat_value(obj: Any) -> Any:
+    """Convert popup chat payload values into JSON-compatible objects."""
+
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        if obj == obj.to_integral():
+            return int(obj)
+        return float(obj)
+    if isinstance(obj, dict):
+        return {key: _serialise_popup_chat_value(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_serialise_popup_chat_value(item) for item in obj]
+    return obj
 
 # ---------------------------------------------------------------------------
 # Device-facing endpoints
@@ -1519,8 +1535,6 @@ async def popup_chat_get_room(
     Authenticated by the ``tray_popup`` encrypted session cookie set when
     ``GET /tray/chat?token=...`` is visited.
     """
-    from datetime import date
-
     session = _parse_popup_session(request)
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session")
@@ -1534,19 +1548,10 @@ async def popup_chat_get_room(
 
     messages = await chat_repo.get_messages(room_id, limit=50)
 
-    def _serial(obj: Any) -> Any:
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        if isinstance(obj, dict):
-            return {k: _serial(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_serial(item) for item in obj]
-        return obj
-
     return JSONResponse(
         {
-            "room": _serial(dict(room)),
-            "messages": _serial(messages),
+            "room": _serialise_popup_chat_value(dict(room)),
+            "messages": _serialise_popup_chat_value(messages),
             "csrf_token": session.get("csrf"),
         }
     )
