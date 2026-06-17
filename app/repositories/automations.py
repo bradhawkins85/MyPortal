@@ -222,6 +222,9 @@ async def update_automation(automation_id: int, **fields: Any) -> AutomationReco
         if key in {"trigger_filters", "action_payload"}:
             assignments.append(f"{key} = %s")
             params.append(_serialise(value))
+        elif key in {"next_run_at", "scheduled_time"}:
+            assignments.append(f"{key} = %s")
+            params.append(_prepare_for_storage(value))
         else:
             assignments.append(f"{key} = %s")
             params.append(value)
