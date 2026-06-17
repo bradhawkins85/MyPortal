@@ -70,6 +70,11 @@ async def test_popup_chat_send_message_syncs_linked_ticket(monkeypatch):
     async def fake_sync_chat_message_to_ticket(**kwargs):
         synced.update(kwargs)
 
+    assistant_activity: list[tuple[int, object]] = []
+
+    async def fake_handle_user_message(room_id: int, sent_at):
+        assistant_activity.append((room_id, sent_at))
+
     monkeypatch.setattr(tray_routes.chat_repo, "get_room", fake_get_room)
     monkeypatch.setattr(tray_routes.tray_repo, "get_device_by_id", fake_get_device_by_id)
     monkeypatch.setattr(tray_routes.chat_repo, "add_message", fake_add_message)
@@ -78,6 +83,11 @@ async def test_popup_chat_send_message_syncs_linked_ticket(monkeypatch):
         tray_routes.chat_ticket_sync,
         "sync_chat_message_to_ticket",
         fake_sync_chat_message_to_ticket,
+    )
+    monkeypatch.setattr(
+        tray_routes.matrix_ai_waiting_assistant,
+        "handle_user_message",
+        fake_handle_user_message,
     )
     response = await tray_routes.popup_chat_send_message(_PopupRequest(), 42)
 
@@ -89,3 +99,4 @@ async def test_popup_chat_send_message_syncs_linked_ticket(monkeypatch):
     assert room_updates
     assert room_updates[0]["room_id"] == 42
     assert room_updates[0]["last_message_at"] == room_updates[0]["updated_at"]
+    assert assistant_activity == [(42, room_updates[0]["last_message_at"])]

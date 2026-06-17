@@ -383,6 +383,22 @@ async def handle_user_message(room_id: int, sent_at: datetime | None = None) -> 
     await _audit("matrix_ai_waiting_assistant.user_activity", room_id)
 
 
+async def handle_chat_opened(room_id: int, opened_at: datetime | None = None) -> None:
+    """Start the waiting-assistant timer when an unassigned customer chat opens.
+
+    Some Matrix-backed rooms are created when a tray popup or customer chat
+    window opens, before the customer sends a first message.  Treat that open
+    event as customer activity so the acknowledgement can be sent when no
+    technician has taken the chat.
+    """
+    room = await chat_repo.get_room(room_id)
+    if not room or room.get("status") != "open" or room.get("assigned_tech_user_id"):
+        return
+    await chat_repo.mark_user_activity(room_id, opened_at)
+    await chat_repo.cancel_active_ai_queue_for_room(room_id, "chat_opened_timer_reset")
+    await _audit("matrix_ai_waiting_assistant.chat_opened", room_id)
+
+
 async def handle_technician_takeover(room_id: int, user_id: int | None = None) -> None:
     await chat_repo.cancel_active_ai_queue_for_room(room_id, "technician_assigned")
     await _audit("matrix_ai_waiting_assistant.technician_takeover", room_id, {"user_id": user_id})
