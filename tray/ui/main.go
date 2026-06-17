@@ -60,6 +60,17 @@ var (
 
 func main() {
 	_ = logger.Init("ui")
+	lockAcquired, lockErr := acquireSingleInstanceLock()
+	if lockErr != nil {
+		logger.Warn("Single-instance check failed: %v", lockErr)
+	} else if !lockAcquired {
+		logger.Info("MyPortal Tray UI is already running for this user; exiting duplicate instance")
+		return
+	}
+	if lockAcquired {
+		defer releaseSingleInstanceLock()
+	}
+
 	logger.Info("MyPortal Tray UI (webview) starting")
 
 	refreshPortalURL()
