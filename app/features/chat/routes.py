@@ -21,6 +21,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.session import SessionData
 from app.services import matrix as matrix_service
 from app.services import tray as tray_service
+from app.services import matrix_ai_waiting_assistant
 from app.core.logging import log_error, log_info
 
 
@@ -312,6 +313,18 @@ async def tray_chat_popup(
             )
         except Exception as exc:
             log_error("tray_chat_popup: auto-assign failed", room_id=room_id_new, error=str(exc))
+
+        # A tray chat can be opened before the user types a message.  If no
+        # technician has been assigned, start the AI waiting-assistant timer so
+        # it can acknowledge the new chat instead of waiting for Matrix /sync
+        # message activity.
+        try:
+            refreshed_room = await chat_repo.get_room(room_id_new)
+            if refreshed_room and not refreshed_room.get("assigned_tech_user_id"):
+                chat_room = refreshed_room
+                await matrix_ai_waiting_assistant.handle_chat_opened(room_id_new)
+        except Exception as exc:
+            log_error("tray_chat_popup: AI waiting assistant open hook failed", room_id=room_id_new, error=str(exc))
 
         log_info(
             "Tray chat popup: created room",
