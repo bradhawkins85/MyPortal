@@ -344,6 +344,8 @@ class Settings(BaseSettings):
     matrixbot_ai_queue_retry_minutes: int = Field(default=5, validation_alias="MATRIXBOT_AI_QUEUE_RETRY_MINUTES", ge=1)
     matrixbot_ai_queue_timeout_minutes: int = Field(default=60, validation_alias="MATRIXBOT_AI_QUEUE_TIMEOUT_MINUTES", ge=1)
     matrixbot_ai_show_match_tags: bool = Field(default=True, validation_alias="MATRIXBOT_AI_SHOW_MATCH_TAGS")
+    ntfy_chat_new_enabled: bool = Field(default=False, validation_alias="NTFY_CHAT_NEW_ENABLED")
+    ntfy_chat_reply_enabled: bool = Field(default=False, validation_alias="NTFY_CHAT_REPLY_ENABLED")
 
     # IP Whitelisting Configuration
     ip_whitelist_enabled: bool = Field(

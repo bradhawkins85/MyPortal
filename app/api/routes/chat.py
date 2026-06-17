@@ -19,6 +19,7 @@ from app.schemas.chat import (
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
+from app.services import chat_ntfy_notifications
 from app.services import tray_chat_notifications
 from app.services import matrix as matrix_service
 from app.services import matrix_admin
@@ -137,6 +138,9 @@ async def create_room(
         new_value={"subject": body.subject},
     )
 
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        await chat_ntfy_notifications.notify_new_chat(room=room, actor=current_user)
+
     return JSONResponse(_serialize(dict(room)), status_code=201)
 
 
@@ -240,6 +244,11 @@ async def send_message(
     await tray_chat_notifications.notify_tray_device_of_chat_message(
         room=room,
         message=msg_data,
+    )
+    await chat_ntfy_notifications.notify_chat_reply(
+        room=room,
+        message=msg_data,
+        actor=current_user,
     )
 
     return JSONResponse(msg_data, status_code=201)
