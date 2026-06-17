@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, EmailStr, Field
 
 
 class StaffBase(BaseModel):
@@ -113,6 +113,18 @@ class StaffExternalCheckpointResponse(BaseModel):
     execution_id: int = Field(validation_alias="executionId")
     staff_id: int = Field(validation_alias="staffId")
     company_id: int = Field(validation_alias="companyId")
+
+
+class StaffWorkflowWebhookCallback(BaseModel):
+    post_key: str = Field(
+        validation_alias=AliasChoices("post_key", "postKey"),
+        min_length=24,
+        max_length=255,
+    )
+    source: str = Field(default="workflow-webhook", min_length=2, max_length=128)
+    company_id: Optional[int] = Field(default=None, validation_alias=AliasChoices("company_id", "companyId"))
+    staff_id: Optional[int] = Field(default=None, validation_alias=AliasChoices("staff_id", "staffId"))
+    payload: dict[str, Any] | None = None
 
 
 class StaffWorkflowManualActionRequest(BaseModel):
