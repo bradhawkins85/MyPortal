@@ -8,7 +8,8 @@
     "start": "electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win --x64",
-    "build:mac": "electron-builder --mac --x64 --arm64"
+    "build:mac": "npm run build:icons:mac && electron-builder --mac --x64 --arm64",
+    "build:icons:mac": "bash ../scripts/build-macos-icons.sh"
   },
   "build": {
     "appId": "io.myportal.tray.chat",
@@ -42,7 +43,8 @@
         }
       ],
       "category": "public.app-category.utilities",
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "icon": "build/icon.icns"
     },
     "portable": {
       "artifactName": "myportal-tray-chat.exe"

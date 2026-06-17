@@ -19,6 +19,7 @@ tray/
 │   ├── main.js       Electron main process — session isolation + window management
 │   ├── preload.js    Security preload (context isolation)
 │   └── package.json  electron-builder config for Windows portable exe + macOS .app
+├── scripts/          Text-only build helpers, including macOS icon generation
 ├── installer/
 │   ├── windows/      WiX v7 MSI project + PowerShell RMM deployment script
 │   └── macos/        pkgbuild scripts + LaunchDaemon/LaunchAgent plists + bash RMM script
@@ -35,7 +36,7 @@ tray/
 - For MSI packaging: .NET SDK 8+ and WiX v7 (`dotnet tool install --global wix --version "7.*"`).
   WiX v7 requires accepting the FireGiant OSMF EULA — the Makefile passes
   `-acceptEula wix7` per https://docs.firegiant.com/wix/osmf/.
-- For macOS .pkg packaging: Xcode command-line tools with `pkgbuild` / `productbuild` (macOS only)
+- For macOS chat-shell icon and .pkg packaging: Xcode command-line tools with `iconutil`, `pkgbuild`, and `productbuild` (macOS only)
 - For chat shell: **Node.js 20+** and npm (required only on the native host runner for each platform)
 
 ### Cross-compile (CGO=0, no webview — for RMM deployment)
@@ -50,11 +51,28 @@ make build-darwin-arm64
 
 Binaries land in `dist/<platform>/`.
 
+### Build the macOS app icon
+
+The macOS chat-shell app icon is generated during the build from a text-only
+recipe so binary icon assets are not committed to the repository. Run this on
+macOS with Xcode Command Line Tools installed:
+
+```sh
+cd tray
+make build-macos-icons
+# or, from tray/chat-shell:
+npm run build:icons:mac
+```
+
+The target creates `tray/chat-shell/build/icon.icns`, which electron-builder
+uses for the packaged `myportal-tray-chat.app`. The generated `.icns` and
+`.iconset` intermediates are build outputs and should not be committed.
+
 ### Build the dedicated chat shell
 
 The chat shell is a minimal Electron app that opens the MyPortal support chat
 in an isolated window completely separate from the user's browser sessions.
-It **must be built on the target platform** (electron-builder constraint).
+It **must be built on the target platform** (electron-builder constraint). The macOS build runs the icon generation script before invoking electron-builder.
 
 ```sh
 # On a Windows host — produces dist/windows/myportal-tray-chat.exe
