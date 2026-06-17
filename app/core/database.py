@@ -189,6 +189,20 @@ class Database:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
 
+    async def execute_rowcount(self, sql: str, params: tuple | dict | None = None) -> int:
+        if self._use_sqlite:
+            if not self._sqlite_conn:
+                raise RuntimeError("SQLite database not initialised")
+            cursor = await self._sqlite_conn.execute(sql, params or ())
+            await self._sqlite_conn.commit()
+            return int(cursor.rowcount or 0)
+        else:
+            async with self.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                    await cursor.execute(adapted_sql, adapted_params)
+                    return int(cursor.rowcount or 0)
+
     async def execute_returning_lastrowid(
         self, sql: str, params: tuple | dict | None = None
     ) -> int:
