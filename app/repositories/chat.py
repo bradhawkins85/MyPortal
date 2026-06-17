@@ -179,6 +179,31 @@ async def has_technician_participant(room_id: int) -> bool:
     return row is not None
 
 
+async def has_technician_message(room_id: int) -> bool:
+    """Return whether a technician/admin has actually replied in the room.
+
+    Auto-assignment can add an assigned technician (and sometimes invite/add a
+    Matrix participant) before any human has responded.  The waiting assistant
+    should continue to help customers until a technician/admin sends a message.
+    """
+    row = await db.fetch_one(
+        """SELECT 1
+           FROM chat_messages m
+           JOIN chat_room_participants p
+             ON p.room_id = m.room_id
+            AND (
+                (m.sender_user_id IS NOT NULL AND p.user_id = m.sender_user_id)
+                OR p.matrix_user_id = m.sender_matrix_id
+            )
+           WHERE m.room_id = %s
+             AND m.redacted_at IS NULL
+             AND p.role IN ('technician', 'admin')
+           LIMIT 1""",
+        (room_id,),
+    )
+    return row is not None
+
+
 async def get_participant(
     room_id: int,
     *,
@@ -600,8 +625,17 @@ async def list_ai_waiting_candidate_rooms(due_before: datetime) -> list[dict[str
              AND r.ai_last_user_message_at <= %s
              AND COALESCE(r.ai_bot_response_count, 0) < 100
              AND NOT EXISTS (
-                 SELECT 1 FROM chat_room_participants p
-                 WHERE p.room_id = r.id AND p.role IN ('technician', 'admin')
+                 SELECT 1
+                 FROM chat_messages m
+                 JOIN chat_room_participants p
+                   ON p.room_id = m.room_id
+                  AND (
+                      (m.sender_user_id IS NOT NULL AND p.user_id = m.sender_user_id)
+                      OR p.matrix_user_id = m.sender_matrix_id
+                  )
+                 WHERE m.room_id = r.id
+                   AND m.redacted_at IS NULL
+                   AND p.role IN ('technician', 'admin')
              )
            ORDER BY r.ai_last_user_message_at ASC
            LIMIT 250""",

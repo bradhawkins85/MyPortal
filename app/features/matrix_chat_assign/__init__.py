@@ -2,10 +2,10 @@
 
 Owns the admin management page for configuring chat auto-assign rules:
 
-* ``GET  /admin/modules/matrix-chat-assign``
-* ``POST /admin/modules/matrix-chat-assign/rules``
-* ``POST /admin/modules/matrix-chat-assign/rules/{rule_id}``
-* ``POST /admin/modules/matrix-chat-assign/rules/{rule_id}/delete``
+* ``GET  /chat/auto-assign``
+* ``POST /chat/auto-assign/rules``
+* ``POST /chat/auto-assign/rules/{rule_id}``
+* ``POST /chat/auto-assign/rules/{rule_id}/delete``
 """
 
 from __future__ import annotations

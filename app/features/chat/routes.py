@@ -84,11 +84,12 @@ async def chat_index(
         "show_closed_filter": show_closed_filter,
         "unattended_filter": unattended,
         "is_staff": is_staff,
+        "is_super_admin": is_super_admin,
     }
     return await main_module._render_template("chat/index.html", request, current_user, extra=extra)
 
 
-@router.get("/chat/{room_id}", response_class=HTMLResponse)
+@router.get("/chat/{room_id:int}", response_class=HTMLResponse)
 async def chat_room_page(
     request: Request,
     room_id: int,
