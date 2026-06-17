@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Query, Request, status
-from fastapi.responses import RedirectResponse
 from starlette.datastructures import FormData
 
 from app.security.flash import flash_redirect

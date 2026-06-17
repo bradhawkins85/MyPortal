@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Query, Request, Response, status
-from fastapi.responses import RedirectResponse
 from starlette.datastructures import FormData
 
 from app.security.flash import flash_redirect
@@ -59,7 +58,6 @@ async def _list_reporting_eligible_users() -> list[dict[str, Any]]:
 
 
 async def _require_reporting_access(request: Request):
-    from app.core.logging import log_error
 
     user, redirect = await _main()._require_authenticated_user(request)
     if redirect:
