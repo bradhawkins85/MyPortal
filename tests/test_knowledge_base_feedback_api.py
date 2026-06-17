@@ -139,3 +139,42 @@ def test_submit_feedback_returns_not_found_for_inaccessible_article(monkeypatch,
     assert response.status_code == 404
     assert response.json()["detail"] == "Article not found"
     create_ticket.assert_not_awaited()
+
+
+def test_add_manual_ai_tag_persists_and_returns_refreshed_article(monkeypatch, active_session):
+    user = {"id": 1, "email": "admin@example.com", "company_id": 12, "is_super_admin": True}
+    app.dependency_overrides[knowledge_base_routes.require_super_admin] = lambda: user
+
+    stored_article = {
+        "id": 55,
+        "ai_tags": ["legacy"],
+        "manual_ai_tags": [],
+        "excluded_ai_tags": ["vpn"],
+    }
+
+    async def fake_get_article_by_id(article_id):
+        assert article_id == 55
+        return dict(stored_article)
+
+    async def fake_update_article(article_id, **updates):
+        assert article_id == 55
+        stored_article.update(updates)
+        return dict(stored_article)
+
+    monkeypatch.setattr(knowledge_base_routes.kb_repo, "get_article_by_id", fake_get_article_by_id)
+    monkeypatch.setattr(knowledge_base_routes.kb_repo, "update_article", fake_update_article)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/knowledge-base/articles/55/manual-ai-tags",
+                json={"tag_slug": "VPN"},
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["manual_ai_tags"] == ["vpn"]
+    assert stored_article["manual_ai_tags"] == ["vpn"]
+    assert stored_article["excluded_ai_tags"] == []
