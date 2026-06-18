@@ -9,7 +9,7 @@
      "attrs": {"data-create-chat-modal-open": "", "aria-haspopup": "dialog", "aria-controls": "create-chat-modal"}},
   ] %}
   {% if is_super_admin | default(false) %}
-    {% set chat_actions = chat_actions + [{"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}] %}
+    {% set chat_actions = chat_actions + [{"label": "Chat configuration", "type": "link", "href": "/chat/configuration"}, {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}] %}
   {% endif %}
   {{ page_header_actions(chat_actions) }}
 {% endblock %}

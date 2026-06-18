@@ -101,3 +101,18 @@ class MatrixSettingsUpdate(BaseModel):
     default_room_preset: str = "private_chat"
     e2ee_enabled: bool = False
     invite_domain: Optional[str] = None
+
+
+class AiTagSynonymGroupCreate(BaseModel):
+    terms: list[str] = Field(..., min_length=2, max_length=20)
+
+
+class AiTagSynonymGroupUpdate(BaseModel):
+    terms: list[str] = Field(..., min_length=2, max_length=20)
+
+
+class AiTagSynonymGroupResponse(BaseModel):
+    id: int
+    terms: list[str]
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None

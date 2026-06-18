@@ -4,17 +4,21 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import chat as chat_repo
+from app.repositories import matrix_ai_tag_synonyms as synonyms_repo
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatRoomCreate,
     ExternalInviteCreate,
+    AiTagSynonymGroupCreate,
+    AiTagSynonymGroupUpdate,
+    AiTagSynonymGroupResponse,
 )
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import audit as audit_service
@@ -47,6 +51,88 @@ def _serialize(obj: Any) -> Any:
 def _require_matrix_enabled() -> None:
     if not _settings.matrix_enabled:
         raise HTTPException(status_code=404, detail="Matrix chat is not enabled")
+
+
+
+
+@router.get(
+    "/ai-tag-synonyms",
+    response_model=list[AiTagSynonymGroupResponse],
+    summary="List AI waiting assistant tag synonym groups",
+)
+async def list_ai_tag_synonym_groups(
+    current_user: dict = Depends(require_super_admin),
+) -> list[dict[str, Any]]:
+    _require_matrix_enabled()
+    return await synonyms_repo.list_groups()
+
+
+@router.post(
+    "/ai-tag-synonyms",
+    response_model=AiTagSynonymGroupResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an AI waiting assistant tag synonym group",
+)
+async def create_ai_tag_synonym_group(
+    body: AiTagSynonymGroupCreate,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, Any]:
+    _require_matrix_enabled()
+    try:
+        return await synonyms_repo.create_group(body.terms)
+    except synonyms_repo.InvalidSynonymGroup as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+
+@router.get(
+    "/ai-tag-synonyms/{group_id}",
+    response_model=AiTagSynonymGroupResponse,
+    summary="Get an AI waiting assistant tag synonym group",
+)
+async def get_ai_tag_synonym_group(
+    group_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, Any]:
+    _require_matrix_enabled()
+    group = await synonyms_repo.get_group(group_id)
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Synonym group not found")
+    return group
+
+
+@router.put(
+    "/ai-tag-synonyms/{group_id}",
+    response_model=AiTagSynonymGroupResponse,
+    summary="Update an AI waiting assistant tag synonym group",
+)
+async def update_ai_tag_synonym_group(
+    group_id: int,
+    body: AiTagSynonymGroupUpdate,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, Any]:
+    _require_matrix_enabled()
+    try:
+        group = await synonyms_repo.update_group(group_id, body.terms)
+    except synonyms_repo.InvalidSynonymGroup as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Synonym group not found")
+    return group
+
+
+@router.delete(
+    "/ai-tag-synonyms/{group_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an AI waiting assistant tag synonym group",
+)
+async def delete_ai_tag_synonym_group(
+    group_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> None:
+    _require_matrix_enabled()
+    deleted = await synonyms_repo.delete_group(group_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Synonym group not found")
 
 
 @router.get("/rooms", summary="List chat rooms")
