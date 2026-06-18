@@ -1,7 +1,7 @@
 # Build the MyPortal Tray macOS PKG and DMG installers and upload them to the
 # GitHub release that triggered this workflow.
 #
-# Triggered by: publishing a new GitHub release (any tag).
+# Triggered by: publishing a new GitHub release (any tag), or manually via workflow_dispatch.
 # Runner:       macos-latest (required for pkgbuild, productbuild, hdiutil,
 #               lipo, iconutil, and electron-builder --mac).
 
@@ -9,7 +9,15 @@ name: Build macOS Installer
 
 on:
   release:
-    types: [created]
+    # Build installers when a release is published. Using only `created` misses
+    # common flows where a draft release is created first and published later.
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to build installers for (defaults to current ref)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -41,14 +49,15 @@ jobs:
           cache-dependency-path: tray/chat-shell/package-lock.json
 
       - name: Build macOS chat shell
-        run: make build-chat-shell-mac VERSION='${{ github.event.release.tag_name }}'
+        run: make build-chat-shell-mac VERSION='${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}'
 
       - name: Build macOS PKG and DMG
-        run: make build-dmg VERSION='${{ github.event.release.tag_name }}'
+        run: make build-dmg VERSION='${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}'
 
       - name: Upload macOS installers to release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
           files: |
             tray/dist/darwin/myportal-tray.pkg
             tray/dist/darwin/myportal-tray.dmg
