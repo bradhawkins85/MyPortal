@@ -36,7 +36,7 @@ tray/
 - For MSI packaging: .NET SDK 8+ and WiX v7 (`dotnet tool install --global wix --version "7.*"`).
   WiX v7 requires accepting the FireGiant OSMF EULA — the Makefile passes
   `-acceptEula wix7` per https://docs.firegiant.com/wix/osmf/.
-- For macOS chat-shell icon and .pkg packaging: Xcode command-line tools with `iconutil`, `pkgbuild`, and `productbuild` (macOS only)
+- For macOS chat-shell icon and installer packaging: Xcode command-line tools with `iconutil`, `pkgbuild`, `productbuild`, and `hdiutil` (macOS only)
 - For chat shell: **Node.js 20+** and npm (required only on the native host runner for each platform)
 
 ### Cross-compile (CGO=0, no webview — for RMM deployment)
@@ -96,20 +96,20 @@ the MSI / .pkg installer jobs run.
 # Requires dist/windows/myportal-tray-chat.exe from build-chat-shell-win.
 make build-msi          # produces dist/windows/myportal-tray.msi
 
-# macOS .pkg (requires pkgbuild — macOS only)
+# macOS .pkg (requires pkgbuild/productbuild — macOS only)
 # Requires dist/darwin/myportal-tray-chat.app from build-chat-shell-mac.
 make build-pkg          # produces dist/darwin/myportal-tray.pkg
 
-# Build all binaries + MSI (+ .pkg on macOS)
+# macOS .dmg wrapping the .pkg (requires hdiutil — macOS only)
+make build-dmg          # produces dist/darwin/myportal-tray.dmg
+
+# Build all binaries + MSI (+ .pkg and .dmg on macOS)
 make package-all
 ```
 
 The built installers must be copied to `app/static/tray/` on the MyPortal server so
-they are served at `/static/tray/myportal-tray.msi` and `/static/tray/myportal-tray.pkg`.
-The `scripts/upgrade.sh` handles this automatically when WiX is installed on a
-Windows host. On Linux/macOS upgrade hosts the MSI build is skipped (WiX is
-Windows-only) — build the MSI separately on Windows and copy it into
-`app/static/tray/myportal-tray.msi`.
+they are served at `/static/tray/myportal-tray.msi`, `/static/tray/myportal-tray.pkg`, and `/static/tray/myportal-tray.dmg`.
+The `scripts/upgrade.sh` handles this automatically: Windows hosts can build the MSI when WiX is installed, and macOS hosts can build the PKG/DMG when Xcode command-line tools are installed. On Linux hosts, build the installers separately on their native platforms and copy them into `app/static/tray/`.
 
 ### With native webview (requires CGO)
 
