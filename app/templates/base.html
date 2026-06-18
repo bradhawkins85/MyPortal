@@ -502,6 +502,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/chat/ai-tag-synonyms" {% if current_path.startswith('/admin/chat/ai-tag-synonyms') or current_path.startswith('/chat/configuration') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-5 5v-5H6a2 2 0 0 1-2-2V4zm4 4v2h8V8H8zm0 4v2h5v-2H8z"/></svg>
+                  </span>
+                  <span class="menu__label">AI Tag Synonyms</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/call-recordings" {% if current_path.startswith('/admin/call-recordings') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v7a1 1 0 0 0 2 0V5a1 1 0 0 0-1-1zm6 7a1 1 0 0 1 1 1 7 7 0 0 1-6 6.93V21h3a1 1 0 0 1 0 2H8a1 1 0 0 1 0-2h3v-2.07A7 7 0 0 1 5 12a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 0 1 1-1z"/></svg>
