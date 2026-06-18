@@ -20,6 +20,18 @@ def test_extract_keywords_uses_ollama_json(monkeypatch):
     assert keywords == ["windows 11", "vpn", "error 809"]
 
 
+def test_matching_tags_matches_known_synonyms():
+    keywords = assistant._normalise_tags(["monitor", "trackpad", "computer"])
+    article_tags = assistant._normalise_tags(["Screen", "Touchpad", "PC", "Printer"])
+
+    assert assistant._matching_tags(keywords, article_tags) == ["pc", "screen", "touchpad"]
+
+def test_matching_tags_normalises_hyphenated_synonyms():
+    keywords = assistant._normalise_tags(["wi-fi", "e-mail"])
+    article_tags = assistant._normalise_tags(["wireless", "mail"])
+
+    assert assistant._matching_tags(keywords, article_tags) == ["mail", "wireless"]
+
 def test_scan_waiting_rooms_sends_ack_before_analysis(monkeypatch):
     settings = SimpleNamespace(
         matrix_enabled=True,
@@ -398,3 +410,9 @@ def test_article_visible_to_room_respects_company_restrictions():
         {"permission_scope": "user", "allowed_user_ids": [21]},
         room,
     ) is False
+
+
+def test_matching_tags_uses_configured_synonym_lookup():
+    lookup = assistant._build_synonym_lookup([["router", "gateway"], ["monitor", "display"]])
+
+    assert assistant._matching_tags(["gateway"], ["router", "screen"], lookup) == ["router"]

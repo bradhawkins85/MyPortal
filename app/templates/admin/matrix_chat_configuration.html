@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Chat Configuration{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Chat rooms", "type": "link", "href": "/chat"},
+    {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<div class="management management--single" data-layout>
+  <section class="management__content">
+    {% if error_message %}
+      <div class="alert alert--danger" role="alert">{{ error_message }}</div>
+    {% endif %}
+
+    <section class="card card--panel">
+      <header class="card__header">
+        <div>
+          <h2 class="card__title">AI Waiting Assistant tag synonyms</h2>
+          <p class="card__subtitle">
+            Super admins can add similar words used when matching extracted chat keywords to knowledge-base article tags.
+            Enter comma-separated terms; each group needs at least two unique terms.
+          </p>
+        </div>
+      </header>
+
+      <form action="/chat/configuration/synonyms" method="post" class="form management__form" autocomplete="off">
+        {% if csrf_token %}
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+        {% endif %}
+        <label class="form-field">
+          <span class="form-label">New synonym group</span>
+          <input
+            type="text"
+            name="terms"
+            class="form-input"
+            maxlength="1200"
+            required
+            placeholder="monitor, screen, display"
+          />
+          <span class="form-help">Example: <code>monitor, screen, display</code> or <code>trackpad, touchpad</code>.</span>
+        </label>
+        <button type="submit" class="button button--primary">Add synonym group</button>
+      </form>
+    </section>
+
+    <section class="card card--panel">
+      <div class="table-wrapper">
+        <table class="table" data-table data-table-id="chat-ai-synonyms">
+          <thead>
+            <tr>
+              <th scope="col" data-sort="number" data-column-key="id">ID</th>
+              <th scope="col" data-sort="string" data-column-key="terms">Terms</th>
+              <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if not synonym_groups %}
+              <tr>
+                <td colspan="3" class="table__empty">No synonym groups configured.</td>
+              </tr>
+            {% endif %}
+            {% for group in synonym_groups %}
+              <tr>
+                <td data-label="ID" data-column-key="id">{{ group.id }}</td>
+                <td data-label="Terms" data-column-key="terms">
+                  <form action="/chat/configuration/synonyms/{{ group.id }}" method="post" class="inline-form chat-synonym-form">
+                    {% if csrf_token %}
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                    {% endif %}
+                    <input
+                      type="text"
+                      name="terms"
+                      class="form-input"
+                      value="{{ (group.terms or []) | join(', ') | e }}"
+                      maxlength="1200"
+                      required
+                      aria-label="Terms for synonym group {{ group.id }}"
+                    />
+                  </form>
+                </td>
+                <td class="table__actions" data-column-key="actions">
+                  <button type="button" class="button button--sm" onclick="this.closest('tr').querySelector('.chat-synonym-form').requestSubmit();">Save</button>
+                  <form action="/chat/configuration/synonyms/{{ group.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Delete this synonym group?');">
+                    {% if csrf_token %}
+                      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                    {% endif %}
+                    <button type="submit" class="button button--sm button--danger">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+</div>
+{% endblock %}

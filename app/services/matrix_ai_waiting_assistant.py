@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import chat as chat_repo
 from app.repositories import knowledge_base as kb_repo
+from app.repositories import matrix_ai_tag_synonyms as tag_synonyms_repo
 from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import matrix as matrix_service
@@ -176,16 +177,84 @@ def _enabled() -> bool:
     )
 
 
+DEFAULT_TAG_SYNONYM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("monitor", "screen", "display"),
+    ("trackpad", "touchpad"),
+    ("computer", "pc", "workstation", "desktop"),
+    ("notebook", "laptop"),
+    ("cellphone", "mobile", "mobile phone", "phone", "smartphone"),
+    ("printer", "mfp", "multifunction printer"),
+    ("wifi", "wi fi", "wi-fi", "wireless"),
+    ("internet", "network", "networking"),
+    ("email", "e mail", "e-mail", "mail"),
+)
+_TAG_SYNONYMS: dict[str, frozenset[str]] = {
+    term: frozenset(group)
+    for group in DEFAULT_TAG_SYNONYM_GROUPS
+    for term in group
+}
+
+
+def _normalise_tag_text(tag: Any) -> str:
+    return " ".join(str(tag or "").strip().lower().replace("_", " ").replace("-", " ").split())
+
+
 def _normalise_tags(tags: list[Any]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for tag in tags:
-        text = str(tag or "").strip().lower()
+        text = _normalise_tag_text(tag)
         if not text or text in seen or len(text) > 80:
             continue
         seen.add(text)
         result.append(text)
     return result[:40]
+
+
+def _build_synonym_lookup(groups: list[list[str]] | tuple[tuple[str, ...], ...]) -> dict[str, frozenset[str]]:
+    lookup: dict[str, frozenset[str]] = {}
+    for group in groups:
+        normalised_group = frozenset(_normalise_tag_text(term) for term in group if _normalise_tag_text(term))
+        for term in normalised_group:
+            lookup[term] = normalised_group
+    return lookup
+
+
+def _tag_terms(tag: str, synonym_lookup: Mapping[str, frozenset[str]] | None = None) -> frozenset[str]:
+    """Return equivalent terms used when comparing extracted and article tags."""
+
+    lookup = synonym_lookup or _TAG_SYNONYMS
+    normalised = _normalise_tag_text(tag)
+    terms = {normalised}
+    if normalised in lookup:
+        terms.update(lookup[normalised])
+    for word in normalised.split():
+        if word in lookup:
+            terms.update(lookup[word])
+    return frozenset(terms)
+
+
+def _matching_tags(
+    keywords: list[str],
+    article_tags: list[str],
+    synonym_lookup: Mapping[str, frozenset[str]] | None = None,
+) -> list[str]:
+    """Return article tags that match keywords directly or through configured synonyms."""
+
+    keyword_terms = set().union(*(_tag_terms(keyword, synonym_lookup) for keyword in keywords)) if keywords else set()
+    return sorted(tag for tag in article_tags if _tag_terms(tag, synonym_lookup) & keyword_terms)
+
+
+async def _load_synonym_lookup() -> dict[str, frozenset[str]]:
+    try:
+        groups = await tag_synonyms_repo.list_groups()
+    except Exception as exc:
+        log_error("AI waiting assistant synonym load failed", error=str(exc))
+        return dict(_TAG_SYNONYMS)
+    configured_groups = [list(group.get("terms") or []) for group in groups if len(group.get("terms") or []) >= 2]
+    if not configured_groups:
+        return dict(_TAG_SYNONYMS)
+    return _build_synonym_lookup(configured_groups)
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -557,6 +626,7 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
         transcript = await _chat_transcript(room_id)
         keywords = await _extract_keywords(transcript)
         keyword_set = set(keywords)
+        synonym_lookup = await _load_synonym_lookup()
         candidates: list[dict[str, Any]] = []
         for article in await kb_repo.list_articles(include_unpublished=False):
             if not _article_visible_to_room(article, room):
@@ -564,7 +634,7 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
             tags = _normalise_tags(article.get("ai_tags") or [])
             if not tags:
                 continue
-            matched = sorted(keyword_set & set(tags))
+            matched = _matching_tags(keywords, tags, synonym_lookup)
             confidence_base = max(1, min(len(tags), len(keyword_set))) if tags else 1
             confidence = min(100.0, (len(matched) / confidence_base) * 100) if tags else 0.0
             if confidence >= settings.matrixbot_ai_kb_confidence_threshold:
