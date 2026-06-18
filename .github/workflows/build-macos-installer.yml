@@ -1,0 +1,54 @@
+# Build the MyPortal Tray macOS PKG and DMG installers and upload them to the
+# GitHub release that triggered this workflow.
+#
+# Triggered by: publishing a new GitHub release (any tag).
+# Runner:       macos-latest (required for pkgbuild, productbuild, hdiutil,
+#               lipo, iconutil, and electron-builder --mac).
+
+name: Build macOS Installer
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-installer:
+    name: Build macOS PKG and DMG
+    runs-on: macos-latest
+
+    defaults:
+      run:
+        working-directory: tray
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: tray/go.mod
+          cache-dependency-path: tray/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: tray/chat-shell/package-lock.json
+
+      - name: Build macOS chat shell
+        run: make build-chat-shell-mac VERSION='${{ github.event.release.tag_name }}'
+
+      - name: Build macOS PKG and DMG
+        run: make build-dmg VERSION='${{ github.event.release.tag_name }}'
+
+      - name: Upload macOS installers to release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            tray/dist/darwin/myportal-tray.pkg
+            tray/dist/darwin/myportal-tray.dmg

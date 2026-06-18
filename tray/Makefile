@@ -24,7 +24,7 @@ LDFLAGS  := -X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVer
 DIST     := dist
 
 .PHONY: all build-all build-windows build-darwin-amd64 build-darwin-arm64 \
-        build-darwin-universal build-msi build-pkg package-all \
+        build-darwin-universal build-msi build-pkg build-dmg package-all \
         build-macos-icons build-chat-shell-win build-chat-shell-mac \
         test lint clean
 
@@ -155,8 +155,8 @@ build-msi: build-windows
 	esac
 
 # -----------------------------------------------------------------------
-# macOS .pkg installer
-# Requires pkgbuild / productbuild — macOS only.
+# macOS .pkg and .dmg installers
+# Requires pkgbuild / productbuild / hdiutil — macOS only.
 # Depends on the universal binary; run build-darwin-universal first if
 # you want a fat binary, otherwise run build-darwin-amd64 / arm64.
 # -----------------------------------------------------------------------
@@ -166,16 +166,23 @@ build-pkg: build-darwin-universal
 	mv installer/macos/myportal-tray-$(VERSION).pkg $(DIST)/darwin/myportal-tray.pkg
 	rm -f installer/macos/myportal-tray-$(VERSION)-unsigned.pkg
 
+# Build a compressed macOS disk image that contains the .pkg installer.
+# This must run on macOS because hdiutil is an Apple platform tool.
+build-dmg: build-pkg
+	@echo "Building macOS .dmg installer..."
+	(cd installer/macos && bash build-dmg.sh "$(VERSION)" "../../$(DIST)/darwin/myportal-tray.pkg")
+	mv installer/macos/myportal-tray-$(VERSION).dmg $(DIST)/darwin/myportal-tray.dmg
+
 # -----------------------------------------------------------------------
 # Package all installers
 # Builds the MSI on Windows hosts that have WiX v7.
-# Builds the macOS .pkg only when pkgbuild is present (macOS runners).
+# Builds the macOS .pkg/.dmg only when pkgbuild and hdiutil are present (macOS runners).
 # -----------------------------------------------------------------------
 package-all: build-msi
-	@if command -v pkgbuild >/dev/null 2>&1; then \
-	    $(MAKE) build-pkg; \
+	@if command -v pkgbuild >/dev/null 2>&1 && command -v hdiutil >/dev/null 2>&1; then \
+	    $(MAKE) build-dmg; \
 	else \
-	    echo "pkgbuild not available; skipping macOS .pkg (macOS-only step)."; \
+	    echo "pkgbuild/hdiutil not available; skipping macOS .pkg/.dmg (macOS-only step)."; \
 	fi
 
 # -----------------------------------------------------------------------

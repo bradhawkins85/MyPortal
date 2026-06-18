@@ -533,7 +533,16 @@ build_tray_installers() {
     if [[ -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
       cp "${tray_dir}/dist/windows/myportal-tray.msi" "${static_tray_dir}/myportal-tray.msi"
       echo "MSI installer built and copied → app/static/tray/" >&2
-    else
+    fi
+    if [[ -f "${tray_dir}/dist/darwin/myportal-tray.pkg" ]]; then
+      cp "${tray_dir}/dist/darwin/myportal-tray.pkg" "${static_tray_dir}/myportal-tray.pkg"
+      echo "PKG installer copied → app/static/tray/" >&2
+    fi
+    if [[ -f "${tray_dir}/dist/darwin/myportal-tray.dmg" ]]; then
+      cp "${tray_dir}/dist/darwin/myportal-tray.dmg" "${static_tray_dir}/myportal-tray.dmg"
+      echo "DMG installer copied → app/static/tray/" >&2
+    fi
+    if [[ ! -f "${tray_dir}/dist/windows/myportal-tray.msi" ]]; then
       echo "Warning: MSI build reported success but myportal-tray.msi was not found at expected path." >&2
     fi
   else
