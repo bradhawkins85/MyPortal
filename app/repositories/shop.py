@@ -2251,8 +2251,8 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         "archived": bool(row.get("archived")),
         "category_id": _coerce_optional_int(row.get("category_id")),
         "category_name": row.get("category_name") or None,
-        "duplicate_sku_import": bool(_coerce_int(row.get("duplicate_sku_import"))),
-        "duplicate_sku_count": _coerce_int(row.get("duplicate_sku_count")),
+        "duplicate_sku_import": bool(_coerce_int(row.get("duplicate_sku_import"), default=0)),
+        "duplicate_sku_count": _coerce_int(row.get("duplicate_sku_count"), default=0),
     }
 
 
