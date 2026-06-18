@@ -1,7 +1,7 @@
 # Build the MyPortal Tray MSI installer on Windows and upload it to the
-# GitHub release that triggered this workflow.
+# GitHub release that triggered this workflow, or the release selected manually.
 #
-# Triggered by: publishing a new GitHub release (any tag).
+# Triggered by: publishing a new GitHub release (any tag), or manually via workflow_dispatch.
 # Runner:       windows-latest (required — WiX v7 only works on Windows)
 #
 # The MSI is built with WiX v7 (installed as a .NET global tool).
@@ -12,7 +12,15 @@ name: Build MSI
 
 on:
   release:
-    types: [created]
+    # Build installers when a release is published. Using only `created` misses
+    # common flows where a draft release is created first and published later.
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to build installers for (defaults to current ref)'
+        required: false
+        type: string
 
 permissions:
   contents: write   # needed to upload the artifact to the release
@@ -53,7 +61,7 @@ jobs:
           $env:GOOS      = "windows"
           $env:GOARCH    = "amd64"
           $env:CGO_ENABLED = "0"
-          $version = "${{ github.event.release.tag_name }}"
+          $version = "${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}"
           $ldflags = "-X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$version'"
 
           New-Item -ItemType Directory -Force -Path dist\windows | Out-Null
@@ -88,4 +96,5 @@ jobs:
       - name: Upload MSI to release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
           files: tray/dist/windows/myportal-tray.msi
