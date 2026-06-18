@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -249,6 +250,32 @@ def _build_public_callback_url(request: Request) -> str:
     return f"{scheme}://{host}{_WEBHOOK_PATH}"
 
 
+
+def _build_trello_ticket_description(
+    card_desc: str | None,
+    card_url: str | None,
+) -> str | None:
+    """Return safe HTML containing the Trello card link and card content."""
+    parts: list[str] = []
+    safe_url = str(card_url or "").strip()
+    if safe_url:
+        escaped_url = html.escape(safe_url, quote=True)
+        parts.append(
+            '<p><strong>Trello card:</strong> '
+            f'<a href="{escaped_url}" target="_blank" rel="noopener noreferrer">'
+            f'{escaped_url}</a></p>'
+        )
+
+    safe_desc = str(card_desc or "").strip()
+    if safe_desc:
+        escaped_desc = html.escape(safe_desc).replace("\n", "<br>")
+        parts.append(
+            "<p><strong>Trello card content:</strong></p>"
+            f"<p>{escaped_desc}</p>"
+        )
+
+    return "\n".join(parts) if parts else None
+
 # ---------------------------------------------------------------------------
 # Internal handlers
 # ---------------------------------------------------------------------------
@@ -273,13 +300,20 @@ async def _handle_create_card(
     company = await trello_service.get_company_for_board(board_id)
     company_id: int | None = int(company["id"]) if company else None
 
-    card_name: str = str(card_data.get("name") or "").strip() or "(no title)"
-    card_desc: str | None = str(card_data.get("desc") or "").strip() or None
+    full_card = await trello_service.get_card(card_id, company=company) if company else None
+    card_payload = full_card or card_data
+
+    card_name: str = str(card_payload.get("name") or "").strip() or "(no title)"
+    card_desc: str | None = str(card_payload.get("desc") or "").strip() or None
+    card_url: str | None = str(
+        card_payload.get("url") or card_payload.get("shortUrl") or ""
+    ).strip() or None
+    ticket_description = _build_trello_ticket_description(card_desc, card_url)
 
     try:
         ticket = await tickets_service.create_ticket(
             subject=card_name,
-            description=card_desc,
+            description=ticket_description,
             requester_id=None,
             company_id=company_id,
             assigned_user_id=None,
