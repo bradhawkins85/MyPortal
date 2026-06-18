@@ -388,31 +388,33 @@ async def _send_bot_message(
     return True
 
 
-def _build_article_recommendation_message(article: Mapping[str, Any], link: str, summary: str) -> tuple[str, str]:
+def _build_article_recommendation_messages(article: Mapping[str, Any], link: str, summary: str) -> list[tuple[str, str]]:
     title = str(article.get("title") or "Knowledge base article").strip() or "Knowledge base article"
     clean_link = str(link).strip()
-    clean_summary = " ".join(str(summary or "").split())
-    body_parts = [
-        f"While you wait, this article may help: {title}",
-        clean_link,
-    ]
-    if clean_summary:
-        body_parts.append(clean_summary)
-    body_parts.append(_AI_DISCLAIMER)
-    body = "\n\n".join(body_parts)
+    clean_summary = " ".join(str(summary or "").split()) or "No summary is available for this article."
 
     safe_title = html.escape(title)
     safe_link = html.escape(clean_link, quote=True)
-    safe_summary = html.escape(clean_summary)
-    safe_disclaimer = html.escape(_AI_DISCLAIMER)
-    formatted_parts = [
-        f"<p>While you wait, this article may help: {safe_title}</p>",
-        f'<p><a href="{safe_link}">{safe_link}</a></p>',
+    messages = [
+        (
+            f"While you wait, this article may help: {title}",
+            f"<p>While you wait, this article may help: {safe_title}</p>",
+        ),
+        (
+            clean_link,
+            f'<p><a href="{safe_link}">{safe_link}</a></p>',
+        ),
     ]
-    if safe_summary:
-        formatted_parts.append(f"<p>{safe_summary}</p>")
-    formatted_parts.append(f"<p>{safe_disclaimer}</p>")
-    formatted_body = "".join(formatted_parts)
+    messages.append((clean_summary, f"<p>{html.escape(clean_summary)}</p>"))
+    messages.append((_AI_DISCLAIMER, f"<p>{html.escape(_AI_DISCLAIMER)}</p>"))
+    return messages
+
+
+# Backwards-compatible helper for callers/tests that need a single Matrix payload.
+def _build_article_recommendation_message(article: Mapping[str, Any], link: str, summary: str) -> tuple[str, str]:
+    messages = _build_article_recommendation_messages(article, link, summary)
+    body = "\n\n".join(part[0] for part in messages)
+    formatted_body = "".join(part[1] for part in messages)
     return body, formatted_body
 
 
@@ -543,16 +545,23 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
                     base = str(settings.public_base_url or settings.portal_url or "").rstrip("/")
                     path = f"/knowledge-base/articles/{article['slug']}"
                     link = f"{base}{path}" if base else path
-                    message, formatted_message = _build_article_recommendation_message(article, link, summary)
+                    messages = _build_article_recommendation_messages(article, link, summary)
                     expected_count = int(room.get("ai_bot_response_count") or 0)
                     reserved_count = expected_count + 1
                     reserved = await chat_repo.reserve_ai_bot_response(room_id, expected_count=expected_count, when=_utcnow())
-                    if reserved and await _send_bot_message(
-                        room,
-                        message,
-                        formatted_body=formatted_message,
-                        response_count=reserved_count,
-                    ):
+                    sent_all = False
+                    if reserved:
+                        sent_all = True
+                        for message, formatted_message in messages:
+                            if not await _send_bot_message(
+                                room,
+                                message,
+                                formatted_body=formatted_message,
+                                response_count=reserved_count,
+                            ):
+                                sent_all = False
+                                break
+                    if reserved and sent_all:
                         selected["sent"] = True
                         selected["sent_at"] = _utcnow().isoformat()
                         sent = True
