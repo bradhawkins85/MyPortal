@@ -210,25 +210,31 @@ def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
     assert successes[0]["response_status"] == 200
 
 
-def test_build_article_recommendation_message_formats_plain_text_and_html():
+def test_build_article_recommendation_messages_formats_four_plain_text_and_html_messages():
     article = {"title": "TouchPad <setup>"}
     link = "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2"
     summary = " Enable the touchpad.\nUse Fn + F10. "
 
-    body, formatted_body = assistant._build_article_recommendation_message(article, link, summary)
+    messages = assistant._build_article_recommendation_messages(article, link, summary)
 
-    assert body == (
-        "While you wait, this article may help: TouchPad <setup>\n\n"
-        "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2\n\n"
-        "Enable the touchpad. Use Fn + F10.\n\n"
-        f"{assistant._AI_DISCLAIMER}"
-    )
-    assert '<p>While you wait, this article may help: TouchPad &lt;setup&gt;</p>' in formatted_body
-    assert (
-        '<a href="https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2">'
-        'https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2</a>'
-    ) in formatted_body
-    assert '<p>Enable the touchpad. Use Fn + F10.</p>' in formatted_body
+    assert messages == [
+        (
+            "While you wait, this article may help: TouchPad <setup>",
+            "<p>While you wait, this article may help: TouchPad &lt;setup&gt;</p>",
+        ),
+        (
+            "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2",
+            (
+                '<p><a href="https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2">'
+                'https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2</a></p>'
+            ),
+        ),
+        ("Enable the touchpad. Use Fn + F10.", "<p>Enable the touchpad. Use Fn + F10.</p>"),
+        (
+            assistant._AI_DISCLAIMER,
+            f"<p>{assistant._AI_DISCLAIMER}</p>",
+        ),
+    ]
 
 
 def test_send_bot_message_forwards_formatted_body(monkeypatch):
