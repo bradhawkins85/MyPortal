@@ -516,6 +516,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "base_url": "",
             "api_key": "",
             "rate_limit_per_minute": 180,
+            "ticket_status_mappings": [],
         },
     },
     {
@@ -1075,11 +1076,31 @@ def _coerce_settings(
             if not api_key and existing_settings and existing_settings.get("api_key"):
                 api_key = str(existing_settings.get("api_key") or "").strip()
         rate_limit = _coerce_int(merged.get("rate_limit_per_minute"), minimum=1, maximum=600) or 180
+        raw_mappings = merged.get("ticket_status_mappings") or []
+        status_mappings: list[dict[str, str]] = []
+        seen_syncro_statuses: set[str] = set()
+        if isinstance(raw_mappings, list):
+            for item in raw_mappings:
+                if not isinstance(item, Mapping):
+                    continue
+                syncro_status = str(item.get("syncro_status") or item.get("syncroStatus") or "").strip()
+                myportal_status = str(item.get("myportal_status") or item.get("myportalStatus") or "").strip().lower()
+                if not syncro_status or not myportal_status:
+                    continue
+                lookup_key = syncro_status.casefold()
+                if lookup_key in seen_syncro_statuses:
+                    continue
+                seen_syncro_statuses.add(lookup_key)
+                status_mappings.append({
+                    "syncro_status": syncro_status[:128],
+                    "myportal_status": myportal_status[:128],
+                })
         merged.update(
             {
                 "base_url": base_url,
                 "api_key": api_key,
                 "rate_limit_per_minute": rate_limit,
+                "ticket_status_mappings": status_mappings,
             }
         )
         _env = os.getenv("SYNCRO_BASE_URL", "").strip().rstrip("/")

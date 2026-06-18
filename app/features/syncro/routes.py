@@ -15,7 +15,7 @@ from app.core.logging import log_error, log_info
 from app.features.staff.helpers import _load_staff_context
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.services import background as background_tasks
-from app.services import company_importer, modules as modules_service, staff_importer, ticket_importer
+from app.services import company_importer, modules as modules_service, staff_importer, ticket_importer, tickets as tickets_service
 
 
 router = APIRouter(tags=["Syncro"])
@@ -62,6 +62,7 @@ def _describe_syncro_module(module: dict[str, Any] | None) -> dict[str, Any]:
             minimum=1,
             maximum=600,
         ),
+        "ticket_status_mappings": settings_payload.get("ticket_status_mappings") or [],
     }
 
 
@@ -75,6 +76,7 @@ async def _render_syncro_ticket_import(
 ) -> HTMLResponse:
     module = await _load_syncro_module()
     module_description = _describe_syncro_module(module)
+    status_definitions = await tickets_service.list_status_definitions()
     if not module_description.get("enabled"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -85,6 +87,14 @@ async def _render_syncro_ticket_import(
         "success_message": success_message,
         "error_message": error_message,
         "syncro_module": module_description,
+        "ticket_status_definitions": [
+            {
+                "tech_status": definition.tech_status,
+                "tech_label": definition.tech_label,
+                "is_default": definition.is_default,
+            }
+            for definition in status_definitions
+        ],
     }
     response = await _main()._render_template(
         "admin/syncro_ticket_import.html",
@@ -107,6 +117,50 @@ async def admin_syncro_ticket_import_page(
     return await _render_syncro_ticket_import(
         request,
         current_user,
+    )
+
+
+@router.post("/admin/tickets/syncro-import/status-mappings", response_class=HTMLResponse)
+async def update_syncro_ticket_status_mappings(request: Request):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    module = await _load_syncro_module()
+    if not module or not module.get("enabled"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Syncro module is disabled",
+        )
+    form = await request.form()
+    syncro_statuses = form.getlist("syncroStatus")
+    myportal_statuses = form.getlist("myportalStatus")
+    allowed_statuses = {definition.tech_status for definition in await tickets_service.list_status_definitions()}
+    mappings: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for syncro_status_raw, myportal_status_raw in zip(syncro_statuses, myportal_statuses, strict=False):
+        syncro_status = str(syncro_status_raw or "").strip()
+        myportal_status = str(myportal_status_raw or "").strip().lower()
+        if not syncro_status and not myportal_status:
+            continue
+        if not syncro_status or myportal_status not in allowed_statuses:
+            return await _render_syncro_ticket_import(
+                request,
+                current_user,
+                error_message="Each mapping needs a Syncro status and a valid MyPortal status.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        key = syncro_status.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        mappings.append({"syncro_status": syncro_status[:128], "myportal_status": myportal_status})
+    existing_settings = dict((module.get("settings") or {}))
+    existing_settings["ticket_status_mappings"] = mappings
+    await modules_service.update_module("syncro", settings=existing_settings)
+    return await _render_syncro_ticket_import(
+        request,
+        current_user,
+        success_message="Syncro ticket status mappings saved.",
     )
 
 

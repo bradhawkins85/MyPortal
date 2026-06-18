@@ -73,6 +73,7 @@ async def _load_module_settings() -> dict[str, Any] | None:
                 "base_url": str(settings_payload.get("base_url") or "").strip(),
                 "api_key": str(settings_payload.get("api_key") or "").strip(),
                 "rate_limit_per_minute": _coerce_rate_limit(settings_payload.get("rate_limit_per_minute")),
+                "ticket_status_mappings": settings_payload.get("ticket_status_mappings") or [],
             }
         _MODULE_SETTINGS_EXPIRY = now + 30.0
     return _MODULE_SETTINGS_CACHE
@@ -100,6 +101,7 @@ async def _get_effective_settings() -> dict[str, Any]:
         "base_url": base_url,
         "api_key": api_key or None,
         "rate_limit_per_minute": _coerce_rate_limit(rate_limit),
+        "ticket_status_mappings": (module_settings or {}).get("ticket_status_mappings") or [],
     }
 
 

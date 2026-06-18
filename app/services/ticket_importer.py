@@ -22,12 +22,39 @@ _DEFAULT_PRIORITY = "normal"
 _DEFAULT_STATUS = "open"
 
 
-async def _get_status_context() -> tuple[set[str], str]:
+async def _get_status_context() -> tuple[set[str], str, dict[str, str]]:
     definitions = await tickets_service.list_status_definitions()
     if definitions:
         slugs = [definition.tech_status for definition in definitions]
-        return set(slugs), slugs[0]
-    return set(_ALLOWED_STATUSES), _DEFAULT_STATUS
+        default = next((definition.tech_status for definition in definitions if definition.is_default), slugs[0])
+    else:
+        slugs = list(_ALLOWED_STATUSES)
+        default = _DEFAULT_STATUS
+    mappings = await _get_syncro_status_mappings(set(slugs))
+    return set(slugs), default, mappings
+
+
+async def _get_syncro_status_mappings(allowed_statuses: Collection[str]) -> dict[str, str]:
+    try:
+        module = await syncro._load_module_settings()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        log_error("Failed to load Syncro ticket status mappings", error=str(exc))
+        return {}
+    configured = (module or {}).get("ticket_status_mappings") or []
+    mappings: dict[str, str] = {}
+    if not isinstance(configured, list):
+        return mappings
+    for item in configured:
+        if not isinstance(item, dict):
+            continue
+        syncro_status = _clean_text(item.get("syncro_status") or item.get("syncroStatus"))
+        myportal_status = _clean_text(item.get("myportal_status") or item.get("myportalStatus"))
+        if not syncro_status or not myportal_status:
+            continue
+        normalized_myportal = myportal_status.lower().replace(" ", "_")
+        if normalized_myportal in allowed_statuses:
+            mappings[syncro_status.casefold()] = normalized_myportal
+    return mappings
 
 @dataclass(slots=True)
 class TicketImportSummary:
@@ -75,7 +102,12 @@ def _clean_text(value: Any) -> str | None:
     return normalised or None
 
 
-def _normalise_status(value: Any, allowed_statuses: Collection[str], default_status: str) -> str:
+def _normalise_status(
+    value: Any,
+    allowed_statuses: Collection[str],
+    default_status: str,
+    status_mappings: dict[str, str] | None = None,
+) -> str:
     if isinstance(value, dict):
         for key in ("name", "status", "label"):
             text_value = value.get(key)
@@ -85,6 +117,9 @@ def _normalise_status(value: Any, allowed_statuses: Collection[str], default_sta
     text = _clean_text(value)
     if not text:
         return default_status
+    mapped = (status_mappings or {}).get(text.casefold())
+    if mapped in allowed_statuses:
+        return mapped
     normalized = text.lower().replace(" ", "_")
     if normalized in allowed_statuses:
         return normalized
@@ -951,6 +986,7 @@ async def _upsert_ticket(
     ticket: dict[str, Any],
     allowed_statuses: Collection[str],
     default_status: str,
+    status_mappings: dict[str, str] | None = None,
 ) -> str:
     status_choices = set(allowed_statuses)
     syncro_id = ticket.get("id")
@@ -965,6 +1001,7 @@ async def _upsert_ticket(
         ticket.get("status_name") or ticket.get("status"),
         status_choices,
         default_status,
+        status_mappings,
     )
     priority = _normalise_priority(ticket.get("priority"))
     category = _clean_text(ticket.get("type") or ticket.get("category"))
@@ -1105,8 +1142,8 @@ async def import_ticket_by_id(
         log_info("Syncro ticket import completed", mode="single", fetched=summary.fetched, created=0, updated=0, skipped=1)
         return summary
     summary.fetched = 1
-    allowed_statuses, default_status = await _get_status_context()
-    outcome = await _upsert_ticket(ticket, allowed_statuses, default_status)
+    allowed_statuses, default_status, status_mappings = await _get_status_context()
+    outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
     summary.record(outcome)
     log_info(
         "Syncro ticket import completed",
@@ -1128,14 +1165,14 @@ async def import_ticket_range(
     limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="range")
     log_info("Starting Syncro ticket import", mode="range", start_id=start_id, end_id=end_id)
-    allowed_statuses, default_status = await _get_status_context()
+    allowed_statuses, default_status, status_mappings = await _get_status_context()
     for identifier in range(start_id, end_id + 1):
         ticket = await syncro.get_ticket(identifier, rate_limiter=limiter)
         if not ticket:
             summary.skipped += 1
             continue
         summary.fetched += 1
-        outcome = await _upsert_ticket(ticket, allowed_statuses, default_status)
+        outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
         summary.record(outcome)
     log_info(
         "Syncro ticket import completed",
@@ -1169,7 +1206,7 @@ async def import_all_tickets(
     limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="all")
     log_info("Starting Syncro ticket import", mode="all")
-    allowed_statuses, default_status = await _get_status_context()
+    allowed_statuses, default_status, status_mappings = await _get_status_context()
     page = 1
     total_pages: int | None = None
     while True:
@@ -1179,7 +1216,7 @@ async def import_all_tickets(
         summary.fetched += len(tickets)
         for ticket in tickets:
             try:
-                outcome = await _upsert_ticket(ticket, allowed_statuses, default_status)
+                outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Failed to import Syncro ticket", syncro_id=ticket.get("id"), error=str(exc))
                 summary.skipped += 1
