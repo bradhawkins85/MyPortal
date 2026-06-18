@@ -1505,7 +1505,7 @@ class SchedulerService:
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
         try:
-            os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o750)
+            os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o700)
         except OSError:
             # Best-effort permission hardening; failures are non-fatal for scheduling.
             pass
