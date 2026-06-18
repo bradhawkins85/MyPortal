@@ -2697,7 +2697,7 @@ async def _invoke_tacticalrmm(
         event_future.set_result(event_id)
     attempt_number = 1
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=verify_ssl) as client:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=True) as client:
             response = await client.request(method, url, json=request_body, headers=headers)
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
