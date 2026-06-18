@@ -347,6 +347,61 @@ async def test_create_ticket_passes_requester_email_fallback(monkeypatch):
     assert captured["requester_email_fallback"] == "sender@example.com"
 
 
+@pytest.mark.anyio
+async def test_create_ticket_can_skip_creation_notification(monkeypatch):
+    """create_ticket can suppress direct creation notifications while keeping automations."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import automations as automations_service
+
+    async def fake_create_ticket_repo(**kwargs):
+        return {"id": 61, **{k: v for k, v in kwargs.items() if k != "id"}}
+
+    automation_events: list[str] = []
+
+    async def fake_handle_event(event_name, context):
+        automation_events.append(event_name)
+        return []
+
+    async def fake_get_company(company_id):
+        return None
+
+    async def fake_get_user(user_id):
+        return {"id": user_id, "email": "requester@example.com"}
+
+    async def fake_resolve_status(value):
+        return value or "open"
+
+    notification_called = False
+
+    async def fake_send_creation_email(enriched_ticket, *, requester_email_fallback=None):
+        nonlocal notification_called
+        notification_called = True
+
+    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket_repo)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(tickets_service, "_send_ticket_creation_email", fake_send_creation_email)
+
+    await tickets_service.create_ticket(
+        subject="Imported ticket",
+        description="Imported from Syncro",
+        requester_id=9,
+        company_id=None,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category=None,
+        module_slug=None,
+        external_reference="12345",
+        send_creation_notification=False,
+    )
+
+    assert not notification_called
+    assert automation_events == ["tickets.created"]
+
+
 # ---------------------------------------------------------------------------
 # _send_ticket_creation_email – template rendering for external requester
 # ---------------------------------------------------------------------------

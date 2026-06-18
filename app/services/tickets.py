@@ -1246,6 +1246,7 @@ async def create_ticket(
     initial_reply_author_id: int | None = None,
     id: int | None = None,
     requester_email: str | None = None,
+    send_creation_notification: bool = True,
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
@@ -1306,17 +1307,18 @@ async def create_ticket(
 
     enriched_ticket = await _enrich_ticket_context(ticket)
 
-    try:
-        await _send_ticket_creation_email(
-            enriched_ticket,
-            requester_email_fallback=requester_email,
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        log_error(
-            "Failed to send ticket creation email",
-            ticket_id=ticket.get("id"),
-            error=str(exc),
-        )
+    if send_creation_notification:
+        try:
+            await _send_ticket_creation_email(
+                enriched_ticket,
+                requester_email_fallback=requester_email,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to send ticket creation email",
+                ticket_id=ticket.get("id"),
+                error=str(exc),
+            )
 
     if trigger_automations:
         try:
