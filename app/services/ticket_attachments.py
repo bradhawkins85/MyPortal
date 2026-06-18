@@ -169,6 +169,59 @@ async def save_uploaded_file(
         raise
 
 
+async def save_file_bytes(
+    ticket_id: int,
+    *,
+    contents: bytes,
+    original_filename: str,
+    mime_type: str | None,
+    access_level: str,
+    uploaded_by_user_id: int | None,
+) -> dict[str, Any]:
+    """Save raw file bytes and create a ticket attachment record."""
+    upload_name = original_filename or "upload"
+    pseudo_file = type(
+        "AttachmentUpload",
+        (),
+        {"filename": upload_name, "content_type": mime_type, "size": len(contents)},
+    )()
+    is_valid, error = validate_file_upload(pseudo_file)
+    if not is_valid:
+        raise ValueError(error or "Invalid file upload")
+    file_size = len(contents)
+    if file_size > MAX_FILE_SIZE:
+        raise ValueError(f"File size {file_size} exceeds maximum")
+
+    secure_filename = _generate_secure_filename(upload_name)
+    upload_dir = _get_upload_directory()
+    file_path = upload_dir / secure_filename
+    try:
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        log_info(f"Saved file {secure_filename} ({file_size} bytes) for ticket {ticket_id}")
+    except Exception as e:
+        log_error(f"Failed to save file: {e}")
+        if file_path.exists():
+            file_path.unlink()
+        raise IOError(f"Failed to save file: {e}") from e
+
+    try:
+        return await attachments_repo.create_attachment(
+            ticket_id=ticket_id,
+            filename=secure_filename,
+            original_filename=upload_name,
+            file_size=file_size,
+            mime_type=mime_type,
+            access_level=access_level,
+            uploaded_by_user_id=uploaded_by_user_id,
+        )
+    except Exception as e:
+        log_error(f"Failed to create attachment record: {e}")
+        if file_path.exists():
+            file_path.unlink()
+        raise
+
+
 async def delete_attachment_file(attachment: dict[str, Any]) -> None:
     """Delete an attachment file and database record."""
     filename = attachment.get("filename")
