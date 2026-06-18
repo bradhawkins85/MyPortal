@@ -17,6 +17,7 @@ from app.core.logging import log_error
 from app.repositories import chat as chat_repo
 from app.repositories import knowledge_base as kb_repo
 from app.services import audit as audit_service
+from app.services import knowledge_base as knowledge_base_service
 from app.services import matrix as matrix_service
 from app.services import webhook_monitor
 from app.services.realtime import refresh_notifier
@@ -257,6 +258,46 @@ async def _chat_transcript(room_id: int) -> str:
         sender = msg.get("sender_display_name") or msg.get("sender_matrix_id") or "Participant"
         lines.append(f"{sender}: {' '.join(body.split())}")
     return "\n".join(lines)[-12000:]
+
+
+def _room_kb_access_context(room: Mapping[str, Any]) -> knowledge_base_service.ArticleAccessContext:
+    """Build the KB access context for a waiting-assistant chat room.
+
+    The waiting assistant acts on behalf of the customer waiting in the room,
+    not as a technician or background super-admin process.  Limit article
+    recommendations to anonymous articles, articles explicitly available to
+    the room creator, and company-scoped articles available to the room's
+    company.  Company-admin-only articles are intentionally excluded because
+    a chat room only carries company membership, not verified admin status.
+    """
+
+    user_id: int | None = None
+    try:
+        candidate_user_id = room.get("created_by_user_id")
+        if candidate_user_id is not None:
+            user_id = int(candidate_user_id)
+    except (TypeError, ValueError):
+        user_id = None
+
+    memberships: dict[int, Mapping[str, Any]] = {}
+    try:
+        company_id = int(room.get("company_id"))
+    except (TypeError, ValueError):
+        company_id = 0
+    if company_id > 0:
+        memberships[company_id] = {"company_id": company_id, "is_admin": False}
+
+    user = {"id": user_id, "is_super_admin": False} if user_id is not None else None
+    return knowledge_base_service.ArticleAccessContext(
+        user=user,
+        user_id=user_id,
+        is_super_admin=False,
+        memberships=memberships,
+    )
+
+
+def _article_visible_to_room(article: Mapping[str, Any], room: Mapping[str, Any]) -> bool:
+    return knowledge_base_service._article_visible(article, _room_kb_access_context(room))
 
 
 async def _extract_keywords(transcript: str) -> list[str]:
@@ -518,6 +559,8 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
         keyword_set = set(keywords)
         candidates: list[dict[str, Any]] = []
         for article in await kb_repo.list_articles(include_unpublished=False):
+            if not _article_visible_to_room(article, room):
+                continue
             tags = _normalise_tags(article.get("ai_tags") or [])
             if not tags:
                 continue
@@ -540,7 +583,7 @@ async def _process_queue_item(item: Mapping[str, Any]) -> None:
             selected = next((c for c in eligible if str(c.get("id") or c.get("slug")) not in sent_ids), None)
             if selected:
                 article = await kb_repo.get_article_by_id(int(selected["id"]))
-                if article:
+                if article and _article_visible_to_room(article, room):
                     summary = await _summarise_article(article)
                     base = str(settings.public_base_url or settings.portal_url or "").rstrip("/")
                     path = f"/knowledge-base/articles/{article['slug']}"
