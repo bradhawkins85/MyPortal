@@ -68,7 +68,7 @@
       <select
         class="form-input shop-category-select"
         aria-label="Select product category"
-        onchange="window.location.href=this.options[this.selectedIndex].getAttribute('data-url');"
+        onchange="(function(selectEl){var raw=selectEl.options[selectEl.selectedIndex].getAttribute('data-url');if(!raw){return;}try{var parsed=new URL(raw, window.location.origin);if((parsed.protocol==='http:'||parsed.protocol==='https:')&&parsed.origin===window.location.origin){window.location.assign(parsed.pathname+parsed.search+parsed.hash);}}catch(e){}})(this);"
       >
         <option data-url="{{ request.url_for('shop_page') }}{{ shop_query() }}" {% if not current_category or current_category == 'packages' %}selected{% endif %}>All products</option>
         {% for category in categories %}
