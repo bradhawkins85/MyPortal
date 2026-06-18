@@ -985,9 +985,19 @@ build_tray_app() {
         echo "Install WiX v7 manually with: dotnet tool install --global wix --version \"7.*\"" >&2
       fi
       ;;
+    Darwin)
+      echo "Skipping MSI build: WiX only supports Windows hosts (host: ${host_os})."
+      echo "Building macOS PKG and DMG installers…"
+      if (cd "$tray_dir" && PATH="${go_dir}:${PATH}" make build-dmg); then
+        echo "macOS installers built: ${tray_dir}/dist/darwin/myportal-tray.pkg and .dmg"
+      else
+        echo "Warning: macOS installer build failed." >&2
+      fi
+      ;;
     *)
       echo "Skipping MSI build: WiX only supports Windows hosts (host: ${host_os})."
       echo "Build the MSI on a Windows machine and copy it to ${static_tray_dir}/myportal-tray.msi."
+      echo "Build the macOS PKG/DMG on a macOS machine and copy them to ${static_tray_dir}/."
       ;;
   esac
 
@@ -1002,6 +1012,11 @@ build_tray_app() {
   if [[ -f "${tray_dir}/dist/darwin/myportal-tray.pkg" ]]; then
     cp "${tray_dir}/dist/darwin/myportal-tray.pkg" "${static_tray_dir}/myportal-tray.pkg"
     echo "Copied myportal-tray.pkg → app/static/tray/"
+    copied=1
+  fi
+  if [[ -f "${tray_dir}/dist/darwin/myportal-tray.dmg" ]]; then
+    cp "${tray_dir}/dist/darwin/myportal-tray.dmg" "${static_tray_dir}/myportal-tray.dmg"
+    echo "Copied myportal-tray.dmg → app/static/tray/"
     copied=1
   fi
   if [[ "$copied" -eq 0 ]]; then
