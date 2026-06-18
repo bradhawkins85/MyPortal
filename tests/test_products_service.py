@@ -140,6 +140,60 @@ async def test_update_stock_feed_persists_items(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_update_stock_feed_flags_duplicate_skus(monkeypatch):
+    xml_payload = """
+        <rss><channel>
+            <item><StockCode>DUP123</StockCode><ProductName>First</ProductName><DBP>10.00</DBP></item>
+            <item><StockCode>DUP123</StockCode><ProductName>Second</ProductName><DBP>11.00</DBP></item>
+            <item><StockCode>UNIQUE1</StockCode><ProductName>Unique</ProductName><DBP>12.00</DBP></item>
+        </channel></rss>
+    """
+
+    class DummyResponse:
+        text = xml_payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class DummyClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # type: ignore[override]
+            return False
+
+        async def get(self, url: str, follow_redirects: bool = True) -> DummyResponse:
+            return DummyResponse()
+
+    monkeypatch.setattr(products_service.httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr(
+        products_service,
+        "get_settings",
+        lambda: SimpleNamespace(stock_feed_url="https://example.com/feed.xml"),
+    )
+    mock_replace = AsyncMock()
+    mock_record_price = AsyncMock()
+    monkeypatch.setattr(products_service.stock_feed_repo, "replace_feed", mock_replace)
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "record_price_if_changed",
+        mock_record_price,
+    )
+
+    count = await products_service.update_stock_feed()
+
+    assert count == 2
+    items = mock_replace.await_args.args[0]
+    assert [item["sku"] for item in items] == ["DUP123", "UNIQUE1"]
+    assert items[0]["duplicate_sku_import"] is True
+    assert items[0]["duplicate_sku_count"] == 2
+    assert "duplicate_sku_import" not in items[1]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_update_stock_feed_requires_config(monkeypatch):
     monkeypatch.setattr(
         products_service,
