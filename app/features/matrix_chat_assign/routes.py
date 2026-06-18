@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from app.core.logging import log_error
 from app.security.flash import flash_redirect
 from app.repositories import chat_auto_assign as assign_repo
+from app.repositories import matrix_ai_tag_synonyms as synonyms_repo
 
 __all__ = ["router"]
 
@@ -29,6 +30,31 @@ def _form_bool(form: Any, key: str) -> bool:
         return value.strip().lower() not in {"", "0", "false", "off"}
     return bool(value)
 
+
+
+def _parse_synonym_terms(raw: Any) -> list[str]:
+    return [part.strip() for part in str(raw or "").split(",") if part.strip()]
+
+
+async def _render_configuration(
+    request: Request,
+    user: dict[str, Any],
+    *,
+    error_message: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
+    main_module = _main()
+    groups = await synonyms_repo.list_groups()
+    extra = {
+        "title": "Chat Configuration",
+        "synonym_groups": groups,
+        "error_message": error_message,
+    }
+    response = await main_module._render_template(
+        "admin/matrix_chat_configuration.html", request, user, extra=extra
+    )
+    response.status_code = status_code
+    return response
 
 def _parse_priority(form: Any) -> int:
     """Parse priority from form data, defaulting to 0."""
@@ -275,3 +301,80 @@ async def chat_delete_auto_assign_rule(rule_id: int, request: Request):
     return flash_redirect(
         "/chat/auto-assign", "Rule deleted.", "success"
     )
+
+
+@router.get("/chat/configuration", response_class=HTMLResponse)
+async def chat_configuration_page(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_configuration(request, current_user)
+
+
+@router.post("/chat/configuration/synonyms", response_class=HTMLResponse)
+async def chat_create_synonym_group(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        await synonyms_repo.create_group(_parse_synonym_terms(form.get("terms")))
+    except synonyms_repo.InvalidSynonymGroup as exc:
+        return await _render_configuration(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    except Exception as exc:
+        log_error("Failed to create chat synonym group", error=str(exc))
+        return await _render_configuration(
+            request,
+            current_user,
+            error_message="Failed to create synonym group.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return flash_redirect("/chat/configuration", "Synonym group created.", "success")
+
+
+@router.post("/chat/configuration/synonyms/{group_id}", response_class=HTMLResponse)
+async def chat_update_synonym_group(group_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        updated = await synonyms_repo.update_group(group_id, _parse_synonym_terms(form.get("terms")))
+    except synonyms_repo.InvalidSynonymGroup as exc:
+        return await _render_configuration(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+    except Exception as exc:
+        log_error("Failed to update chat synonym group", group_id=group_id, error=str(exc))
+        return await _render_configuration(
+            request,
+            current_user,
+            error_message="Failed to update synonym group.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    if not updated:
+        return flash_redirect("/chat/configuration", "Synonym group not found.", "error")
+    return flash_redirect("/chat/configuration", "Synonym group updated.", "success")
+
+
+@router.post("/chat/configuration/synonyms/{group_id}/delete", response_class=HTMLResponse)
+async def chat_delete_synonym_group(group_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    deleted = await synonyms_repo.delete_group(group_id)
+    if not deleted:
+        return flash_redirect("/chat/configuration", "Synonym group not found.", "error")
+    return flash_redirect("/chat/configuration", "Synonym group deleted.", "success")
