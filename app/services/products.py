@@ -367,6 +367,43 @@ def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
     return items
 
 
+def _flag_duplicate_stock_feed_skus(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return feed items with duplicate SKUs collapsed and flagged for review.
+
+    The stock feed table is keyed by SKU, so duplicate XML records cannot all be
+    inserted. Keep the first occurrence to allow the import to complete and mark
+    it so shop admins can manually evaluate the vendor data.
+    """
+    deduped: list[dict[str, Any]] = []
+    by_sku: dict[str, dict[str, Any]] = {}
+    duplicate_counts: dict[str, int] = {}
+
+    for item in items:
+        sku = str(item.get("sku") or "").strip()
+        if not sku:
+            deduped.append(item)
+            continue
+        if sku in by_sku:
+            duplicate_counts[sku] = duplicate_counts.get(sku, 1) + 1
+            continue
+        clean_item = dict(item)
+        clean_item["sku"] = sku
+        by_sku[sku] = clean_item
+        deduped.append(clean_item)
+
+    for sku, count in duplicate_counts.items():
+        by_sku[sku]["duplicate_sku_import"] = True
+        by_sku[sku]["duplicate_sku_count"] = count
+
+    if duplicate_counts:
+        log_error(
+            "Stock feed contained duplicate SKUs; flagged for shop admin review",
+            duplicate_skus=sorted(duplicate_counts),
+        )
+
+    return deduped
+
+
 async def update_stock_feed() -> int:
     """Download the stock feed and persist it for later product updates."""
 
@@ -389,10 +426,11 @@ async def update_stock_feed() -> int:
         log_error("Failed to parse stock feed", error=str(exc))
         raise
 
-    await stock_feed_repo.replace_feed(items)
+    persisted_items = _flag_duplicate_stock_feed_skus(items)
+    await stock_feed_repo.replace_feed(persisted_items)
 
-    # Record DBP price history for every item in the feed.
-    for item in items:
+    # Record DBP price history for every unique item in the feed.
+    for item in persisted_items:
         sku = str(item.get("sku") or "").strip()
         if not sku:
             continue
@@ -402,8 +440,8 @@ async def update_stock_feed() -> int:
         except Exception as exc:  # pragma: no cover - best-effort
             log_error("Failed to record price history", sku=sku, error=str(exc))
 
-    log_info("Stock feed updated", item_count=len(items))
-    return len(items)
+    log_info("Stock feed updated", item_count=len(persisted_items), source_item_count=len(items))
+    return len(persisted_items)
 
 
 async def _get_or_create_category_hierarchy(category_path: str) -> int | None:

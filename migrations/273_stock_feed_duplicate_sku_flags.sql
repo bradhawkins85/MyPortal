@@ -1,0 +1,2 @@
+ALTER TABLE stock_feed ADD COLUMN IF NOT EXISTS duplicate_sku_import TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE stock_feed ADD COLUMN IF NOT EXISTS duplicate_sku_count INT NOT NULL DEFAULT 0;
