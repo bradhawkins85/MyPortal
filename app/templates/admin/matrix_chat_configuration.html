@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Chat Configuration{% endblock %}
+{% block header_title %}AI Tag Synonyms{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "Chat rooms", "type": "link", "href": "/chat"},
-    {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}
+    {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"},
+    {"label": "API docs", "type": "link", "href": "/docs#/Chat/list_ai_tag_synonym_groups_api_chat_ai_tag_synonyms_get"}
   ]) }}
 {% endblock %}
 
@@ -22,13 +23,13 @@
         <div>
           <h2 class="card__title">AI Waiting Assistant tag synonyms</h2>
           <p class="card__subtitle">
-            Super admins can add similar words used when matching extracted chat keywords to knowledge-base article tags.
+            Configure the synonym groups used by <code>/api/chat/ai-tag-synonyms</code> when the AI Waiting Assistant matches extracted chat keywords to knowledge-base article tags.
             Enter comma-separated terms; each group needs at least two unique terms.
           </p>
         </div>
       </header>
 
-      <form action="/chat/configuration/synonyms" method="post" class="form management__form" autocomplete="off">
+      <form action="/admin/chat/ai-tag-synonyms" method="post" class="form management__form" autocomplete="off">
         {% if csrf_token %}
           <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
         {% endif %}
@@ -68,7 +69,7 @@
               <tr>
                 <td data-label="ID" data-column-key="id">{{ group.id }}</td>
                 <td data-label="Terms" data-column-key="terms">
-                  <form action="/chat/configuration/synonyms/{{ group.id }}" method="post" class="inline-form chat-synonym-form">
+                  <form action="/admin/chat/ai-tag-synonyms/{{ group.id }}" method="post" class="inline-form chat-synonym-form">
                     {% if csrf_token %}
                       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                     {% endif %}
@@ -85,7 +86,7 @@
                 </td>
                 <td class="table__actions" data-column-key="actions">
                   <button type="button" class="button button--sm" onclick="this.closest('tr').querySelector('.chat-synonym-form').requestSubmit();">Save</button>
-                  <form action="/chat/configuration/synonyms/{{ group.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Delete this synonym group?');">
+                  <form action="/admin/chat/ai-tag-synonyms/{{ group.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Delete this synonym group?');">
                     {% if csrf_token %}
                       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
                     {% endif %}

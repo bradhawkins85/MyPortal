@@ -304,6 +304,7 @@ async def chat_delete_auto_assign_rule(rule_id: int, request: Request):
 
 
 @router.get("/chat/configuration", response_class=HTMLResponse)
+@router.get("/admin/chat/ai-tag-synonyms", response_class=HTMLResponse)
 async def chat_configuration_page(request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -313,6 +314,7 @@ async def chat_configuration_page(request: Request):
 
 
 @router.post("/chat/configuration/synonyms", response_class=HTMLResponse)
+@router.post("/admin/chat/ai-tag-synonyms", response_class=HTMLResponse)
 async def chat_create_synonym_group(request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -336,10 +338,11 @@ async def chat_create_synonym_group(request: Request):
             error_message="Failed to create synonym group.",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-    return flash_redirect("/chat/configuration", "Synonym group created.", "success")
+    return flash_redirect("/admin/chat/ai-tag-synonyms", "Synonym group created.", "success")
 
 
 @router.post("/chat/configuration/synonyms/{group_id}", response_class=HTMLResponse)
+@router.post("/admin/chat/ai-tag-synonyms/{group_id}", response_class=HTMLResponse)
 async def chat_update_synonym_group(group_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -364,11 +367,12 @@ async def chat_update_synonym_group(group_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     if not updated:
-        return flash_redirect("/chat/configuration", "Synonym group not found.", "error")
-    return flash_redirect("/chat/configuration", "Synonym group updated.", "success")
+        return flash_redirect("/admin/chat/ai-tag-synonyms", "Synonym group not found.", "error")
+    return flash_redirect("/admin/chat/ai-tag-synonyms", "Synonym group updated.", "success")
 
 
 @router.post("/chat/configuration/synonyms/{group_id}/delete", response_class=HTMLResponse)
+@router.post("/admin/chat/ai-tag-synonyms/{group_id}/delete", response_class=HTMLResponse)
 async def chat_delete_synonym_group(group_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
@@ -376,5 +380,5 @@ async def chat_delete_synonym_group(group_id: int, request: Request):
         return redirect
     deleted = await synonyms_repo.delete_group(group_id)
     if not deleted:
-        return flash_redirect("/chat/configuration", "Synonym group not found.", "error")
-    return flash_redirect("/chat/configuration", "Synonym group deleted.", "success")
+        return flash_redirect("/admin/chat/ai-tag-synonyms", "Synonym group not found.", "error")
+    return flash_redirect("/admin/chat/ai-tag-synonyms", "Synonym group deleted.", "success")
