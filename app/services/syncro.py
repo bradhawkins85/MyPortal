@@ -4,6 +4,7 @@ import asyncio
 from collections import deque
 from time import monotonic
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -452,6 +453,43 @@ async def get_assets(customer_id: str | int) -> list[dict[str, Any]]:
         if total_pages and page >= total_pages:
             break
     return results
+
+
+async def download_file(
+    url_or_path: str,
+    *,
+    timeout: float = 30.0,
+    rate_limiter: AsyncRateLimiter | None = None,
+) -> tuple[bytes, str | None]:
+    """Download a Syncro-hosted file using the configured API credentials."""
+    settings = await _get_effective_settings()
+    limiter = rate_limiter or await _get_or_create_rate_limiter(settings["rate_limit_per_minute"])
+    await limiter.acquire()
+    candidate = str(url_or_path or "").strip()
+    if not candidate:
+        raise SyncroAPIError("Syncro download URL is empty")
+    base_url = settings["base_url"]
+    is_relative = not candidate.startswith(("http://", "https://"))
+    if is_relative:
+        url = f"{base_url}{candidate if candidate.startswith('/') else f'/{candidate}'}"
+    else:
+        parsed = urlparse(candidate)
+        if parsed.scheme not in {"http", "https"}:
+            raise SyncroAPIError("Syncro download URL must use HTTP or HTTPS")
+        url = candidate
+    headers: dict[str, str] = {}
+    if settings.get("api_key") and (is_relative or urlparse(url).netloc == urlparse(base_url).netloc):
+        headers["Authorization"] = f"Bearer {settings['api_key']}"
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        try:
+            response = await client.get(url, headers=headers)
+        except httpx.HTTPError as exc:
+            log_error("Syncro file download failed", url=url, error=str(exc))
+            raise SyncroAPIError(str(exc)) from exc
+    if response.status_code >= 400:
+        log_error("Syncro file download responded with error", url=url, status=response.status_code)
+        raise SyncroAPIError(f"Syncro file download responded with {response.status_code}")
+    return response.content, response.headers.get("content-type")
 
 
 async def list_customers(

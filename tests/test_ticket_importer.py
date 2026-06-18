@@ -1629,3 +1629,79 @@ async def test_import_ticket_no_asset_link_when_ticket_has_no_assets(monkeypatch
     # No assets in the ticket -- list_company_assets should not even be called
     assert len(list_assets_calls) == 0
     assert len(replace_calls) == 0
+
+
+def test_extract_comment_image_candidates_from_html_img():
+    comment = {
+        "body": '<p>[embedded image]</p><img src="https://example.test/files/image.png" alt="screen.png">'
+    }
+
+    assert ticket_importer._extract_comment_image_candidates(comment) == [
+        {
+            "url": "https://example.test/files/image.png",
+            "filename": "screen.png",
+            "mime_type": None,
+        }
+    ]
+
+
+def test_extract_comment_image_candidates_from_attachments_only_images():
+    comment = {
+        "attachments": [
+            {"download_url": "/attachments/1", "filename": "photo", "content_type": "image/png"},
+            {"download_url": "/attachments/2", "filename": "note.txt", "content_type": "text/plain"},
+        ]
+    }
+
+    assert ticket_importer._extract_comment_image_candidates(comment) == [
+        {"url": "/attachments/1", "filename": "photo", "mime_type": "image/png"}
+    ]
+
+
+@pytest.mark.anyio
+async def test_sync_ticket_replies_imports_embedded_images(monkeypatch):
+    async def fake_list_replies(ticket_id, include_internal=True):  # noqa: ARG001
+        return []
+
+    reply_calls = []
+
+    async def fake_create_reply(**kwargs):
+        reply_calls.append(kwargs)
+        return {"id": 1, **kwargs}
+
+    async def fake_download_file(url):
+        assert url == "https://example.test/files/image.png"
+        return b"png-bytes", "image/png"
+
+    attachment_calls = []
+
+    async def fake_save_file_bytes(**kwargs):
+        attachment_calls.append(kwargs)
+        return {"id": 10, **kwargs}
+
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(syncro, "download_file", fake_download_file)
+    monkeypatch.setattr(ticket_importer.attachments_service, "save_file_bytes", fake_save_file_bytes)
+
+    await ticket_importer._sync_ticket_replies(
+        123,
+        [
+            {
+                "id": 77,
+                "body": '<p>[embedded image]</p><img src="https://example.test/files/image.png" alt="screen.png">',
+                "tech": "agent",
+                "hidden": False,
+            }
+        ],
+        requester_id=None,
+        contact_email=None,
+    )
+
+    assert reply_calls[0]["external_reference"] == "77"
+    assert len(attachment_calls) == 1
+    assert attachment_calls[0]["ticket_id"] == 123
+    assert attachment_calls[0]["contents"] == b"png-bytes"
+    assert attachment_calls[0]["original_filename"] == "screen.png"
+    assert attachment_calls[0]["mime_type"] == "image/png"
+    assert attachment_calls[0]["access_level"] == "closed"

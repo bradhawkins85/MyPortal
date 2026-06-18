@@ -4,8 +4,11 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
+import mimetypes
+from pathlib import PurePosixPath
 import re
 import json
+from urllib.parse import unquote, urlparse
 from typing import Any
 
 from app.core.logging import log_error, log_info
@@ -14,7 +17,12 @@ from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.repositories import webhook_events as webhook_events_repo
-from app.services import syncro, tickets as tickets_service, webhook_monitor
+from app.services import (
+    syncro,
+    ticket_attachments as attachments_service,
+    tickets as tickets_service,
+    webhook_monitor,
+)
 
 _ALLOWED_PRIORITIES = {"urgent", "high", "normal", "low"}
 _ALLOWED_STATUSES = {"open", "in_progress", "pending", "resolved", "closed"}
@@ -196,6 +204,134 @@ def _extract_comment_body(comment: dict[str, Any]) -> str | None:
         or comment.get("text")
         or comment.get("content")
     )
+
+
+_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+_IMAGE_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+}
+
+
+def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str, str | None]]:
+    """Return image attachment candidates embedded in a Syncro comment."""
+    candidates: list[dict[str, str | None]] = []
+
+    def add(url: Any, filename: Any = None, content_type: Any = None) -> None:
+        url_text = str(url or "").strip()
+        if not url_text:
+            return
+        mime = _clean_text(content_type)
+        if mime and ";" in mime:
+            mime = mime.split(";", 1)[0].strip().lower()
+        if mime and not mime.startswith("image/"):
+            return
+        filename_text = _clean_text(filename)
+        key = (url_text, filename_text or "")
+        if any((item["url"], item.get("filename") or "") == key for item in candidates):
+            return
+        candidates.append({"url": url_text, "filename": filename_text, "mime_type": mime})
+
+    for key in ("attachments", "files", "uploads", "images"):
+        raw = comment.get(key)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if isinstance(item, str):
+                add(item)
+            elif isinstance(item, dict):
+                add(
+                    item.get("url")
+                    or item.get("download_url")
+                    or item.get("downloadUrl")
+                    or item.get("file_url")
+                    or item.get("fileUrl")
+                    or item.get("attachment_url")
+                    or item.get("attachmentUrl"),
+                    item.get("filename")
+                    or item.get("file_name")
+                    or item.get("fileName")
+                    or item.get("name"),
+                    item.get("content_type")
+                    or item.get("contentType")
+                    or item.get("mime_type")
+                    or item.get("mimeType"),
+                )
+
+    for body_key in ("body", "comment", "text", "content"):
+        body = comment.get(body_key)
+        if not isinstance(body, str) or "<img" not in body.lower():
+            continue
+        for match in re.finditer(
+            r"<img\b[^>]*\bsrc=[\"']([^\"']+)[\"'][^>]*>",
+            body,
+            flags=re.IGNORECASE,
+        ):
+            tag = match.group(0)
+            filename_match = re.search(
+                r"\b(?:alt|title)=[\"']([^\"']+)[\"']",
+                tag,
+                flags=re.IGNORECASE,
+            )
+            add(unescape(match.group(1)), unescape(filename_match.group(1)) if filename_match else None)
+    return candidates
+
+
+def _filename_for_image_candidate(
+    candidate: dict[str, str | None], content_type: str | None, index: int
+) -> str:
+    filename = (candidate.get("filename") or "").strip()
+    if filename and filename.lower() not in {"[embedded image]", "embedded image"}:
+        name = PurePosixPath(unquote(urlparse(filename).path)).name or filename
+    else:
+        parsed_name = PurePosixPath(unquote(urlparse(candidate.get("url") or "").path)).name
+        name = parsed_name or f"syncro-comment-image-{index}"
+    if "." not in name:
+        ext = _IMAGE_EXTENSIONS.get((content_type or candidate.get("mime_type") or "").lower(), ".img")
+        name = f"{name}{ext}"
+    return name[:255]
+
+
+async def _import_comment_images(ticket_id: int, comment: dict[str, Any], author_id: int | None) -> None:
+    candidates = _extract_comment_image_candidates(comment)
+    for index, candidate in enumerate(candidates, start=1):
+        try:
+            contents, downloaded_type = await syncro.download_file(candidate["url"] or "")
+            content_type = (
+                (downloaded_type or candidate.get("mime_type") or "")
+                .split(";", 1)[0]
+                .strip()
+                .lower()
+                or None
+            )
+            if content_type not in _IMAGE_MIME_TYPES:
+                guessed, _ = mimetypes.guess_type(candidate.get("url") or "")
+                content_type = guessed if guessed in _IMAGE_MIME_TYPES else content_type
+            if content_type not in _IMAGE_MIME_TYPES:
+                log_error(
+                    "Skipping Syncro embedded image with unsupported MIME type",
+                    ticket_id=ticket_id,
+                    mime_type=content_type,
+                )
+                continue
+            await attachments_service.save_file_bytes(
+                ticket_id=ticket_id,
+                contents=contents,
+                original_filename=_filename_for_image_candidate(candidate, content_type, index),
+                mime_type=content_type,
+                access_level="closed",
+                uploaded_by_user_id=author_id,
+            )
+        except Exception as exc:  # pragma: no cover - import should continue if an image fails
+            log_error(
+                "Failed to import Syncro embedded image",
+                ticket_id=ticket_id,
+                url=candidate.get("url"),
+                error=str(exc),
+            )
 
 
 def _extract_comment_author_name(comment: dict[str, Any]) -> str | None:
@@ -832,6 +968,7 @@ async def _sync_ticket_replies(
             external_reference=external_ref,
             created_at=created_at,
         )
+        await _import_comment_images(ticket_id, comment, author_id)
         if external_ref:
             known_refs.add(external_ref)
 
