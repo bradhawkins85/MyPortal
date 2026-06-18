@@ -54,7 +54,7 @@
       <div class="compliance-summary__grid">
         <div class="compliance-summary__item">
           <span class="compliance-summary__label">Total requirements</span>
-          <span class="compliance-summary__value">{{ requirements_ml1|length + requirements_ml2|length + requirements_ml3|length }}</span>
+          <span class="compliance-summary__value">{{ (requirements_ml1|length) + (requirements_ml2|length) + (requirements_ml3|length) }}</span>
         </div>
         <div class="compliance-summary__item">
           <span class="compliance-summary__label">Compliant</span>
@@ -75,7 +75,7 @@
         <div class="compliance-summary__item">
           <span class="compliance-summary__label">Not started</span>
           <span class="compliance-summary__value">
-            {% set total_reqs = requirements_ml1|length + requirements_ml2|length + requirements_ml3|length %}
+            {% set total_reqs = (requirements_ml1|length) + (requirements_ml2|length) + (requirements_ml3|length) %}
             {% set tracked_count = requirement_compliance_map|length %}
             {% set not_started_count = requirement_compliance_map.values()|selectattr('status', 'equalto', 'not_started')|list|length + (total_reqs - tracked_count) %}
             {{ not_started_count }}
