@@ -27,7 +27,6 @@ from app.services import modules as modules_service
 from app.services import system_state
 from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
-from app.services.scheduler import scheduler_service
 
 _MAX_FETCH_BYTES = 5 * 1024 * 1024
 _CID_REFERENCE_PATTERN = re.compile(r"(?i)cid:([^\"'>\s]+)")
@@ -646,6 +645,12 @@ async def get_account(account_id: int, *, redact: bool = True) -> dict[str, Any]
     return _redact_account(account) if redact else account
 
 
+async def _refresh_scheduler() -> None:
+    from app.services.scheduler import scheduler_service
+
+    await scheduler_service.refresh()
+
+
 async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any]:
     account_id = account.get("id")
     if account_id is None:
@@ -688,9 +693,9 @@ async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any
             int(account_id),
             scheduled_task_id=int(task.get("id")) if task.get("id") is not None else None,
         )
-        await scheduler_service.refresh()
+        await _refresh_scheduler()
         return refreshed or account
-    await scheduler_service.refresh()
+    await _refresh_scheduler()
     return account
 
 
@@ -856,7 +861,7 @@ async def delete_account(account_id: int) -> None:
     await imap_repo.delete_account(account_id)
     if scheduled_task_id:
         await scheduled_tasks_repo.delete_task(int(scheduled_task_id))
-    await scheduler_service.refresh()
+    await _refresh_scheduler()
 
 
 def _decode_subject(message: email.message.Message) -> str:
