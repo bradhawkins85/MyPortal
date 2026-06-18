@@ -91,3 +91,15 @@ async def test_template_contains_columns_dropdown():
     assert 'id="columns-dropdown"' in template
     assert 'id="columns-toggle"' in template
     assert 'id="columns-menu"' in template
+
+
+
+def test_template_contains_duplicate_feed_warning_badge():
+    """Shop admin surfaces duplicate vendor SKUs from the latest stock feed import."""
+    from pathlib import Path
+
+    template = Path('app/templates/admin/shop.html').read_text()
+
+    assert 'product.duplicate_sku_import' in template
+    assert 'Duplicate in feed' in template
+    assert 'product.duplicate_sku_count' in template

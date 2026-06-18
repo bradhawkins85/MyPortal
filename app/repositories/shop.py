@@ -393,9 +393,12 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         "    p.stock,",
         "    p.archived,",
         "    p.category_id,",
-        "    c.name AS category_name",
+        "    c.name AS category_name,",
+        "    sf.duplicate_sku_import,",
+        "    sf.duplicate_sku_count",
         "FROM shop_products AS p",
         "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
+        "LEFT JOIN stock_feed AS sf ON sf.sku = COALESCE(NULLIF(p.vendor_sku, ''), p.sku)",
     ]
     params: list[Any] = []
 
@@ -2248,6 +2251,8 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         "archived": bool(row.get("archived")),
         "category_id": _coerce_optional_int(row.get("category_id")),
         "category_name": row.get("category_name") or None,
+        "duplicate_sku_import": bool(_coerce_int(row.get("duplicate_sku_import"))),
+        "duplicate_sku_count": _coerce_int(row.get("duplicate_sku_count")),
     }
 
 

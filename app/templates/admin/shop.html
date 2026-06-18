@@ -176,7 +176,12 @@
               </td>
               <td data-label="Name" data-column="name">{{ product.name }}</td>
               <td data-label="SKU" data-column="sku">{{ product.sku }}</td>
-              <td data-label="Vendor SKU" data-column="vendor-sku">{{ product.vendor_sku }}</td>
+              <td data-label="Vendor SKU" data-column="vendor-sku">
+                {{ product.vendor_sku }}
+                {% if product.duplicate_sku_import %}
+                  <span class="badge badge--warning" title="The latest stock feed import contained {{ product.duplicate_sku_count }} records for this vendor SKU. Review this item manually before updating from the feed.">Duplicate in feed</span>
+                {% endif %}
+              </td>
               <td data-label="DBP" data-column="dbp" data-value="{{ product.buy_price if product.buy_price is not none else '' }}">
                 {% if product.buy_price is not none %}
                   ${{ '%.2f'|format(product.buy_price) }}
