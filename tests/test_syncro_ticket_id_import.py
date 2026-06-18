@@ -116,3 +116,16 @@ async def test_syncro_ticket_import_uses_syncro_id(monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_syncro_status_mapping_takes_precedence():
+    """Configured Syncro statuses map to the selected MyPortal status."""
+    assert (
+        ticket_importer._normalise_status(
+            "Waiting on Customer",
+            {"open", "pending", "closed"},
+            "open",
+            {"waiting on customer": "pending"},
+        )
+        == "pending"
+    )
