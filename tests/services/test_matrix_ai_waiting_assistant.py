@@ -373,3 +373,28 @@ def test_handle_chat_opened_ignores_room_with_technician_message(monkeypatch):
     asyncio.run(assistant.handle_chat_opened(42))
 
     assert marked == []
+
+
+def test_article_visible_to_room_respects_company_restrictions():
+    room = {"company_id": 10, "created_by_user_id": 20}
+
+    assert assistant._article_visible_to_room(
+        {"permission_scope": "company", "company_ids": [10]},
+        room,
+    ) is True
+    assert assistant._article_visible_to_room(
+        {"permission_scope": "company", "company_ids": [99]},
+        room,
+    ) is False
+    assert assistant._article_visible_to_room(
+        {"permission_scope": "company_admin", "company_admin_ids": [10]},
+        room,
+    ) is False
+    assert assistant._article_visible_to_room(
+        {"permission_scope": "user", "allowed_user_ids": [20]},
+        room,
+    ) is True
+    assert assistant._article_visible_to_room(
+        {"permission_scope": "user", "allowed_user_ids": [21]},
+        room,
+    ) is False
