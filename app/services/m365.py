@@ -68,6 +68,9 @@ _TEAMS_ADMIN_ROLE_TEMPLATE_ID = "69091246-20e8-4a56-aa4d-066075b2a7a8"
 # Microsoft Graph application permission required for SharePoint Online best-practice checks.
 # Grants access to GET /admin/sharepoint/settings via the Graph API.
 _SHAREPOINT_TENANT_SETTINGS_ROLE = "a8ead177-1889-4546-9387-f25e658e2a79"
+# Microsoft Graph application permission required to enumerate SharePoint sites
+# and read their default document libraries for OneDrive export destinations.
+_SITES_READ_ALL_ROLE = "332a536c-c7ef-4017-ab91-336970924f0d"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 PACKAGE_MAILBOX_RE = re.compile(
@@ -116,6 +119,8 @@ _PROVISION_APP_ROLES: list[str] = [
     "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
     # SharePoint Online tenant settings (required for SPO best-practice checks)
     _SHAREPOINT_TENANT_SETTINGS_ROLE,  # SharePointTenantSettings.Read.All
+    # SharePoint sites and default document libraries (OneDrive export destination picker):
+    _SITES_READ_ALL_ROLE,  # Sites.Read.All
     # MFA registration details report and per-user MFA state checks:
     # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
     # - GET /beta/users/{id}/authentication/requirements
@@ -199,6 +204,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "bf394140-e372-4bf9-a898-299cfc7564e5": "SecurityEvents.Read.All",
     "e0b77adb-e790-44a3-b0a0-257d06303687": "SecuritySecureScore.Read.All",
     "a8ead177-1889-4546-9387-f25e658e2a79": "SharePointTenantSettings.Read.All",
+    "332a536c-c7ef-4017-ab91-336970924f0d": "Sites.Read.All",
     "38d9df27-64da-44fd-b7c5-a6fbac20248f": "UserAuthenticationMethod.Read.All",
     "434d7c66-07c6-4b1f-ab21-417cf2cdaaca": "OrgSettings-Forms.Read.All",
 }
@@ -1053,10 +1059,21 @@ async def list_sharepoint_export_sites(company_id: int) -> list[dict[str, Any]]:
     """Return SharePoint sites with their default document-library drive IDs for export selection."""
 
     access_token = await acquire_access_token(company_id, force_client_credentials=True)
-    sites = await _graph_get_all(
-        access_token,
-        "https://graph.microsoft.com/v1.0/sites?search=*&$select=id,displayName,name,webUrl&$top=200",
-    )
+    try:
+        sites = await _graph_get_all(
+            access_token,
+            "https://graph.microsoft.com/v1.0/sites?search=*&$select=id,displayName,name,webUrl&$top=200",
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "Microsoft Graph permission denied while loading SharePoint sites. "
+                "Grant the Sites.Read.All application permission to the Microsoft 365 enterprise app, "
+                "then reconnect the company from Microsoft 365 settings so MyPortal can repair missing permissions.",
+                http_status=exc.http_status,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
     options: list[dict[str, Any]] = []
     for site in sites:
         site_id = str(site.get("id") or "").strip()
