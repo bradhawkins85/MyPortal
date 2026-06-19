@@ -56,6 +56,36 @@ async def test_list_enabled_staff_users_returns_rows(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_list_enabled_staff_users_deduplicates_by_email(monkeypatch):
+    dummy_rows = [
+        {"staff_id": 11, "user_id": 101, "email": "Casey@Example.com"},
+        {"staff_id": 12, "user_id": 101, "email": " casey@example.com "},
+        {"staff_id": 13, "user_id": None, "email": "other@example.com"},
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+
+    result = await staff.list_enabled_staff_users(3)
+
+    assert [row["staff_id"] for row in result] == [11, 13]
+
+
+@pytest.mark.anyio
+async def test_list_active_staff_for_offboarding_deduplicates_by_email(monkeypatch):
+    dummy_rows = [
+        {"id": 1, "first_name": "Evan", "last_name": "One", "email": "evan@example.com"},
+        {"id": 2, "first_name": "Evan", "last_name": "Two", "email": "EVAN@example.com"},
+        {"id": 3, "first_name": "Riley", "last_name": "Three", "email": "riley@example.com"},
+    ]
+    dummy_db = _DummyStaffDB(dummy_rows)
+    monkeypatch.setattr(staff, "db", dummy_db)
+
+    result = await staff.list_active_staff_for_offboarding(3)
+
+    assert [row["id"] for row in result] == [1, 3]
+
+
+@pytest.mark.anyio
 async def test_list_enabled_staff_users_handles_empty(monkeypatch):
     dummy_db = _DummyStaffDB([])
     monkeypatch.setattr(staff, "db", dummy_db)

@@ -334,6 +334,16 @@
       return '';
     }
 
+    function uniqueItems(items, getValue) {
+      var seen = {};
+      return (items || []).filter(function (item) {
+        var value = String(getValue(item) || '').trim().toLowerCase();
+        if (!value || seen[value]) return false;
+        seen[value] = true;
+        return true;
+      });
+    }
+
     function buildCheckboxes(container, items, emptyText, getValue, getLabel) {
       container.innerHTML = '';
       if (!items || !items.length) {
@@ -402,7 +412,9 @@
               var upnValue = optionValue(item, ['upn', 'email', 'user_principal_name']);
               return name && upnValue ? name + ' (' + upnValue + ')' : (name || upnValue || 'Unknown user');
             });
-            buildCheckboxes(addOptions, activeStaff, 'No active staff members found.', function (item) {
+            buildCheckboxes(addOptions, uniqueItems(activeStaff, function (item) {
+              return optionValue(item, ['email']);
+            }), 'No active staff members found.', function (item) {
               return optionValue(item, ['email']);
             }, function (item) {
               var name = [item.first_name, item.last_name].filter(Boolean).join(' ') || item.email;
