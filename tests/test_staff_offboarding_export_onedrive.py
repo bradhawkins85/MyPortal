@@ -143,3 +143,44 @@ async def test_export_onedrive_requires_destination_drive_id(monkeypatch):
             step_config={},
             vars_map={},
         )
+
+
+@pytest.mark.anyio
+async def test_export_onedrive_destination_403_raises_actionable_permission_error(monkeypatch):
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "acquire_access_token",
+        AsyncMock(return_value="token"),
+    )
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-id", "userPrincipalName": "user@example.com"}),
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get",
+        AsyncMock(return_value={"id": "root-id", "name": "root"}),
+    )
+
+    async def forbidden_post(token, url, payload):
+        raise workflows.M365Error(
+            "Microsoft Graph POST failed (403): Access denied",
+            http_status=403,
+            graph_error_code="accessDenied",
+        )
+
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", forbidden_post)
+
+    with pytest.raises(workflows.WorkflowStepError) as exc_info:
+        await workflows._run_export_onedrive_step(
+            company_id=42,
+            staff={"id": 7, "email": "user@example.com"},
+            step_config={"destination_drive_id": "drive-id"},
+            vars_map={},
+        )
+
+    assert exc_info.value.http_status == 403
+    assert "Sites.ReadWrite.All" in str(exc_info.value)
+    assert "Sites.Selected" in str(exc_info.value)
+    assert exc_info.value.request_payload == {"operation": "create_destination_folder"}
