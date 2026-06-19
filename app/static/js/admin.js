@@ -2944,6 +2944,7 @@
     const xeroButton = document.querySelector('[data-lookup-xero-id]');
     const huduButton = document.querySelector('[data-lookup-hudu-id]');
     const onedriveSitesButton = document.querySelector('[data-lookup-onedrive-export-sites]');
+    const createOffboardedStaffSiteButton = document.querySelector('[data-create-offboarded-staff-site]');
     const huntressButton = document.querySelector('[data-lookup-huntress-id]');
     const tacticalInput = document.getElementById('edit-company-tactical');
     const xeroInput = document.getElementById('edit-company-xero');
@@ -2951,6 +2952,47 @@
     const onedriveSitesSelect = document.querySelector('[data-onedrive-export-sites-select]');
     const onedriveSitesError = document.querySelector('[data-onedrive-export-sites-error]');
     const huntressInput = document.getElementById('edit-company-huntress');
+
+    const offboardedStaffSiteName = 'Offboarded Staff';
+
+    const addOneDriveSiteOption = (site, { select = false } = {}) => {
+      if (!onedriveSitesSelect || !site) {
+        return;
+      }
+      const siteId = String(site.site_id || '').trim();
+      const driveId = String(site.drive_id || '').trim();
+      if (!siteId || !driveId) {
+        return;
+      }
+      const payload = {
+        site_id: siteId,
+        site_name: String(site.site_name || '').trim(),
+        drive_id: driveId,
+      };
+      const optionValue = JSON.stringify(payload);
+      let option = Array.from(onedriveSitesSelect.options).find((candidate) => candidate.value === optionValue);
+      if (!option) {
+        option = document.createElement('option');
+        option.value = optionValue;
+        option.textContent = site.label || `${payload.site_name || siteId} (${site.drive_name || 'Documents'})`;
+        onedriveSitesSelect.appendChild(option);
+      }
+      if (select) {
+        option.selected = true;
+        onedriveSitesSelect.classList.add('form-input--success');
+        setTimeout(() => onedriveSitesSelect.classList.remove('form-input--success'), 2000);
+      }
+    };
+
+    const refreshCreateOffboardedStaffVisibility = (sites) => {
+      if (!createOffboardedStaffSiteButton) {
+        return;
+      }
+      const hasOffboardedStaffSite = Array.isArray(sites) && sites.some((site) => {
+        return String(site.site_name || site.displayName || site.name || '').trim().toLowerCase() === offboardedStaffSiteName.toLowerCase();
+      });
+      createOffboardedStaffSiteButton.hidden = hasOffboardedStaffSite;
+    };
 
     const spinnerHtml = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
 
@@ -3035,24 +3077,7 @@
           onedriveSitesSelect.replaceChildren(...existingOptions);
 
           sites.forEach((site) => {
-            const siteId = String(site.site_id || '').trim();
-            const driveId = String(site.drive_id || '').trim();
-            if (!siteId || !driveId) {
-              return;
-            }
-            const payload = {
-              site_id: siteId,
-              site_name: String(site.site_name || '').trim(),
-              drive_id: driveId,
-            };
-            const optionValue = JSON.stringify(payload);
-            if (Array.from(onedriveSitesSelect.options).some((option) => option.value === optionValue)) {
-              return;
-            }
-            const option = document.createElement('option');
-            option.value = optionValue;
-            option.textContent = site.label || `${payload.site_name || siteId} (${site.drive_name || 'Documents'})`;
-            onedriveSitesSelect.appendChild(option);
+            addOneDriveSiteOption(site);
           });
 
           if (selectedValue) {
@@ -3061,6 +3086,8 @@
               previousOption.selected = true;
             }
           }
+
+          refreshCreateOffboardedStaffVisibility(sites);
 
           if (!sites.length) {
             alert('No SharePoint sites were found for this Microsoft 365 tenant.');
@@ -3083,6 +3110,42 @@
         }
       });
     }
+
+    if (createOffboardedStaffSiteButton && onedriveSitesSelect) {
+      createOffboardedStaffSiteButton.addEventListener('click', async () => {
+        const originalText = createOffboardedStaffSiteButton.innerHTML;
+        createOffboardedStaffSiteButton.disabled = true;
+        createOffboardedStaffSiteButton.innerHTML = spinnerHtml;
+        if (onedriveSitesError) {
+          onedriveSitesError.hidden = true;
+          onedriveSitesError.textContent = '';
+        }
+
+        try {
+          const result = await requestJson(`/api/companies/${companyId}/onedrive-export-sites/offboarded-staff`, {
+            method: 'POST',
+          });
+          if (result?.site) {
+            addOneDriveSiteOption(result.site, { select: true });
+            refreshCreateOffboardedStaffVisibility([result.site]);
+          }
+          alert(result?.status === 'exists' ? 'Offboarded Staff already exists and has been selected.' : 'Offboarded Staff was created and selected.');
+        } catch (error) {
+          console.error('Failed to create Offboarded Staff site:', error);
+          const message = error instanceof Error ? error.message : 'Failed to create Offboarded Staff site. Please try again.';
+          if (onedriveSitesError) {
+            onedriveSitesError.textContent = `Unable to create Offboarded Staff site: ${message}`;
+            onedriveSitesError.hidden = false;
+          } else {
+            alert(message);
+          }
+        } finally {
+          createOffboardedStaffSiteButton.disabled = false;
+          createOffboardedStaffSiteButton.innerHTML = originalText;
+        }
+      });
+    }
+
 
     if (huduButton && huduInput) {
       huduButton.addEventListener('click', async () => {
