@@ -2080,9 +2080,15 @@ async def _run_export_onedrive_step(
     )
     source_root_id = str(source_root.get("id") or "root").strip() or "root"
 
+    encoded_destination_drive_id = quote(destination_drive_id, safe="")
+    destination_children_url = (
+        f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/root/children"
+        if destination_parent_item_id.lower() == "root"
+        else f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/items/{quote(destination_parent_item_id, safe='')}/children"
+    )
     destination_folder = await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
         access_token,
-        f"https://graph.microsoft.com/v1.0/drives/{quote(destination_drive_id, safe='')}/items/{quote(destination_parent_item_id, safe='')}/children",
+        destination_children_url,
         {
             "name": safe_folder_name,
             "folder": {},
