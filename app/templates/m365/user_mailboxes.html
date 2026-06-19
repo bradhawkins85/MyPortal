@@ -441,8 +441,8 @@
         fetch('/m365/mailboxes/permissions/request', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+            'Content-Type': 'application/json',
+            {% if csrf_token %}'X-CSRF-Token': '{{ csrf_token }}',{% endif %}
           },
           body: JSON.stringify({
             mailbox_upn: requestUpn.value,
