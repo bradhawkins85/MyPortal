@@ -76,6 +76,9 @@ _SITES_READ_ALL_ROLE = "332a536c-c7ef-4017-ab91-336970924f0d"
 # Sites.ReadWrite.All is preferred over Files.ReadWrite.All because it is scoped
 # to SharePoint site content rather than all files across the tenant.
 _SITES_READWRITE_ALL_ROLE = "9492366f-7969-46a4-8d15-ed1a20078fff"
+# Microsoft Graph application permission required to create the backing Microsoft
+# 365 group for the default Offboarded Staff SharePoint export site.
+_GROUP_READWRITE_ALL_ROLE = "62a82d76-70ea-41e2-9197-370581804d09"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 PACKAGE_MAILBOX_RE = re.compile(
@@ -128,6 +131,7 @@ _PROVISION_APP_ROLES: list[str] = [
     _SITES_READ_ALL_ROLE,  # Sites.Read.All
     # SharePoint document library writes (OneDrive export folder creation/copy):
     _SITES_READWRITE_ALL_ROLE,  # Sites.ReadWrite.All
+    _GROUP_READWRITE_ALL_ROLE,  # Group.ReadWrite.All (create Offboarded Staff export site)
     # MFA registration details report and per-user MFA state checks:
     # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
     # - GET /beta/users/{id}/authentication/requirements
@@ -213,6 +217,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "a8ead177-1889-4546-9387-f25e658e2a79": "SharePointTenantSettings.Read.All",
     "332a536c-c7ef-4017-ab91-336970924f0d": "Sites.Read.All",
     "9492366f-7969-46a4-8d15-ed1a20078fff": "Sites.ReadWrite.All",
+    "62a82d76-70ea-41e2-9197-370581804d09": "Group.ReadWrite.All",
     "38d9df27-64da-44fd-b7c5-a6fbac20248f": "UserAuthenticationMethod.Read.All",
     "434d7c66-07c6-4b1f-ab21-417cf2cdaaca": "OrgSettings-Forms.Read.All",
 }
@@ -1063,6 +1068,33 @@ async def _graph_get(
     return response.json()
 
 
+_OFFBOARDED_STAFF_SITE_DISPLAY_NAME = "Offboarded Staff"
+_OFFBOARDED_STAFF_SITE_ALIAS = "OffboardedStaff"
+
+
+def _sharepoint_export_site_option(site: dict[str, Any], drive: dict[str, Any]) -> dict[str, Any] | None:
+    site_id = str(site.get("id") or "").strip()
+    drive_id = str(drive.get("id") or "").strip()
+    if not site_id or not drive_id:
+        return None
+    display_name = str(site.get("displayName") or site.get("name") or site.get("webUrl") or site_id).strip()
+    drive_name = drive.get("name") or "Documents"
+    return {
+        "site_id": site_id,
+        "site_name": display_name,
+        "site_web_url": site.get("webUrl"),
+        "drive_id": drive_id,
+        "drive_name": drive_name,
+        "drive_web_url": drive.get("webUrl"),
+        "label": f"{display_name} ({drive_name})",
+    }
+
+
+def _is_offboarded_staff_site(site: dict[str, Any]) -> bool:
+    values = (site.get("site_name"), site.get("displayName"), site.get("name"))
+    return any(str(value or "").strip().casefold() == _OFFBOARDED_STAFF_SITE_DISPLAY_NAME.casefold() for value in values)
+
+
 async def list_sharepoint_export_sites(company_id: int) -> list[dict[str, Any]]:
     """Return SharePoint sites with their default document-library drive IDs for export selection."""
 
@@ -1104,20 +1136,72 @@ async def list_sharepoint_export_sites(company_id: int) -> list[dict[str, Any]]:
         drive_id = str(drive.get("id") or "").strip()
         if not drive_id:
             continue
-        display_name = str(site.get("displayName") or site.get("name") or site.get("webUrl") or site_id).strip()
-        options.append(
-            {
-                "site_id": site_id,
-                "site_name": display_name,
-                "site_web_url": site.get("webUrl"),
-                "drive_id": drive_id,
-                "drive_name": drive.get("name") or "Documents",
-                "drive_web_url": drive.get("webUrl"),
-                "label": f"{display_name} ({drive.get('name') or 'Documents'})",
-            }
-        )
+        option = _sharepoint_export_site_option(site, drive)
+        if option:
+            options.append(option)
     options.sort(key=lambda item: str(item.get("label") or "").lower())
     return options
+
+
+async def create_offboarded_staff_export_site(company_id: int) -> dict[str, Any]:
+    """Create the default Offboarded Staff SharePoint site and return its export option."""
+
+    existing_sites = await list_sharepoint_export_sites(company_id)
+    for option in existing_sites:
+        if _is_offboarded_staff_site(option):
+            return {"status": "exists", "site": option}
+
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    payload = {
+        "displayName": _OFFBOARDED_STAFF_SITE_DISPLAY_NAME,
+        "description": "Default destination for staff OneDrive exports created by MyPortal.",
+        "groupTypes": ["Unified"],
+        "mailEnabled": True,
+        "mailNickname": _OFFBOARDED_STAFF_SITE_ALIAS,
+        "securityEnabled": False,
+        "visibility": "Private",
+    }
+    try:
+        group = await _graph_post(access_token, "https://graph.microsoft.com/v1.0/groups", payload)
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "Microsoft Graph permission denied while creating the Offboarded Staff site. "
+                "Grant Group.ReadWrite.All and Sites.ReadWrite.All application permissions, then reconnect the company.",
+                http_status=exc.http_status,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
+
+    group_id = str(group.get("id") or "").strip()
+    if not group_id:
+        raise M365Error("Microsoft Graph did not return a group ID for the Offboarded Staff site")
+
+    last_exc: M365Error | None = None
+    for attempt in range(1, 7):
+        try:
+            site = await _graph_get(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/groups/{quote(group_id, safe='')}/sites/root?$select=id,displayName,name,webUrl",
+            )
+            drive = await _graph_get(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/sites/{quote(str(site.get('id') or ''), safe='')}/drive?$select=id,name,webUrl",
+            )
+            option = _sharepoint_export_site_option(site, drive)
+            if option:
+                return {"status": "created", "site": option}
+        except M365Error as exc:
+            last_exc = exc
+            if exc.http_status not in (400, 404):
+                raise
+        await asyncio.sleep(min(attempt * 2, 10))
+
+    raise M365Error(
+        "Created the Offboarded Staff Microsoft 365 group, but its SharePoint site is not ready yet. Refresh sites again in a few minutes.",
+        http_status=last_exc.http_status if last_exc else None,
+        graph_error_code=last_exc.graph_error_code if last_exc else None,
+    )
 
 
 async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:

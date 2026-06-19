@@ -307,8 +307,18 @@
                     </svg>
                   </span>
                 </button>
+                <button
+                  type="button"
+                  class="button button--ghost"
+                  data-create-offboarded-staff-site
+                  title="Create the Offboarded Staff SharePoint site for OneDrive exports"
+                  aria-label="Create Offboarded Staff SharePoint site"
+                  hidden
+                >
+                  Create Offboarded Staff
+                </button>
               </div>
-              <p class="form-help">Click the lookup button to load SharePoint sites/default document libraries, then select the destination that will receive OneDrive export folders.</p>
+              <p class="form-help">Click the lookup button to load SharePoint sites/default document libraries, then select the destination that will receive OneDrive export folders. If Offboarded Staff is missing after lookup, use the create button to add it.</p>
               {% if form_data.onedrive_export_drive_id %}
                 <p class="form-help">Current saved export site: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}</p>
               {% endif %}
