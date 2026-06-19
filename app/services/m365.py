@@ -67,7 +67,7 @@ _TEAMS_ADMIN_ROLE_TEMPLATE_ID = "69091246-20e8-4a56-aa4d-066075b2a7a8"
 
 # Microsoft Graph application permission required for SharePoint Online best-practice checks.
 # Grants access to GET /admin/sharepoint/settings via the Graph API.
-_SHAREPOINT_TENANT_SETTINGS_ROLE = "a8ead177-1889-4546-9387-f25e658e2a79"
+_SHAREPOINT_TENANT_SETTINGS_ROLE = "83d4163d-a2d8-4d3b-9695-4ae3ca98f888"
 # Microsoft Graph application permission required to enumerate SharePoint sites
 # and read their default document libraries for OneDrive export destinations.
 _SITES_READ_ALL_ROLE = "332a536c-c7ef-4017-ab91-336970924f0d"
@@ -214,7 +214,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30": "Application.Read.All",
     "bf394140-e372-4bf9-a898-299cfc7564e5": "SecurityEvents.Read.All",
     "e0b77adb-e790-44a3-b0a0-257d06303687": "SecuritySecureScore.Read.All",
-    "a8ead177-1889-4546-9387-f25e658e2a79": "SharePointTenantSettings.Read.All",
+    "83d4163d-a2d8-4d3b-9695-4ae3ca98f888": "SharePointTenantSettings.Read.All",
     "332a536c-c7ef-4017-ab91-336970924f0d": "Sites.Read.All",
     "9492366f-7969-46a4-8d15-ed1a20078fff": "Sites.ReadWrite.All",
     "62a82d76-70ea-41e2-9197-370581804d09": "Group.ReadWrite.All",
