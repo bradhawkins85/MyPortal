@@ -27,7 +27,14 @@ def _make_sp_data(sp_id: str = "sp-object-id") -> dict[str, Any]:
 
 
 def _make_graph_sp_response(graph_sp_id: str = "graph-sp-id") -> dict[str, Any]:
-    return {"value": [{"id": graph_sp_id}]}
+    return {
+        "value": [
+            {
+                "id": graph_sp_id,
+                "appRoles": [{"id": role_id} for role_id in m365_service._PROVISION_APP_ROLES],
+            }
+        ]
+    }
 
 
 def _make_role_assignment() -> dict[str, Any]:
@@ -203,6 +210,73 @@ async def test_provision_app_registration_default_display_name():
         if "/applications" in p["url"] and "addPassword" not in p["url"]
     )
     assert app_create["payload"]["displayName"] == "MyPortal Integration"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_keeps_sharepoint_permission_when_lookup_omits_it():
+    """Provisioning must request SharePointTenantSettings.Read.All even if Graph appRoles omits it."""
+    captured_payloads: list[dict] = []
+    sharepoint_role = m365_service._SHAREPOINT_TENANT_SETTINGS_ROLE
+    graph_roles_without_sharepoint = [
+        {"id": role_id}
+        for role_id in m365_service._PROVISION_APP_ROLES
+        if role_id != sharepoint_role
+    ]
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        captured_payloads.append({"url": url, "payload": payload})
+        if "/applications" in url and "addPassword" not in url and "owners" not in url:
+            return _make_app_data()
+        if "/servicePrincipals" in url and "appRoleAssignments" not in url:
+            return _make_sp_data()
+        if "appRoleAssignments" in url:
+            return _make_role_assignment()
+        if "owners/$ref" in url:
+            return {}
+        if "addPassword" in url:
+            return _make_secret_data()
+        return {}
+
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "filter=displayName" in url:
+            return {"value": []}
+        if m365_service._TEAMS_APP_ID in url:
+            return {
+                "value": [
+                    {
+                        "id": "teams-sp-id",
+                        "appRoles": [{"id": m365_service._TEAMS_MANAGE_AS_APP_ROLE}],
+                    }
+                ]
+            }
+        return {"value": [{"id": "graph-sp-id", "appRoles": graph_roles_without_sharepoint}]}
+
+    with (
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        await m365_service.provision_app_registration(access_token="token")
+        await drain_provision_background_tasks()
+
+    app_create = next(
+        p for p in captured_payloads
+        if "/applications" in p["url"] and "addPassword" not in p["url"]
+    )
+    graph_access = next(
+        access
+        for access in app_create["payload"]["requiredResourceAccess"]
+        if access["resourceAppId"] == m365_service._GRAPH_APP_ID
+    )
+    requested_graph_roles = {role["id"] for role in graph_access["resourceAccess"]}
+    granted_graph_roles = {
+        p["payload"]["appRoleId"]
+        for p in captured_payloads
+        if "appRoleAssignments" in p["url"]
+        and p["payload"].get("resourceId") == "graph-sp-id"
+    }
+
+    assert sharepoint_role in requested_graph_roles
+    assert sharepoint_role in granted_graph_roles
 
 
 @pytest.mark.anyio("asyncio")

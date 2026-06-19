@@ -507,6 +507,55 @@ async def test_try_grant_missing_permissions_grants_sharepoint_when_missing():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_try_grant_missing_permissions_grants_sharepoint_when_role_lookup_omits_it():
+    """Repair must still grant SharePointTenantSettings.Read.All if Graph omits it from appRoles."""
+    present_roles = [r for r in _PROVISION_APP_ROLES if r != _SHAREPOINT_TENANT_SETTINGS_ROLE]
+    all_assignments = (
+        [{"appRoleId": r, "resourceId": "graph-sp-id"} for r in present_roles]
+        + [
+            {"appRoleId": _EXO_MANAGE_AS_APP_ROLE, "resourceId": "exo-sp-id"},
+            {"appRoleId": _TEAMS_MANAGE_AS_APP_ROLE, "resourceId": "teams-sp-id"},
+        ]
+    )
+    graph_roles_without_sharepoint = [
+        {"id": r} for r in present_roles if r != _SHAREPOINT_TENANT_SETTINGS_ROLE
+    ]
+
+    granted: list[dict] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "appRoleAssignments" in url:
+            return {"value": all_assignments}
+        if _GRAPH_APP_ID in url:
+            return {"value": [{"id": "graph-sp-id", "appRoles": graph_roles_without_sharepoint}]}
+        if _EXO_APP_ID in url:
+            return {"value": [{"id": "exo-sp-id"}]}
+        if _TEAMS_APP_ID in url:
+            return _teams_sp_response()
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": [{"id": "existing-role"}]}
+        return _sp_response("sp-123")
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        granted.append(payload)
+        return {"id": "new-assignment"}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service.try_grant_missing_permissions(
+            company_id=1,
+            access_token="admin-token",
+        )
+
+    assert result is True
+    assert [g["appRoleId"] for g in granted] == [_SHAREPOINT_TENANT_SETTINGS_ROLE]
+    assert granted[0]["resourceId"] == "graph-sp-id"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_check_enterprise_app_permissions_marks_sharepoint_as_fail_when_missing():
     """Diagnostics should treat missing SharePointTenantSettings.Read.All as actionable fail."""
     with (
