@@ -9,11 +9,12 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, cast
 
-from fastapi import HTTPException, Request, status
+from fastapi import BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import ValidationError
 
 from app import main as main_module
+from app.services import notifications as notifications_service
 
 from .helpers import (
     _filter_staff_for_offboarding_choices,
@@ -3107,7 +3108,9 @@ async def invite_staff_member(staff_id: int, request: Request):
     return JSONResponse({"success": True})
 
 
-async def m365_export_staff_onedrive(staff_id: int, request: Request):
+async def m365_export_staff_onedrive(
+    staff_id: int, request: Request, background_tasks: BackgroundTasks
+):
     """Manually export a staff member's OneDrive to the company-configured SharePoint location."""
     (
         user,
@@ -3134,41 +3137,79 @@ async def m365_export_staff_onedrive(staff_id: int, request: Request):
             detail="Select a OneDrive export SharePoint site in this company's settings before exporting.",
         )
 
-    try:
-        result = await staff_onboarding_workflow_service.export_onedrive_for_staff(
-            company_id=staff_company_id,
-            staff=staff,
-            destination_drive_id=destination_drive_id,
-            destination_parent_item_id=str(settings.m365_onedrive_export_destination_parent_item_id or "root"),
-            mark_source_read_only=bool(settings.m365_onedrive_export_mark_source_read_only),
-            wait_for_completion=bool(settings.m365_onedrive_export_wait_for_completion),
-            copy_timeout_seconds=int(settings.m365_onedrive_export_copy_timeout_seconds),
-            folder_conflict_behavior=str(settings.m365_onedrive_export_folder_conflict_behavior or "fail"),
-        )
-    except staff_onboarding_workflow_service.WorkflowStepError as exc:
-        status_code = exc.http_status if exc.http_status in {400, 403, 404, 409, 429} else status.HTTP_502_BAD_GATEWAY
-        raise HTTPException(status_code=status_code, detail=str(exc))
-    except m365_service.M365Error as exc:
-        status_code = exc.http_status if exc.http_status in {400, 403, 404, 409, 429} else status.HTTP_502_BAD_GATEWAY
-        raise HTTPException(status_code=status_code, detail=str(exc))
+    user_id = int(user["id"]) if user.get("id") is not None else None
+    destination_parent_item_id = str(settings.m365_onedrive_export_destination_parent_item_id or "root")
+    mark_source_read_only = bool(settings.m365_onedrive_export_mark_source_read_only)
+    copy_timeout_seconds = int(settings.m365_onedrive_export_copy_timeout_seconds)
+    folder_conflict_behavior = str(settings.m365_onedrive_export_folder_conflict_behavior or "fail")
 
-    await audit_service.log_action(
-        entity_type="staff",
-        entity_id=staff_id,
-        action="staff.m365.onedrive_exported",
-        user_id=int(user["id"]) if user.get("id") is not None else None,
-        metadata={
-            "email": staff.get("email"),
-            "destination_drive_id": result.get("destination_drive_id"),
-            "destination_parent_item_id": result.get("destination_parent_item_id"),
-            "destination_folder_id": result.get("destination_folder_id"),
-            "destination_folder_name": result.get("destination_folder_name"),
-            "copy_status": result.get("copy_status"),
-            "source_items_submitted": result.get("source_items_submitted"),
-            "source_marked_read_only": result.get("source_marked_read_only"),
+    async def _run_onedrive_export_task() -> None:
+        try:
+            result = await staff_onboarding_workflow_service.export_onedrive_for_staff(
+                company_id=staff_company_id,
+                staff=staff,
+                destination_drive_id=destination_drive_id,
+                destination_parent_item_id=destination_parent_item_id,
+                mark_source_read_only=mark_source_read_only,
+                wait_for_completion=True,
+                copy_timeout_seconds=copy_timeout_seconds,
+                folder_conflict_behavior=folder_conflict_behavior,
+            )
+            await audit_service.log_action(
+                entity_type="staff",
+                entity_id=staff_id,
+                action="staff.m365.onedrive_exported",
+                user_id=user_id,
+                metadata={
+                    "email": staff.get("email"),
+                    "destination_drive_id": result.get("destination_drive_id"),
+                    "destination_parent_item_id": result.get("destination_parent_item_id"),
+                    "destination_folder_id": result.get("destination_folder_id"),
+                    "destination_folder_name": result.get("destination_folder_name"),
+                    "copy_status": result.get("copy_status"),
+                    "source_items_submitted": result.get("source_items_submitted"),
+                    "source_marked_read_only": result.get("source_marked_read_only"),
+                },
+            )
+            folder_name = (
+                result.get("destination_folder_name") or staff.get("email") or "the selected staff member"
+            )
+            await notifications_service.emit_notification(
+                event_type="staff.m365.onedrive_export.completed",
+                message=f"OneDrive export completed for {folder_name}.",
+                user_id=user_id,
+                metadata={"staff_id": staff_id, "export": result},
+            )
+        except (staff_onboarding_workflow_service.WorkflowStepError, m365_service.M365Error) as exc:
+            log_error("OneDrive export background task failed", staff_id=staff_id, error=str(exc))
+            await notifications_service.emit_notification(
+                event_type="staff.m365.onedrive_export.failed",
+                message=f"OneDrive export failed for {staff.get('email') or 'the selected staff member'}: {exc}",
+                user_id=user_id,
+                metadata={
+                    "staff_id": staff_id,
+                    "error": str(exc),
+                    "http_status": getattr(exc, "http_status", None),
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive background task guard
+            log_error("OneDrive export background task crashed", staff_id=staff_id, error=str(exc))
+            await notifications_service.emit_notification(
+                event_type="staff.m365.onedrive_export.failed",
+                message=f"OneDrive export failed for {staff.get('email') or 'the selected staff member'}: {exc}",
+                user_id=user_id,
+                metadata={"staff_id": staff_id, "error": str(exc)},
+            )
+
+    background_tasks.add_task(_run_onedrive_export_task)
+    return JSONResponse(
+        {
+            "success": True,
+            "queued": True,
+            "message": "OneDrive export started. You will receive a notification when it completes.",
         },
+        status_code=status.HTTP_202_ACCEPTED,
     )
-    return JSONResponse({"success": True, "export": result})
 
 
 async def m365_reset_staff_password(staff_id: int, request: Request):

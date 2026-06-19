@@ -1028,6 +1028,10 @@
         return;
       }
       const data = await requestJson(`/api/staff/${staffId}/m365/export-onedrive`, { method: 'POST' });
+      if (data && data.queued) {
+        window.alert(data.message || 'OneDrive export started. You will receive a notification when it completes.');
+        return;
+      }
       const exported = data && data.export ? data.export : {};
       const folderName = exported.destination_folder_name || 'the configured folder';
       const status = exported.copy_status || 'submitted';
