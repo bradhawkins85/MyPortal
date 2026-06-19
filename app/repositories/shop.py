@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import re
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Literal, Sequence
 
 import aiomysql
 
@@ -1413,14 +1413,31 @@ async def replace_product_features(
                 raise
 
 
-async def delete_product(product_id: int) -> bool:
+ProductDeleteResult = Literal["deleted", "archived", "missing"]
+
+
+def _is_foreign_key_constraint_error(exc: BaseException) -> bool:
+    code = exc.args[0] if exc.args else None
+    return code == 1451
+
+
+async def delete_product(product_id: int) -> ProductDeleteResult:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
-            await cursor.execute(
-                "DELETE FROM shop_products WHERE id = %s",
-                (product_id,),
-            )
-            return cursor.rowcount > 0
+            try:
+                await cursor.execute(
+                    "DELETE FROM shop_products WHERE id = %s",
+                    (product_id,),
+                )
+            except aiomysql.IntegrityError as exc:
+                if not _is_foreign_key_constraint_error(exc):
+                    raise
+                await cursor.execute(
+                    "UPDATE shop_products SET archived = 1 WHERE id = %s",
+                    (product_id,),
+                )
+                return "archived" if cursor.rowcount > 0 else "missing"
+            return "deleted" if cursor.rowcount > 0 else "missing"
 
 
 async def create_order(
