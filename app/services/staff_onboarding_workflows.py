@@ -2010,6 +2010,35 @@ async def _wait_for_graph_copy(access_token: str, monitor_url: str, *, timeout_s
     )
 
 
+def _onedrive_export_permission_message(exc: M365Error | WorkflowStepError) -> str:
+    """Return an actionable message for Graph-denied OneDrive export writes."""
+
+    graph_code = getattr(exc, "graph_error_code", None)
+    suffix = f" Graph error code: {graph_code}." if graph_code else ""
+    return (
+        "Microsoft Graph denied access while creating the OneDrive export folder in the "
+        "selected SharePoint document library. Confirm the company's M365 enterprise app "
+        "has admin-consented application permissions to write SharePoint/OneDrive content "
+        "(Sites.ReadWrite.All or Files.ReadWrite.All), and if the tenant uses Sites.Selected, "
+        "grant the app write access to the selected export SharePoint site before retrying."
+        f"{suffix}"
+    )
+
+
+def _raise_onedrive_export_graph_error(exc: M365Error | WorkflowStepError, *, operation: str) -> None:
+    """Preserve Graph status codes and add context for OneDrive export failures."""
+
+    http_status = getattr(exc, "http_status", None)
+    if http_status == 403:
+        raise WorkflowStepError(
+            _onedrive_export_permission_message(exc),
+            request_payload={"operation": operation},
+            http_status=403,
+            create_ticket_on_failure=True,
+        ) from exc
+    raise exc
+
+
 async def export_onedrive_for_staff(
     *,
     company_id: int,
@@ -2086,15 +2115,18 @@ async def _run_export_onedrive_step(
         if destination_parent_item_id.lower() == "root"
         else f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/items/{quote(destination_parent_item_id, safe='')}/children"
     )
-    destination_folder = await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
-        access_token,
-        destination_children_url,
-        {
-            "name": safe_folder_name,
-            "folder": {},
-            "@microsoft.graph.conflictBehavior": conflict_behavior,
-        },
-    )
+    try:
+        destination_folder = await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            destination_children_url,
+            {
+                "name": safe_folder_name,
+                "folder": {},
+                "@microsoft.graph.conflictBehavior": conflict_behavior,
+            },
+        )
+    except M365Error as exc:
+        _raise_onedrive_export_graph_error(exc, operation="create_destination_folder")
     destination_folder_id = str(destination_folder.get("id") or "").strip()
     if not destination_folder_id:
         raise WorkflowStepError("Graph did not return an ID for the OneDrive export destination folder")
@@ -2119,11 +2151,14 @@ async def _run_export_onedrive_step(
             "name": child_name or None,
         }
         copy_payload = {key: value for key, value in copy_payload.items() if value is not None}
-        _, monitor_url = await _graph_post_for_location(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(child_id, safe='')}/copy",
-            copy_payload,
-        )
+        try:
+            _, monitor_url = await _graph_post_for_location(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(child_id, safe='')}/copy",
+                copy_payload,
+            )
+        except WorkflowStepError as exc:
+            _raise_onedrive_export_graph_error(exc, operation="copy_source_item")
         if monitor_url:
             monitor_urls.append(monitor_url)
         copied_items.append({"id": child_id, "name": child_name})
