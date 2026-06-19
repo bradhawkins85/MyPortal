@@ -73,3 +73,78 @@ def test_provision_app_roles_includes_sites_readwrite_all_for_onedrive_export_wr
         "Sites.Read.All",
         "Sites.ReadWrite.All",
     }
+
+
+@pytest.mark.anyio
+async def test_create_offboarded_staff_export_site_returns_existing_site(monkeypatch):
+    existing = {
+        "site_id": "site-existing",
+        "site_name": "Offboarded Staff",
+        "drive_id": "drive-existing",
+        "label": "Offboarded Staff (Documents)",
+    }
+
+    async def fake_list(company_id):
+        assert company_id == 42
+        return [existing]
+
+    async def fail_acquire(*args, **kwargs):  # pragma: no cover - should not be called
+        raise AssertionError("existing Offboarded Staff site should not create a new group")
+
+    monkeypatch.setattr(m365_service, "list_sharepoint_export_sites", fake_list)
+    monkeypatch.setattr(m365_service, "acquire_access_token", fail_acquire)
+
+    result = await m365_service.create_offboarded_staff_export_site(42)
+
+    assert result == {"status": "exists", "site": existing}
+
+
+@pytest.mark.anyio
+async def test_create_offboarded_staff_export_site_creates_group_and_returns_drive(monkeypatch):
+    calls = []
+
+    async def fake_list(company_id):
+        return []
+
+    async def fake_acquire(company_id, force_client_credentials=False):
+        assert company_id == 42
+        assert force_client_credentials is True
+        return "token"
+
+    async def fake_post(token, url, payload):
+        calls.append((url, payload))
+        assert token == "token"
+        assert url == "https://graph.microsoft.com/v1.0/groups"
+        assert payload["displayName"] == "Offboarded Staff"
+        assert payload["mailNickname"] == "OffboardedStaff"
+        assert payload["groupTypes"] == ["Unified"]
+        return {"id": "group-1"}
+
+    async def fake_get(token, url, *, extra_headers=None):
+        assert token == "token"
+        if "/groups/group-1/sites/root" in url:
+            return {"id": "site-1", "displayName": "Offboarded Staff", "webUrl": "https://contoso/sites/offboardedstaff"}
+        if "/sites/site-1/drive" in url:
+            return {"id": "drive-1", "name": "Documents", "webUrl": "https://contoso/sites/offboardedstaff/docs"}
+        raise AssertionError(f"unexpected Graph URL: {url}")
+
+    async def fake_sleep(delay):
+        raise AssertionError("site was ready immediately; sleep should not be called")
+
+    monkeypatch.setattr(m365_service, "list_sharepoint_export_sites", fake_list)
+    monkeypatch.setattr(m365_service, "acquire_access_token", fake_acquire)
+    monkeypatch.setattr(m365_service, "_graph_post", fake_post)
+    monkeypatch.setattr(m365_service, "_graph_get", fake_get)
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+
+    result = await m365_service.create_offboarded_staff_export_site(42)
+
+    assert result["status"] == "created"
+    assert result["site"]["site_name"] == "Offboarded Staff"
+    assert result["site"]["drive_id"] == "drive-1"
+    assert len(calls) == 1
+
+
+def test_provision_app_roles_includes_group_readwrite_all_for_offboarded_staff_site_creation():
+    assert m365_service._GROUP_READWRITE_ALL_ROLE in m365_service._PROVISION_APP_ROLES
+    assert m365_service._GRAPH_ROLE_NAMES[m365_service._GROUP_READWRITE_ALL_ROLE] == "Group.ReadWrite.All"
