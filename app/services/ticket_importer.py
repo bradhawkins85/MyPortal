@@ -1220,20 +1220,14 @@ async def _upsert_ticket(
             priority=priority,
             status=status,
             category=category_value,
-            module_slug=None,
+            module_slug="syncro",
             external_reference=external_reference,
             ticket_number=ticket_number,
-            trigger_automations=True,
+            trigger_automations=False,
             send_creation_notification=False,
             id=ticket_id_to_use,
         )
         created_id = created.get("id")
-        if created_id is not None:
-            try:
-                await tickets_service.refresh_ticket_ai_summary(int(created_id))
-            except RuntimeError:
-                pass
-            await tickets_service.refresh_ticket_ai_tags(int(created_id))
         ticket_db_id = int(created_id) if created_id is not None else None
         if created_id is not None and any((created_at, updated_at, closed_at)):
             timestamp_updates: dict[str, Any] = {}
