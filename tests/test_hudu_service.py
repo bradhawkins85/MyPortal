@@ -76,3 +76,45 @@ async def test_create_asset_password_uses_flat_endpoint_with_company_id_and_send
     assert pw_body["username"] == "alice@example.com"
 
     assert result["id"] == 42
+
+
+@pytest.mark.anyio
+async def test_create_asset_password_401_reports_password_access_guidance(monkeypatch):
+    """401s on the password endpoint should guide admins to Hudu password API scope."""
+
+    class DummyResponse:
+        status_code = 401
+
+        def raise_for_status(self):  # pragma: no cover - _raise_for_status handles 401 first
+            raise AssertionError("raise_for_status should not be called for 401 responses")
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, *, headers=None, json=None, **kwargs):
+            return DummyResponse()
+
+    async def fake_load_settings():
+        return {"base_url": "https://hudu.example.com", "api_key": "test-api-key-abc"}
+
+    monkeypatch.setattr(hudu_service, "_load_settings", fake_load_settings)
+    monkeypatch.setattr(hudu_service.httpx, "AsyncClient", DummyClient)
+
+    with pytest.raises(hudu_service.HuduAuthenticationError) as exc_info:
+        await hudu_service.create_asset_password(
+            company_id="99",
+            name="Test Password",
+            password="s3cr3t",
+        )
+
+    error = str(exc_info.value)
+    assert "Hudu rejected the API key" in error
+    assert "Passwords access enabled" in error
+    assert "company/IP address" in error

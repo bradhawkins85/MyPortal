@@ -14,6 +14,24 @@ class HuduConfigurationError(Exception):
     """Raised when Hudu is not configured or credentials are missing."""
 
 
+class HuduAuthenticationError(Exception):
+    """Raised when Hudu rejects API authentication or authorization."""
+
+
+_PASSWORD_ACCESS_MESSAGE = (
+    "Hudu rejected the API key while accessing asset passwords. "
+    "Confirm the configured Hudu API key is current, has Passwords access enabled, "
+    "is allowed for this company/IP address, and is not Magic Dash only."
+)
+
+
+def _raise_for_status(response: httpx.Response, *, password_access: bool = False) -> None:
+    if response.status_code == 401:
+        message = _PASSWORD_ACCESS_MESSAGE if password_access else "Invalid Hudu API key"
+        raise HuduAuthenticationError(message)
+    response.raise_for_status()
+
+
 async def _load_settings() -> dict[str, Any]:
     """Load and validate Hudu module settings."""
     module = await modules_service.get_module("hudu", redact=False)
@@ -63,7 +81,7 @@ async def search_companies(name: str) -> list[dict[str, Any]]:
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, headers=_make_headers(api_key), params=params)
-        response.raise_for_status()
+        _raise_for_status(response)
 
     data = response.json()
     companies = data.get("companies", [])
@@ -93,7 +111,7 @@ async def get_company_url(hudu_id: str) -> str | None:
             response = await client.get(url, headers=_make_headers(api_key))
         if response.status_code == 404:
             return None
-        response.raise_for_status()
+        _raise_for_status(response)
         data = response.json()
         company = data.get("company") or {}
         full_url = str(company.get("full_url") or "").strip()
@@ -157,7 +175,7 @@ async def create_person(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(url, headers=_make_headers(api_key), json=body)
-        response.raise_for_status()
+        _raise_for_status(response)
 
     data = response.json()
     return data.get("person") or data
@@ -206,7 +224,7 @@ async def create_asset_password(
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(endpoint, headers=_make_headers(api_key), json=body)
-        response.raise_for_status()
+        _raise_for_status(response, password_access=True)
 
     data = response.json()
     return data.get("asset_password") or data
