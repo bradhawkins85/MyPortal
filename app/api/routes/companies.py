@@ -465,6 +465,31 @@ async def list_onedrive_export_sites(
     return {"sites": sites}
 
 
+@router.post("/{company_id}/onedrive-export-sites/offboarded-staff")
+async def create_offboarded_staff_export_site(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Create the default Offboarded Staff SharePoint export site on demand."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    try:
+        return await m365_service.create_offboarded_staff_export_site(company_id)
+    except m365_service.M365Error as exc:
+        raise HTTPException(
+            status_code=exc.http_status or status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating Offboarded Staff site: {str(exc)}",
+        ) from exc
+
+
 @router.post("/{company_id}/lookup-hudu-id")
 async def lookup_hudu_company_id(
     company_id: int,
