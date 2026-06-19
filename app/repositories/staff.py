@@ -7,6 +7,20 @@ from app.core.database import db
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 
 
+def _dedupe_by_normalized_email(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return rows with duplicate non-empty emails removed, preserving order."""
+    unique_rows: list[dict[str, Any]] = []
+    seen_emails: set[str] = set()
+    for row in rows:
+        email = str(row.get("email") or "").strip().lower()
+        if email and email in seen_emails:
+            continue
+        if email:
+            seen_emails.add(email)
+        unique_rows.append(row)
+    return unique_rows
+
+
 def _ensure_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -300,7 +314,7 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
         )
         record["is_registered_user"] = user_id_int is not None
         results.append(record)
-    return results
+    return _dedupe_by_normalized_email(results)
 
 
 async def get_enabled_staff_requester(company_id: int, staff_id: int) -> dict[str, Any] | None:
@@ -812,7 +826,7 @@ async def list_active_staff_for_offboarding(company_id: int, *, exclude_staff_id
         """,
         tuple(params),
     )
-    return [dict(row) for row in rows]
+    return _dedupe_by_normalized_email([dict(row) for row in rows])
 
 
 async def set_enabled(staff_id: int, enabled: bool) -> None:
