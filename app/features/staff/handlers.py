@@ -576,6 +576,7 @@ async def staff_page(
         "active_staff_for_offboarding": cast(list[dict[str, Any]], _serialise_for_json(active_staff_for_offboarding)),
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
         "has_m365": has_m365,
+        "manual_onedrive_export_enabled": bool(str((company_record or {}).get("onedrive_export_drive_id") or "").strip()),
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -657,6 +658,14 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "m365_remove_sharepoint_site_member",
         "name": "Remove from SharePoint sites",
         "description": "Removes the staff member from one or more SharePoint sites using Graph site IDs.",
+    },
+    {
+        "type": "m365_export_onedrive",
+        "name": "Export OneDrive",
+        "description": (
+            "Copies the user's OneDrive root into the configured SharePoint document library folder, "
+            "naming the exported folder after the user's UPN and optionally setting the source OneDrive to read-only."
+        ),
     },
     {
         "type": "send_welcome_email",
@@ -1275,6 +1284,67 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "User object ID (optional)",
                 "type": "text",
                 "default": "",
+            },
+        ],
+    },
+    "m365_export_onedrive": {
+        "fields": [
+            {
+                "name": "destination_drive_id",
+                "label": "Destination SharePoint drive ID (optional)",
+                "type": "text",
+                "default": "",
+                "description": (
+                    "Optional override. Leave blank to use the SharePoint site selected in the company's settings. "
+                    "If overriding, this is the Graph drive ID for the destination SharePoint document library. "
+                    "To find it in Microsoft Graph Explorer: get the site with "
+                    "GET /sites/<tenant>.sharepoint.com:/sites/<site-name>, then list libraries with "
+                    "GET /sites/<site-id>/drives and copy the target library's id. "
+                    "For the default document library, GET /sites/<site-id>/drive also returns the id."
+                ),
+            },
+            {
+                "name": "destination_parent_item_id",
+                "label": "Destination parent folder item ID",
+                "type": "text",
+                "default": "root",
+                "description": (
+                    "Drive item ID of the SharePoint folder that will receive the UPN-named export folder. "
+                    "Use root for the library root, or list folders with "
+                    "GET /drives/<drive-id>/root/children and copy the destination folder's id."
+                ),
+            },
+            {
+                "name": "mark_source_read_only",
+                "label": "Mark source OneDrive read-only",
+                "type": "checkbox",
+                "default": True,
+                "description": "Attempts to remove inherited permissions and grant the user read access after export.",
+            },
+            {
+                "name": "wait_for_completion",
+                "label": "Wait for copy completion",
+                "type": "checkbox",
+                "default": True,
+            },
+            {
+                "name": "copy_timeout_seconds",
+                "label": "Copy timeout seconds",
+                "type": "number",
+                "default": 3600,
+                "description": "Maximum time to wait for Graph to complete the asynchronous copy operation.",
+            },
+            {
+                "name": "folder_conflict_behavior",
+                "label": "Destination folder conflict behavior",
+                "type": "select",
+                "default": "fail",
+                "description": "Controls what happens when the destination already contains a folder with the user's UPN.",
+                "options": [
+                    {"value": "fail", "label": "Fail (safest)"},
+                    {"value": "rename", "label": "Rename new export"},
+                    {"value": "replace", "label": "Replace existing"},
+                ],
             },
         ],
     },
@@ -3035,6 +3105,68 @@ async def invite_staff_member(staff_id: int, request: Request):
         invited_user_id=created_user["id"],
     )
     return JSONResponse({"success": True})
+
+
+async def m365_export_staff_onedrive(staff_id: int, request: Request):
+    """Manually export a staff member's OneDrive to the company-configured SharePoint location."""
+    (
+        user,
+        membership,
+        company,
+        staff_permission,
+        company_id,
+        redirect,
+    ) = await _load_staff_context(request, require_super_admin=True)
+    if redirect:
+        return redirect
+
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+    if not bool(user.get("is_super_admin")) and staff.get("company_id") != company_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    staff_company_id = int(staff.get("company_id") or company_id or 0)
+    staff_company = await company_repo.get_company_by_id(staff_company_id)
+    destination_drive_id = str((staff_company or {}).get("onedrive_export_drive_id") or "").strip()
+    if not destination_drive_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select a OneDrive export SharePoint site in this company's settings before exporting.",
+        )
+
+    try:
+        result = await staff_onboarding_workflow_service.export_onedrive_for_staff(
+            company_id=staff_company_id,
+            staff=staff,
+            destination_drive_id=destination_drive_id,
+            destination_parent_item_id=str(settings.m365_onedrive_export_destination_parent_item_id or "root"),
+            mark_source_read_only=bool(settings.m365_onedrive_export_mark_source_read_only),
+            wait_for_completion=bool(settings.m365_onedrive_export_wait_for_completion),
+            copy_timeout_seconds=int(settings.m365_onedrive_export_copy_timeout_seconds),
+            folder_conflict_behavior=str(settings.m365_onedrive_export_folder_conflict_behavior or "fail"),
+        )
+    except staff_onboarding_workflow_service.WorkflowStepError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+
+    await audit_service.log_action(
+        entity_type="staff",
+        entity_id=staff_id,
+        action="staff.m365.onedrive_exported",
+        user_id=int(user["id"]) if user.get("id") is not None else None,
+        metadata={
+            "email": staff.get("email"),
+            "destination_drive_id": result.get("destination_drive_id"),
+            "destination_parent_item_id": result.get("destination_parent_item_id"),
+            "destination_folder_id": result.get("destination_folder_id"),
+            "destination_folder_name": result.get("destination_folder_name"),
+            "copy_status": result.get("copy_status"),
+            "source_items_submitted": result.get("source_items_submitted"),
+            "source_marked_read_only": result.get("source_marked_read_only"),
+        },
+    )
+    return JSONResponse({"success": True, "export": result})
 
 
 async def m365_reset_staff_password(staff_id: int, request: Request):

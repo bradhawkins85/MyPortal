@@ -1049,6 +1049,52 @@ async def _graph_get(
     return response.json()
 
 
+async def list_sharepoint_export_sites(company_id: int) -> list[dict[str, Any]]:
+    """Return SharePoint sites with their default document-library drive IDs for export selection."""
+
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    sites = await _graph_get_all(
+        access_token,
+        "https://graph.microsoft.com/v1.0/sites?search=*&$select=id,displayName,name,webUrl&$top=200",
+    )
+    options: list[dict[str, Any]] = []
+    for site in sites:
+        site_id = str(site.get("id") or "").strip()
+        if not site_id:
+            continue
+        try:
+            drive = await _graph_get(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/sites/{quote(site_id, safe='')}/drive?$select=id,name,webUrl",
+            )
+        except M365Error as exc:
+            log_warning(
+                "Skipping SharePoint site without accessible default drive",
+                company_id=company_id,
+                site_id=site_id,
+                http_status=exc.http_status,
+                error=str(exc),
+            )
+            continue
+        drive_id = str(drive.get("id") or "").strip()
+        if not drive_id:
+            continue
+        display_name = str(site.get("displayName") or site.get("name") or site.get("webUrl") or site_id).strip()
+        options.append(
+            {
+                "site_id": site_id,
+                "site_name": display_name,
+                "site_web_url": site.get("webUrl"),
+                "drive_id": drive_id,
+                "drive_name": drive.get("name") or "Documents",
+                "drive_web_url": drive.get("webUrl"),
+                "label": f"{display_name} ({drive.get('name') or 'Documents'})",
+            }
+        )
+    options.sort(key=lambda item: str(item.get("label") or "").lower())
+    return options
+
+
 async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:
     """GET a Microsoft Graph collection endpoint, following ``@odata.nextLink`` pagination.
 
