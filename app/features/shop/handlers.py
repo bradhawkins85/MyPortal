@@ -2554,9 +2554,29 @@ async def admin_delete_shop_product(request: Request, product_id: int):
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    deleted = await shop_repo.delete_product(product_id)
-    if not deleted:
+    delete_result = await shop_repo.delete_product(product_id)
+    if delete_result in (False, "missing"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    if delete_result == "archived":
+        _main().log_info(
+            "Shop product archived because it has existing orders",
+            product_id=product_id,
+            updated_by=current_user.get("id") if current_user else None,
+        )
+        await audit_service.record(
+            action="shop.product.archive",
+            request=request,
+            entity_type="shop.product",
+            entity_id=product_id,
+            before={"archived": bool(product.get("archived"))},
+            after={"archived": True, "reason": "referenced_by_orders"},
+        )
+        return flash_redirect(
+            "/admin/shop",
+            "Product has existing orders, so it was archived instead of permanently deleted.",
+            "warning",
+        )
 
     image_url = product.get("image_url")
     if image_url:
