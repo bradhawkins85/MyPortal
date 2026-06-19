@@ -145,6 +145,21 @@ class Settings(BaseSettings):
     m365_client_secret_renewal_days: int = Field(
         default=14, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
     )
+    m365_onedrive_export_destination_parent_item_id: str = Field(
+        default="root", validation_alias="M365_ONEDRIVE_EXPORT_DESTINATION_PARENT_ITEM_ID"
+    )
+    m365_onedrive_export_mark_source_read_only: bool = Field(
+        default=True, validation_alias="M365_ONEDRIVE_EXPORT_MARK_SOURCE_READ_ONLY"
+    )
+    m365_onedrive_export_wait_for_completion: bool = Field(
+        default=True, validation_alias="M365_ONEDRIVE_EXPORT_WAIT_FOR_COMPLETION"
+    )
+    m365_onedrive_export_copy_timeout_seconds: int = Field(
+        default=3600, validation_alias="M365_ONEDRIVE_EXPORT_COPY_TIMEOUT_SECONDS", ge=1
+    )
+    m365_onedrive_export_folder_conflict_behavior: str = Field(
+        default="fail", validation_alias="M365_ONEDRIVE_EXPORT_FOLDER_CONFLICT_BEHAVIOR"
+    )
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     feature_packs: str = Field(

@@ -1101,6 +1101,14 @@ async def _execute_policy_step(
     if step_type == "m365_assign_license":
         return await _run_licensing_step(company_id=company_id, staff=staff, policy_config=policy_config)
 
+    if step_type == "m365_export_onedrive":
+        return await _run_export_onedrive_step(
+            company_id=company_id,
+            staff=staff,
+            step_config=step,
+            vars_map=vars_map,
+        )
+
     if step_type in {"http_get", "http_post"}:
         method = "GET" if step_type == "http_get" else "POST"
         url = _validate_web_url(_resolve_template_value(step.get("url"), vars_map=vars_map), field_name="url")
@@ -1951,6 +1959,222 @@ async def _resolve_staff_m365_user(
     if not matched or not matched.get("id"):
         raise WorkflowStepError(f"Unable to locate M365 user for {email}")
     return matched
+
+
+async def _graph_post_for_location(access_token: str, url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(url, headers=headers, json=payload)
+    if response.status_code not in (200, 201, 202, 204):
+        log_error(
+            "Microsoft Graph POST failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
+        raise WorkflowStepError(
+            f"Microsoft Graph POST failed ({response.status_code})",
+            request_payload={"url": url, "payload": payload},
+            http_status=response.status_code,
+        )
+    body = {} if response.status_code == 204 or not response.text else response.json()
+    return body, response.headers.get("Location")
+
+
+async def _wait_for_graph_copy(access_token: str, monitor_url: str, *, timeout_seconds: int) -> dict[str, Any]:
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=max(1, timeout_seconds))
+    headers = {"Authorization": f"Bearer {access_token}"}
+    last_payload: dict[str, Any] = {}
+    async with httpx.AsyncClient(timeout=30) as client:
+        while datetime.now(timezone.utc) < deadline:
+            response = await client.get(monitor_url, headers=headers)
+            if response.status_code >= 400:
+                raise WorkflowStepError(
+                    f"OneDrive export copy monitor failed ({response.status_code})",
+                    request_payload={"monitor_url": monitor_url},
+                    http_status=response.status_code,
+                )
+            last_payload = response.json() if response.text else {}
+            status_text = str(last_payload.get("status") or "").strip().lower()
+            if status_text in {"completed", "complete", "succeeded"}:
+                return last_payload
+            if status_text in {"failed", "deleted", "cancelled", "canceled"}:
+                raise WorkflowStepError(
+                    f"OneDrive export copy failed: {status_text or 'unknown'}",
+                    request_payload={"monitor_url": monitor_url, "monitor_payload": last_payload},
+                )
+            await asyncio.sleep(5)
+    raise WorkflowStepError(
+        "OneDrive export copy did not complete before timeout",
+        request_payload={"monitor_url": monitor_url, "last_payload": last_payload},
+    )
+
+
+async def export_onedrive_for_staff(
+    *,
+    company_id: int,
+    staff: dict[str, Any],
+    destination_drive_id: str,
+    destination_parent_item_id: str = "root",
+    mark_source_read_only: bool = True,
+    wait_for_completion: bool = True,
+    copy_timeout_seconds: int = 3600,
+    folder_conflict_behavior: str = "fail",
+) -> dict[str, Any]:
+    """Export a staff member's OneDrive using explicit destination settings."""
+
+    return await _run_export_onedrive_step(
+        company_id=company_id,
+        staff=staff,
+        step_config={
+            "destination_drive_id": destination_drive_id,
+            "destination_parent_item_id": destination_parent_item_id,
+            "mark_source_read_only": mark_source_read_only,
+            "wait_for_completion": wait_for_completion,
+            "copy_timeout_seconds": copy_timeout_seconds,
+            "folder_conflict_behavior": folder_conflict_behavior,
+        },
+        vars_map={},
+    )
+
+
+async def _run_export_onedrive_step(
+    *,
+    company_id: int,
+    staff: dict[str, Any],
+    step_config: dict[str, Any] | None = None,
+    vars_map: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    _vars = vars_map or {}
+    _step = step_config or {}
+    destination_drive_id = str(_resolve_template_value(_step.get("destination_drive_id"), vars_map=_vars) or "").strip()
+    if not destination_drive_id:
+        company = await company_repo.get_company_by_id(company_id)
+        destination_drive_id = str((company or {}).get("onedrive_export_drive_id") or "").strip()
+    destination_parent_item_id = str(
+        _resolve_template_value(_step.get("destination_parent_item_id"), vars_map=_vars) or "root"
+    ).strip() or "root"
+    if not destination_drive_id:
+        raise WorkflowStepError(
+            "Export OneDrive requires a destination_drive_id or a company OneDrive export site setting"
+        )
+
+    conflict_behavior = str(
+        _resolve_template_value(_step.get("folder_conflict_behavior"), vars_map=_vars) or "fail"
+    ).strip().lower()
+    if conflict_behavior not in {"fail", "rename", "replace"}:
+        raise WorkflowStepError("folder_conflict_behavior must be fail, rename, or replace")
+
+    access_token = await m365_service.acquire_access_token(company_id, force_client_credentials=True)
+    user = await _resolve_staff_m365_user(company_id, staff, access_token=access_token)
+    user_id = str(user["id"]).strip()
+    user_upn = str(user.get("userPrincipalName") or staff.get("email") or "").strip()
+    if not user_upn:
+        raise WorkflowStepError("Unable to resolve user UPN for OneDrive export")
+    encoded_user_id = quote(user_id, safe="")
+    safe_folder_name = user_upn.replace("/", "_").replace("\\", "_")
+
+    source_root = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/root?$select=id,name,webUrl",
+    )
+    source_root_id = str(source_root.get("id") or "root").strip() or "root"
+
+    destination_folder = await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/drives/{quote(destination_drive_id, safe='')}/items/{quote(destination_parent_item_id, safe='')}/children",
+        {
+            "name": safe_folder_name,
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": conflict_behavior,
+        },
+    )
+    destination_folder_id = str(destination_folder.get("id") or "").strip()
+    if not destination_folder_id:
+        raise WorkflowStepError("Graph did not return an ID for the OneDrive export destination folder")
+
+    source_children = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(source_root_id, safe='')}/children",
+    )
+
+    monitor_urls: list[str] = []
+    copied_items: list[dict[str, str]] = []
+    for child in source_children:
+        child_id = str(child.get("id") or "").strip()
+        child_name = str(child.get("name") or "").strip()
+        if not child_id:
+            continue
+        copy_payload = {
+            "parentReference": {
+                "driveId": destination_drive_id,
+                "id": destination_folder_id,
+            },
+            "name": child_name or None,
+        }
+        copy_payload = {key: value for key, value in copy_payload.items() if value is not None}
+        _, monitor_url = await _graph_post_for_location(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(child_id, safe='')}/copy",
+            copy_payload,
+        )
+        if monitor_url:
+            monitor_urls.append(monitor_url)
+        copied_items.append({"id": child_id, "name": child_name})
+
+    monitor_payloads: list[dict[str, Any]] = []
+    if monitor_urls and bool(_step.get("wait_for_completion", True)):
+        timeout_seconds = int(_step.get("copy_timeout_seconds") or 3600)
+        for monitor_url in monitor_urls:
+            monitor_payloads.append(
+                await _wait_for_graph_copy(access_token, monitor_url, timeout_seconds=timeout_seconds)
+            )
+
+    read_only_applied = False
+    if bool(_step.get("mark_source_read_only", True)):
+        try:
+            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(source_root_id, safe='')}/invite",
+                {
+                    "requireSignIn": True,
+                    "sendInvitation": False,
+                    "roles": ["read"],
+                    "recipients": [{"email": user_upn}],
+                    "retainInheritedPermissions": False,
+                },
+            )
+            read_only_applied = True
+        except M365Error as exc:
+            log_warning(
+                "Offboarding Export OneDrive: unable to mark source read-only",
+                user_id=user_id,
+                user_upn=user_upn,
+                http_status=exc.http_status,
+                error=str(exc),
+            )
+
+    completed_count = sum(
+        1 for payload in monitor_payloads if str(payload.get("status") or "").strip().lower() in {"completed", "complete", "succeeded"}
+    )
+    copy_status = "completed" if monitor_payloads and completed_count == len(monitor_payloads) else ("accepted" if monitor_urls else "submitted")
+
+    return {
+        "company_id": int(company_id),
+        "staff_id": int(staff["id"]),
+        "m365_user_id": user_id,
+        "user_principal_name": user_upn,
+        "destination_drive_id": destination_drive_id,
+        "destination_parent_item_id": destination_parent_item_id,
+        "destination_folder_id": destination_folder_id,
+        "destination_folder_name": safe_folder_name,
+        "destination_folder_web_url": destination_folder.get("webUrl"),
+        "copy_monitor_urls": monitor_urls,
+        "copy_status": copy_status,
+        "source_items_submitted": len(copied_items),
+        "source_items": copied_items,
+        "source_marked_read_only": read_only_applied,
+    }
 
 
 async def _run_offboarding_step(

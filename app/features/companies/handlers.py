@@ -494,6 +494,15 @@ async def _render_company_edit_page(
             "offboarding_email_forwarding_enabled",
             bool(int(company_record.get("offboarding_email_forwarding_enabled", 1) or 1)),
         ),
+        "onedrive_export_site_id": _string_value(
+            "onedrive_export_site_id", (company_record.get("onedrive_export_site_id") or "").strip()
+        ),
+        "onedrive_export_drive_id": _string_value(
+            "onedrive_export_drive_id", (company_record.get("onedrive_export_drive_id") or "").strip()
+        ),
+        "onedrive_export_site_name": _string_value(
+            "onedrive_export_site_name", (company_record.get("onedrive_export_site_name") or "").strip()
+        ),
         "trello_board_id": _string_value(
             "trello_board_id", (company_record.get("trello_board_id") or "").strip()
         ),
@@ -695,6 +704,8 @@ async def _render_company_edit_page(
 
     # Fetch Microsoft 365 credentials for the company
     m365_credential_view: dict[str, Any] | None = None
+    onedrive_export_site_options: list[dict[str, Any]] = []
+    onedrive_export_sites_error: str | None = None
     if is_super_admin:
         try:
             m365_creds = await m365_service.get_credentials(company_id)
@@ -711,6 +722,10 @@ async def _render_company_edit_page(
                     "client_id": m365_creds.get("client_id"),
                     "token_expires_at": expires_display,
                 }
+                try:
+                    onedrive_export_site_options = await m365_service.list_sharepoint_export_sites(company_id)
+                except m365_service.M365Error as exc:
+                    onedrive_export_sites_error = str(exc)
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" in str(exc):
                 pass
@@ -774,6 +789,8 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
+        "onedrive_export_site_options": onedrive_export_site_options,
+        "onedrive_export_sites_error": onedrive_export_sites_error,
         "m365_admin_credentials_configured": bool(all(await _main()._get_m365_admin_credentials(company_id))),
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,
@@ -1258,6 +1275,19 @@ async def admin_update_company(company_id: int, request: Request):
     offboarding_email_forwarding_enabled = bool(
         form.get("offboardingEmailForwardingEnabled")
     )
+    onedrive_export_selection_raw = str(form.get("onedriveExportSite") or "").strip()
+    onedrive_export_site_id_raw = ""
+    onedrive_export_drive_id_raw = ""
+    onedrive_export_site_name_raw = ""
+    if onedrive_export_selection_raw:
+        try:
+            selection_data = json.loads(onedrive_export_selection_raw)
+        except json.JSONDecodeError:
+            selection_data = {}
+        if isinstance(selection_data, dict):
+            onedrive_export_site_id_raw = str(selection_data.get("site_id") or "").strip()
+            onedrive_export_drive_id_raw = str(selection_data.get("drive_id") or "").strip()
+            onedrive_export_site_name_raw = str(selection_data.get("site_name") or "").strip()[:255]
     _selected_methods = [
         m
         for m, enabled in [
@@ -1275,6 +1305,10 @@ async def admin_update_company(company_id: int, request: Request):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Company not found"
         )
+    if "onedriveExportSite" not in form:
+        onedrive_export_site_id_raw = str(existing.get("onedrive_export_site_id") or "").strip()
+        onedrive_export_drive_id_raw = str(existing.get("onedrive_export_drive_id") or "").strip()
+        onedrive_export_site_name_raw = str(existing.get("onedrive_export_site_name") or "").strip()[:255]
     form_values = {
         "name": name,
         "syncro_company_id": syncro_company_raw,
@@ -1290,6 +1324,9 @@ async def admin_update_company(company_id: int, request: Request):
         "payment_method": payment_method,
         "require_po": require_po,
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
+        "onedrive_export_site_id": onedrive_export_site_id_raw,
+        "onedrive_export_drive_id": onedrive_export_drive_id_raw,
+        "onedrive_export_site_name": onedrive_export_site_name_raw,
     }
     try:
         email_domains = company_domains.parse_email_domain_text(email_domains_text)
@@ -1309,6 +1346,15 @@ async def admin_update_company(company_id: int, request: Request):
             company_id=company_id,
             form_values=form_values,
             error_message="Enter a company name.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if onedrive_export_selection_raw and (not onedrive_export_site_id_raw or not onedrive_export_drive_id_raw):
+        return await _render_company_edit_page(
+            request,
+            current_user,
+            company_id=company_id,
+            form_values=form_values,
+            error_message="Select a valid SharePoint site for OneDrive exports.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     syncro_company_id = syncro_company_raw or None
@@ -1340,6 +1386,9 @@ async def admin_update_company(company_id: int, request: Request):
         "offboarding_email_forwarding_enabled": 1
         if offboarding_email_forwarding_enabled
         else 0,
+        "onedrive_export_site_id": onedrive_export_site_id_raw or None,
+        "onedrive_export_site_name": onedrive_export_site_name_raw or None,
+        "onedrive_export_drive_id": onedrive_export_drive_id_raw or None,
     }
     try:
         await company_repo.update_company(company_id, **updates)
