@@ -85,6 +85,55 @@ async def test_export_onedrive_creates_upn_folder_copies_children_and_marks_read
 
 
 @pytest.mark.anyio
+async def test_export_onedrive_uses_drive_root_children_endpoint_for_default_parent(monkeypatch):
+    calls = {"get": [], "get_all": [], "post_location": [], "post": []}
+
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "acquire_access_token",
+        AsyncMock(return_value="token"),
+    )
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-id", "userPrincipalName": "user@example.com"}),
+    )
+
+    async def fake_graph_get(token, url):
+        calls["get"].append((token, url))
+        return {"id": "root-id", "name": "root"}
+
+    async def fake_graph_get_all(token, url):
+        calls["get_all"].append((token, url))
+        return []
+
+    async def fake_graph_post(token, url, payload):
+        calls["post"].append((token, url, payload))
+        if url.endswith("/children"):
+            return {"id": "dest-folder-id", "name": payload["name"]}
+        return {"value": []}
+
+    monkeypatch.setattr(workflows.m365_service, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(workflows.m365_service, "_graph_get_all", fake_graph_get_all)
+    monkeypatch.setattr(workflows.m365_service, "_graph_post", fake_graph_post)
+
+    result = await workflows._run_export_onedrive_step(
+        company_id=42,
+        staff={"id": 7, "email": "user@example.com"},
+        step_config={
+            "destination_drive_id": "drive-id",
+            "destination_parent_item_id": "root",
+            "mark_source_read_only": False,
+        },
+        vars_map={},
+    )
+
+    assert result["destination_folder_id"] == "dest-folder-id"
+    assert calls["post"][0][1] == "https://graph.microsoft.com/v1.0/drives/drive-id/root/children"
+    assert "/items/root/children" not in calls["post"][0][1]
+
+
+@pytest.mark.anyio
 async def test_export_onedrive_requires_destination_drive_id(monkeypatch):
     monkeypatch.setattr(workflows.company_repo, "get_company_by_id", AsyncMock(return_value={}))
     with pytest.raises(workflows.WorkflowStepError, match="destination_drive_id"):
