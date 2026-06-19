@@ -3146,9 +3146,11 @@ async def m365_export_staff_onedrive(staff_id: int, request: Request):
             folder_conflict_behavior=str(settings.m365_onedrive_export_folder_conflict_behavior or "fail"),
         )
     except staff_onboarding_workflow_service.WorkflowStepError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        status_code = exc.http_status if exc.http_status in {400, 403, 404, 409, 429} else status.HTTP_502_BAD_GATEWAY
+        raise HTTPException(status_code=status_code, detail=str(exc))
     except m365_service.M365Error as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        status_code = exc.http_status if exc.http_status in {400, 403, 404, 409, 429} else status.HTTP_502_BAD_GATEWAY
+        raise HTTPException(status_code=status_code, detail=str(exc))
 
     await audit_service.log_action(
         entity_type="staff",
