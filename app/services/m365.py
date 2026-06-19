@@ -222,6 +222,25 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "434d7c66-07c6-4b1f-ab21-417cf2cdaaca": "OrgSettings-Forms.Read.All",
 }
 
+
+# Microsoft Graph application permissions that must be requested/granted even
+# when a tenant's servicePrincipal appRoles projection does not include them.
+# SharePointTenantSettings.Read.All is assignable in tenants where the Entra
+# portal can add it manually, but Graph service-principal lookups can omit it;
+# filtering it out here caused diagnostics repair/re-authorisation to leave the
+# permission missing while still reporting it as an actionable failure.
+_FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
+    {
+        _SHAREPOINT_TENANT_SETTINGS_ROLE,
+    }
+)
+
+
+def _is_graph_role_grantable(role_id: str, graph_sp_role_ids: set[str]) -> bool:
+    """Return whether a Graph application role should be requested/granted."""
+    return role_id in graph_sp_role_ids or role_id in _FORCE_GRANT_GRAPH_APP_ROLES
+
+
 # Catalog of enterprise apps and their expected application permissions.
 # Used by the diagnostics page to display Pass/Fail per permission per app.
 ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
@@ -1534,9 +1553,15 @@ async def provision_app_registration(
 
     _teams_sp_id, teams_sp_role_ids = await _get_sp_app_role_ids(access_token, _TEAMS_APP_ID)
 
-    # Filter Graph roles to only those present in this tenant's Graph SP.
-    valid_graph_roles: list[str] = [r for r in _PROVISION_APP_ROLES if r in graph_sp_role_ids]
-    skipped_graph_roles: list[str] = [r for r in _PROVISION_APP_ROLES if r not in graph_sp_role_ids]
+    # Filter Graph roles to those present in this tenant's Graph SP, plus
+    # explicitly force-granted roles whose availability lookup can be stale or
+    # incomplete even though Graph accepts the assignment.
+    valid_graph_roles: list[str] = [
+        r for r in _PROVISION_APP_ROLES if _is_graph_role_grantable(r, graph_sp_role_ids)
+    ]
+    skipped_graph_roles: list[str] = [
+        r for r in _PROVISION_APP_ROLES if not _is_graph_role_grantable(r, graph_sp_role_ids)
+    ]
     if skipped_graph_roles:
         log_warning(
             "Some required Graph permissions are not available in this tenant's "
@@ -3565,8 +3590,12 @@ async def try_grant_missing_permissions(
                     company_id=company_id,
                 )
             else:
-                grantable = [r for r in missing if r in graph_sp_role_ids]
-                not_in_tenant = [r for r in missing if r not in graph_sp_role_ids]
+                grantable = [
+                    r for r in missing if _is_graph_role_grantable(r, graph_sp_role_ids)
+                ]
+                not_in_tenant = [
+                    r for r in missing if not _is_graph_role_grantable(r, graph_sp_role_ids)
+                ]
                 if not_in_tenant:
                     log_info(
                         "try_grant_missing_permissions: skipping roles not present "
