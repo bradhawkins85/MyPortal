@@ -270,6 +270,48 @@
             <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
           </div>
           <div class="form-field">
+            <label class="form-label" for="edit-company-onedrive-export-site">OneDrive export SharePoint site</label>
+            {% if m365_has_credentials %}
+              <select
+                id="edit-company-onedrive-export-site"
+                name="onedriveExportSite"
+                class="form-input"
+              >
+                <option value="">Do not enable manual OneDrive exports</option>
+                {% if form_data.onedrive_export_drive_id %}
+                  {% set saved_site_payload = {
+                    'site_id': form_data.onedrive_export_site_id,
+                    'site_name': form_data.onedrive_export_site_name,
+                    'drive_id': form_data.onedrive_export_drive_id
+                  } %}
+                  <option value="{{ saved_site_payload | tojson | forceescape }}" selected>
+                    Current: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}
+                  </option>
+                {% endif %}
+                {% for site in onedrive_export_site_options %}
+                  {% set site_payload = {
+                    'site_id': site.site_id,
+                    'site_name': site.site_name,
+                    'drive_id': site.drive_id
+                  } %}
+                  <option
+                    value="{{ site_payload | tojson | forceescape }}"
+                  >{{ site.label }}</option>
+                {% endfor %}
+              </select>
+              <p class="form-help">Select the SharePoint site/default document library that will receive OneDrive export folders. The system stores the selected library drive ID against this company.</p>
+              {% if form_data.onedrive_export_drive_id and not onedrive_export_site_options %}
+                <p class="form-help">Current saved export site: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}</p>
+              {% endif %}
+              {% if onedrive_export_sites_error %}
+                <p class="form-help form-help--error">Unable to load SharePoint sites: {{ onedrive_export_sites_error }}</p>
+              {% endif %}
+            {% else %}
+              <input class="form-input" id="edit-company-onedrive-export-site" value="Configure Microsoft 365 credentials first" readonly />
+              <p class="form-help">Complete this company's Office 365 configuration before selecting a OneDrive export destination.</p>
+            {% endif %}
+          </div>
+          <div class="form-field">
             <label class="form-label">Payment method</label>
             <div class="form-checkbox-group">
               <label class="form-checkbox__label">
