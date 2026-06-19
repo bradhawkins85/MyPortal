@@ -21,6 +21,7 @@ from app.schemas.company_recurring_invoice_items import (
 from app.schemas.users import StaffRequesterOption
 from app.services import audit as audit_service
 from app.services import company_id_lookup
+from app.services import m365 as m365_service
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
 
@@ -435,6 +436,33 @@ async def lookup_xero_contact_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error looking up Xero contact ID: {str(exc)}"
         )
+
+
+@router.get("/{company_id}/onedrive-export-sites")
+async def list_onedrive_export_sites(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup SharePoint sites and default drives for OneDrive export selection on demand."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    try:
+        sites = await m365_service.list_sharepoint_export_sites(company_id)
+    except m365_service.M365Error as exc:
+        raise HTTPException(
+            status_code=exc.http_status or status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error loading SharePoint sites: {str(exc)}",
+        ) from exc
+
+    return {"sites": sites}
 
 
 @router.post("/{company_id}/lookup-hudu-id")

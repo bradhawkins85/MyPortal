@@ -272,40 +272,47 @@
           <div class="form-field">
             <label class="form-label" for="edit-company-onedrive-export-site">OneDrive export SharePoint site</label>
             {% if m365_has_credentials %}
-              <select
-                id="edit-company-onedrive-export-site"
-                name="onedriveExportSite"
-                class="form-input"
-              >
-                <option value="">Do not enable manual OneDrive exports</option>
-                {% if form_data.onedrive_export_drive_id %}
-                  {% set saved_site_payload = {
-                    'site_id': form_data.onedrive_export_site_id,
-                    'site_name': form_data.onedrive_export_site_name,
-                    'drive_id': form_data.onedrive_export_drive_id
-                  } %}
-                  <option value="{{ saved_site_payload | tojson | forceescape }}" selected>
-                    Current: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}
-                  </option>
-                {% endif %}
-                {% for site in onedrive_export_site_options %}
-                  {% set site_payload = {
-                    'site_id': site.site_id,
-                    'site_name': site.site_name,
-                    'drive_id': site.drive_id
-                  } %}
-                  <option
-                    value="{{ site_payload | tojson | forceescape }}"
-                  >{{ site.label }}</option>
-                {% endfor %}
-              </select>
-              <p class="form-help">Select the SharePoint site/default document library that will receive OneDrive export folders. The system stores the selected library drive ID against this company.</p>
-              {% if form_data.onedrive_export_drive_id and not onedrive_export_site_options %}
+              <div class="form-field__group">
+                <select
+                  id="edit-company-onedrive-export-site"
+                  name="onedriveExportSite"
+                  class="form-input"
+                  data-onedrive-export-sites-select
+                >
+                  <option value="">Do not enable manual OneDrive exports</option>
+                  {% if form_data.onedrive_export_drive_id %}
+                    {% set saved_site_payload = {
+                      'site_id': form_data.onedrive_export_site_id,
+                      'site_name': form_data.onedrive_export_site_name,
+                      'drive_id': form_data.onedrive_export_drive_id
+                    } %}
+                    <option value="{{ saved_site_payload | tojson | forceescape }}" selected>
+                      Current: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}
+                    </option>
+                  {% endif %}
+                </select>
+                <button
+                  type="button"
+                  class="button button--ghost"
+                  data-lookup-onedrive-export-sites
+                  title="Lookup SharePoint sites for OneDrive exports"
+                  aria-label="Lookup SharePoint sites for OneDrive exports from Microsoft Graph"
+                >
+                  <span class="button__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+                      <path d="M20 12h2a10 10 0 0 0-10-10v2a8 8 0 0 1 8 8z"/>
+                      <path d="M12 20v2a10 10 0 0 0 10-10h-2a8 8 0 0 1-8 8z"/>
+                      <path d="M4 12H2a10 10 0 0 0 10 10v-2a8 8 0 0 1-8-8z"/>
+                    </svg>
+                  </span>
+                </button>
+              </div>
+              <p class="form-help">Click the lookup button to load SharePoint sites/default document libraries, then select the destination that will receive OneDrive export folders.</p>
+              {% if form_data.onedrive_export_drive_id %}
                 <p class="form-help">Current saved export site: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}</p>
               {% endif %}
-              {% if onedrive_export_sites_error %}
-                <p class="form-help form-help--error">Unable to load SharePoint sites: {{ onedrive_export_sites_error }}</p>
-              {% endif %}
+              <p class="form-help form-help--error" data-onedrive-export-sites-error hidden></p>
             {% else %}
               <input class="form-input" id="edit-company-onedrive-export-site" value="Configure Microsoft 365 credentials first" readonly />
               <p class="form-help">Complete this company's Office 365 configuration before selecting a OneDrive export destination.</p>
