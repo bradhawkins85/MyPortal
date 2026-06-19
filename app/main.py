@@ -3550,12 +3550,14 @@ async def m365_user_mailboxes_page(request: Request):
     credentials = await m365_service.get_credentials(company_id)
     mailboxes = await m365_service.get_user_mailboxes(company_id)
     synced_at = await m365_repo.get_mailbox_synced_at(company_id)
+    active_staff = await staff_repo.list_active_staff_for_offboarding(company_id)
     extra = {
         "title": "User Mailboxes",
         "company": company,
         "mailboxes": mailboxes,
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
+        "active_staff": active_staff,
     }
     return await _render_template("m365/user_mailboxes.html", request, user, extra=extra)
 
@@ -3570,12 +3572,14 @@ async def m365_shared_mailboxes_page(request: Request):
     credentials = await m365_service.get_credentials(company_id)
     mailboxes = await m365_service.get_shared_mailboxes(company_id)
     synced_at = await m365_repo.get_mailbox_synced_at(company_id)
+    active_staff = await staff_repo.list_active_staff_for_offboarding(company_id)
     extra = {
         "title": "Shared Mailboxes",
         "company": company,
         "mailboxes": mailboxes,
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
+        "active_staff": active_staff,
     }
     return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
 
@@ -3742,6 +3746,111 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
             {"error": "Unable to retrieve mailbox permissions at this time."},
             status_code=503,
         )
+
+
+@app.post("/m365/mailboxes/permissions/request", response_class=JSONResponse, tags=["Microsoft 365"])
+async def request_m365_mailbox_permission_changes(request: Request):
+    """Create a ticket requesting mailbox permission additions/removals."""
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not (
+        user.get("is_super_admin")
+        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True)
+        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True)
+        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes")
+        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes")
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mailbox permission access required")
+
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+
+    mailbox_upn = str((body or {}).get("mailbox_upn") or "").strip()
+    mailbox_display_name = str((body or {}).get("mailbox_display_name") or mailbox_upn).strip()
+    notes = str((body or {}).get("notes") or "").strip()
+    removals_raw = (body or {}).get("removals") or []
+    additions_raw = (body or {}).get("additions") or []
+    if not mailbox_upn:
+        return JSONResponse({"error": "A mailbox is required."}, status_code=400)
+
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    known_upns = {str(mb.get("user_principal_name") or "").strip().lower() for mb in user_mbs + shared_mbs}
+    if mailbox_upn.lower() not in known_upns:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
+
+    def _clean_change_items(items: Any, *, value_key: str) -> list[dict[str, str]]:
+        cleaned: list[dict[str, str]] = []
+        if not isinstance(items, list):
+            return cleaned
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get(value_key) or item.get("upn") or item.get("email") or "").strip()
+            label = str(item.get("label") or value).strip()
+            if not value or value.lower() in seen:
+                continue
+            seen.add(value.lower())
+            cleaned.append({value_key: value, "label": label or value})
+        return cleaned
+
+    removals = _clean_change_items(removals_raw, value_key="upn")
+    additions = _clean_change_items(additions_raw, value_key="email")
+    if not removals and not additions:
+        return JSONResponse({"error": "Select at least one permission change."}, status_code=400)
+
+    active_staff = await staff_repo.list_active_staff_for_offboarding(company_id)
+    active_staff_emails = {str(staff.get("email") or "").strip().lower() for staff in active_staff}
+    additions = [item for item in additions if item["email"].lower() in active_staff_emails]
+    if additions_raw and not additions and not removals:
+        return JSONResponse({"error": "Select at least one active staff member to add."}, status_code=400)
+
+    removal_lines = "".join(f"<li>{escape(item['label'])}</li>" for item in removals) or "<li>None</li>"
+    addition_lines = "".join(f"<li>{escape(item['label'])}</li>" for item in additions) or "<li>None</li>"
+    requester_name = str(user.get("name") or user.get("email") or "Current user")
+    description = (
+        f"<p>{escape(requester_name)} requested mailbox permission changes for "
+        f"<strong>{escape(mailbox_display_name)}</strong> ({escape(mailbox_upn)}).</p>"
+        f"<h3>Request Removal for existing permissions</h3><ul>{removal_lines}</ul>"
+        f"<h3>Add active staff members</h3><ul>{addition_lines}</ul>"
+    )
+    if notes:
+        description += f"<h3>Notes</h3><p>{escape(notes)}</p>"
+
+    requester_id = int(user["id"])
+    ticket = await tickets_service.create_ticket(
+        subject=f"Mailbox permission change request: {mailbox_display_name or mailbox_upn}",
+        description=description,
+        requester_id=requester_id,
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status=await tickets_service.resolve_status_or_default(None),
+        category="Microsoft 365",
+        module_slug="m365_admin",
+        external_reference=f"m365-mailbox-permissions:{mailbox_upn}",
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+    )
+    try:
+        await tickets_repo.add_watcher(ticket["id"], requester_id)
+    except Exception:
+        logger.exception("Failed to add mailbox permission requester as ticket watcher")
+
+    log_info(
+        "M365 mailbox permission change ticket created",
+        company_id=company_id,
+        user_id=user.get("id"),
+        mailbox_upn=mailbox_upn,
+        ticket_id=ticket.get("id"),
+        removals=len(removals),
+        additions=len(additions),
+    )
+    return JSONResponse({"ticket_id": ticket.get("id"), "ticket_number": ticket.get("ticket_number")})
 
 
 @app.post("/m365/checks/report-privacy", response_class=RedirectResponse)
