@@ -438,7 +438,7 @@ def test_provision_app_roles_includes_group_member_readwrite_all():
 def test_provision_app_roles_includes_sharepoint_tenant_settings_read_all():
     """_PROVISION_APP_ROLES must include SharePointTenantSettings.Read.All for SPO best-practice checks."""
     assert _SHAREPOINT_TENANT_SETTINGS_ROLE in _PROVISION_APP_ROLES, (
-        "SharePointTenantSettings.Read.All (a8ead177-1889-4546-9387-f25e658e2a79) must be in "
+        "SharePointTenantSettings.Read.All (83d4163d-a2d8-4d3b-9695-4ae3ca98f888) must be in "
         "_PROVISION_APP_ROLES to enable SharePoint Online best-practice checks "
         "(GET /admin/sharepoint/settings)"
     )
