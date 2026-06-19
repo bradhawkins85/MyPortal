@@ -418,12 +418,15 @@
         requestStatus.textContent = 'Submitting request…';
         requestStatus.className = 'panel__subtitle';
         requestStatus.style.display = 'block';
+        var headers = {
+          'Content-Type': 'application/json'
+        };
+{% if csrf_token %}
+        headers['X-CSRF-Token'] = '{{ csrf_token }}';
+{% endif %}
         fetch('/m365/mailboxes/permissions/request', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
-          },
+          headers: headers,
           body: JSON.stringify({
             mailbox_upn: requestUpn.value,
             mailbox_display_name: requestDisplayName.value,
