@@ -96,6 +96,11 @@ router.add_api_route("/staff/enabled", handlers.set_staff_enabled, methods=["POS
 router.add_api_route("/staff/{staff_id}/verify", handlers.verify_staff_member, methods=["POST"])
 router.add_api_route("/staff/{staff_id}/invite", handlers.invite_staff_member, methods=["POST"])
 router.add_api_route(
+    "/api/staff/{staff_id}/m365/export-onedrive",
+    handlers.m365_export_staff_onedrive,
+    methods=["POST"],
+)
+router.add_api_route(
     "/api/staff/{staff_id}/m365/reset-password",
     handlers.m365_reset_staff_password,
     methods=["POST"],

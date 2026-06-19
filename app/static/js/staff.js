@@ -515,6 +515,7 @@
       workflowRetry: container.querySelector('[data-edit-action="workflow-retry"]'),
       workflowResume: container.querySelector('[data-edit-action="workflow-resume"]'),
       workflowForceComplete: container.querySelector('[data-edit-action="workflow-force-complete"]'),
+      m365ExportOneDrive: container.querySelector('[data-edit-action="m365-export-onedrive"]'),
       m365ResetPassword: container.querySelector('[data-edit-action="m365-reset-password"]'),
       m365EnableSignIn: container.querySelector('[data-edit-action="m365-enable-sign-in"]'),
       m365DisableSignIn: container.querySelector('[data-edit-action="m365-disable-sign-in"]'),
@@ -813,6 +814,8 @@
       setActionVisibility(editActionButtons.workflowResume, { visible: workflowContext.canResume, disabled: false });
       setActionVisibility(editActionButtons.workflowForceComplete, { visible: workflowContext.canForceComplete, disabled: false });
       const canM365Actions = Boolean(flags && flags.isSuperAdmin && flags.hasM365 && member.email);
+      const canExportOneDrive = Boolean(canM365Actions && flags.manualOneDriveExportEnabled);
+      setActionVisibility(editActionButtons.m365ExportOneDrive, { visible: canExportOneDrive, disabled: false });
       setActionVisibility(editActionButtons.m365ResetPassword, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365EnableSignIn, { visible: canM365Actions, disabled: false });
       setActionVisibility(editActionButtons.m365DisableSignIn, { visible: canM365Actions, disabled: false });
@@ -1018,6 +1021,20 @@
       });
     }
 
+    async function exportM365OneDrive(staffId) {
+      const member = staffById.get(String(staffId)) || staffById.get(Number(staffId));
+      const name = member ? `${member.first_name || ''} ${member.last_name || ''}`.trim() || member.email || 'this staff member' : 'this staff member';
+      if (!window.confirm(`Export OneDrive for ${name}? This may take some time and uses the SharePoint destination configured in .env.`)) {
+        return;
+      }
+      const data = await requestJson(`/api/staff/${staffId}/m365/export-onedrive`, { method: 'POST' });
+      const exported = data && data.export ? data.export : {};
+      const folderName = exported.destination_folder_name || 'the configured folder';
+      const status = exported.copy_status || 'submitted';
+      window.alert(`OneDrive export ${status} for ${folderName}. Submitted ${exported.source_items_submitted || 0} root item(s).`);
+      window.location.reload();
+    }
+
     async function resetM365Password(staffId) {
       const data = await requestJson(`/api/staff/${staffId}/m365/reset-password`, { method: 'POST' });
       const password = data && data.password ? data.password : '';
@@ -1046,6 +1063,20 @@
           return;
         }
         openOffboardingRequestModal(id);
+      });
+    });
+
+    container.querySelectorAll('[data-staff-export-onedrive]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-staff-export-onedrive');
+        if (!id) {
+          return;
+        }
+        try {
+          await exportM365OneDrive(id);
+        } catch (error) {
+          alert(`Failed to export OneDrive: ${error.message}`);
+        }
       });
     });
 
@@ -1409,6 +1440,19 @@
           }, getActionStep((editActionButtons.workflowForceComplete.dataset.currentStep || '').trim()), getActionNote() || '');
         } catch (error) {
           setInlineError(editActionError, `Failed to force-complete workflow step: ${error.message}`);
+        }
+      });
+    }
+    if (editActionButtons.m365ExportOneDrive) {
+      editActionButtons.m365ExportOneDrive.addEventListener('click', async () => {
+        if (!currentEditStaffId) {
+          return;
+        }
+        try {
+          setInlineError(editActionError, '');
+          await exportM365OneDrive(currentEditStaffId);
+        } catch (error) {
+          setInlineError(editActionError, `Failed to export OneDrive: ${error.message}`);
         }
       });
     }
