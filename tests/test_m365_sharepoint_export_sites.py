@@ -56,3 +56,20 @@ async def test_list_sharepoint_export_sites_403_mentions_sites_read_all(monkeypa
 def test_provision_app_roles_includes_sites_read_all_for_sharepoint_export_picker():
     assert m365_service._SITES_READ_ALL_ROLE in m365_service._PROVISION_APP_ROLES
     assert m365_service._GRAPH_ROLE_NAMES[m365_service._SITES_READ_ALL_ROLE] == "Sites.Read.All"
+
+
+def test_provision_app_roles_includes_sites_readwrite_all_for_onedrive_export_writes():
+    assert m365_service._SITES_READWRITE_ALL_ROLE in m365_service._PROVISION_APP_ROLES
+    assert (
+        m365_service._GRAPH_ROLE_NAMES[m365_service._SITES_READWRITE_ALL_ROLE]
+        == "Sites.ReadWrite.All"
+    )
+    graph_permissions = next(
+        app["permissions"]
+        for app in m365_service.ENTERPRISE_APP_CATALOG
+        if app["app_id"] == m365_service._GRAPH_APP_ID
+    )
+    assert {permission["name"] for permission in graph_permissions} >= {
+        "Sites.Read.All",
+        "Sites.ReadWrite.All",
+    }
