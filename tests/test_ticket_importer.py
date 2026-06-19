@@ -118,10 +118,50 @@ async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
     assert created_calls["status"] == "in_progress"
     assert created_calls["ticket_number"] == "101"
     assert created_calls["requester_id"] is None
+    assert created_calls["module_slug"] == "syncro"
+    assert created_calls["trigger_automations"] is False
     # Now the ticket ID should match the Syncro ticket number
     assert created_calls["id"] == 101
     assert update_calls[0][0] == 101
     assert "created_at" in update_calls[0][1]
+
+
+@pytest.mark.anyio
+async def test_import_ticket_by_id_does_not_queue_ollama_generation(monkeypatch):
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": ticket_id,
+            "subject": "Imported ticket",
+            "status": "New",
+            "problem": "Imported from Syncro",
+        }
+
+    async def fake_get_existing(_external_reference):
+        return None
+
+    async def fake_create_ticket(**kwargs):
+        assert kwargs["module_slug"] == "syncro"
+        assert kwargs["trigger_automations"] is False
+        return {"id": kwargs.get("id") or 222, **kwargs}
+
+    async def fail_refresh_summary(_ticket_id):
+        raise AssertionError("Syncro imports must not queue Ollama summary generation")
+
+    async def fail_refresh_tags(_ticket_id):
+        raise AssertionError("Syncro imports must not queue Ollama tag generation")
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", fail_refresh_summary)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", fail_refresh_tags)
+    monkeypatch.setattr(ticket_importer.user_repo, "get_user_by_email", lambda _email: None)
+
+    summary = await ticket_importer.import_ticket_by_id(222, rate_limiter=None)
+
+    assert summary.created == 1
+    assert summary.updated == 0
+    assert summary.skipped == 0
 
 
 @pytest.mark.anyio
