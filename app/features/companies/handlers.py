@@ -704,8 +704,6 @@ async def _render_company_edit_page(
 
     # Fetch Microsoft 365 credentials for the company
     m365_credential_view: dict[str, Any] | None = None
-    onedrive_export_site_options: list[dict[str, Any]] = []
-    onedrive_export_sites_error: str | None = None
     if is_super_admin:
         try:
             m365_creds = await m365_service.get_credentials(company_id)
@@ -722,10 +720,6 @@ async def _render_company_edit_page(
                     "client_id": m365_creds.get("client_id"),
                     "token_expires_at": expires_display,
                 }
-                try:
-                    onedrive_export_site_options = await m365_service.list_sharepoint_export_sites(company_id)
-                except m365_service.M365Error as exc:
-                    onedrive_export_sites_error = str(exc)
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" in str(exc):
                 pass
@@ -789,8 +783,6 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
-        "onedrive_export_site_options": onedrive_export_site_options,
-        "onedrive_export_sites_error": onedrive_export_sites_error,
         "m365_admin_credentials_configured": bool(all(await _main()._get_m365_admin_credentials(company_id))),
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,

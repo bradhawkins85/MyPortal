@@ -2943,10 +2943,13 @@
     const tacticalButton = document.querySelector('[data-lookup-tactical-id]');
     const xeroButton = document.querySelector('[data-lookup-xero-id]');
     const huduButton = document.querySelector('[data-lookup-hudu-id]');
+    const onedriveSitesButton = document.querySelector('[data-lookup-onedrive-export-sites]');
     const huntressButton = document.querySelector('[data-lookup-huntress-id]');
     const tacticalInput = document.getElementById('edit-company-tactical');
     const xeroInput = document.getElementById('edit-company-xero');
     const huduInput = document.getElementById('edit-company-hudu');
+    const onedriveSitesSelect = document.querySelector('[data-onedrive-export-sites-select]');
+    const onedriveSitesError = document.querySelector('[data-onedrive-export-sites-error]');
     const huntressInput = document.getElementById('edit-company-huntress');
 
     const spinnerHtml = '<span class="button__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false" class="spin-animation"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg></span>';
@@ -3005,6 +3008,78 @@
         } finally {
           xeroButton.disabled = false;
           xeroButton.innerHTML = originalText;
+        }
+      });
+    }
+
+
+    if (onedriveSitesButton && onedriveSitesSelect) {
+      onedriveSitesButton.addEventListener('click', async () => {
+        const originalText = onedriveSitesButton.innerHTML;
+        const selectedValue = onedriveSitesSelect.value;
+        onedriveSitesButton.disabled = true;
+        onedriveSitesButton.innerHTML = spinnerHtml;
+        if (onedriveSitesError) {
+          onedriveSitesError.hidden = true;
+          onedriveSitesError.textContent = '';
+        }
+
+        try {
+          const result = await requestJson(`/api/companies/${companyId}/onedrive-export-sites`, {
+            method: 'GET',
+          });
+          const sites = Array.isArray(result?.sites) ? result.sites : [];
+          const existingOptions = Array.from(onedriveSitesSelect.options).filter((option) => {
+            return option.value === '' || option.selected;
+          });
+          onedriveSitesSelect.replaceChildren(...existingOptions);
+
+          sites.forEach((site) => {
+            const siteId = String(site.site_id || '').trim();
+            const driveId = String(site.drive_id || '').trim();
+            if (!siteId || !driveId) {
+              return;
+            }
+            const payload = {
+              site_id: siteId,
+              site_name: String(site.site_name || '').trim(),
+              drive_id: driveId,
+            };
+            const optionValue = JSON.stringify(payload);
+            if (Array.from(onedriveSitesSelect.options).some((option) => option.value === optionValue)) {
+              return;
+            }
+            const option = document.createElement('option');
+            option.value = optionValue;
+            option.textContent = site.label || `${payload.site_name || siteId} (${site.drive_name || 'Documents'})`;
+            onedriveSitesSelect.appendChild(option);
+          });
+
+          if (selectedValue) {
+            const previousOption = Array.from(onedriveSitesSelect.options).find((option) => option.value === selectedValue);
+            if (previousOption) {
+              previousOption.selected = true;
+            }
+          }
+
+          if (!sites.length) {
+            alert('No SharePoint sites were found for this Microsoft 365 tenant.');
+          } else {
+            onedriveSitesSelect.classList.add('form-input--success');
+            setTimeout(() => onedriveSitesSelect.classList.remove('form-input--success'), 2000);
+          }
+        } catch (error) {
+          console.error('Failed to lookup SharePoint sites:', error);
+          const message = error instanceof Error ? error.message : 'Failed to lookup SharePoint sites. Please try again.';
+          if (onedriveSitesError) {
+            onedriveSitesError.textContent = `Unable to load SharePoint sites: ${message}`;
+            onedriveSitesError.hidden = false;
+          } else {
+            alert(message);
+          }
+        } finally {
+          onedriveSitesButton.disabled = false;
+          onedriveSitesButton.innerHTML = originalText;
         }
       });
     }
