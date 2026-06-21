@@ -1193,6 +1193,49 @@ async def get_time_totals_by_ticket_ids(ticket_ids: list[int]) -> dict[int, dict
     return result
 
 
+async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]:
+    """Return aggregate ticket values used by automation filter matching."""
+
+    time_row = await db.fetch_one(
+        """
+        SELECT
+            SUM(CASE WHEN is_billable = 1 AND minutes_spent IS NOT NULL THEN minutes_spent ELSE 0 END) AS billable_minutes,
+            SUM(CASE WHEN is_billable = 0 AND minutes_spent IS NOT NULL THEN minutes_spent ELSE 0 END) AS non_billable_minutes
+        FROM ticket_replies
+        WHERE ticket_id = %s AND minutes_spent IS NOT NULL AND minutes_spent > 0
+        """,
+        (ticket_id,),
+    )
+    attachment_row = await db.fetch_one(
+        "SELECT COUNT(*) AS attachment_count FROM ticket_attachments WHERE ticket_id = %s",
+        (ticket_id,),
+    )
+    task_row = await db.fetch_one(
+        """
+        SELECT
+            COUNT(*) AS task_count,
+            SUM(CASE WHEN is_completed = 0 THEN 1 ELSE 0 END) AS open_task_count
+        FROM ticket_tasks
+        WHERE ticket_id = %s
+        """,
+        (ticket_id,),
+    )
+
+    attachment_count = int((attachment_row or {}).get("attachment_count") or 0)
+    task_count = int((task_row or {}).get("task_count") or 0)
+    open_task_count = int((task_row or {}).get("open_task_count") or 0)
+    return {
+        "billable_minutes": int((time_row or {}).get("billable_minutes") or 0),
+        "non_billable_minutes": int((time_row or {}).get("non_billable_minutes") or 0),
+        "attachment_count": attachment_count,
+        "has_attachments": attachment_count > 0,
+        "task_count": task_count,
+        "has_tasks": task_count > 0,
+        "open_task_count": open_task_count,
+        "has_open_tasks": open_task_count > 0,
+    }
+
+
 async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int) -> tuple[bool, str | None]:
     """
     Validate that all reply IDs belong to the specified ticket.
