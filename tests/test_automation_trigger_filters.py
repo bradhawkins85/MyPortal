@@ -41,3 +41,78 @@ def test_filters_like_requires_string_actual_value():
     filters = {"match": {"ticket.subject": "% wont turn on"}}
 
     assert not automations_service._filters_match(filters, context)
+
+
+def test_filters_match_ai_tags_sequence_contains_expected_tag():
+    context = {"ticket": {"ai_tags": ["printer", "network-outage"]}}
+    filters = {"match": {"ticket.ai_tags": "network-%"}}
+
+    assert automations_service._filters_match(filters, context)
+
+
+def test_filters_match_ticket_boolean_and_time_automation_fields():
+    context = {
+        "ticket": {
+            "has_attachments": True,
+            "has_open_tasks": False,
+            "billable_minutes": 45,
+            "non_billable_minutes": 10,
+        }
+    }
+
+    assert automations_service._filters_match(
+        {
+            "all": [
+                {"match": {"ticket.has_attachments": True}},
+                {"match": {"ticket.has_open_tasks": False}},
+                {"greater_than": {"ticket.billable_minutes": 30}},
+                {"less_than_or_equal": {"ticket.non_billable_minutes": 10}},
+            ]
+        },
+        context,
+    )
+
+
+def test_filters_match_string_operator_variants():
+    context = {"ticket": {"subject": "Network outage for payroll"}}
+
+    assert automations_service._filters_match(
+        {"starts_with": {"ticket.subject": "Network"}}, context
+    )
+    assert automations_service._filters_match(
+        {"ends_with": {"ticket.subject": "payroll"}}, context
+    )
+    assert automations_service._filters_match(
+        {"contains": {"ticket.subject": "outage"}}, context
+    )
+    assert automations_service._filters_match(
+        {"not_contains": {"ticket.subject": "printer"}}, context
+    )
+    assert automations_service._filters_match(
+        {"regex": {"ticket.subject": r"Network\s+outage"}}, context
+    )
+
+
+def test_filters_match_string_operators_support_sequences():
+    context = {"ticket": {"ai_tags": ["printer", "network-outage"]}}
+
+    assert automations_service._filters_match(
+        {"contains": {"ticket.ai_tags": "network"}}, context
+    )
+    assert automations_service._filters_match(
+        {"not_contains": {"ticket.ai_tags": "billing"}}, context
+    )
+    assert not automations_service._filters_match(
+        {"not_contains": {"ticket.ai_tags": "printer"}}, context
+    )
+
+
+def test_filters_match_custom_regex_rejects_invalid_or_oversized_patterns():
+    context = {"ticket": {"subject": "Network outage for payroll"}}
+
+    assert not automations_service._filters_match(
+        {"regex": {"ticket.subject": "["}}, context
+    )
+    assert not automations_service._filters_match(
+        {"regex": {"ticket.subject": "a" * 257}}, context
+    )
