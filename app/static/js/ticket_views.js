@@ -48,19 +48,20 @@
       this.setupEventListeners();
       this.setupStatusFilters();
       this.setupGroupingControls();
+      this.updateViewActions();
       this.applyDefaultView();
     }
 
     /**
      * Load all saved views from the API
      */
-    async loadViews() {
+    async loadViews(selectedViewId = null) {
       try {
         const response = await fetch(`${API_BASE}/views`);
         if (response.ok) {
           const data = await response.json();
           this.views = data.items || [];
-          this.renderViewSelector();
+          this.renderViewSelector(selectedViewId);
         }
       } catch (error) {
         console.error('Failed to load ticket views:', error);
@@ -88,6 +89,12 @@
       const saveViewBtn = this.container.querySelector('[data-save-view]');
       if (saveViewBtn) {
         saveViewBtn.addEventListener('click', () => this.showSaveViewModal());
+      }
+
+      // Update view button
+      const updateViewBtn = this.container.querySelector('[data-update-view]');
+      if (updateViewBtn) {
+        updateViewBtn.addEventListener('click', () => this.updateCurrentView());
       }
 
       // Save view form
@@ -378,6 +385,11 @@
         if (response.ok) {
           const view = await response.json();
           this.currentView = view;
+          const viewSelect = this.container.querySelector('[data-view-select]');
+          if (viewSelect) {
+            viewSelect.value = String(view.id);
+          }
+          this.updateViewActions();
           
           // Apply filters
           if (view.filters) {
@@ -397,6 +409,7 @@
           }
           
           this.applyFilters();
+          this.updateViewActions();
         }
       } catch (error) {
         console.error('Failed to apply view:', error);
@@ -418,6 +431,7 @@
      */
     clearView() {
       this.currentView = null;
+      this.updateViewActions();
       this.filterState = {
         statuses: [],
         priorities: [],
@@ -462,12 +476,10 @@
     }
 
     /**
-     * Save current view
+     * Build the payload used when creating or updating a view.
      */
-    async saveView(name, description, isDefault) {
-      const payload = {
-        name,
-        description,
+    buildViewPayload(overrides = {}) {
+      return {
         filters: {
           status: this.filterState.statuses,
           priority: this.filterState.priorities,
@@ -475,8 +487,19 @@
         grouping_field: this.groupingField,
         sort_field: this.sortField,
         sort_direction: this.sortDirection,
-        is_default: isDefault
+        ...overrides
       };
+    }
+
+    /**
+     * Save current view
+     */
+    async saveView(name, description, isDefault) {
+      const payload = this.buildViewPayload({
+        name,
+        description,
+        is_default: isDefault
+      });
 
       try {
         const csrfToken = getCsrfToken();
@@ -495,6 +518,41 @@
         }
       } catch (error) {
         console.error('Failed to save view:', error);
+      }
+      return false;
+    }
+
+    /**
+     * Update the selected saved view with the current filters and grouping.
+     */
+    async updateCurrentView() {
+      if (!this.currentView) return false;
+
+      const payload = this.buildViewPayload({
+        name: this.currentView.name,
+        description: this.currentView.description,
+        is_default: Boolean(this.currentView.is_default)
+      });
+
+      try {
+        const csrfToken = getCsrfToken();
+        const response = await fetch(`${API_BASE}/views/${this.currentView.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          this.currentView = await response.json();
+          await this.loadViews(this.currentView.id);
+          this.updateViewActions();
+          return true;
+        }
+      } catch (error) {
+        console.error('Failed to update view:', error);
       }
       return false;
     }
@@ -530,10 +588,11 @@
     /**
      * Render view selector
      */
-    renderViewSelector() {
+    renderViewSelector(selectedViewId = null) {
       const viewSelect = this.container.querySelector('[data-view-select]');
       if (!viewSelect) return;
 
+      const activeViewId = selectedViewId || (this.currentView && this.currentView.id);
       viewSelect.innerHTML = '<option value="">Select a view...</option>';
       this.views.forEach(view => {
         const option = document.createElement('option');
@@ -541,6 +600,28 @@
         option.textContent = view.name + (view.is_default ? ' (default)' : '');
         viewSelect.appendChild(option);
       });
+      viewSelect.value = activeViewId ? String(activeViewId) : '';
+    }
+
+    /**
+     * Toggle saved-view actions based on whether a view is loaded.
+     */
+    updateViewActions() {
+      const hasCurrentView = Boolean(this.currentView);
+      const saveViewBtn = this.container.querySelector('[data-save-view]');
+      const updateViewBtn = this.container.querySelector('[data-update-view]');
+      const deleteViewBtn = this.container.querySelector('[data-delete-view]');
+
+      if (saveViewBtn) {
+        saveViewBtn.hidden = hasCurrentView;
+      }
+      if (updateViewBtn) {
+        updateViewBtn.hidden = !hasCurrentView;
+        updateViewBtn.disabled = !hasCurrentView;
+      }
+      if (deleteViewBtn) {
+        deleteViewBtn.disabled = !hasCurrentView;
+      }
     }
 
     /**
