@@ -571,6 +571,29 @@ async def admin_update_automation_status(automation_id: int, request: Request):
     return flash_redirect("/admin/automations", f"Automation {automation_id} updated.", "success")
 
 
+async def admin_preview_automation(automation_id: int, request: Request, limit: int = Query(default=1000, ge=1, le=5000)):
+    from app.repositories import automations as automation_repo
+    from app.services import automations as automations_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+    try:
+        preview = await automations_service.preview_scheduled_ticket_automation(automation, limit=limit)
+    except ValueError as exc:
+        return flash_redirect("/admin/automations", str(exc), "error")
+    extra = {
+        "title": f"Preview automation #{automation_id}",
+        "automation": automation,
+        "preview": preview,
+        "limit": limit,
+    }
+    return await _main()._render_template("admin/automations_preview.html", request, current_user, extra=extra)
+
+
 async def admin_execute_automation(automation_id: int, request: Request):
     from app.services import automations as automations_service
 

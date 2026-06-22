@@ -765,6 +765,45 @@ def test_filters_match_supports_ticket_age_comparisons():
     )
 
 
+def test_filters_match_supports_in_and_not_in_comma_separated_values():
+    resolved_context = {"ticket": {"status": "Resolved"}}
+    open_context = {"ticket": {"status": "Open"}}
+
+    assert automations_service._filters_match(
+        {"in": {"ticket.status": "Resolved, Closed"}},
+        resolved_context,
+    )
+    assert not automations_service._filters_match(
+        {"in": {"ticket.status": "Resolved, Closed"}},
+        open_context,
+    )
+    assert automations_service._filters_match(
+        {"not_in": {"ticket.status": "Resolved, Closed"}},
+        open_context,
+    )
+    assert not automations_service._filters_match(
+        {"not_in": {"ticket.status": "Resolved, Closed"}},
+        resolved_context,
+    )
+
+
+def test_filters_match_not_in_rejects_matching_sequence_members():
+    context = {"ticket": {"labels": ["vip", "escalated"]}}
+
+    assert automations_service._filters_match(
+        {"in": {"ticket.labels": "vip, customer"}},
+        context,
+    )
+    assert not automations_service._filters_match(
+        {"not_in": {"ticket.labels": "vip, customer"}},
+        context,
+    )
+    assert automations_service._filters_match(
+        {"not_in": {"ticket.labels": "spam, customer"}},
+        context,
+    )
+
+
 @pytest.mark.anyio
 async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tickets(monkeypatch):
     scanned_tickets = [
@@ -866,3 +905,69 @@ def test_filters_match_supports_reply_internal_note_context():
         {"match": {"reply.is_internal": True}},
         public_context,
     )
+
+
+@pytest.mark.anyio
+async def test_preview_scheduled_ticket_automation_returns_matches_without_actions(monkeypatch):
+    scanned_tickets = [
+        {
+            "id": 10,
+            "ticket_number": "T-10",
+            "status": "open",
+            "subject": "Stale ticket",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=40),
+            "updated_at": datetime.now(timezone.utc) - timedelta(days=35),
+            "latest_reply_at": datetime.now(timezone.utc) - timedelta(days=34),
+        },
+        {
+            "id": 11,
+            "ticket_number": "T-11",
+            "status": "closed",
+            "subject": "Closed ticket",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=40),
+            "updated_at": datetime.now(timezone.utc) - timedelta(days=35),
+            "latest_reply_at": datetime.now(timezone.utc) - timedelta(days=34),
+        },
+    ]
+
+    async def fake_list_tickets_for_automation_scan(*, limit: int = 1000):
+        assert limit == 25
+        return scanned_tickets
+
+    async def fake_enrich(ticket):
+        return dict(ticket)
+
+    async def fail_trigger_module(*args, **kwargs):  # pragma: no cover - should never be called
+        raise AssertionError("preview must not execute automation actions")
+
+    from app.services import tickets as tickets_service
+
+    monkeypatch.setattr(
+        automations_service.tickets_repo,
+        "list_tickets_for_automation_scan",
+        fake_list_tickets_for_automation_scan,
+    )
+    monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
+    monkeypatch.setattr(automations_service.modules_service, "trigger_module", fail_trigger_module)
+
+    result = await automations_service.preview_scheduled_ticket_automation(
+        {
+            "id": 12,
+            "name": "Preview stale open tickets",
+            "kind": "scheduled",
+            "trigger_filters": {
+                "all": [
+                    {"match": {"ticket.status": "open"}},
+                    {"greater_than": {"ticket.age_days": 30}},
+                ]
+            },
+            "action_module": "update-ticket",
+        },
+        limit=25,
+    )
+
+    assert result["mode"] == "scheduled_ticket_preview"
+    assert result["scanned"] == 2
+    assert result["matched"] == 1
+    assert result["tickets"][0]["id"] == 10
+    assert result["tickets"][0]["ticket_number"] == "T-10"
