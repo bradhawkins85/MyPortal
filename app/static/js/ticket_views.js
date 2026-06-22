@@ -36,6 +36,7 @@
         assignedUsers: [],
         search: ''
       };
+      this.groupingFields = [];
       this.groupingField = null;
       this.sortField = null;
       this.sortDirection = 'asc';
@@ -136,13 +137,6 @@
         deleteViewBtn.addEventListener('click', () => this.deleteCurrentView());
       }
 
-      // Grouping selector
-      const groupingSelect = this.container.querySelector('[data-grouping-select]');
-      if (groupingSelect) {
-        groupingSelect.addEventListener('change', (e) => {
-          this.setGrouping(e.target.value);
-        });
-      }
     }
 
     /**
@@ -177,13 +171,41 @@
      * Setup grouping controls
      */
     setupGroupingControls() {
-      // Grouping selector is already in the template, just verify it exists
-      const groupingSelect = this.container.querySelector('[data-grouping-select]');
-      if (groupingSelect) {
-        groupingSelect.addEventListener('change', (e) => {
-          this.setGrouping(e.target.value);
+      const groupBy = document.querySelector('[data-ticket-group-by]');
+      if (!groupBy) return;
+      const button = groupBy.querySelector('[data-group-by-toggle]');
+      const panel = groupBy.querySelector('[data-group-by-panel]');
+      const clear = groupBy.querySelector('[data-group-by-clear]');
+      if (button && panel) {
+        button.addEventListener('click', () => {
+          const isOpen = groupBy.classList.contains('ticket-columns--open');
+          panel.hidden = isOpen;
+          groupBy.classList.toggle('ticket-columns--open', !isOpen);
+          button.setAttribute('aria-expanded', String(!isOpen));
+        });
+        document.addEventListener('click', (event) => {
+          if (!groupBy.contains(event.target)) {
+            panel.hidden = true;
+            groupBy.classList.remove('ticket-columns--open');
+            button.setAttribute('aria-expanded', 'false');
+          }
         });
       }
+      groupBy.querySelectorAll('[data-grouping-field]').forEach((checkbox) => {
+        checkbox.addEventListener('change', (event) => {
+          const field = event.target.getAttribute('data-grouping-field');
+          if (!field) return;
+          if (event.target.checked) {
+            this.setGrouping([...this.groupingFields.filter((item) => item !== field), field]);
+          } else {
+            this.setGrouping(this.groupingFields.filter((item) => item !== field));
+          }
+        });
+      });
+      if (clear) {
+        clear.addEventListener('click', () => this.setGrouping([]));
+      }
+      this.updateGroupingUI();
     }
 
     /**
@@ -236,12 +258,32 @@
     /**
      * Set grouping field and apply
      */
-    setGrouping(field) {
-      this.groupingField = field || null;
-      if (this.groupingField) {
+    setGrouping(fields) {
+      const selected = Array.isArray(fields) ? fields : (fields ? [fields] : []);
+      const allowed = ['status', 'priority', 'company', 'assigned'];
+      this.groupingFields = selected.filter((field, index) => allowed.includes(field) && selected.indexOf(field) === index);
+      this.groupingField = this.groupingFields[0] || null;
+      this.updateGroupingUI();
+      if (this.groupingFields.length) {
         this.applyGrouping();
       } else {
         this.removeGrouping();
+      }
+    }
+
+    updateGroupingUI() {
+      const groupBy = document.querySelector('[data-ticket-group-by]');
+      if (!groupBy) return;
+      const labels = { status: 'Status', priority: 'Priority', company: 'Company', assigned: 'Assigned' };
+      groupBy.querySelectorAll('[data-grouping-field]').forEach((checkbox) => {
+        const field = checkbox.getAttribute('data-grouping-field');
+        checkbox.checked = this.groupingFields.includes(field);
+      });
+      const label = groupBy.querySelector('[data-group-by-label]');
+      if (label) {
+        label.textContent = this.groupingFields.length
+          ? `Group By: ${this.groupingFields.map((field) => labels[field] || field).join(' › ')}`
+          : 'Group By';
       }
     }
 
@@ -255,78 +297,87 @@
       const tbody = table.querySelector('tbody');
       if (!tbody) return;
 
-      // Remove existing grouping
       this.removeGrouping();
 
-      // Get ALL rows (including filtered ones) to preserve them
       const allRows = Array.from(tbody.querySelectorAll('tr:not(.ticket-group-header)'));
-      
-      // Group ALL rows by the selected field (including hidden ones)
-      const groups = {};
       const fieldMap = {
-        'status': 'Status',
-        'priority': 'Priority',
-        'company': 'Company',
-        'assigned': 'Assigned'
+        status: 'Status',
+        priority: 'Priority',
+        company: 'Company',
+        assigned: 'Assigned'
       };
-      const fieldLabel = fieldMap[this.groupingField];
+      const fields = this.groupingFields.length ? this.groupingFields : (this.groupingField ? [this.groupingField] : []);
+      if (!fields.length) return;
 
-      allRows.forEach(row => {
-        const cell = row.querySelector(`[data-label="${fieldLabel}"]`);
-        let groupKey = cell ? (cell.getAttribute('data-value') || cell.textContent.trim()) : 'Unspecified';
-        
-        if (!groups[groupKey]) {
-          groups[groupKey] = [];
-        }
-        groups[groupKey].push(row);
-      });
+      const getGroupValue = (row, field) => {
+        const label = fieldMap[field];
+        const cell = label ? row.querySelector(`[data-label="${label}"]`) : null;
+        const value = cell ? (cell.getAttribute('data-value') || cell.textContent.trim()) : '';
+        return value || 'Unspecified';
+      };
 
-      // Create grouped structure
-      const fragment = document.createDocumentFragment();
-      const groupKeys = Object.keys(groups).sort();
-
-      groupKeys.forEach(groupKey => {
-        // Count only visible rows for the header
-        const visibleRowsInGroup = groups[groupKey].filter(row => !row.classList.contains('ticket-filtered-hidden'));
-        
-        // Create group header row
-        const headerRow = document.createElement('tr');
-        headerRow.className = 'ticket-group-header';
-        headerRow.setAttribute('data-group-key', groupKey);
-        
-        // Hide the group header if there are no visible rows in this group
-        if (visibleRowsInGroup.length === 0) {
-          headerRow.classList.add('ticket-filtered-hidden');
-        }
-        
-        const headerCell = document.createElement('td');
-        headerCell.colSpan = table.querySelector('thead tr').children.length;
-        headerCell.innerHTML = `
-          <div class="ticket-group-header__content">
-            <button type="button" class="ticket-group-header__toggle" data-group-toggle="${groupKey}" aria-expanded="true">
-              <svg class="ticket-group-header__icon" viewBox="0 0 24 24" width="20" height="20">
-                <path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" />
-              </svg>
-            </button>
-            <span class="ticket-group-header__title">${groupKey}</span>
-            <span class="ticket-group-header__count">${visibleRowsInGroup.length} ticket${visibleRowsInGroup.length !== 1 ? 's' : ''}</span>
-          </div>
-        `;
-        headerRow.appendChild(headerCell);
-        fragment.appendChild(headerRow);
-
-        // Add ALL rows for this group (including filtered ones)
-        groups[groupKey].forEach(row => {
-          row.setAttribute('data-group', groupKey);
-          fragment.appendChild(row);
+      const buildLevel = (rows, depth, path, fragment) => {
+        const field = fields[depth];
+        const groups = new Map();
+        rows.forEach((row) => {
+          const key = getGroupValue(row, field);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(row);
         });
-      });
 
-      // Clear and repopulate tbody
+        Array.from(groups.keys()).sort().forEach((groupKey) => {
+          const groupRows = groups.get(groupKey);
+          const visibleRowsInGroup = groupRows.filter((row) => !row.classList.contains('ticket-filtered-hidden'));
+          const groupId = [...path, groupKey].join('¦');
+          const headerRow = document.createElement('tr');
+          headerRow.className = 'ticket-group-header';
+          headerRow.setAttribute('data-group-key', groupId);
+          headerRow.setAttribute('data-group-path', groupId);
+          headerRow.setAttribute('data-group-depth', String(depth));
+          if (visibleRowsInGroup.length === 0) headerRow.classList.add('ticket-filtered-hidden');
+
+          const headerCell = document.createElement('td');
+          headerCell.colSpan = table.querySelector('thead tr').children.length;
+          const headerContent = document.createElement('div');
+          headerContent.className = 'ticket-group-header__content';
+          headerContent.style.paddingLeft = `${depth * 1.5}rem`;
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'ticket-group-header__toggle';
+          toggle.setAttribute('data-group-toggle', groupId);
+          toggle.setAttribute('aria-expanded', 'true');
+          toggle.innerHTML = '<svg class="ticket-group-header__icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" /></svg>';
+          const fieldTitle = document.createElement('span');
+          fieldTitle.className = 'ticket-group-header__title ticket-group-header__title--nested';
+          fieldTitle.textContent = `${fieldMap[field]}:`;
+          const groupTitle = document.createElement('span');
+          groupTitle.className = 'ticket-group-header__title';
+          groupTitle.textContent = groupKey;
+          const count = document.createElement('span');
+          count.className = 'ticket-group-header__count';
+          count.textContent = `${visibleRowsInGroup.length} ticket${visibleRowsInGroup.length !== 1 ? 's' : ''}`;
+          headerContent.append(toggle, fieldTitle, groupTitle, count);
+          headerCell.appendChild(headerContent);
+          headerRow.appendChild(headerCell);
+          fragment.appendChild(headerRow);
+
+          if (depth + 1 < fields.length) {
+            buildLevel(groupRows, depth + 1, [...path, groupKey], fragment);
+          } else {
+            groupRows.forEach((row) => fragment.appendChild(row));
+          }
+          groupRows.forEach((row) => {
+            row.setAttribute('data-group', groupId);
+            row.setAttribute('data-group-path', groupId);
+          });
+        });
+      };
+
+      const fragment = document.createDocumentFragment();
+      buildLevel(allRows, 0, [], fragment);
       tbody.innerHTML = '';
       tbody.appendChild(fragment);
 
-      // Attach toggle listeners
       tbody.querySelectorAll('[data-group-toggle]').forEach(toggle => {
         toggle.addEventListener('click', (e) => {
           const groupKey = e.currentTarget.getAttribute('data-group-toggle');
@@ -342,12 +393,16 @@
       const tbody = this.container.querySelector('tbody');
       if (!tbody) return;
 
-      const headerRow = tbody.querySelector(`[data-group-key="${groupKey}"]`);
-      const groupRows = tbody.querySelectorAll(`tr[data-group="${groupKey}"]`);
+      const headerRow = Array.from(tbody.querySelectorAll('[data-group-key]'))
+        .find((row) => row.getAttribute('data-group-key') === groupKey);
+      if (!headerRow) return;
       const toggle = headerRow.querySelector('[data-group-toggle]');
+      if (!toggle) return;
       const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+      const descendantRows = Array.from(tbody.querySelectorAll('tr[data-group-path]'))
+        .filter((row) => row !== headerRow && (row.getAttribute('data-group-path') || '').startsWith(groupKey));
 
-      groupRows.forEach(row => {
+      descendantRows.forEach(row => {
         if (isExpanded) {
           row.classList.add('ticket-group-hidden');
         } else {
@@ -355,7 +410,7 @@
         }
       });
 
-      toggle.setAttribute('aria-expanded', !isExpanded);
+      toggle.setAttribute('aria-expanded', String(!isExpanded));
       headerRow.classList.toggle('ticket-group-header--collapsed', isExpanded);
     }
 
@@ -370,8 +425,9 @@
       tbody.querySelectorAll('.ticket-group-header').forEach(el => el.remove());
       
       // Remove group attributes and classes
-      tbody.querySelectorAll('tr[data-group]').forEach(row => {
+      tbody.querySelectorAll('tr[data-group], tr[data-group-path]').forEach(row => {
         row.removeAttribute('data-group');
+        row.removeAttribute('data-group-path');
         row.classList.remove('ticket-group-hidden');
       });
     }
@@ -400,13 +456,7 @@
           }
           
           // Apply grouping
-          if (view.grouping_field) {
-            this.setGrouping(view.grouping_field);
-            const groupingSelect = this.container.querySelector('[data-grouping-select]');
-            if (groupingSelect) {
-              groupingSelect.value = view.grouping_field;
-            }
-          }
+          this.setGrouping(view.grouping_fields || view.grouping_field || []);
           
           this.applyFilters();
           this.updateViewActions();
@@ -439,7 +489,9 @@
         assignedUsers: [],
         search: ''
       };
+      this.groupingFields = [];
       this.groupingField = null;
+      this.updateGroupingUI();
       
       // Remove all filter classes from rows
       const tbody = this.container.querySelector('tbody');
@@ -485,6 +537,7 @@
           priority: this.filterState.priorities,
         },
         grouping_field: this.groupingField,
+        grouping_fields: this.groupingFields,
         sort_field: this.sortField,
         sort_direction: this.sortDirection,
         ...overrides

@@ -154,18 +154,8 @@
                 </div>
               </div>
 
-              <!-- Grouping and Search Section -->
+              <!-- Search Section -->
               <div class="ticket-filters__section ticket-filters__section--horizontal">
-                <div class="ticket-filters__group-control">
-                  <label class="form-label" for="ticket-grouping">Group by</label>
-                  <select id="ticket-grouping" name="grouping" class="form-input" data-grouping-select>
-                    <option value="">No grouping</option>
-                    <option value="status">Status</option>
-                    <option value="priority">Priority</option>
-                    <option value="company">Company</option>
-                    <option value="assigned">Assigned user</option>
-                  </select>
-                </div>
                 <div class="ticket-filters__search-control">
                   <label class="form-label" for="ticket-quick-filter">Quick search</label>
                   <input 
@@ -246,6 +236,36 @@
                 />
               </form>
             {% endif %}
+
+            <div class="ticket-columns ticket-group-by" data-ticket-group-by>
+              <button type="button" class="button button--ghost ticket-columns__toggle" data-group-by-toggle aria-haspopup="true" aria-expanded="false">
+                <span data-group-by-label>Group By</span>
+                <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="ticket-columns__panel" data-group-by-panel hidden>
+                <p class="ticket-columns__title">Group tickets by</p>
+                <p class="ticket-group-by__hint">Select multiple fields in the order they should be grouped.</p>
+                <div class="ticket-columns__options">
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="company" />
+                    <span>Company</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="assigned" />
+                    <span>Assigned user</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="status" />
+                    <span>Status</span>
+                  </label>
+                  <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-group-by-toggle" data-grouping-field="priority" />
+                    <span>Priority</span>
+                  </label>
+                </div>
+                <button type="button" class="button button--ghost button--compact ticket-group-by__clear" data-group-by-clear>Clear grouping</button>
+              </div>
+            </div>
             <div class="ticket-columns" data-ticket-columns>
               <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true">
                 <span>Columns</span>

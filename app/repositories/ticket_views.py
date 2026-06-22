@@ -50,6 +50,25 @@ def _normalise_ticket_view(row: dict[str, Any]) -> TicketViewRecord:
         else:
             parsed_filters = None
     record["filters"] = parsed_filters
+
+    grouping_value = record.get("grouping_field")
+    grouping_fields: list[str] = []
+    if isinstance(grouping_value, str) and grouping_value.strip():
+        stripped = grouping_value.strip()
+        try:
+            parsed_grouping = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed_grouping = None
+        if isinstance(parsed_grouping, list):
+            grouping_fields = [item for item in parsed_grouping if isinstance(item, str) and item]
+        elif "," in stripped:
+            grouping_fields = [item.strip() for item in stripped.split(",") if item.strip()]
+        else:
+            grouping_fields = [stripped]
+    elif isinstance(grouping_value, list):
+        grouping_fields = [item for item in grouping_value if isinstance(item, str) and item]
+    record["grouping_fields"] = grouping_fields
+    record["grouping_field"] = grouping_fields[0] if grouping_fields else None
     
     if "is_default" in record:
         record["is_default"] = bool(record.get("is_default"))
@@ -148,6 +167,8 @@ async def create_view(
         await _unset_default_views(user_id)
     
     filters_json = json.dumps(filters) if filters else None
+    if isinstance(grouping_field, list):
+        grouping_field = json.dumps(grouping_field)
     
     query = """
         INSERT INTO ticket_views 
@@ -204,6 +225,8 @@ async def update_view(
     for key, value in kwargs.items():
         if key in allowed_fields:
             if key == "filters" and value is not None:
+                value = json.dumps(value)
+            if key == "grouping_field" and isinstance(value, list):
                 value = json.dumps(value)
             updates.append(f"{key} = %s")
             params.append(value)
