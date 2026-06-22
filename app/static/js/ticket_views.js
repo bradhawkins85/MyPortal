@@ -73,6 +73,16 @@
      * Setup event listeners for UI controls
      */
     setupEventListeners() {
+      const table = this.container.querySelector('[data-table]');
+      if (table) {
+        table.addEventListener('table:sorted', () => {
+          const fields = this.groupingFields.length ? this.groupingFields : (this.groupingField ? [this.groupingField] : []);
+          if (fields.length) {
+            this.applyGrouping();
+          }
+        });
+      }
+
       // View selector
       const viewSelect = this.container.querySelector('[data-view-select]');
       if (viewSelect) {
@@ -364,12 +374,12 @@
           if (depth + 1 < fields.length) {
             buildLevel(groupRows, depth + 1, [...path, groupKey], fragment);
           } else {
-            groupRows.forEach((row) => fragment.appendChild(row));
+            groupRows.forEach((row) => {
+              row.setAttribute('data-group', groupId);
+              row.setAttribute('data-group-path', groupId);
+              fragment.appendChild(row);
+            });
           }
-          groupRows.forEach((row) => {
-            row.setAttribute('data-group', groupId);
-            row.setAttribute('data-group-path', groupId);
-          });
         });
       };
 
