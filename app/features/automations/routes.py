@@ -34,6 +34,12 @@ router.add_api_route(
     response_class=HTMLResponse,
 )
 router.add_api_route(
+    "/admin/automations/{automation_id}/preview",
+    handlers.admin_preview_automation,
+    methods=["GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
     "/admin/automations/{automation_id}/edit",
     handlers.admin_edit_automation_page,
     methods=["GET"],

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}Automation preview{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to automations", "type": "link", "variant": "ghost", "href": "/admin/automations"},
+    {"label": "Edit automation", "type": "link", "variant": "primary", "href": "/admin/automations/" ~ automation.id ~ "/edit"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+  <div class="management management--single" data-layout>
+    <section class="management__content">
+      <header class="management__header">
+        <div>
+          <p class="eyebrow">Scheduled ticket automation</p>
+          <h1 class="page-title">{{ automation.name }}</h1>
+          <p class="page-subtitle">Preview the tickets that will be actioned the next time this automation runs. No actions are executed from this page.</p>
+        </div>
+        <form method="get" class="management__filters">
+          <label class="form-label" for="preview-limit">Scan limit</label>
+          <input id="preview-limit" name="limit" type="number" min="1" max="5000" class="form-input" value="{{ limit }}" />
+          <button type="submit" class="button">Refresh preview</button>
+        </form>
+      </header>
+
+      <div class="management__body">
+        <div class="management__stats">
+          <article class="stat-card">
+            <h3 class="stat-card__title">Tickets scanned</h3>
+            <p class="stat-card__value">{{ preview.scanned }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Tickets matched</h3>
+            <p class="stat-card__value">{{ preview.matched }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Next run</h3>
+            <p class="stat-card__value stat-card__value--small">{{ automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—' }}</p>
+          </article>
+          <article class="stat-card">
+            <h3 class="stat-card__title">Checked</h3>
+            <p class="stat-card__value stat-card__value--small">{{ preview.checked_at.astimezone().strftime('%Y-%m-%d %H:%M') }}</p>
+          </article>
+        </div>
+
+        <div class="management__toolbar">
+          <div class="management__toolbar-search">
+            <input type="search" class="form-input" placeholder="Filter preview tickets" aria-label="Filter preview tickets" data-table-filter="automation-preview-table" />
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="table" id="automation-preview-table" data-table data-table-id="automation-preview">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="int" data-column-key="id">ID</th>
+                <th scope="col" data-sort="string" data-column-key="number">Number</th>
+                <th scope="col" data-sort="string" data-column-key="subject">Subject</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" data-sort="string" data-column-key="priority">Priority</th>
+                <th scope="col" data-sort="int" data-column-key="company">Company</th>
+                <th scope="col" data-sort="string" data-column-key="updated">Updated</th>
+                <th scope="col" data-sort="float" data-column-key="age">Age (days)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if preview.tickets %}
+                {% for ticket in preview.tickets %}
+                  <tr>
+                    <td data-label="ID" data-column-key="id"><a href="/admin/tickets/{{ ticket.id }}">{{ ticket.id }}</a></td>
+                    <td data-label="Number" data-column-key="number">{{ ticket.ticket_number or '—' }}</td>
+                    <td data-label="Subject" data-column-key="subject">{{ ticket.subject or '—' }}</td>
+                    <td data-label="Status" data-column-key="status">{{ ticket.status or '—' }}</td>
+                    <td data-label="Priority" data-column-key="priority">{{ ticket.priority or '—' }}</td>
+                    <td data-label="Company" data-column-key="company">{{ ticket.company_id or '—' }}</td>
+                    <td data-label="Updated" data-column-key="updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    <td data-label="Age (days)" data-column-key="age">{{ '%.1f'|format(ticket.age_days) if ticket.age_days is not none else '—' }}</td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="8" class="table__empty">No tickets match this automation's filters in the current scan window.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+{% endblock %}
