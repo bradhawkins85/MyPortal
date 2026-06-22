@@ -1011,6 +1011,21 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
+    status_definitions = await tickets_service.list_status_definitions()
+    valid_reply_statuses = {definition.tech_status for definition in status_definitions}
+    default_reply_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+    if not default_reply_status:
+        default_reply_status = "pending" if "pending" in valid_reply_statuses else (next(iter(valid_reply_statuses), "open"))
+    reply_status = str(form.get("replyStatus") or default_reply_status).strip().lower()
+    if reply_status not in valid_reply_statuses:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Select a valid ticket status for the reply.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
     if ticket.get("xero_invoice_number"):
         return await main_module._render_ticket_detail(
             request,
@@ -1065,6 +1080,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
                     has_failed_attachments = True
         if isinstance(author_id, int):
             await tickets_repo.add_watcher(ticket_id, author_id)
+        await tickets_repo.set_ticket_status(ticket_id, reply_status)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
