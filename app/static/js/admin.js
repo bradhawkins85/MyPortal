@@ -883,7 +883,6 @@
       return acc;
     }, {});
 
-    const csrfToken = table.getAttribute('data-csrf-token') || '';
     const canBulkDelete = table.getAttribute('data-can-bulk-delete') === 'true';
     const bulkDeleteFormId = table.getAttribute('data-bulk-delete-form-id') || '';
     const emptyMessage = table.getAttribute('data-table-empty-label') || 'No records found.';
@@ -963,66 +962,18 @@
       return date.toISOString().replace('T', ' ').slice(0, 16);
     }
 
-    function createStatusCell(ticketId, currentStatus) {
+    function createStatusCell(currentStatus) {
       const cell = document.createElement('td');
       cell.dataset.label = 'Status';
+      cell.dataset.column = 'status';
+      cell.className = 'tickets-table__cell tickets-table__cell--status';
       const normalisedStatus = String(currentStatus || 'open');
       cell.dataset.value = normalisedStatus;
 
-      const wrapper = document.createElement('div');
-      wrapper.className = 'ticket-status';
-
-      const labelId = `ticket-status-label-${ticketId}`;
-      const hiddenLabel = document.createElement('span');
-      hiddenLabel.className = 'visually-hidden';
-      hiddenLabel.id = labelId;
-      hiddenLabel.textContent = 'Ticket status';
-      wrapper.appendChild(hiddenLabel);
-
-      const form = document.createElement('form');
-      form.id = `ticket-status-form-${ticketId}`;
-      form.action = `/admin/tickets/${ticketId}/status`;
-      form.method = 'post';
-      form.className = 'inline-form ticket-status__form';
-      form.setAttribute('data-ticket-status-form', '');
-      form.setAttribute('aria-labelledby', labelId);
-
-      if (csrfToken) {
-        const csrfInput = document.createElement('input');
-        csrfInput.type = 'hidden';
-        csrfInput.name = '_csrf';
-        csrfInput.value = csrfToken;
-        form.appendChild(csrfInput);
-      }
-
-      const label = document.createElement('label');
-      label.className = 'visually-hidden';
-      label.htmlFor = `ticket-status-${ticketId}`;
-      label.textContent = 'Status';
-      form.appendChild(label);
-
-      const select = document.createElement('select');
-      select.id = `ticket-status-${ticketId}`;
-      select.name = 'status';
-      select.className = 'form-input form-input--compact';
-      select.setAttribute('data-ticket-status-select', '');
-
-      const optionValues = Array.from(
-        new Set([...statusOptions.map((option) => option.value), normalisedStatus])
-      );
-      optionValues.forEach((option) => {
-        const optionElement = document.createElement('option');
-        optionElement.value = option;
-        optionElement.textContent = statusLabels[option] || option.replace(/_/g, ' ');
-        if (option === normalisedStatus) {
-          optionElement.selected = true;
-        }
-        select.appendChild(optionElement);
-      });
-
-      form.appendChild(select);
-      wrapper.appendChild(form);
-      cell.appendChild(wrapper);
+      const statusText = document.createElement('span');
+      statusText.className = 'ticket-status__text';
+      statusText.textContent = statusLabels[normalisedStatus] || normalisedStatus.replace(/_/g, ' ');
+      cell.appendChild(statusText);
       return cell;
     }
 
@@ -1066,7 +1017,7 @@
       subjectCell.appendChild(subjectLink);
       row.appendChild(subjectCell);
 
-      const statusCell = createStatusCell(ticketId, ticket.status);
+      const statusCell = createStatusCell(ticket.status);
       row.appendChild(statusCell);
 
       const priorityCell = document.createElement('td');
