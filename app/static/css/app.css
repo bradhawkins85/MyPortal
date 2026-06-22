@@ -8922,6 +8922,17 @@ a.service-card__ai-icon:hover {
   min-height: 100px;
 }
 
+.management__column--details .form-input,
+.management__column--details .form-textarea {
+  max-width: 90%;
+}
+
+.ticket-reply-form .form-input,
+.ticket-reply-form .form-textarea,
+.ticket-reply-form .rich-text-editor {
+  max-width: 98%;
+}
+
 .form-checkbox-label {
   display: flex;
   align-items: center;
