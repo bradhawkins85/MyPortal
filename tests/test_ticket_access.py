@@ -17,7 +17,7 @@ from app.api.routes import tickets as tickets_routes
 from app.core.database import db
 from app import main as main_module
 from app.main import app, scheduler_service
-from app.services.tickets import HELPDESK_PERMISSION_KEY
+from app.services.tickets import HELPDESK_PERMISSION_KEY, TicketStatusDefinition
 from app.security.session import SessionData, session_manager
 
 
@@ -1008,6 +1008,22 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
         captured["permission"] = permission
         return [{"id": 1, "email": "tech@example.com"}]
 
+    async def fake_list_status_definitions():
+        return [
+            TicketStatusDefinition(
+                tech_status="open",
+                tech_label="Open",
+                public_status="Open",
+                is_default=False,
+            ),
+            TicketStatusDefinition(
+                tech_status="pending",
+                tech_label="Pending",
+                public_status="Pending",
+                is_default=True,
+            ),
+        ]
+
     async def fake_render_template(template_name, request, user, *, extra=None):
         captured["template_name"] = template_name
         captured["extra"] = extra or {}
@@ -1023,6 +1039,7 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
         "list_users_with_permission",
         fake_list_helpdesk_users,
     )
+    monkeypatch.setattr(main_module.tickets_service, "list_status_definitions", fake_list_status_definitions)
     monkeypatch.setattr(main_module, "_render_template", fake_render_template)
 
     request = Request({"type": "http", "app": app, "headers": []})
@@ -1037,6 +1054,7 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
     lookup = captured["extra"].get("ticket_user_lookup")
     assert lookup[1]["email"] == "tech@example.com"
     assert lookup[2]["email"] == "general@example.com"
+    assert captured["extra"]["ticket_reply_default_status"] == "pending"
     assert captured["template_name"] == "admin/tickets.html"
 
 
