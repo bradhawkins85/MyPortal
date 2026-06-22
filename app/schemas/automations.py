@@ -75,3 +75,31 @@ class AutomationExecutionResult(BaseModel):
     started_at: datetime
     finished_at: datetime
     next_run_at: Optional[datetime]
+
+
+class AutomationTicketPreviewItem(BaseModel):
+    id: int
+    ticket_number: Optional[str] = None
+    subject: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    company_id: Optional[int] = None
+    requester_id: Optional[int] = None
+    assigned_user_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    last_reply_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    age_days: Optional[float] = None
+    last_activity_age_days: Optional[float] = None
+
+
+class AutomationTicketPreviewResponse(BaseModel):
+    automation_id: int
+    automation_name: Optional[str] = None
+    mode: str
+    checked_at: datetime
+    scan_limit: int
+    scanned: int
+    matched: int
+    tickets: list[AutomationTicketPreviewItem]

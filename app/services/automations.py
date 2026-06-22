@@ -585,6 +585,78 @@ async def _invoke_automation_actions_for_context(
     return {"status": "skipped", "reason": "No action module configured"}, None
 
 
+async def preview_scheduled_ticket_automation(
+    automation: Mapping[str, Any],
+    *,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Return tickets that would be actioned by a scheduled ticket automation.
+
+    This mirrors the scheduled ticket scan path but never invokes automation
+    actions, so admins can safely inspect the next run impact before enabling
+    or manually executing an automation.
+    """
+
+    if str(automation.get("kind") or "").strip().lower() != "scheduled":
+        raise ValueError("Only scheduled automations can be previewed")
+
+    now = datetime.now(timezone.utc)
+    raw_filters = automation.get("trigger_filters")
+    filters = raw_filters if isinstance(raw_filters, Mapping) else None
+    scan_limit = max(1, min(int(limit or 1000), 5000))
+    scanned = await tickets_repo.list_tickets_for_automation_scan(limit=scan_limit)
+    matches: list[dict[str, Any]] = []
+
+    from app.services import tickets as tickets_service
+
+    for ticket in scanned:
+        ticket_context = _attach_ticket_age_context(ticket, now=now)
+        try:
+            enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
+        except Exception:  # pragma: no cover - defensive fallback
+            enriched_ticket = ticket_context
+        context = {
+            "ticket": _attach_ticket_age_context(enriched_ticket, now=now),
+            "ticket_update": {
+                "actor_type": "automation",
+                "actor_label": "Automation",
+                "actor_user": None,
+            },
+            "schedule": {
+                "automation_id": automation.get("id"),
+                "automation_name": automation.get("name"),
+                "checked_at": now.isoformat(),
+                "preview": True,
+            },
+        }
+        if not _filters_match(filters, context):
+            continue
+        match = dict(enriched_ticket)
+        match["last_reply_at"] = ticket_context.get("last_reply_at")
+        match["last_activity_at"] = ticket_context.get("last_activity_at")
+        match["age_days"] = ticket_context.get("age_days")
+        match["last_activity_age_days"] = ticket_context.get("last_activity_age_days")
+        matches.append(match)
+
+    return {
+        "automation_id": automation.get("id"),
+        "automation_name": automation.get("name"),
+        "mode": "scheduled_ticket_preview",
+        "checked_at": now,
+        "scan_limit": scan_limit,
+        "scanned": len(scanned),
+        "matched": len(matches),
+        "tickets": matches,
+    }
+
+
+async def preview_scheduled_ticket_automation_by_id(automation_id: int, *, limit: int = 1000) -> dict[str, Any]:
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise ValueError(f"Automation {automation_id} not found")
+    return await preview_scheduled_ticket_automation(automation, limit=limit)
+
+
 async def _execute_scheduled_ticket_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
     """Run a scheduled automation once for each ticket matching its filters."""
 
