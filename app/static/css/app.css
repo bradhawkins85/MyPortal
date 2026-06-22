@@ -2273,6 +2273,23 @@ button.header-title-menu__link {
   transform: rotate(180deg);
 }
 
+.ticket-group-by__hint {
+  margin: -0.25rem 0 0.75rem;
+  color: var(--muted-text, #64748b);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.ticket-group-by__clear {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.ticket-group-header__title--nested {
+  color: var(--muted-text, #64748b);
+  font-weight: 600;
+}
+
 .invoice-row--overdue td {
   background: rgba(248, 113, 113, 0.08);
 }

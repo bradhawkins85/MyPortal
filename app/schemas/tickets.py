@@ -332,6 +332,7 @@ class TicketViewCreate(BaseModel):
     description: Optional[str] = None
     filters: Optional[TicketViewFilters] = None
     grouping_field: Optional[str] = Field(default=None, max_length=64)
+    grouping_fields: Optional[list[str]] = Field(default=None, max_length=8)
     sort_field: Optional[str] = Field(default=None, max_length=64)
     sort_direction: Optional[str] = Field(default=None, pattern="^(asc|desc)$")
     is_default: bool = False
@@ -345,6 +346,7 @@ class TicketViewUpdate(BaseModel):
     description: Optional[str] = None
     filters: Optional[TicketViewFilters] = None
     grouping_field: Optional[str] = Field(default=None, max_length=64)
+    grouping_fields: Optional[list[str]] = Field(default=None, max_length=8)
     sort_field: Optional[str] = Field(default=None, max_length=64)
     sort_direction: Optional[str] = Field(default=None, pattern="^(asc|desc)$")
     is_default: Optional[bool] = None
@@ -360,6 +362,7 @@ class TicketViewModel(BaseModel):
     description: Optional[str] = None
     filters: Optional[dict] = None
     grouping_field: Optional[str] = None
+    grouping_fields: Optional[list[str]] = None
     sort_field: Optional[str] = None
     sort_direction: Optional[str] = None
     is_default: bool
