@@ -418,6 +418,85 @@ def test_invoke_ollama_uses_default_model_when_blank(monkeypatch):
     assert client_factory.captured_kwargs["url"] == f"{modules._DEFAULT_OLLAMA_BASE_URL}/api/generate"
 
 
+def test_invoke_ollama_supports_openai_chat_completions(monkeypatch):
+    async def fake_enqueue_event(**kwargs):
+        assert kwargs["name"] == "module.ollama.openai.generate"
+        assert kwargs["headers"]["Authorization"] == "********"
+        return {"id": 22, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {"id": 22, "status": "pending", "attempt_count": 0}
+    attempts: list[dict[str, object]] = []
+
+    async def fake_record_attempt(**kwargs):
+        attempts.append(kwargs)
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        fake_event_state.update({"status": "succeeded", "attempt_count": attempt_number, "response_status": response_status, "response_body": response_body})
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    class FakeResponse:
+        status_code = 200
+        text = json.dumps({"choices": [{"message": {"content": "ok"}}]})
+        request = httpx.Request("POST", "http://example.com")
+        def raise_for_status(self):
+            return None
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    result = asyncio.run(modules._invoke_ollama({"provider": "openai", "model": "gpt-4.1-mini", "api_key": "sk-test"}, {"prompt": "Hi", "format": "json"}))
+
+    assert result["provider"] == "openai"
+    assert client_factory.captured_kwargs["url"] == "https://api.openai.com/v1/chat/completions"
+    assert client_factory.captured_kwargs["headers"]["Authorization"] == "Bearer sk-test"
+    assert client_factory.captured_kwargs["json"]["messages"] == [{"role": "user", "content": "Hi"}]
+    assert client_factory.captured_kwargs["json"]["response_format"] == {"type": "json_object"}
+    assert attempts[0]["request_headers"]["Authorization"] == "********"
+
+
+def test_invoke_ollama_supports_llamacpp_openai_compatible_endpoint(monkeypatch):
+    async def fake_enqueue_event(**kwargs):
+        return {"id": 23, "status": "pending", "attempt_count": 0}
+
+    fake_event_state = {"id": 23, "status": "pending", "attempt_count": 0}
+
+    async def fake_record_attempt(**kwargs):
+        pass
+
+    async def fake_mark_event_completed(event_id, *, attempt_number, response_status, response_body):
+        fake_event_state.update({"status": "succeeded", "attempt_count": attempt_number, "response_status": response_status, "response_body": response_body})
+
+    async def fake_get_event(event_id):
+        return dict(fake_event_state)
+
+    class FakeResponse:
+        status_code = 200
+        text = json.dumps({"choices": [{"message": {"content": "ok"}}]})
+        request = httpx.Request("POST", "http://example.com")
+        def raise_for_status(self):
+            return None
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_enqueue_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_event_completed)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    result = asyncio.run(modules._invoke_ollama({"provider": "llamacpp", "base_url": "http://llama.local:8080", "model": "local-model"}, {"prompt": "Hi"}))
+
+    assert result["provider"] == "llamacpp"
+    assert client_factory.captured_kwargs["url"] == "http://llama.local:8080/v1/chat/completions"
+    assert "Authorization" not in client_factory.captured_kwargs["headers"]
+
 def test_invoke_ollama_records_event_failure(monkeypatch):
     async def fake_enqueue_event(**kwargs):
         return {"id": 4, "status": "pending", "attempt_count": 0}
