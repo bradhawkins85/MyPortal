@@ -53,6 +53,29 @@ def test_normalise_workflow_steps_uses_step_type_from_config():
     assert steps[0]["type"] == "m365_create_user"
 
 
+
+def test_normalise_workflow_steps_preserves_hudu_password_label_config():
+    policy_config = {
+        "steps": [
+            {
+                "name": "Push password to Hudu",
+                "enabled": True,
+                "config": {
+                    "type": "hudu_push_password",
+                    "name": "${vars.staff.full_name} - M365 Password",
+                    "password": "${vars.generated_password}",
+                },
+            }
+        ]
+    }
+
+    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+
+    assert len(steps) == 1
+    assert steps[0]["_workflow_step_name"] == "Push password to Hudu"
+    assert steps[0]["name"] == "${vars.staff.full_name} - M365 Password"
+    assert steps[0]["type"] == "hudu_push_password"
+
 def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_direction():
     policy_config = {
         "steps": [{"name": "Onboarding only", "type": "provision_account"}],
