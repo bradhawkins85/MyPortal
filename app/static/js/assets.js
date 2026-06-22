@@ -230,6 +230,52 @@
     });
   }
 
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') || '' : '';
+  }
+
+  function initialiseTrayChat() {
+    document.querySelectorAll('[data-tray-chat]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const deviceUid = button.getAttribute('data-device-uid');
+        if (!deviceUid) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          const response = await fetch(`/api/tray/${encodeURIComponent(deviceUid)}/chat/start`, {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': getCsrfToken(),
+            },
+            body: JSON.stringify({ subject: 'Helpdesk chat' }),
+          });
+          if (!response.ok) {
+            throw new Error(await response.text());
+          }
+          const data = await response.json();
+          if (data.room_id) {
+            window.location.href = `/chat?room=${encodeURIComponent(data.room_id)}`;
+            return;
+          }
+          throw new Error('Chat room was not returned.');
+        } catch (error) {
+          console.error('Failed to open tray chat', error);
+          if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+            window.__portalToast.show('Failed to open chat. Please try again.', { variant: 'error' });
+          } else {
+            window.alert('Failed to open chat. Please try again.');
+          }
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+
   function initialiseDeletion(table) {
     const buttons = document.querySelectorAll('.asset-delete-button');
     buttons.forEach((button) => {
@@ -459,6 +505,7 @@
     initialiseColumnControls(table);
     initialiseCsvExport(table);
     initialiseDeletion(table);
+    initialiseTrayChat();
     initialiseCustomFieldsEditing();
     updateVisibleCount(table);
 
