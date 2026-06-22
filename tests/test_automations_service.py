@@ -765,6 +765,45 @@ def test_filters_match_supports_ticket_age_comparisons():
     )
 
 
+def test_filters_match_supports_in_and_not_in_comma_separated_values():
+    resolved_context = {"ticket": {"status": "Resolved"}}
+    open_context = {"ticket": {"status": "Open"}}
+
+    assert automations_service._filters_match(
+        {"in": {"ticket.status": "Resolved, Closed"}},
+        resolved_context,
+    )
+    assert not automations_service._filters_match(
+        {"in": {"ticket.status": "Resolved, Closed"}},
+        open_context,
+    )
+    assert automations_service._filters_match(
+        {"not_in": {"ticket.status": "Resolved, Closed"}},
+        open_context,
+    )
+    assert not automations_service._filters_match(
+        {"not_in": {"ticket.status": "Resolved, Closed"}},
+        resolved_context,
+    )
+
+
+def test_filters_match_not_in_rejects_matching_sequence_members():
+    context = {"ticket": {"labels": ["vip", "escalated"]}}
+
+    assert automations_service._filters_match(
+        {"in": {"ticket.labels": "vip, customer"}},
+        context,
+    )
+    assert not automations_service._filters_match(
+        {"not_in": {"ticket.labels": "vip, customer"}},
+        context,
+    )
+    assert automations_service._filters_match(
+        {"not_in": {"ticket.labels": "spam, customer"}},
+        context,
+    )
+
+
 @pytest.mark.anyio
 async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tickets(monkeypatch):
     scanned_tickets = [
