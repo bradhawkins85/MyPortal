@@ -10272,25 +10272,32 @@ a.stat-strip__stat:focus-visible {
 }
 
 .ticket-reply-submit {
+  --ticket-reply-submit-height: 2.5rem;
   position: relative;
   display: inline-flex;
   align-items: stretch;
 }
 
 .ticket-reply-submit__primary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ticket-reply-submit-height);
+  box-sizing: border-box;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
 
 .ticket-reply-submit__status-menu {
   position: relative;
+  display: flex;
 }
 
 .ticket-reply-submit__toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: var(--ticket-reply-submit-height);
+  box-sizing: border-box;
   min-width: 2.75rem;
   padding-inline: 0.85rem;
   border-top-left-radius: 0;
