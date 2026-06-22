@@ -181,10 +181,36 @@ def _string_value_matches(actual: Any, expected: str) -> bool:
     pattern = _compile_like_pattern(expected)
     return bool(pattern.fullmatch(actual))
 
+_REGEX_PATTERN_MAX_LENGTH = 256
+_REGEX_INPUT_MAX_LENGTH = 4096
+
+
+def _string_operator_matches(actual: Any, expected: Any, operator: str) -> bool:
+    if not isinstance(actual, str) or not isinstance(expected, str):
+        return False
+    if operator == "starts_with":
+        return actual.startswith(expected)
+    if operator == "ends_with":
+        return actual.endswith(expected)
+    if operator == "contains":
+        return expected in actual
+    if operator == "not_contains":
+        return expected not in actual
+    if operator == "regex":
+        if len(expected) > _REGEX_PATTERN_MAX_LENGTH:
+            return False
+        try:
+            return bool(re.search(expected, actual[:_REGEX_INPUT_MAX_LENGTH]))
+        except re.error:
+            return False
+    return False
+
 
 def _value_matches(actual: Any, expected: Any) -> bool:
     if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes, bytearray)):
         return any(_value_matches(actual, candidate) for candidate in expected)
+    if isinstance(actual, Sequence) and not isinstance(actual, (str, bytes, bytearray)):
+        return any(_value_matches(candidate, expected) for candidate in actual)
     if isinstance(expected, str):
         return _string_value_matches(actual, expected)
     return actual == expected
@@ -209,6 +235,15 @@ def _coerce_comparable(value: Any) -> Any:
 
 
 def _compare_values(actual: Any, expected: Any, operator: str) -> bool:
+    if isinstance(actual, Sequence) and not isinstance(actual, (str, bytes, bytearray)):
+        if operator == "not_contains":
+            return all(_compare_values(candidate, expected, operator) for candidate in actual)
+        return any(_compare_values(candidate, expected, operator) for candidate in actual)
+
+    string_operators = {"starts_with", "ends_with", "contains", "not_contains", "regex"}
+    if operator in string_operators:
+        return _string_operator_matches(actual, expected, operator)
+
     actual_value = _coerce_comparable(actual)
     expected_value = _coerce_comparable(expected)
     try:
@@ -286,6 +321,11 @@ def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any]
         "less_than": "less_than",
         "lte": "less_than_or_equal",
         "less_than_or_equal": "less_than_or_equal",
+        "starts_with": "starts_with",
+        "ends_with": "ends_with",
+        "contains": "contains",
+        "not_contains": "not_contains",
+        "regex": "regex",
     }
     for filter_key, operator in operator_keys.items():
         comparison_filters = filters.get(filter_key)
