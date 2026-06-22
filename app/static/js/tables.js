@@ -21,7 +21,8 @@
     if (!tbody) {
       return;
     }
-    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const hadGroupedRows = tbody.querySelector('.ticket-group-header') !== null;
+    const rows = Array.from(tbody.querySelectorAll('tr:not(.ticket-group-header)'));
     const current = table.getAttribute('data-sort-index') === String(columnIndex)
       ? table.getAttribute('data-sort-order')
       : null;
@@ -39,11 +40,25 @@
       return 0;
     });
 
+    if (hadGroupedRows) {
+      tbody.querySelectorAll('.ticket-group-header').forEach((row) => row.remove());
+    }
+
     const fragment = document.createDocumentFragment();
     rows.forEach((row) => fragment.appendChild(row));
     tbody.appendChild(fragment);
     table.setAttribute('data-sort-index', String(columnIndex));
     table.setAttribute('data-sort-order', ascending ? 'asc' : 'desc');
+
+    table.dispatchEvent(new CustomEvent('table:sorted', {
+      bubbles: true,
+      detail: {
+        columnIndex,
+        sortType: type,
+        sortOrder: ascending ? 'asc' : 'desc',
+        hadGroupedRows
+      }
+    }));
 
     if (controller) {
       controller.refreshRows();
@@ -52,9 +67,10 @@
 
   function attachSorting(table, controller) {
     const headers = table.querySelectorAll('th[data-sort]');
-    headers.forEach((header, index) => {
+    headers.forEach((header) => {
       header.addEventListener('click', () => {
-        sortTable(table, index, header.getAttribute('data-sort') || 'string', controller);
+        const columnIndex = Array.prototype.indexOf.call(header.parentElement.children, header);
+        sortTable(table, columnIndex, header.getAttribute('data-sort') || 'string', controller);
       });
     });
   }
