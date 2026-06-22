@@ -412,12 +412,13 @@ async def create_ticket_view(
 ) -> TicketViewModel:
     """Create a new saved ticket view"""
     filters_dict = payload.filters.model_dump() if payload.filters else None
+    grouping_fields = payload.grouping_fields or ([payload.grouping_field] if payload.grouping_field else [])
     view = await ticket_views_repo.create_view(
         user_id=session.user_id,
         name=payload.name,
         description=payload.description,
         filters=filters_dict,
-        grouping_field=payload.grouping_field,
+        grouping_field=grouping_fields,
         sort_field=payload.sort_field,
         sort_direction=payload.sort_direction,
         is_default=payload.is_default,
@@ -445,6 +446,8 @@ async def update_ticket_view(
 ) -> TicketViewModel:
     """Update a saved ticket view"""
     update_data = payload.model_dump(exclude_unset=True)
+    if "grouping_fields" in update_data:
+        update_data["grouping_field"] = update_data.pop("grouping_fields") or None
     
     view = await ticket_views_repo.update_view(view_id, session.user_id, **update_data)
     if not view:
