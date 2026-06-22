@@ -909,7 +909,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form" enctype="multipart/form-data">
+            <form action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" enctype="multipart/form-data">
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
