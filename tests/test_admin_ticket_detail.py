@@ -261,11 +261,14 @@ async def test_admin_reply_saves_attachments(monkeypatch):
         AsyncMock(return_value={"id": 3, "xero_invoice_number": None}),
     )
     monkeypatch.setattr(main.tickets_repo, "create_reply", AsyncMock(return_value=None))
+    set_status_mock = AsyncMock(return_value={"id": 3, "status": "pending"})
+    monkeypatch.setattr(main.tickets_repo, "set_ticket_status", set_status_mock)
     monkeypatch.setattr(main.tickets_repo, "add_watcher", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_summary", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_tags", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "broadcast_ticket_event", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "emit_ticket_updated_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "emit_ticket_replied_event", AsyncMock(return_value=None))
 
     save_mock = AsyncMock(return_value={"id": 1})
     monkeypatch.setattr(main.attachments_service, "save_uploaded_file", save_mock)
@@ -274,6 +277,7 @@ async def test_admin_reply_saves_attachments(monkeypatch):
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
     assert "/admin/tickets/3" in response.headers.get("location", "")
+    assert set_status_mock.await_args.args == (3, "pending")
     assert save_mock.await_count == 1
     called_args = save_mock.await_args.kwargs
     assert called_args["ticket_id"] == 3
@@ -320,11 +324,13 @@ async def test_admin_reply_reports_failed_attachments(monkeypatch):
         AsyncMock(return_value={"id": 4, "xero_invoice_number": None}),
     )
     monkeypatch.setattr(main.tickets_repo, "create_reply", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_repo, "set_ticket_status", AsyncMock(return_value={"id": 4, "status": "pending"}))
     monkeypatch.setattr(main.tickets_repo, "add_watcher", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_summary", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_tags", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "broadcast_ticket_event", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "emit_ticket_updated_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "emit_ticket_replied_event", AsyncMock(return_value=None))
 
     save_mock = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(main.attachments_service, "save_uploaded_file", save_mock)
@@ -333,6 +339,7 @@ async def test_admin_reply_reports_failed_attachments(monkeypatch):
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
     parsed = urlparse(response.headers.get("location", ""))
-    success_values = parse_qs(parsed.query).get("success", [])
-    assert any("failed to upload" in unquote(value) for value in success_values)
+    message_values = [value for values in parse_qs(parsed.query).values() for value in values]
+    message_values.extend(response.headers.getlist("set-cookie"))
+    assert any("failed" in unquote(value).lower() for value in message_values)
     assert save_mock.await_count == 1

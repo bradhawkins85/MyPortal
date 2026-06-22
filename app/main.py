@@ -7446,7 +7446,12 @@ async def _render_portal_ticket_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))
-    status_label_map = await tickets_service.get_public_status_map()
+    status_definitions = await tickets_service.list_status_definitions()
+    status_label_map = {definition.tech_status: definition.public_status for definition in status_definitions}
+    available_statuses = [definition.tech_status for definition in status_definitions]
+    reply_default_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+    if not reply_default_status:
+        reply_default_status = "pending" if "pending" in available_statuses else (available_statuses[0] if available_statuses else "open")
     status_value = str(ticket.get("status") or "open").lower()
     status_label = status_label_map.get(status_value) or status_value.replace("_", " ").title()
     priority_value = str(ticket.get("priority") or "normal")
@@ -7778,6 +7783,16 @@ async def _render_portal_ticket_detail(
         "ticket_watchers": watchers,
         "ticket_attachments": formatted_attachments,
         "ticket_assets": ticket_assets,
+        "ticket_status_definitions": [
+            {
+                "tech_status": definition.tech_status,
+                "tech_label": definition.tech_label,
+                "public_status": definition.public_status,
+                "is_default": definition.is_default,
+            }
+            for definition in status_definitions
+        ],
+        "ticket_reply_default_status": reply_default_status,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
         "matrix_chat_enabled": settings.matrix_enabled,
@@ -7963,6 +7978,7 @@ async def _render_tickets_dashboard(
         "ticket_status_definitions": status_definitions_payload,
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
+        "ticket_reply_default_status": reply_default_status,
         "ticket_modules": reference_data["modules"],
         "ticket_company_options": reference_data["companies"],
         "ticket_user_options": reference_data["technicians"],
@@ -8279,6 +8295,9 @@ async def _render_ticket_detail(
     status_label_map = {definition.tech_status: definition.tech_label for definition in status_definitions}
     public_status_map = {definition.tech_status: definition.public_status for definition in status_definitions}
     available_statuses = [definition.tech_status for definition in status_definitions]
+    reply_default_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+    if not reply_default_status:
+        reply_default_status = "pending" if "pending" in available_statuses else (available_statuses[0] if available_statuses else "open")
     ticket_status_slug = ticket.get("status") or "open"
     if ticket_status_slug not in available_statuses:
         available_statuses.append(ticket_status_slug)
@@ -8448,6 +8467,7 @@ async def _render_ticket_detail(
         ],
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
+        "ticket_reply_default_status": reply_default_status,
         "ticket_company_options": companies,
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
