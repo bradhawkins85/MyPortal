@@ -554,6 +554,20 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         )
         latest_reply = reply
     enriched["latest_reply"] = latest_reply
+
+    if isinstance(ticket_id, int):
+        filter_context = await _safely_call(tickets_repo.get_automation_filter_context, ticket_id)
+        if isinstance(filter_context, Mapping):
+            enriched.update(filter_context)
+    enriched.setdefault("billable_minutes", 0)
+    enriched.setdefault("non_billable_minutes", 0)
+    enriched.setdefault("attachment_count", 0)
+    enriched.setdefault("has_attachments", False)
+    enriched.setdefault("task_count", 0)
+    enriched.setdefault("has_tasks", False)
+    enriched.setdefault("open_task_count", 0)
+    enriched.setdefault("has_open_tasks", False)
+
     _attach_sms_context(enriched)
 
     return enriched

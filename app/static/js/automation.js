@@ -1525,6 +1525,11 @@
         lt: 'less_than',
         less_than_or_equal: 'less_than_or_equal',
         lte: 'less_than_or_equal',
+        starts_with: 'starts_with',
+        ends_with: 'ends_with',
+        contains: 'contains',
+        not_contains: 'not_contains',
+        regex: 'regex',
       };
       const operatorKey = Object.keys(operatorNodes).find((key) => (
         node[key] && typeof node[key] === 'object' && !Array.isArray(node[key])
@@ -1597,6 +1602,11 @@
         greater_than_or_equal: 'greater_than_or_equal',
         less_than: 'less_than',
         less_than_or_equal: 'less_than_or_equal',
+        starts_with: 'starts_with',
+        ends_with: 'ends_with',
+        contains: 'contains',
+        not_contains: 'not_contains',
+        regex: 'regex',
       }[row.operator] || 'match';
       const matchNode = { [operatorKey]: { [fieldPath]: typedValue } };
       if (row.conditionType === 'all') {
@@ -1677,8 +1687,27 @@
           const datalist = document.createElement('datalist');
           datalist.id = 'automation-filter-field-suggestions';
           [
+            'ticket.subject',
             'ticket.status',
             'ticket.priority',
+            'ticket.requester_email',
+            'ticket.requester_display_name',
+            'ticket.assigned_user_email',
+            'ticket.assigned_user_display_name',
+            'ticket.company_name',
+            'ticket.company.id',
+            'ticket.category',
+            'ticket.external_reference',
+            'ticket.billable_minutes',
+            'ticket.non_billable_minutes',
+            'ticket.has_attachments',
+            'ticket.attachment_count',
+            'ticket.has_tasks',
+            'ticket.task_count',
+            'ticket.has_open_tasks',
+            'ticket.open_task_count',
+            'ticket.ai_tags',
+            'ticket.labels',
             'ticket.age_days',
             'ticket.updated_age_hours',
             'ticket.last_reply_age_hours',
@@ -1704,6 +1733,11 @@
           ['greater_than_or_equal', 'greater than or equal'],
           ['less_than', 'less than'],
           ['less_than_or_equal', 'less than or equal'],
+          ['starts_with', 'starts with'],
+          ['ends_with', 'ends with'],
+          ['contains', 'contains'],
+          ['not_contains', 'not contains'],
+          ['regex', 'custom regex'],
         ].forEach(([value, label]) => {
           const option = document.createElement('option');
           option.value = value;
