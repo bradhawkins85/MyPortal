@@ -448,7 +448,25 @@
                     <p class="form-help">You can upload multiple files. Maximum file size: 10MB per file.</p>
                   </div>
                   <div class="form-actions">
-                    <button type="submit" class="button button--primary">Post reply</button>
+                    {% if has_helpdesk_access or is_super_admin %}
+                      <div class="ticket-reply-submit" data-ticket-reply-submit>
+                        <button type="submit" name="replyStatus" value="{{ ticket_reply_default_status }}" class="button button--primary ticket-reply-submit__primary">Post reply</button>
+                        <details class="ticket-reply-submit__status-menu">
+                          <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
+                            <span aria-hidden="true">▾</span>
+                          </summary>
+                          <div class="ticket-reply-submit__menu" role="menu" aria-label="Post reply and set status">
+                            {% for status_definition in ticket_status_definitions %}
+                              <button type="submit" name="replyStatus" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem">
+                                {{ status_definition.tech_label }}
+                              </button>
+                            {% endfor %}
+                          </div>
+                        </details>
+                      </div>
+                    {% else %}
+                      <button type="submit" class="button button--primary">Post reply</button>
+                    {% endif %}
                   </div>
                 </form>
               {% elif is_watcher %}

@@ -1517,6 +1517,8 @@
       const operatorNodes = {
         match: 'equals',
         not_equals: 'not_equals',
+        in: 'in',
+        not_in: 'not_in',
         greater_than: 'greater_than',
         gt: 'greater_than',
         greater_than_or_equal: 'greater_than_or_equal',
@@ -1598,6 +1600,8 @@
       const typedValue = parseTypedValue(row.valueType, row.value);
       const operatorKey = {
         not_equals: 'not_equals',
+        in: 'in',
+        not_in: 'not_in',
         greater_than: 'greater_than',
         greater_than_or_equal: 'greater_than_or_equal',
         less_than: 'less_than',
@@ -1729,6 +1733,8 @@
         [
           ['equals', 'equals'],
           ['not_equals', 'not equals'],
+          ['in', 'in'],
+          ['not_in', 'not in'],
           ['greater_than', 'greater than'],
           ['greater_than_or_equal', 'greater than or equal'],
           ['less_than', 'less than'],
@@ -1745,7 +1751,10 @@
           operatorSelect.appendChild(option);
         });
         operatorSelect.value = row.operator || 'equals';
-        operatorSelect.addEventListener('change', () => handleRowChange(index, 'operator', operatorSelect.value));
+        operatorSelect.addEventListener('change', () => {
+          handleRowChange(index, 'operator', operatorSelect.value);
+          valueInput.placeholder = operatorSelect.value === 'in' || operatorSelect.value === 'not_in' ? 'Resolved, Closed' : 'value';
+        });
 
         const valueTypeSelect = document.createElement('select');
         valueTypeSelect.className = 'form-input';
@@ -1762,7 +1771,7 @@
         const valueInput = document.createElement('input');
         valueInput.className = 'form-input';
         valueInput.type = 'text';
-        valueInput.placeholder = 'value';
+        valueInput.placeholder = row.operator === 'in' || row.operator === 'not_in' ? 'Resolved, Closed' : 'value';
         valueInput.value = row.value || '';
         valueInput.disabled = row.valueType === 'null';
 

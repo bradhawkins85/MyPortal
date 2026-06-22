@@ -185,6 +185,14 @@ _REGEX_PATTERN_MAX_LENGTH = 256
 _REGEX_INPUT_MAX_LENGTH = 4096
 
 
+def _split_membership_values(expected: Any) -> list[Any]:
+    if isinstance(expected, str):
+        return [item.strip() for item in expected.split(",") if item.strip()]
+    if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes, bytearray)):
+        return list(expected)
+    return [expected]
+
+
 def _string_operator_matches(actual: Any, expected: Any, operator: str) -> bool:
     if not isinstance(actual, str) or not isinstance(expected, str):
         return False
@@ -236,9 +244,14 @@ def _coerce_comparable(value: Any) -> Any:
 
 def _compare_values(actual: Any, expected: Any, operator: str) -> bool:
     if isinstance(actual, Sequence) and not isinstance(actual, (str, bytes, bytearray)):
-        if operator == "not_contains":
+        if operator in {"not_contains", "not_in"}:
             return all(_compare_values(candidate, expected, operator) for candidate in actual)
         return any(_compare_values(candidate, expected, operator) for candidate in actual)
+
+    if operator in {"in", "not_in"}:
+        candidates = _split_membership_values(expected)
+        matched = any(_value_matches(actual, candidate) for candidate in candidates)
+        return matched if operator == "in" else not matched
 
     string_operators = {"starts_with", "ends_with", "contains", "not_contains", "regex"}
     if operator in string_operators:
@@ -313,6 +326,8 @@ def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any]
 
     operator_keys = {
         "not_equals": "not_equals",
+        "in": "in",
+        "not_in": "not_in",
         "gt": "greater_than",
         "greater_than": "greater_than",
         "gte": "greater_than_or_equal",
@@ -583,6 +598,78 @@ async def _invoke_automation_actions_for_context(
                 return result, str(result_error or "Module action failed")
         return result, None
     return {"status": "skipped", "reason": "No action module configured"}, None
+
+
+async def preview_scheduled_ticket_automation(
+    automation: Mapping[str, Any],
+    *,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Return tickets that would be actioned by a scheduled ticket automation.
+
+    This mirrors the scheduled ticket scan path but never invokes automation
+    actions, so admins can safely inspect the next run impact before enabling
+    or manually executing an automation.
+    """
+
+    if str(automation.get("kind") or "").strip().lower() != "scheduled":
+        raise ValueError("Only scheduled automations can be previewed")
+
+    now = datetime.now(timezone.utc)
+    raw_filters = automation.get("trigger_filters")
+    filters = raw_filters if isinstance(raw_filters, Mapping) else None
+    scan_limit = max(1, min(int(limit or 1000), 5000))
+    scanned = await tickets_repo.list_tickets_for_automation_scan(limit=scan_limit)
+    matches: list[dict[str, Any]] = []
+
+    from app.services import tickets as tickets_service
+
+    for ticket in scanned:
+        ticket_context = _attach_ticket_age_context(ticket, now=now)
+        try:
+            enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
+        except Exception:  # pragma: no cover - defensive fallback
+            enriched_ticket = ticket_context
+        context = {
+            "ticket": _attach_ticket_age_context(enriched_ticket, now=now),
+            "ticket_update": {
+                "actor_type": "automation",
+                "actor_label": "Automation",
+                "actor_user": None,
+            },
+            "schedule": {
+                "automation_id": automation.get("id"),
+                "automation_name": automation.get("name"),
+                "checked_at": now.isoformat(),
+                "preview": True,
+            },
+        }
+        if not _filters_match(filters, context):
+            continue
+        match = dict(enriched_ticket)
+        match["last_reply_at"] = ticket_context.get("last_reply_at")
+        match["last_activity_at"] = ticket_context.get("last_activity_at")
+        match["age_days"] = ticket_context.get("age_days")
+        match["last_activity_age_days"] = ticket_context.get("last_activity_age_days")
+        matches.append(match)
+
+    return {
+        "automation_id": automation.get("id"),
+        "automation_name": automation.get("name"),
+        "mode": "scheduled_ticket_preview",
+        "checked_at": now,
+        "scan_limit": scan_limit,
+        "scanned": len(scanned),
+        "matched": len(matches),
+        "tickets": matches,
+    }
+
+
+async def preview_scheduled_ticket_automation_by_id(automation_id: int, *, limit: int = 1000) -> dict[str, Any]:
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise ValueError(f"Automation {automation_id} not found")
+    return await preview_scheduled_ticket_automation(automation, limit=limit)
 
 
 async def _execute_scheduled_ticket_automation(automation: Mapping[str, Any]) -> dict[str, Any]:

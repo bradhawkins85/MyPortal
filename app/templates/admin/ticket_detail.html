@@ -898,9 +898,6 @@
             </div>
           </details>
 
-        </div>
-
-        <div class="management__column management__column--activity">
           <details class="card card--panel card-collapsible" open>
             <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Add a reply</h2>
@@ -1079,7 +1076,21 @@
                 </div>
               </div>
               <div class="form-actions">
-                <button type="submit" class="button button--primary">Post reply</button>
+                <div class="ticket-reply-submit" data-ticket-reply-submit>
+                  <button type="submit" name="replyStatus" value="{{ ticket_reply_default_status }}" class="button button--primary ticket-reply-submit__primary">Post reply</button>
+                  <details class="ticket-reply-submit__status-menu">
+                    <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
+                      <span aria-hidden="true">▾</span>
+                    </summary>
+                    <div class="ticket-reply-submit__menu" role="menu" aria-label="Post reply and set status">
+                      {% for status_definition in ticket_status_definitions %}
+                        <button type="submit" name="replyStatus" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem">
+                          {{ status_definition.tech_label }}
+                        </button>
+                      {% endfor %}
+                    </div>
+                  </details>
+                </div>
               </div>
             </form>
             </div>
