@@ -878,9 +878,14 @@ def _normalise_workflow_steps(policy_config: dict[str, Any], *, direction: str) 
         step_type = str(config.get("type") or raw_step.get("type") or raw_step.get("key") or "").strip().lower()
         if not step_type:
             continue
-        step_name = str(raw_step.get("name") or config.get("name") or f"step_{index + 1}_{step_type}").strip()
+        step_name = str(raw_step.get("name") or f"step_{index + 1}_{step_type}").strip()
         step_record = dict(config)
-        step_record["name"] = step_name
+        # Keep the workflow step display name separate from action-specific fields.
+        # Some actions (for example hudu_push_password) legitimately use config.name
+        # as their payload label, so overwriting it with the step name changes the
+        # external API payload.
+        step_record["_workflow_step_name"] = step_name
+        step_record.setdefault("name", step_name)
         step_record["type"] = step_type
         steps.append(step_record)
     return steps
@@ -2587,7 +2592,7 @@ async def _execute_policy_steps(
                 secret_vars.add(str(name))
 
     for index, step in enumerate(steps):
-        step_name = str(step.get("name") or f"step_{index + 1}")
+        step_name = str(step.get("_workflow_step_name") or step.get("name") or f"step_{index + 1}")
         if step_name in succeeded_steps:
             continue
         if str(step.get("type")).strip().lower() in {"wait_external_checkpoint", "wait_for_webhook"}:
