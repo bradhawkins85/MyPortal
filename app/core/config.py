@@ -353,6 +353,8 @@ class Settings(BaseSettings):
     matrixbot_ai_ollama_enabled: bool = Field(default=False, validation_alias="MATRIXBOT_AI_OLLAMA_ENABLED")
     matrixbot_ai_ollama_url: str | None = Field(default=None, validation_alias="MATRIXBOT_AI_OLLAMA_URL")
     matrixbot_ai_ollama_model: str | None = Field(default=None, validation_alias="MATRIXBOT_AI_OLLAMA_MODEL")
+    matrixbot_ai_ollama_provider: str = Field(default="ollama", validation_alias="MATRIXBOT_AI_OLLAMA_PROVIDER")
+    matrixbot_ai_ollama_api_key: str | None = Field(default=None, validation_alias="MATRIXBOT_AI_OLLAMA_API_KEY")
     matrixbot_ai_response_delay_minutes: int = Field(default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1)
     matrixbot_ai_max_responses: int = Field(default=2, validation_alias="MATRIXBOT_AI_MAX_RESPONSES", ge=0)
     matrixbot_ai_kb_confidence_threshold: float = Field(default=50.0, validation_alias="MATRIXBOT_AI_KB_CONFIDENCE_THRESHOLD", ge=0, le=100)

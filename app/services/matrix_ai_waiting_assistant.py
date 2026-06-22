@@ -274,45 +274,72 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     return {}
 
 
+def _matrixbot_ai_provider(settings: Any) -> str:
+    provider = str(getattr(settings, "matrixbot_ai_ollama_provider", "ollama") or "ollama").strip().lower()
+    return provider if provider in {"ollama", "openai", "llamacpp"} else "ollama"
+
+
+def _openai_chat_response_text(payload: Mapping[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0] if isinstance(choices[0], Mapping) else {}
+    message = first.get("message")
+    if isinstance(message, Mapping):
+        content = message.get("content")
+        if isinstance(content, list):
+            return "".join(str(part.get("text") or "") if isinstance(part, Mapping) else str(part) for part in content).strip()
+        return str(content or "").strip()
+    return str(first.get("text") or "").strip()
+
+
 async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
     settings = get_settings()
-    base_url = (settings.matrixbot_ai_ollama_url or "http://127.0.0.1:11434").rstrip("/")
-    model = (settings.matrixbot_ai_ollama_model or "llama3").strip()
-    body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
-    if json_format:
-        body["format"] = "json"
-    target_url = urljoin(f"{base_url}/", "api/generate")
+    provider = _matrixbot_ai_provider(settings)
+    default_base_url = "https://api.openai.com" if provider == "openai" else "http://127.0.0.1:11434"
+    configured_base_url = str(settings.matrixbot_ai_ollama_url or "").strip()
+    if provider == "openai" and configured_base_url.rstrip("/") == "http://127.0.0.1:11434":
+        configured_base_url = ""
+    base_url = (configured_base_url or default_base_url).rstrip("/")
+    model = (settings.matrixbot_ai_ollama_model or ("gpt-4.1-mini" if provider == "openai" else "llama3")).strip()
+    headers = {"Content-Type": "application/json"}
+    if provider == "ollama":
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+        if json_format:
+            body["format"] = "json"
+        target_url = urljoin(f"{base_url}/", "api/generate")
+    else:
+        body = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False}
+        if json_format:
+            body["response_format"] = {"type": "json_object"}
+        target_url = urljoin(f"{base_url}/", "v1/chat/completions")
+        api_key = str(getattr(settings, "matrixbot_ai_ollama_api_key", "") or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+    provider_label = "Ollama" if provider == "ollama" else provider
     monitor_event = await _create_monitor_event(
-        "MATRIXBOT_AI Ollama generate",
+        f"MATRIXBOT_AI {provider_label} generate",
         target_url,
-        {"model": model, "json_format": json_format, "prompt": prompt},
+        {"provider": provider, "model": model, "json_format": json_format, "prompt": prompt},
     )
     try:
         async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(target_url, json=body)
+            response = await client.post(target_url, json=body, headers=headers)
         response.raise_for_status()
         payload = response.json()
-        result = str(payload.get("response") or "").strip()
+        result = (str(payload.get("response") or "").strip() if provider == "ollama" else _openai_chat_response_text(payload))
         await _record_monitor_success(
             monitor_event,
             response_status=response.status_code,
             response_body=result,
-            request_body={
-                "model": model,
-                "json_format": json_format,
-                "prompt": prompt,
-            },
+            request_body={"provider": provider, "model": model, "json_format": json_format, "prompt": prompt},
         )
         return result
     except Exception as exc:
         await _record_monitor_failure(
             monitor_event,
             error_message=str(exc),
-            request_body={
-                "model": model,
-                "json_format": json_format,
-                "prompt": prompt,
-            },
+            request_body={"provider": provider, "model": model, "json_format": json_format, "prompt": prompt},
         )
         raise
 
