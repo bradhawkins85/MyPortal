@@ -170,6 +170,8 @@ def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
     settings = SimpleNamespace(
         matrixbot_ai_ollama_url="http://ollama.test",
         matrixbot_ai_ollama_model="llama3",
+        matrixbot_ai_ollama_provider="ollama",
+        matrixbot_ai_ollama_api_key=None,
     )
     events: list[dict] = []
     successes: list[dict] = []
@@ -206,7 +208,7 @@ def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-        async def post(self, url, json):
+        async def post(self, url, json, headers=None):
             return FakeResponse()
 
     monkeypatch.setattr(assistant.httpx, "AsyncClient", FakeClient)
@@ -220,6 +222,64 @@ def test_ollama_generate_records_webhook_monitor_success(monkeypatch):
     assert "prompt_preview" not in events[0]["payload"]
     assert successes[0]["event_id"] == 123
     assert successes[0]["response_status"] == 200
+
+
+def test_ollama_generate_supports_openai_compatible_chat_completions(monkeypatch):
+    settings = SimpleNamespace(
+        matrixbot_ai_ollama_url="https://llamacpp.test",
+        matrixbot_ai_ollama_model="local-model",
+        matrixbot_ai_ollama_provider="llamacpp",
+        matrixbot_ai_ollama_api_key="secret-token",
+    )
+    requests: list[dict] = []
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+
+    async def fake_create_manual_event(**kwargs):
+        return {"id": 123}
+
+    async def fake_record_manual_success(event_id, **kwargs):
+        return {"id": event_id, "status": "succeeded"}
+
+    monkeypatch.setattr(assistant.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(assistant.webhook_monitor, "record_manual_success", fake_record_manual_success)
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"answer":"ok"}'}}]}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, json, headers=None):
+            requests.append({"url": url, "json": json, "headers": headers})
+            return FakeResponse()
+
+    monkeypatch.setattr(assistant.httpx, "AsyncClient", FakeClient)
+
+    result = asyncio.run(assistant._ollama_generate("return json", json_format=True))
+
+    assert result == '{"answer":"ok"}'
+    assert requests[0]["url"] == "https://llamacpp.test/v1/chat/completions"
+    assert requests[0]["json"] == {
+        "model": "local-model",
+        "messages": [{"role": "user", "content": "return json"}],
+        "stream": False,
+        "response_format": {"type": "json_object"},
+    }
+    assert requests[0]["headers"]["Authorization"] == "Bearer secret-token"
 
 
 def test_build_article_recommendation_messages_formats_four_plain_text_and_html_messages():
