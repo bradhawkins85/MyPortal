@@ -2119,6 +2119,65 @@ def _parse_event_response(event: Mapping[str, Any]) -> Any:
     return response_body
 
 
+def _extract_openai_compatible_text(payload: Any) -> str | None:
+    """Extract assistant text from OpenAI-compatible chat completion payloads.
+
+    llama.cpp's OpenAI-compatible server returns successful generations in the
+    ``choices[].message.content`` shape. Ticket AI processors expect an
+    Ollama-like ``response``/``message`` field, so normalize that text into the
+    parsed response while preserving the original provider payload.
+    """
+
+    if not isinstance(payload, Mapping):
+        return None
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+
+    first = choices[0]
+    if not isinstance(first, Mapping):
+        return None
+
+    message = first.get("message")
+    if isinstance(message, Mapping):
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, Mapping):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif isinstance(item, str):
+                    parts.append(item)
+            joined = "".join(parts).strip()
+            if joined:
+                return joined
+
+    text = first.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+
+    return None
+
+
+def _normalise_ai_response_payload(payload: Any) -> Any:
+    """Add Ollama-style text keys to OpenAI-compatible AI responses."""
+
+    text = _extract_openai_compatible_text(payload)
+    if not text or not isinstance(payload, Mapping):
+        return payload
+
+    normalised = dict(payload)
+    normalised.setdefault("response", text)
+    normalised.setdefault("message", text)
+    normalised.setdefault("text", text)
+    return normalised
+
+
 def _build_event_result(event: Mapping[str, Any], extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {}
     if extra:
@@ -2137,7 +2196,7 @@ def _build_event_result(event: Mapping[str, Any], extra: Mapping[str, Any] | Non
         result["last_error"] = event.get("last_error")
     parsed_response = _parse_event_response(event)
     if parsed_response is not None:
-        result["response"] = parsed_response
+        result["response"] = _normalise_ai_response_payload(parsed_response)
     return result
 
 

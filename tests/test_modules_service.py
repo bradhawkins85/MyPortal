@@ -494,6 +494,10 @@ def test_invoke_ollama_supports_llamacpp_openai_compatible_endpoint(monkeypatch)
     result = asyncio.run(modules._invoke_ollama({"provider": "llamacpp", "base_url": "http://llama.local:8080", "model": "local-model"}, {"prompt": "Hi"}))
 
     assert result["provider"] == "llamacpp"
+    assert result["response"]["response"] == "ok"
+    assert result["response"]["message"] == "ok"
+    assert result["response"]["text"] == "ok"
+    assert result["response"]["choices"] == [{"message": {"content": "ok"}}]
     assert client_factory.captured_kwargs["url"] == "http://llama.local:8080/v1/chat/completions"
     assert "Authorization" not in client_factory.captured_kwargs["headers"]
 
