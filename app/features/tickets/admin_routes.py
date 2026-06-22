@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core.logging import log_error, log_info
+from app.features.tickets.form_helpers import get_last_form_value
 from app.security.flash import flash_redirect
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
@@ -1016,7 +1017,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     default_reply_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
     if not default_reply_status:
         default_reply_status = "pending" if "pending" in valid_reply_statuses else (next(iter(valid_reply_statuses), "open"))
-    reply_status = str(form.get("replyStatus") or default_reply_status).strip().lower()
+    reply_status = str(get_last_form_value(form, "replyStatus", default_reply_status) or default_reply_status).strip().lower()
     if reply_status not in valid_reply_statuses:
         return await main_module._render_ticket_detail(
             request,

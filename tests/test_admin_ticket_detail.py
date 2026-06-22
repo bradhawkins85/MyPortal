@@ -288,6 +288,70 @@ async def test_admin_reply_saves_attachments(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_reply_uses_last_duplicate_reply_status(monkeypatch):
+    """A selected split-button status should win over the primary default status."""
+
+    class DummySanitized:
+        html = "<p>reply</p>"
+        text_content = "reply"
+        has_rich_content = True
+
+    form_data = FormData(
+        [
+            ("body", "<p>reply</p>"),
+            ("replyStatus", "waiting_on_client"),
+            ("replyStatus", "resolved"),
+        ]
+    )
+
+    class DummyRequest:
+        url = type("url", (), {"path": "/admin/tickets/8"})()
+
+        async def form(self):
+            return form_data
+
+    monkeypatch.setattr(
+        main, "_require_helpdesk_page", AsyncMock(return_value=({"id": 9, "is_super_admin": True}, None))
+    )
+    monkeypatch.setattr(main, "sanitize_rich_text", lambda value: DummySanitized())
+    monkeypatch.setattr(
+        main.tickets_service,
+        "list_status_definitions",
+        AsyncMock(
+            return_value=[
+                TicketStatusDefinition(
+                    tech_status="waiting_on_client",
+                    tech_label="Waiting on client",
+                    public_status="Waiting on client",
+                    is_default=True,
+                ),
+                TicketStatusDefinition(
+                    tech_status="resolved",
+                    tech_label="Resolved",
+                    public_status="Resolved",
+                    is_default=False,
+                ),
+            ]
+        ),
+    )
+    monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value={"id": 8, "xero_invoice_number": None}))
+    monkeypatch.setattr(main.tickets_repo, "create_reply", AsyncMock(return_value={"id": 81}))
+    set_status_mock = AsyncMock(return_value={"id": 8, "status": "resolved"})
+    monkeypatch.setattr(main.tickets_repo, "set_ticket_status", set_status_mock)
+    monkeypatch.setattr(main.tickets_repo, "add_watcher", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_tags", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "broadcast_ticket_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "emit_ticket_updated_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "emit_ticket_replied_event", AsyncMock(return_value=None))
+
+    response = await admin_routes.admin_create_ticket_reply(8, DummyRequest())
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert set_status_mock.await_args.args == (8, "resolved")
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_reply_reports_failed_attachments(monkeypatch):
     """Failed attachment uploads should surface in the success message."""
 
