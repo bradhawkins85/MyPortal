@@ -289,6 +289,24 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
+    reply_status: str | None = None
+    if has_helpdesk_access or is_super_admin:
+        status_definitions = await tickets_service.list_status_definitions()
+        valid_reply_statuses = {definition.tech_status for definition in status_definitions}
+        default_reply_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+        if not default_reply_status:
+            default_reply_status = "pending" if "pending" in valid_reply_statuses else (next(iter(valid_reply_statuses), "open"))
+        reply_status = str(form.get("replyStatus") or default_reply_status).strip().lower()
+        if reply_status not in valid_reply_statuses:
+            return await main_module._render_portal_ticket_detail(
+                request,
+                user,
+                ticket_id=ticket_id,
+                reply_error="Select a valid ticket status for the reply.",
+                reply_body=body,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
     try:
         created_reply = await tickets_repo.create_reply(
             ticket_id=ticket_id,
@@ -298,6 +316,8 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             minutes_spent=None,
             is_billable=False,
         )
+        if reply_status:
+            await tickets_repo.set_ticket_status(ticket_id, reply_status)
 
         # Handle file attachments
         attachments = form.getlist("attachments")
