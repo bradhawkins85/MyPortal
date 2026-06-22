@@ -522,12 +522,14 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "ollama",
         "name": "Ollama",
-        "description": "Generate ticket summaries using an on-prem Ollama model.",
+        "description": "Generate AI summaries with Ollama, OpenAI, or OpenAI-compatible llama.cpp servers.",
         "icon": "🧠",
         "settings": {
+            "provider": "ollama",
             "base_url": "http://127.0.0.1:11434",
             "model": "llama3",
             "prompt": "",
+            "api_key": "",
         },
     },
     {
@@ -857,7 +859,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
     "hudu": ("base_url", "api_key"),
     "m365-admin": ("client_id", "client_secret"),
     "ntfy": ("base_url", "topic", "auth_token"),
-    "ollama": ("base_url", "model", "prompt"),
+    "ollama": ("provider", "base_url", "model", "prompt", "api_key"),
     "ollama-mcp": (
         "shared_secret_hash",
         "allowed_actions",
@@ -997,10 +999,25 @@ def _coerce_settings(
     base = _merge_settings(defaults, existing_settings)
     merged = _merge_settings(base, payload)
     if slug == "ollama":
+        provider = str(merged.get("provider", "")).strip().lower() or "ollama"
+        if provider not in {"ollama", "openai", "llamacpp"}:
+            provider = "ollama"
         base_url = str(merged.get("base_url", "")).strip() or defaults.get("base_url")
         model = str(merged.get("model", "")).strip() or defaults.get("model")
         prompt = str(merged.get("prompt", "")).strip()
-        merged.update({"base_url": base_url, "model": model, "prompt": prompt})
+        api_key_override = (payload or {}).get("api_key")
+        if api_key_override is None:
+            api_key = str(merged.get("api_key") or "").strip()
+        else:
+            candidate = str(api_key_override or "").strip()
+            if not candidate and existing_settings and existing_settings.get("api_key"):
+                api_key = str(existing_settings.get("api_key") or "").strip()
+            else:
+                api_key = candidate
+        merged.update({"provider": provider, "base_url": base_url, "model": model, "prompt": prompt, "api_key": api_key})
+        _env = os.getenv("OLLAMA_PROVIDER", "").strip().lower()
+        if _env in {"ollama", "openai", "llamacpp"}:
+            merged["provider"] = _env
         _env = os.getenv("OLLAMA_BASE_URL", "").strip()
         if _env:
             merged["base_url"] = _env
@@ -1010,6 +1027,9 @@ def _coerce_settings(
         _env = os.getenv("OLLAMA_PROMPT", "").strip()
         if _env:
             merged["prompt"] = _env
+        _env = os.getenv("OPENAI_API_KEY", "").strip()
+        if _env:
+            merged["api_key"] = _env
     elif slug == "smtp":
         merged.update(
             {
@@ -1659,6 +1679,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
     slug = module.get("slug")
     fields_to_redact: dict[str, tuple[str, ...]] = {
         "chatgpt-mcp": ("shared_secret_hash",),
+        "ollama": ("api_key",),
         "ollama-mcp": ("shared_secret_hash",),
         "syncro": ("api_key",),
         "uptimekuma": ("shared_secret_hash",),
@@ -2187,9 +2208,15 @@ async def _invoke_ollama(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
+    provider = str(payload.get("provider") or settings.get("provider") or "ollama").strip().lower()
+    if provider not in {"ollama", "openai", "llamacpp"}:
+        provider = "ollama"
+
+    default_base_url = "https://api.openai.com" if provider == "openai" else _DEFAULT_OLLAMA_BASE_URL
     configured_base_url = str(settings.get("base_url") or "").strip()
-    base_url = configured_base_url or _DEFAULT_OLLAMA_BASE_URL
-    base_url = base_url.rstrip("/")
+    if provider == "openai" and configured_base_url.rstrip("/") == _DEFAULT_OLLAMA_BASE_URL.rstrip("/"):
+        configured_base_url = ""
+    base_url = (configured_base_url or default_base_url).rstrip("/")
 
     payload_model = payload.get("model")
     configured_model = str(settings.get("model") or "").strip()
@@ -2199,19 +2226,37 @@ async def _invoke_ollama(
     prompt = str(payload.get("prompt") or payload.get("text") or default_prompt)
     if not prompt:
         raise ValueError("Ollama prompt cannot be empty")
-    endpoint = urljoin(f"{base_url}/", "api/generate")
-    body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
-    # Forward the ``format`` parameter when provided so callers can request
-    # structured output (e.g. ``"json"``).
-    payload_format = payload.get("format")
-    if payload_format is not None:
-        body["format"] = payload_format
+
     request_headers = {"Content-Type": "application/json"}
+    if provider == "ollama":
+        endpoint = urljoin(f"{base_url}/", "api/generate")
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+        payload_format = payload.get("format")
+        if payload_format is not None:
+            body["format"] = payload_format
+    else:
+        endpoint = urljoin(f"{base_url}/", "v1/chat/completions")
+        messages = payload.get("messages")
+        if not isinstance(messages, list) or not messages:
+            messages = [{"role": "user", "content": prompt}]
+        body = {"model": model, "messages": messages, "stream": False}
+        if payload.get("temperature") is not None:
+            body["temperature"] = payload.get("temperature")
+        if payload.get("max_tokens") is not None:
+            body["max_tokens"] = payload.get("max_tokens")
+        if payload.get("response_format") is not None:
+            body["response_format"] = payload.get("response_format")
+        elif payload.get("format") == "json":
+            body["response_format"] = {"type": "json_object"}
+        api_key = str(payload.get("api_key") or settings.get("api_key") or "").strip()
+        if api_key:
+            request_headers["Authorization"] = f"Bearer {api_key}"
+
     event = await webhook_monitor.create_manual_event(
-        name="module.ollama.generate",
+        name=f"module.ollama.{provider}.generate",
         target_url=endpoint,
         payload={"request_body": body},
-        headers=request_headers,
+        headers={k: ("********" if k.lower() == "authorization" else v) for k, v in request_headers.items()},
         max_attempts=1,
         backoff_seconds=60,
     )
@@ -2221,9 +2266,10 @@ async def _invoke_ollama(
     if event_future and not event_future.done():
         event_future.set_result(event_id)
     attempt_number = 1
+    recorded_headers = {k: ("********" if k.lower() == "authorization" else v) for k, v in request_headers.items()}
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.post(endpoint, json=body)
+            response = await client.post(endpoint, json=body, headers=request_headers)
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         response_body = exc.response.text if exc.response is not None else None
@@ -2234,13 +2280,10 @@ async def _invoke_ollama(
             error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
-            request_headers=request_headers,
+            request_headers=recorded_headers,
             request_body=body,
         )
-        return _build_event_result(
-            updated_event,
-            extra={"model": model, "endpoint": endpoint},
-        )
+        return _build_event_result(updated_event, extra={"model": model, "endpoint": endpoint, "provider": provider})
     except Exception as exc:  # pragma: no cover - defensive
         updated_event = await _record_failure(
             event_id,
@@ -2249,13 +2292,10 @@ async def _invoke_ollama(
             error_message=str(exc),
             response_status=None,
             response_body=None,
-            request_headers=request_headers,
+            request_headers=recorded_headers,
             request_body=body,
         )
-        return _build_event_result(
-            updated_event,
-            extra={"model": model, "endpoint": endpoint},
-        )
+        return _build_event_result(updated_event, extra={"model": model, "endpoint": endpoint, "provider": provider})
 
     response_body = response.text
     updated_event = await _record_success(
@@ -2263,13 +2303,10 @@ async def _invoke_ollama(
         attempt_number=attempt_number,
         response_status=response.status_code,
         response_body=response_body,
-        request_headers=request_headers,
+        request_headers=recorded_headers,
         request_body=body,
     )
-    return _build_event_result(
-        updated_event,
-        extra={"model": model, "endpoint": endpoint},
-    )
+    return _build_event_result(updated_event, extra={"model": model, "endpoint": endpoint, "provider": provider})
 
 
 async def _invoke_smtp(
