@@ -7966,6 +7966,16 @@ async def _render_tickets_dashboard(
     public_status_map = {
         definition.tech_status: definition.public_status for definition in dashboard.status_definitions
     }
+    reply_default_status = next(
+        (definition.tech_status for definition in dashboard.status_definitions if definition.is_default),
+        None,
+    )
+    if not reply_default_status:
+        reply_default_status = (
+            "pending"
+            if "pending" in dashboard.available_statuses
+            else (dashboard.available_statuses[0] if dashboard.available_statuses else "open")
+        )
     labour_types = await labour_types_service.list_labour_types()
     ticket_ids = [int(t.get("id")) for t in dashboard.tickets if t.get("id") is not None]
     ticket_time_lookup = await tickets_repo.get_time_totals_by_ticket_ids(ticket_ids)
