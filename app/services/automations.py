@@ -185,6 +185,14 @@ _REGEX_PATTERN_MAX_LENGTH = 256
 _REGEX_INPUT_MAX_LENGTH = 4096
 
 
+def _split_membership_values(expected: Any) -> list[Any]:
+    if isinstance(expected, str):
+        return [item.strip() for item in expected.split(",") if item.strip()]
+    if isinstance(expected, Sequence) and not isinstance(expected, (str, bytes, bytearray)):
+        return list(expected)
+    return [expected]
+
+
 def _string_operator_matches(actual: Any, expected: Any, operator: str) -> bool:
     if not isinstance(actual, str) or not isinstance(expected, str):
         return False
@@ -236,9 +244,14 @@ def _coerce_comparable(value: Any) -> Any:
 
 def _compare_values(actual: Any, expected: Any, operator: str) -> bool:
     if isinstance(actual, Sequence) and not isinstance(actual, (str, bytes, bytearray)):
-        if operator == "not_contains":
+        if operator in {"not_contains", "not_in"}:
             return all(_compare_values(candidate, expected, operator) for candidate in actual)
         return any(_compare_values(candidate, expected, operator) for candidate in actual)
+
+    if operator in {"in", "not_in"}:
+        candidates = _split_membership_values(expected)
+        matched = any(_value_matches(actual, candidate) for candidate in candidates)
+        return matched if operator == "in" else not matched
 
     string_operators = {"starts_with", "ends_with", "contains", "not_contains", "regex"}
     if operator in string_operators:
@@ -313,6 +326,8 @@ def _filters_match(filters: Mapping[str, Any] | None, context: Mapping[str, Any]
 
     operator_keys = {
         "not_equals": "not_equals",
+        "in": "in",
+        "not_in": "not_in",
         "gt": "greater_than",
         "greater_than": "greater_than",
         "gte": "greater_than_or_equal",
