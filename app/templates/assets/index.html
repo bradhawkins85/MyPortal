@@ -99,7 +99,7 @@
                 {{ column.label }}
               </th>
             {% endfor %}
-            {% if is_super_admin %}
+            {% if has_asset_actions %}
               <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
             {% endif %}
           </tr>
@@ -202,7 +202,7 @@
                   </td>
                 {% endif %}
               {% endfor %}
-              {% if is_super_admin %}
+              {% if has_asset_actions %}
                 <td class="table__actions" data-mobile-priority="essential">
                   <details class="header-title-menu__dropdown" data-header-menu>
                     <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
@@ -213,22 +213,35 @@
                       <span class="visually-hidden">Toggle row actions menu</span>
                     </summary>
                     <ul class="header-title-menu__list" role="menu">
-                      <li class="header-title-menu__item" role="none">
-                        <button
-                          type="button"
-                          class="header-title-menu__link"
-                          role="menuitem"
-                          data-edit-asset="{{ asset.id }}"
-                        >Edit</button>
-                      </li>
-                      <li class="header-title-menu__item" role="none">
-                        <button
-                          type="button"
-                          class="header-title-menu__link header-title-menu__link--danger asset-delete-button"
-                          role="menuitem"
-                          data-asset-id="{{ asset.id }}"
-                        >Delete</button>
-                      </li>
+                      {% if asset.can_open_chat %}
+                        <li class="header-title-menu__item" role="none">
+                          <button
+                            type="button"
+                            class="header-title-menu__link"
+                            role="menuitem"
+                            data-tray-chat
+                            data-device-uid="{{ asset.tray_device_uid }}"
+                          >Open Chat</button>
+                        </li>
+                      {% endif %}
+                      {% if is_super_admin %}
+                        <li class="header-title-menu__item" role="none">
+                          <button
+                            type="button"
+                            class="header-title-menu__link"
+                            role="menuitem"
+                            data-edit-asset="{{ asset.id }}"
+                          >Edit</button>
+                        </li>
+                        <li class="header-title-menu__item" role="none">
+                          <button
+                            type="button"
+                            class="header-title-menu__link header-title-menu__link--danger asset-delete-button"
+                            role="menuitem"
+                            data-asset-id="{{ asset.id }}"
+                          >Delete</button>
+                        </li>
+                      {% endif %}
                     </ul>
                   </details>
                 </td>

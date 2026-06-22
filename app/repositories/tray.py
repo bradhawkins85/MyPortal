@@ -215,6 +215,33 @@ async def list_devices(
     return [dict(r) for r in rows]
 
 
+
+
+async def list_active_devices_by_asset_ids(asset_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Return one active tray device per asset ID keyed by asset ID."""
+    if not asset_ids:
+        return {}
+    unique_ids = list(dict.fromkeys(int(asset_id) for asset_id in asset_ids if asset_id))
+    if not unique_ids:
+        return {}
+    placeholder = "?" if db.is_sqlite() else "%s"
+    placeholders = ", ".join([placeholder] * len(unique_ids))
+    rows = await db.fetch_all(
+        f"""SELECT * FROM tray_devices
+           WHERE status = 'active' AND asset_id IN ({placeholders})
+           ORDER BY last_seen_utc DESC, updated_at DESC, id DESC""",
+        tuple(unique_ids),
+    )
+    devices_by_asset: dict[int, dict[str, Any]] = {}
+    for row in rows or []:
+        item = dict(row)
+        asset_id = item.get("asset_id")
+        if asset_id is None:
+            continue
+        devices_by_asset.setdefault(int(asset_id), item)
+    return devices_by_asset
+
+
 async def update_device_heartbeat(
     device_id: int,
     *,
