@@ -450,35 +450,7 @@
                       'closed': 'badge--muted'
                     } %}
                     <td data-label="Status" data-column="status" data-value="{{ ticket_status }}" class="tickets-table__cell tickets-table__cell--status">
-                      <div class="ticket-status">
-                        <span class="visually-hidden" id="ticket-status-label-{{ ticket.id }}">Ticket status</span>
-                        <form
-                          id="ticket-status-form-{{ ticket.id }}"
-                          action="/admin/tickets/{{ ticket.id }}/status"
-                          method="post"
-                          class="inline-form ticket-status__form"
-                          data-ticket-status-form
-                          aria-labelledby="ticket-status-label-{{ ticket.id }}"
-                        >
-                          {% if csrf_token %}
-                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-                          {% endif %}
-                          <label class="visually-hidden" for="ticket-status-{{ ticket.id }}">Status</label>
-                          <select
-                            id="ticket-status-{{ ticket.id }}"
-                            name="status"
-                            class="form-input form-input--compact"
-                            data-ticket-status-select
-                          >
-                            {% if ticket_status not in ticket_status_label_map %}
-                              <option value="{{ ticket_status }}" selected>{{ status_label }}</option>
-                            {% endif %}
-                            {% for status_option in ticket_status_definitions %}
-                              <option value="{{ status_option.tech_status }}" {% if status_option.tech_status == ticket_status %}selected{% endif %}>{{ status_option.tech_label }}</option>
-                            {% endfor %}
-                          </select>
-                        </form>
-                      </div>
+                      <span class="ticket-status__text">{{ status_label }}</span>
                     </td>
                     <td data-label="Priority" data-column="priority" class="tickets-table__cell tickets-table__cell--priority">{{ ticket.priority or 'normal' }}</td>
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
