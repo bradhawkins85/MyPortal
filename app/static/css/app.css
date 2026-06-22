@@ -5095,9 +5095,20 @@ dialog.modal:not([open]) {
 }
 
 @media (min-width: 961px) and (max-width: 1799px) {
+  .management__column--details {
+    grid-column: 1;
+    grid-row: 1 / 3;
+  }
+
+  .management__column--content {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
   .management__column--activity,
   .management__column--conversation {
     grid-column: 2;
+    grid-row: 2;
   }
 }
 
