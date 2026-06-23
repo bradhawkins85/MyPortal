@@ -57,6 +57,7 @@ def _normalise_event(row: dict[str, Any]) -> dict[str, Any]:
             data[key] = int(data[key])
     data["headers"] = _deserialise(data.get("headers"))
     data["payload"] = _deserialise(data.get("payload"))
+    data["metadata"] = _deserialise(data.get("metadata"))
     if data.get("created_at"):
         data["created_at"] = _make_aware(data["created_at"])
     if data.get("updated_at"):
@@ -97,12 +98,13 @@ async def create_event(
     backoff_seconds: int = 300,
     direction: str = "outgoing",
     source_url: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     event_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO webhook_events
-            (name, target_url, headers, payload, max_attempts, backoff_seconds, direction, source_url)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (name, target_url, headers, payload, max_attempts, backoff_seconds, direction, source_url, metadata)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             name,
@@ -113,6 +115,7 @@ async def create_event(
             max(1, backoff_seconds),
             direction,
             source_url,
+            _serialise(metadata),
         ),
     )
     if not event_id:
