@@ -11,6 +11,7 @@ from app.core.logging import log_error
 from app.repositories import shop as shop_repo
 from app.repositories import tickets as tickets_repo
 from app.services import company_access
+from app.services import issues as issues_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import modules as modules_service
 
@@ -22,6 +23,8 @@ _CHAT_RESULT_LIMIT = 5
 _ORDER_RESULT_LIMIT = 5
 _ASSET_RESULT_LIMIT = 5
 _FEATURE_PACK_RESULT_LIMIT = 5
+_COMPANY_RESULT_LIMIT = 5
+_ISSUE_RESULT_LIMIT = 5
 _MAX_SNIPPET_LENGTH = 320
 
 
@@ -123,6 +126,76 @@ def _coerce_user_id(user: Mapping[str, Any]) -> int:
         return int(user.get("id") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _search_company_sources(
+    query: str, memberships: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    needle = query.casefold()
+    matches: list[dict[str, Any]] = []
+    for membership in memberships:
+        try:
+            company_id = int(membership.get("company_id") or membership.get("id"))
+        except (TypeError, ValueError):
+            continue
+        name = str(
+            membership.get("company_name") or membership.get("name") or ""
+        ).strip()
+        syncro_id = str(membership.get("syncro_company_id") or "").strip()
+        searchable = " ".join(
+            part for part in (name, syncro_id, str(company_id)) if part
+        ).casefold()
+        if needle not in searchable:
+            continue
+        matches.append(
+            {
+                "id": company_id,
+                "name": name or f"Company #{company_id}",
+                "syncro_company_id": syncro_id or None,
+            }
+        )
+        if len(matches) >= _COMPANY_RESULT_LIMIT:
+            break
+    return matches
+
+
+async def _search_issue_sources(
+    query: str,
+    *,
+    memberships: Sequence[Mapping[str, Any]],
+    company_ids: Sequence[int],
+    is_super_admin: bool,
+) -> list[dict[str, Any]]:
+    if not _has_membership_flag(
+        memberships, "can_manage_issues", is_super_admin=is_super_admin
+    ):
+        return []
+    overviews = await issues_service.build_issue_overview(
+        search=query.strip().lower(),
+        company_ids=company_ids or None,
+    )
+    sources: list[dict[str, Any]] = []
+    for overview in overviews[:_ISSUE_RESULT_LIMIT]:
+        assignments = [
+            {
+                "company_id": assignment.company_id,
+                "company_name": assignment.company_name,
+                "status": assignment.status,
+                "status_label": assignment.status_label,
+            }
+            for assignment in overview.assignments[:3]
+        ]
+        sources.append(
+            {
+                "id": overview.issue_id,
+                "name": overview.name,
+                "slug": overview.slug,
+                "description": _truncate(overview.description),
+                "updated_at": overview.updated_at_iso,
+                "assignments": assignments,
+            }
+        )
+    return sources
 
 
 async def _search_chat_sources(
@@ -367,6 +440,8 @@ async def execute_agent_query(
                 "chats": [],
                 "orders": [],
                 "assets": [],
+                "companies": [],
+                "issues": [],
                 "feature_packs": {},
             },
             "context": {"companies": []},
@@ -456,6 +531,10 @@ async def execute_agent_query(
     chat_sources: list[dict[str, Any]] = []
     order_sources: list[dict[str, Any]] = []
     asset_sources: list[dict[str, Any]] = []
+    company_sources: list[dict[str, Any]] = _search_company_sources(
+        query_text, resolved_memberships
+    )
+    issue_sources: list[dict[str, Any]] = []
     feature_pack_sources: dict[str, list[dict[str, Any]]] = {}
     include_products = _can_access_shop(
         resolved_memberships, is_super_admin=is_super_admin
@@ -615,6 +694,17 @@ async def execute_agent_query(
                 }
             )
 
+    try:
+        issue_sources = await _search_issue_sources(
+            query_text,
+            memberships=resolved_memberships,
+            company_ids=accessible_company_ids,
+            is_super_admin=is_super_admin,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Agent issue lookup failed", error=str(exc))
+        issue_sources = []
+
     feature_pack_sources = await _search_feature_pack_sources(
         query_text,
         user=user,
@@ -633,6 +723,8 @@ async def execute_agent_query(
         or chat_sources
         or order_sources
         or asset_sources
+        or company_sources
+        or issue_sources
         or any(feature_pack_sources.values())
     )
 
@@ -642,7 +734,7 @@ async def execute_agent_query(
         "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
         "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
         "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], or [Asset:#id].",
+        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], or [Issue:#id].",
         f"User query: {query_text}",
         "",
     ]
@@ -713,6 +805,33 @@ async def execute_agent_query(
             ):
                 if asset.get(key):
                     parts.append(f"{label}: {asset[key]}")
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if company_sources:
+        context_sections.append("Companies accessible to the user:")
+        for company in company_sources:
+            parts = [f"[Company:#{company['id']}] {company['name']}"]
+            if company.get("syncro_company_id"):
+                parts.append(f"Syncro ID: {company['syncro_company_id']}")
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if issue_sources:
+        context_sections.append("Issues accessible to the user:")
+        for issue in issue_sources:
+            parts = [f"[Issue:#{issue['id']}] {issue['name']}"]
+            if issue.get("description"):
+                parts.append(issue["description"])
+            assignment_labels = [
+                (
+                    f"{assignment.get('company_name') or assignment.get('company_id')}: "
+                    f"{assignment.get('status_label') or assignment.get('status')}"
+                )
+                for assignment in issue.get("assignments", [])
+            ]
+            if assignment_labels:
+                parts.append("Assignments: " + ", ".join(assignment_labels))
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
@@ -836,6 +955,8 @@ async def execute_agent_query(
             "chats": chat_sources,
             "orders": order_sources,
             "assets": asset_sources,
+            "companies": company_sources,
+            "issues": issue_sources,
             "feature_packs": feature_pack_sources,
         },
         "context": {"companies": company_context},

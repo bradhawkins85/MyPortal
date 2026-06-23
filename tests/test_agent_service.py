@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -255,11 +256,12 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
     memberships = [
         {
             "company_id": 1,
-            "company_name": "Contoso",
+            "company_name": "VPN Co",
             "can_access_shop": False,
             "can_access_chat": True,
             "can_access_orders": True,
             "can_manage_assets": True,
+            "can_manage_issues": True,
         }
     ]
 
@@ -334,12 +336,37 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
             "response": {"response": "Found sources"},
         }
 
+    issue_overviews = [
+        SimpleNamespace(
+            issue_id=22,
+            name="VPN rollout",
+            slug="vpn-rollout",
+            description="Track VPN deployment issues",
+            updated_at_iso="2025-01-10T10:00:00+00:00",
+            assignments=[
+                SimpleNamespace(
+                    company_id=1,
+                    company_name="VPN Co",
+                    status="investigating",
+                    status_label="Investigating",
+                )
+            ],
+        )
+    ]
+    monkeypatch.setattr(
+        agent_service.issues_service,
+        "build_issue_overview",
+        AsyncMock(return_value=issue_overviews),
+    )
+
     monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
 
     result = await agent_service.execute_agent_query(
         "VPN", user, active_company_id=1, memberships=memberships
     )
 
+    assert result["sources"]["companies"][0]["name"] == "VPN Co"
+    assert result["sources"]["issues"][0]["id"] == 22
     assert result["sources"]["chats"][0]["id"] == 11
     assert result["sources"]["orders"][0]["order_number"] == "ORD-100"
     assert result["sources"]["assets"][0]["id"] == 33

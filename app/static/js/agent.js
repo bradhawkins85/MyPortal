@@ -146,6 +146,28 @@
   }
 
 
+  function formatCompanySource(item) {
+    const id = escapeHtml(item.id);
+    const name = escapeHtml(item.name || `Company #${item.id}`);
+    const syncro = item.syncro_company_id ? `<div class="agent-sources__meta">Syncro ID: ${escapeHtml(item.syncro_company_id)}</div>` : '';
+    return `[#${id}] ${name}${syncro}`;
+  }
+
+  function formatIssueSource(item) {
+    const id = escapeHtml(item.id);
+    const name = escapeHtml(item.name || `Issue #${item.id}`);
+    const description = item.description ? escapeHtml(item.description) : '';
+    const assignments = Array.isArray(item.assignments) && item.assignments.length
+      ? item.assignments.map((assignment) => {
+          const company = assignment.company_name || assignment.company_id || 'Company';
+          const status = assignment.status_label || assignment.status || 'unknown';
+          return `${escapeHtml(company)}: ${escapeHtml(status)}`;
+        }).join(', ')
+      : '';
+    const meta = [description, assignments ? `Assignments: ${assignments}` : null].filter(Boolean).join('<br />');
+    return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  }
+
   function formatFeaturePackTitle(slug) {
     return String(slug || 'feature pack')
       .replace(/[_-]+/g, ' ')
@@ -194,6 +216,12 @@
     }
     if (Array.isArray(sources.packages)) {
       groups.push(createSourceList('Packages', sources.packages, formatPackageSource));
+    }
+    if (Array.isArray(sources.companies)) {
+      groups.push(createSourceList('Companies', sources.companies, formatCompanySource));
+    }
+    if (Array.isArray(sources.issues)) {
+      groups.push(createSourceList('Issues', sources.issues, formatIssueSource));
     }
     if (sources.feature_packs && typeof sources.feature_packs === 'object') {
       Object.keys(sources.feature_packs).sort().forEach((slug) => {
