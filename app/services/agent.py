@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
+from app.core.database import db
+from app.core.features import get_registry, module_name_for_slug
 from app.core.logging import log_error
 from app.repositories import shop as shop_repo
 from app.repositories import tickets as tickets_repo
@@ -15,12 +18,18 @@ _KB_RESULT_LIMIT = 5
 _TICKET_RESULT_LIMIT = 5
 _PRODUCT_RESULT_LIMIT = 5
 _PACKAGE_RESULT_LIMIT = 5
+_CHAT_RESULT_LIMIT = 5
+_ORDER_RESULT_LIMIT = 5
+_ASSET_RESULT_LIMIT = 5
+_FEATURE_PACK_RESULT_LIMIT = 5
 _MAX_SNIPPET_LENGTH = 320
 
 
 def _utc_iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
+    if not isinstance(dt, datetime):
+        return str(dt)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat()
@@ -67,7 +76,9 @@ def _extract_company_ids(memberships: Sequence[Mapping[str, Any]]) -> list[int]:
     return sorted(set(identifiers))
 
 
-def _can_access_shop(memberships: Sequence[Mapping[str, Any]], *, is_super_admin: bool) -> bool:
+def _can_access_shop(
+    memberships: Sequence[Mapping[str, Any]], *, is_super_admin: bool
+) -> bool:
     if is_super_admin:
         return True
     for membership in memberships:
@@ -89,10 +100,244 @@ def _company_summary(memberships: Sequence[Mapping[str, Any]]) -> list[dict[str,
         summary.append(
             {
                 "company_id": company_id,
-                "company_name": membership.get("company_name") or f"Company #{company_id}",
+                "company_name": membership.get("company_name")
+                or f"Company #{company_id}",
             }
         )
     return summary
+
+
+def _has_membership_flag(
+    memberships: Sequence[Mapping[str, Any]],
+    flag: str,
+    *,
+    is_super_admin: bool,
+) -> bool:
+    if is_super_admin:
+        return True
+    return any(bool(membership.get(flag)) for membership in memberships)
+
+
+def _coerce_user_id(user: Mapping[str, Any]) -> int:
+    try:
+        return int(user.get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _search_chat_sources(
+    query: str,
+    *,
+    user: Mapping[str, Any],
+    is_super_admin: bool,
+    can_access_chat: bool,
+) -> list[dict[str, Any]]:
+    if not can_access_chat:
+        return []
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
+        return []
+    like = f"%{query}%"
+    rows = await db.fetch_all(
+        """
+        SELECT r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id,
+               MAX(m.sent_at) AS last_message_at,
+               SUBSTR(MAX(m.body), 1, 320) AS matching_message
+        FROM chat_rooms r
+        LEFT JOIN chat_messages m ON m.room_id = r.id AND m.redacted_at IS NULL
+        WHERE (? = 1
+               OR EXISTS (
+                   SELECT 1 FROM user_companies uc
+                   WHERE uc.company_id = r.company_id AND uc.user_id = ?
+               )
+               OR EXISTS (
+                   SELECT 1 FROM chat_room_participants cp
+                   WHERE cp.room_id = r.id AND cp.user_id = ?
+               ))
+          AND (r.subject LIKE ? OR r.room_alias LIKE ? OR m.body LIKE ?)
+        GROUP BY r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id
+        ORDER BY COALESCE(MAX(m.sent_at), r.updated_at) DESC
+        LIMIT ?
+        """,
+        (
+            1 if is_super_admin else 0,
+            user_id,
+            user_id,
+            like,
+            like,
+            like,
+            _CHAT_RESULT_LIMIT,
+        ),
+    )
+    return [dict(row) for row in rows or []]
+
+
+async def _search_order_sources(
+    query: str, *, user: Mapping[str, Any], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
+        return []
+    like = f"%{query}%"
+    rows = await db.fetch_all(
+        """
+        SELECT o.order_number, o.company_id, MAX(o.order_date) AS order_date,
+               MAX(o.status) AS status, MAX(o.shipping_status) AS shipping_status,
+               MAX(o.po_number) AS po_number, MAX(o.consignment_id) AS consignment_id,
+               MAX(o.notes) AS notes, COUNT(*) AS item_count
+        FROM shop_orders o
+        LEFT JOIN shop_products p ON p.id = o.product_id
+        WHERE (? = 1
+               OR EXISTS (
+                   SELECT 1 FROM user_companies uc
+                   WHERE uc.company_id = o.company_id AND uc.user_id = ?
+               ))
+          AND (o.order_number LIKE ? OR o.po_number LIKE ? OR o.notes LIKE ? OR p.name LIKE ?)
+        GROUP BY o.order_number, o.company_id
+        ORDER BY MAX(o.order_date) DESC
+        LIMIT ?
+        """,
+        (
+            1 if is_super_admin else 0,
+            user_id,
+            like,
+            like,
+            like,
+            like,
+            _ORDER_RESULT_LIMIT,
+        ),
+    )
+    return [dict(row) for row in rows or []]
+
+
+async def _search_asset_sources(
+    query: str, *, user: Mapping[str, Any], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
+        return []
+    like = f"%{query}%"
+    rows = await db.fetch_all(
+        """
+        SELECT a.id, a.company_id, a.name, a.type, a.serial_number, a.status,
+               a.os_name, a.last_user, a.warranty_status, a.last_sync
+        FROM assets a
+        WHERE (? = 1
+               OR EXISTS (
+                   SELECT 1 FROM user_companies uc
+                   WHERE uc.company_id = a.company_id AND uc.user_id = ?
+               ))
+          AND (a.name LIKE ? OR a.type LIKE ? OR a.serial_number LIKE ? OR a.status LIKE ?
+               OR a.os_name LIKE ? OR a.last_user LIKE ? OR a.syncro_asset_id LIKE ? OR a.tactical_asset_id LIKE ?)
+        ORDER BY COALESCE(a.last_sync, a.name) DESC, a.id DESC
+        LIMIT ?
+        """,
+        (
+            1 if is_super_admin else 0,
+            user_id,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            _ASSET_RESULT_LIMIT,
+        ),
+    )
+    return [dict(row) for row in rows or []]
+
+
+async def _search_feature_pack_sources(
+    query: str,
+    *,
+    user: Mapping[str, Any],
+    active_company_id: int | None,
+    memberships: Sequence[Mapping[str, Any]],
+    company_ids: Sequence[int],
+    is_super_admin: bool,
+) -> dict[str, list[dict[str, Any]]]:
+    """Ask loaded feature packs for permission-aware agent search results.
+
+    Feature packs can opt in by exposing either ``AGENT_SEARCH_PROVIDER`` or
+    ``get_agent_search_provider()`` from their package module.  Providers are
+    called with keyword-only context and are expected to enforce any
+    feature-specific permissions before returning records.  The agent caps each
+    pack's returned records defensively so a single pack cannot dominate the
+    prompt.
+    """
+
+    try:
+        registry = get_registry()
+    except Exception as exc:  # pragma: no cover - startup/test fallback
+        log_error("Agent feature pack registry unavailable", error=str(exc))
+        return {}
+
+    sources: dict[str, list[dict[str, Any]]] = {}
+    for state in getattr(registry, "_states", {}).values():
+        pack = getattr(state, "pack", None)
+        slug = getattr(pack, "slug", "")
+        if not slug:
+            continue
+        try:
+            module = importlib.import_module(module_name_for_slug(slug))
+            provider = getattr(module, "AGENT_SEARCH_PROVIDER", None)
+            if provider is None:
+                provider_factory = getattr(module, "get_agent_search_provider", None)
+                if callable(provider_factory):
+                    provider = provider_factory()
+            if not callable(provider):
+                continue
+            result = provider(
+                query=query,
+                user=user,
+                active_company_id=active_company_id,
+                memberships=memberships,
+                company_ids=company_ids,
+                is_super_admin=is_super_admin,
+                limit=_FEATURE_PACK_RESULT_LIMIT,
+            )
+            if hasattr(result, "__await__"):
+                result = await result
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error(
+                "Agent feature pack lookup failed", feature_pack=slug, error=str(exc)
+            )
+            continue
+        if not result:
+            continue
+        items = list(result if isinstance(result, list) else result.get("results", []))
+        normalised: list[dict[str, Any]] = []
+        for item in items[:_FEATURE_PACK_RESULT_LIMIT]:
+            if not isinstance(item, Mapping):
+                continue
+            title = str(
+                item.get("title") or item.get("name") or item.get("label") or ""
+            ).strip()
+            if not title:
+                continue
+            metadata = (
+                item.get("metadata")
+                if isinstance(item.get("metadata"), Mapping)
+                else {}
+            )
+            normalised.append(
+                {
+                    "title": title,
+                    "summary": _truncate(
+                        item.get("summary")
+                        or item.get("description")
+                        or item.get("excerpt")
+                    ),
+                    "url": item.get("url"),
+                    "source_type": item.get("source_type") or slug,
+                    "metadata": dict(metadata),
+                }
+            )
+        if normalised:
+            sources[slug] = normalised
+    return sources
 
 
 async def execute_agent_query(
@@ -114,7 +359,16 @@ async def execute_agent_query(
             "event_id": None,
             "message": "Query must not be empty.",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "sources": {"knowledge_base": [], "tickets": [], "products": [], "packages": []},
+            "sources": {
+                "knowledge_base": [],
+                "tickets": [],
+                "products": [],
+                "packages": [],
+                "chats": [],
+                "orders": [],
+                "assets": [],
+                "feature_packs": {},
+            },
             "context": {"companies": []},
         }
 
@@ -190,14 +444,22 @@ async def execute_agent_query(
                     "status": str(status).strip() or "unknown",
                     "priority": str(priority).strip() or "normal",
                     "updated_at": _utc_iso(ticket.get("updated_at")),
-                    "summary": _truncate(ticket.get("ai_summary") or ticket.get("description")),
+                    "summary": _truncate(
+                        ticket.get("ai_summary") or ticket.get("description")
+                    ),
                     "company_id": ticket.get("company_id"),
                 }
             )
 
     product_sources: list[dict[str, Any]] = []
     package_sources: list[dict[str, Any]] = []
-    include_products = _can_access_shop(resolved_memberships, is_super_admin=is_super_admin)
+    chat_sources: list[dict[str, Any]] = []
+    order_sources: list[dict[str, Any]] = []
+    asset_sources: list[dict[str, Any]] = []
+    feature_pack_sources: dict[str, list[dict[str, Any]]] = {}
+    include_products = _can_access_shop(
+        resolved_memberships, is_super_admin=is_super_admin
+    )
     if include_products:
         company_scope: int | None = None
         if active_company_id:
@@ -272,31 +534,131 @@ async def execute_agent_query(
                 }
             )
 
+    can_access_chat = _has_membership_flag(
+        resolved_memberships, "can_access_chat", is_super_admin=is_super_admin
+    )
+    try:
+        raw_chats = await _search_chat_sources(
+            query_text,
+            user=user,
+            is_super_admin=is_super_admin,
+            can_access_chat=can_access_chat,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Agent chat lookup failed", error=str(exc))
+        raw_chats = []
+    for chat in raw_chats[:_CHAT_RESULT_LIMIT]:
+        chat_sources.append(
+            {
+                "id": chat.get("id"),
+                "subject": chat.get("subject") or f"Chat #{chat.get('id')}",
+                "status": chat.get("status") or "unknown",
+                "company_id": chat.get("company_id"),
+                "updated_at": _utc_iso(
+                    chat.get("updated_at") or chat.get("last_message_at")
+                ),
+                "linked_ticket_id": chat.get("linked_ticket_id"),
+                "summary": _truncate(chat.get("matching_message")),
+            }
+        )
+
+    can_access_orders = _has_membership_flag(
+        resolved_memberships, "can_access_orders", is_super_admin=is_super_admin
+    )
+    if can_access_orders:
+        try:
+            raw_orders = await _search_order_sources(
+                query_text, user=user, is_super_admin=is_super_admin
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent order lookup failed", error=str(exc))
+            raw_orders = []
+        for order in raw_orders[:_ORDER_RESULT_LIMIT]:
+            order_sources.append(
+                {
+                    "order_number": order.get("order_number"),
+                    "company_id": order.get("company_id"),
+                    "status": order.get("status") or "unknown",
+                    "shipping_status": order.get("shipping_status"),
+                    "po_number": order.get("po_number"),
+                    "consignment_id": order.get("consignment_id"),
+                    "order_date": _utc_iso(order.get("order_date")),
+                    "item_count": order.get("item_count"),
+                    "summary": _truncate(order.get("notes")),
+                }
+            )
+
+    can_manage_assets = _has_membership_flag(
+        resolved_memberships, "can_manage_assets", is_super_admin=is_super_admin
+    )
+    if can_manage_assets:
+        try:
+            raw_assets = await _search_asset_sources(
+                query_text, user=user, is_super_admin=is_super_admin
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent asset lookup failed", error=str(exc))
+            raw_assets = []
+        for asset in raw_assets[:_ASSET_RESULT_LIMIT]:
+            asset_sources.append(
+                {
+                    "id": asset.get("id"),
+                    "company_id": asset.get("company_id"),
+                    "name": asset.get("name") or f"Asset #{asset.get('id')}",
+                    "type": asset.get("type"),
+                    "serial_number": asset.get("serial_number"),
+                    "status": asset.get("status"),
+                    "os_name": asset.get("os_name"),
+                    "last_user": asset.get("last_user"),
+                    "warranty_status": asset.get("warranty_status"),
+                    "last_sync": _utc_iso(asset.get("last_sync")),
+                }
+            )
+
+    feature_pack_sources = await _search_feature_pack_sources(
+        query_text,
+        user=user,
+        active_company_id=active_company_id,
+        memberships=resolved_memberships,
+        company_ids=accessible_company_ids,
+        is_super_admin=is_super_admin,
+    )
+
     # Check if we have any relevant sources
     has_relevant_sources = bool(
-        knowledge_base_sources or ticket_sources or product_sources or package_sources
+        knowledge_base_sources
+        or ticket_sources
+        or product_sources
+        or package_sources
+        or chat_sources
+        or order_sources
+        or asset_sources
+        or any(feature_pack_sources.values())
     )
-    
+
     context_sections: list[str] = [
         "You are the MyPortal Agent. Answer the user using only the supplied context.",
         "If the portal context does not contain information relevant to the user's question, "
         "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
         "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
         "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], or [Product:SKU].",
+        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], or [Asset:#id].",
         f"User query: {query_text}",
         "",
     ]
 
     if company_context:
         company_lines = ", ".join(
-            f"{entry['company_name']} (#{entry['company_id']})" for entry in company_context
+            f"{entry['company_name']} (#{entry['company_id']})"
+            for entry in company_context
         )
-        context_sections.extend([
-            "Companies available to the user:",
-            company_lines,
-            "",
-        ])
+        context_sections.extend(
+            [
+                "Companies available to the user:",
+                company_lines,
+                "",
+            ]
+        )
 
     if knowledge_base_sources:
         context_sections.append("Knowledge base articles:")
@@ -316,11 +678,67 @@ async def execute_agent_query(
             )
         context_sections.append("")
 
+    if chat_sources:
+        context_sections.append("Chats accessible to the user:")
+        for chat in chat_sources:
+            summary = chat["summary"] or "No matching message excerpt available"
+            context_sections.append(
+                f"- [Chat:#{chat['id']}] {chat['subject']} (status: {chat['status']}): {summary}"
+            )
+        context_sections.append("")
+
+    if order_sources:
+        context_sections.append("Orders accessible to the user:")
+        for order in order_sources:
+            parts = [f"[Order:{order['order_number']}] status: {order['status']}"]
+            if order.get("shipping_status"):
+                parts.append(f"shipping: {order['shipping_status']}")
+            if order.get("po_number"):
+                parts.append(f"PO: {order['po_number']}")
+            if order.get("summary"):
+                parts.append(order["summary"])
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if asset_sources:
+        context_sections.append("Assets accessible to the user:")
+        for asset in asset_sources:
+            parts = [f"[Asset:#{asset['id']}] {asset['name']}"]
+            for key, label in (
+                ("type", "type"),
+                ("serial_number", "serial"),
+                ("status", "status"),
+                ("os_name", "OS"),
+                ("last_user", "last user"),
+            ):
+                if asset.get(key):
+                    parts.append(f"{label}: {asset[key]}")
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if feature_pack_sources:
+        context_sections.append("Feature pack results accessible to the user:")
+        for slug, items in sorted(feature_pack_sources.items()):
+            for item in items:
+                parts = [f"[Feature:{slug}] {item['title']}"]
+                if item.get("source_type"):
+                    parts.append(f"type: {item['source_type']}")
+                if item.get("summary"):
+                    parts.append(item["summary"])
+                context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
     if product_sources:
-        context_sections.append("Products and hardware recommendations available to the user:")
+        context_sections.append(
+            "Products and hardware recommendations available to the user:"
+        )
         for product in product_sources:
             parts = [
-                f"[Product:{product['sku']}] {product['name']}" if product.get("sku") else product.get("name", "Product"),
+                (
+                    f"[Product:{product['sku']}] {product['name']}"
+                    if product.get("sku")
+                    else product.get("name", "Product")
+                ),
             ]
             if product.get("price"):
                 parts.append(f"Price: {product['price']}")
@@ -333,10 +751,16 @@ async def execute_agent_query(
         context_sections.append("")
 
     if package_sources:
-        context_sections.append("Hardware bundles and service packages available to the user:")
+        context_sections.append(
+            "Hardware bundles and service packages available to the user:"
+        )
         for package in package_sources:
             parts = [
-                f"[Package:{package['sku']}] {package['name']}" if package.get("sku") else package.get("name", "Package"),
+                (
+                    f"[Package:{package['sku']}] {package['name']}"
+                    if package.get("sku")
+                    else package.get("name", "Package")
+                ),
             ]
             count_value = package.get("product_count")
             try:
@@ -409,6 +833,10 @@ async def execute_agent_query(
             "tickets": ticket_sources,
             "products": product_sources,
             "packages": package_sources,
+            "chats": chat_sources,
+            "orders": order_sources,
+            "assets": asset_sources,
+            "feature_packs": feature_pack_sources,
         },
         "context": {"companies": company_context},
     }

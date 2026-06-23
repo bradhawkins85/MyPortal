@@ -139,7 +139,9 @@ async def test_execute_agent_query_rejects_blank(monkeypatch):
 async def test_execute_agent_query_has_relevant_sources_flag(monkeypatch):
     """Test that has_relevant_sources flag is set correctly when sources are found."""
     user = {"id": 7, "is_super_admin": False}
-    memberships = [{"company_id": 1, "company_name": "Test Co", "can_access_shop": False}]
+    memberships = [
+        {"company_id": 1, "company_name": "Test Co", "can_access_shop": False}
+    ]
 
     kb_result = {
         "results": [
@@ -194,7 +196,9 @@ async def test_execute_agent_query_has_relevant_sources_flag(monkeypatch):
 async def test_execute_agent_query_no_relevant_sources(monkeypatch):
     """Test that has_relevant_sources flag is False when no sources are found."""
     user = {"id": 7, "is_super_admin": False}
-    memberships = [{"company_id": 1, "company_name": "Test Co", "can_access_shop": False}]
+    memberships = [
+        {"company_id": 1, "company_name": "Test Co", "can_access_shop": False}
+    ]
 
     # Return empty results
     kb_result = {"results": []}
@@ -218,7 +222,10 @@ async def test_execute_agent_query_no_relevant_sources(monkeypatch):
     async def fake_trigger(slug, payload, *, background):
         prompt = payload.get("prompt", "")
         # Verify the prompt contains the updated messaging
-        assert "don't have specific information" in prompt.lower() or "no portal records matched" in prompt.lower()
+        assert (
+            "don't have specific information" in prompt.lower()
+            or "no portal records matched" in prompt.lower()
+        )
         return {
             "status": "succeeded",
             "model": "llama3",
@@ -240,3 +247,162 @@ async def test_execute_agent_query_no_relevant_sources(monkeypatch):
     assert len(result["sources"]["tickets"]) == 0
     assert len(result["sources"]["products"]) == 0
     assert len(result["sources"]["packages"]) == 0
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeypatch):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [
+        {
+            "company_id": 1,
+            "company_name": "Contoso",
+            "can_access_shop": False,
+            "can_access_chat": True,
+            "can_access_orders": True,
+            "can_manage_assets": True,
+        }
+    ]
+
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value={"results": []}),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+
+    async def fake_fetch_all(sql, params):
+        if "FROM chat_rooms" in sql:
+            return [
+                {
+                    "id": 11,
+                    "subject": "VPN chat",
+                    "status": "open",
+                    "company_id": 1,
+                    "updated_at": datetime(2025, 1, 7, 8, 0, tzinfo=timezone.utc),
+                    "linked_ticket_id": 42,
+                    "matching_message": "VPN disconnects every hour",
+                }
+            ]
+        if "FROM shop_orders" in sql:
+            return [
+                {
+                    "order_number": "ORD-100",
+                    "company_id": 1,
+                    "order_date": datetime(2025, 1, 8, 9, 0, tzinfo=timezone.utc),
+                    "status": "processing",
+                    "shipping_status": "pending",
+                    "po_number": "PO-77",
+                    "consignment_id": None,
+                    "notes": "VPN appliance order",
+                    "item_count": 2,
+                }
+            ]
+        if "FROM assets" in sql:
+            return [
+                {
+                    "id": 33,
+                    "company_id": 1,
+                    "name": "VPN Gateway",
+                    "type": "Firewall",
+                    "serial_number": "SN123",
+                    "status": "active",
+                    "os_name": "RouterOS",
+                    "last_user": None,
+                    "warranty_status": "in_warranty",
+                    "last_sync": datetime(2025, 1, 9, 10, 0, tzinfo=timezone.utc),
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(agent_service.db, "fetch_all", fake_fetch_all)
+
+    async def fake_trigger(slug, payload, *, background):
+        prompt = payload.get("prompt", "")
+        assert "Chats accessible" in prompt
+        assert "Orders accessible" in prompt
+        assert "Assets accessible" in prompt
+        return {
+            "status": "succeeded",
+            "model": "llama3",
+            "response": {"response": "Found sources"},
+        }
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "VPN", user, active_company_id=1, memberships=memberships
+    )
+
+    assert result["sources"]["chats"][0]["id"] == 11
+    assert result["sources"]["orders"][0]["order_number"] == "ORD-100"
+    assert result["sources"]["assets"][0]["id"] == 33
+    assert result["has_relevant_sources"] is True
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_includes_generic_feature_pack_sources(monkeypatch):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [{"company_id": 1, "company_name": "Contoso"}]
+    provider_calls = []
+
+    async def feature_provider(**context):
+        provider_calls.append(context)
+        return [
+            {
+                "title": "Backups policy",
+                "summary": "Nightly backup completed successfully",
+                "url": "/backups/jobs/1",
+                "source_type": "backup_job",
+                "metadata": {"job_id": 1},
+            }
+        ]
+
+    module = ModuleType("app.features.backups")
+    module.AGENT_SEARCH_PROVIDER = feature_provider
+    monkeypatch.setitem(sys.modules, "app.features.backups", module)
+    fake_registry = SimpleNamespace(
+        _states={"backups": SimpleNamespace(pack=SimpleNamespace(slug="backups"))}
+    )
+    monkeypatch.setattr(agent_service, "get_registry", lambda: fake_registry)
+
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value={"results": []}),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+
+    async def fake_trigger(slug, payload, *, background):
+        prompt = payload.get("prompt", "")
+        assert "Feature pack results accessible" in prompt
+        assert "[Feature:backups] Backups policy" in prompt
+        return {"status": "succeeded", "response": {"response": "Found backups"}}
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "backup", user, active_company_id=1, memberships=memberships
+    )
+
+    assert provider_calls[0]["user"] == user
+    assert provider_calls[0]["company_ids"] == [1]
+    assert result["sources"]["feature_packs"]["backups"][0]["title"] == "Backups policy"
+    assert result["has_relevant_sources"] is True

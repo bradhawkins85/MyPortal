@@ -113,6 +113,56 @@
     return `${label}${meta}`;
   }
 
+
+  function formatChatSource(item) {
+    const id = escapeHtml(item.id);
+    const subject = escapeHtml(item.subject || `Chat #${item.id}`);
+    const status = escapeHtml(item.status || 'unknown');
+    const summary = escapeHtml(item.summary || '');
+    const ticket = item.linked_ticket_id ? ` • Ticket #${escapeHtml(item.linked_ticket_id)}` : '';
+    return `[#${id}] ${subject}<div class="agent-sources__meta">Status: ${status}${ticket}${summary ? `<br />${summary}` : ''}</div>`;
+  }
+
+  function formatOrderSource(item) {
+    const number = escapeHtml(item.order_number || 'Order');
+    const status = escapeHtml(item.status || 'unknown');
+    const shipping = item.shipping_status ? ` • Shipping: ${escapeHtml(item.shipping_status)}` : '';
+    const po = item.po_number ? ` • PO: ${escapeHtml(item.po_number)}` : '';
+    const summary = escapeHtml(item.summary || '');
+    return `[${number}]<div class="agent-sources__meta">Status: ${status}${shipping}${po}${summary ? `<br />${summary}` : ''}</div>`;
+  }
+
+  function formatAssetSource(item) {
+    const id = escapeHtml(item.id);
+    const name = escapeHtml(item.name || `Asset #${item.id}`);
+    const metaParts = [];
+    if (item.type) metaParts.push(`Type: ${escapeHtml(item.type)}`);
+    if (item.serial_number) metaParts.push(`Serial: ${escapeHtml(item.serial_number)}`);
+    if (item.status) metaParts.push(`Status: ${escapeHtml(item.status)}`);
+    if (item.os_name) metaParts.push(`OS: ${escapeHtml(item.os_name)}`);
+    if (item.last_user) metaParts.push(`Last user: ${escapeHtml(item.last_user)}`);
+    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : '';
+    return `[#${id}] ${name}${meta}`;
+  }
+
+
+  function formatFeaturePackTitle(slug) {
+    return String(slug || 'feature pack')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function formatFeaturePackSource(item) {
+    const title = escapeHtml(item.title || 'Result');
+    const summary = escapeHtml(item.summary || '');
+    const type = item.source_type ? escapeHtml(item.source_type) : null;
+    const url = item.url ? escapeHtml(item.url) : null;
+    const linkStart = url ? `<a href="${url}">` : '';
+    const linkEnd = url ? '</a>' : '';
+    const meta = [type ? `Type: ${type}` : null, summary].filter(Boolean).join('<br />');
+    return `${linkStart}${title}${linkEnd}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  }
+
   function renderSources(container, sources) {
     if (!container) {
       return;
@@ -133,8 +183,25 @@
     if (Array.isArray(sources.products)) {
       groups.push(createSourceList('Products', sources.products, formatProductSource));
     }
+    if (Array.isArray(sources.chats)) {
+      groups.push(createSourceList('Chats', sources.chats, formatChatSource));
+    }
+    if (Array.isArray(sources.orders)) {
+      groups.push(createSourceList('Orders', sources.orders, formatOrderSource));
+    }
+    if (Array.isArray(sources.assets)) {
+      groups.push(createSourceList('Assets', sources.assets, formatAssetSource));
+    }
     if (Array.isArray(sources.packages)) {
       groups.push(createSourceList('Packages', sources.packages, formatPackageSource));
+    }
+    if (sources.feature_packs && typeof sources.feature_packs === 'object') {
+      Object.keys(sources.feature_packs).sort().forEach((slug) => {
+        const items = sources.feature_packs[slug];
+        if (Array.isArray(items)) {
+          groups.push(createSourceList(formatFeaturePackTitle(slug), items, formatFeaturePackSource));
+        }
+      });
     }
 
     const usable = groups.filter((group) => group);
