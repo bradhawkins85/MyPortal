@@ -5787,6 +5787,47 @@ async def admin_tray_devices_page(
     return await _render_template("admin/tray/devices.html", request, current_user, extra=extra)
 
 
+@app.post("/admin/tray/devices/{device_id}/update", response_class=HTMLResponse)
+async def admin_tray_update_device(device_id: int, request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+    from app.services import tray as tray_service
+
+    device = await tray_repo.get_device_by_id(device_id)
+    if not device:
+        return flash_redirect("/admin/tray/devices", "Tray device not found.", "error")
+    if device.get("status") == "revoked":
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Revoked tray devices cannot receive update commands.",
+            "error",
+        )
+
+    payload = {"type": "update"}
+    device_uid = str(device.get("device_uid") or "").strip()
+    delivered = await tray_service.send_to_device(device_uid, payload) if device_uid else False
+    await tray_repo.log_command(
+        device_id=int(device["id"]),
+        command="update",
+        payload_json=json.dumps(payload),
+        initiated_by_user_id=current_user.get("id") if current_user else None,
+        status="delivered" if delivered else "queued",
+    )
+    if delivered:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Update command sent to tray device.",
+            "success",
+        )
+    return flash_redirect(
+        "/admin/tray/devices",
+        "Update command queued; the tray device is not currently connected to this server process.",
+        "info",
+    )
+
+
 @app.post("/admin/tray/devices/{device_id}/revoke", response_class=HTMLResponse)
 async def admin_tray_revoke_device(device_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)

@@ -78,6 +78,10 @@
                 <td>{{ device.agent_version or '—' }}</td>
                 <td class="data-table__col--actions">
                   {% if device.status != 'revoked' %}
+                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <button type="submit" class="button button--small button--primary" data-confirm="Signal this tray device to check the server for an updated tray app installer?">Update</button>
+                    </form>
                     <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
