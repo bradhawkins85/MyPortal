@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from app.core.config import get_settings
-from app.core.logging import log_info, log_warning
+from app.core.logging import log_error, log_info, log_warning
 from app.repositories import assets as assets_repo
 from app.repositories import companies as companies_repo
 from app.repositories import site_settings as site_settings_repo
@@ -115,6 +116,193 @@ async def find_matching_asset(
         except (TypeError, ValueError):
             return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Tactical RMM enrolment-token synchronisation
+# ---------------------------------------------------------------------------
+
+
+def trmm_client_token_field_name() -> str:
+    """Return the TRMM client custom field name that stores tray install tokens."""
+
+    return (
+        os.getenv("TRMM_CLIENT_TOKEN_FIELD", "MyPortalToken").strip() or "MyPortalToken"
+    )[:128]
+
+
+async def ensure_company_install_token(
+    *,
+    company_id: int,
+    created_by_user_id: int | None = None,
+    label: str | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """Return an active company install-token row, creating one when needed.
+
+    The raw token can only be returned when a new token is created. Existing
+    token values are intentionally unrecoverable because only HMAC hashes are
+    stored at rest.
+    """
+
+    tokens = await tray_repo.list_install_tokens(company_id=int(company_id))
+    for token in tokens:
+        if token.get("revoked_at"):
+            continue
+        expires_at = token.get("expires_at")
+        if isinstance(expires_at, datetime):
+            aware = expires_at.replace(tzinfo=expires_at.tzinfo or timezone.utc)
+            if aware < datetime.now(timezone.utc):
+                continue
+        return token, None
+
+    company = await companies_repo.get_company_by_id(int(company_id))
+    raw_token = generate_install_token()
+    record = await tray_repo.create_install_token(
+        label=(label or f"{(company or {}).get('name') or 'Company'} TRMM tray token")[
+            :150
+        ],
+        company_id=int(company_id),
+        token_hash=hash_token(raw_token),
+        token_prefix=token_prefix(raw_token),
+        created_by_user_id=created_by_user_id,
+    )
+    return record, raw_token
+
+
+def _extract_trmm_custom_field_id(
+    client: dict[str, Any], field_name: str
+) -> int | None:
+    for field in client.get("custom_fields") or []:
+        if not isinstance(field, dict):
+            continue
+        if str(field.get("name") or "").strip() != field_name:
+            continue
+        raw_id = field.get("field") or field.get("id") or field.get("pk")
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+async def update_trmm_client_token_field(
+    *,
+    trmm_client_id: str | int,
+    token: str,
+    field_name: str | None = None,
+) -> dict[str, Any]:
+    """Write a tray enrolment token into a Tactical RMM client custom field."""
+
+    from app.services import tacticalrmm as tacticalrmm_service
+
+    client_id = str(trmm_client_id or "").strip()
+    if not client_id:
+        raise ValueError("Tactical RMM client ID is required")
+    custom_field_name = (field_name or trmm_client_token_field_name()).strip()
+    if not custom_field_name:
+        raise ValueError("Tactical RMM custom field name is required")
+
+    client = await tacticalrmm_service._call_endpoint(
+        f"/clients/{client_id}/", method="GET"
+    )
+    if not isinstance(client, dict):
+        client = {}
+    field_id = _extract_trmm_custom_field_id(client, custom_field_name)
+
+    custom_field_payload: dict[str, Any]
+    if field_id is not None:
+        custom_field_payload = {"field": field_id, "string_value": token}
+    else:
+        # Recent TRMM builds expose the field ID in the client response. Keep a
+        # name-based fallback so the sync still works on APIs that accept names.
+        custom_field_payload = {"name": custom_field_name, "string_value": token}
+
+    body = {"custom_fields": [custom_field_payload]}
+    return await tacticalrmm_service._call_endpoint(
+        f"/clients/{client_id}/", method="PATCH", body=body
+    )
+
+
+async def sync_company_trmm_tray_token(
+    *,
+    company_id: int,
+    created_by_user_id: int | None = None,
+) -> dict[str, Any]:
+    """Ensure a MyPortal tray token exists and publish it to TRMM for a company."""
+
+    company = await companies_repo.get_company_by_id(int(company_id))
+    if not company:
+        return {
+            "status": "skipped",
+            "reason": "company_not_found",
+            "company_id": company_id,
+        }
+    trmm_client_id = str(company.get("tacticalrmm_client_id") or "").strip()
+    if not trmm_client_id:
+        return {
+            "status": "skipped",
+            "reason": "missing_tacticalrmm_client_id",
+            "company_id": company_id,
+        }
+
+    token_record, raw_token = await ensure_company_install_token(
+        company_id=int(company_id), created_by_user_id=created_by_user_id
+    )
+    if raw_token is None:
+        return {
+            "status": "skipped",
+            "reason": "existing_token_value_not_recoverable",
+            "company_id": company_id,
+            "token_id": token_record.get("id"),
+        }
+
+    await update_trmm_client_token_field(trmm_client_id=trmm_client_id, token=raw_token)
+    log_info(
+        "Published tray enrolment token to Tactical RMM client custom field",
+        company_id=company_id,
+        trmm_client_id=trmm_client_id,
+        field=trmm_client_token_field_name(),
+    )
+    return {
+        "status": "updated",
+        "company_id": company_id,
+        "token_id": token_record.get("id"),
+    }
+
+
+async def sync_all_company_trmm_tray_tokens(
+    *, created_by_user_id: int | None = None
+) -> dict[str, Any]:
+    """Create missing tray enrolment tokens and publish new values to TRMM."""
+
+    companies = await companies_repo.list_companies()
+    summary: dict[str, Any] = {
+        "processed": 0,
+        "updated": 0,
+        "skipped": [],
+        "errors": [],
+    }
+    for company in companies:
+        company_id = int(company.get("id") or 0)
+        if company_id <= 0:
+            continue
+        summary["processed"] += 1
+        try:
+            result = await sync_company_trmm_tray_token(
+                company_id=company_id, created_by_user_id=created_by_user_id
+            )
+            if result.get("status") == "updated":
+                summary["updated"] += 1
+            else:
+                summary["skipped"].append(result)
+        except Exception as exc:  # pragma: no cover - defensive integration logging
+            log_error(
+                "Failed to sync tray token to Tactical RMM",
+                company_id=company_id,
+                error=str(exc),
+            )
+            summary["errors"].append({"company_id": company_id, "error": str(exc)})
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -242,11 +430,7 @@ async def resolve_config_for_device(device: dict[str, Any]) -> dict[str, Any]:
         display_text = chosen.get("display_text")
         branding_icon_url = chosen.get("branding_icon_url")
         raw_allow = chosen.get("env_allowlist") or ""
-        env_allowlist = [
-            v.strip()
-            for v in str(raw_allow).split(",")
-            if v.strip()
-        ]
+        env_allowlist = [v.strip() for v in str(raw_allow).split(",") if v.strip()]
         version = int(chosen.get("version") or 1)
     else:
         payload = list(_DEFAULT_MENU)
@@ -346,7 +530,9 @@ async def push_notification_to_company_devices(
     if not company or not company.get("tray_notifications_enabled"):
         return {"targeted": 0, "delivered": 0, "queued": 0}
 
-    active_devices = await tray_repo.list_devices(company_id=int(company_id), status="active")
+    active_devices = await tray_repo.list_devices(
+        company_id=int(company_id), status="active"
+    )
     allowed_asset_ids = {
         int(asset_id)
         for asset_id in (asset_ids or [])
@@ -355,7 +541,8 @@ async def push_notification_to_company_devices(
     target_devices = [
         device
         for device in active_devices
-        if not allowed_asset_ids or int(device.get("asset_id") or 0) in allowed_asset_ids
+        if not allowed_asset_ids
+        or int(device.get("asset_id") or 0) in allowed_asset_ids
     ]
     if not target_devices:
         return {"targeted": 0, "delivered": 0, "queued": 0}
@@ -400,7 +587,9 @@ async def push_notification_to_company_devices(
 # ---------------------------------------------------------------------------
 
 
-def technician_can_initiate(user: dict[str, Any], company: dict[str, Any] | None) -> bool:
+def technician_can_initiate(
+    user: dict[str, Any], company: dict[str, Any] | None
+) -> bool:
     """Return True when ``user`` is allowed to push a chat to a device.
 
     The per-company toggle ``tray_chat_enabled`` is the primary gate; super
