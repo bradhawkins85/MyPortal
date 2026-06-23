@@ -397,7 +397,7 @@
           <form action="/admin/companies/{{ company.id }}/staff-fields" method="post" class="form">
             {% include "partials/csrf.html" %}
             <div class="table-wrapper">
-              <table class="table">
+              <table class="table staff-field-config-table">
                 <thead>
                   <tr>
                     <th scope="col">Field</th>
@@ -569,7 +569,7 @@
           </form>
 
           <div class="table-wrapper">
-            <table class="table">
+            <table class="table staff-custom-fields-table">
               <thead>
                 <tr>
                   <th>Key</th>

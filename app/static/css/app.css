@@ -10383,3 +10383,108 @@ a.stat-strip__stat:focus-visible {
   background: rgba(56, 189, 248, 0.16);
   outline: none;
 }
+
+/* Staff admin field configuration tables need enough intrinsic width for
+ * labels, inputs, textareas, and action buttons. Keep them inside the card's
+ * horizontal scroller instead of letting controls visually overlap. */
+.staff-field-config-table,
+.staff-custom-fields-table {
+  table-layout: fixed;
+}
+
+.staff-field-config-table {
+  min-width: 980px;
+}
+
+.staff-custom-fields-table {
+  min-width: 1680px;
+}
+
+.staff-field-config-table th,
+.staff-field-config-table td,
+.staff-custom-fields-table th,
+.staff-custom-fields-table td {
+  vertical-align: top;
+}
+
+.staff-field-config-table .form-input,
+.staff-custom-fields-table .form-input {
+  min-width: 0;
+}
+
+.staff-field-config-table td:nth-child(1) {
+  width: 18%;
+}
+
+.staff-field-config-table td:nth-child(2) {
+  width: 14%;
+}
+
+.staff-field-config-table td:nth-child(5) {
+  width: 9rem;
+}
+
+.staff-custom-fields-table th:nth-child(1),
+.staff-custom-fields-table td:nth-child(1) {
+  width: 9rem;
+}
+
+.staff-custom-fields-table th:nth-child(2),
+.staff-custom-fields-table td:nth-child(2),
+.staff-custom-fields-table th:nth-child(3),
+.staff-custom-fields-table td:nth-child(3),
+.staff-custom-fields-table th:nth-child(5),
+.staff-custom-fields-table td:nth-child(5),
+.staff-custom-fields-table th:nth-child(9),
+.staff-custom-fields-table td:nth-child(9),
+.staff-custom-fields-table th:nth-child(10),
+.staff-custom-fields-table td:nth-child(10) {
+  width: 12rem;
+}
+
+.staff-custom-fields-table th:nth-child(4),
+.staff-custom-fields-table td:nth-child(4) {
+  width: 9rem;
+}
+
+.staff-custom-fields-table th:nth-child(6),
+.staff-custom-fields-table td:nth-child(6) {
+  width: 7rem;
+}
+
+.staff-custom-fields-table th:nth-child(7),
+.staff-custom-fields-table td:nth-child(7) {
+  width: 5rem;
+  text-align: center;
+}
+
+.staff-custom-fields-table th:nth-child(8),
+.staff-custom-fields-table td:nth-child(8) {
+  width: 16rem;
+}
+
+.staff-custom-fields-table th:nth-child(11),
+.staff-custom-fields-table td:nth-child(11) {
+  width: 9rem;
+}
+
+.staff-custom-fields-table .form-field {
+  gap: 0.35rem;
+  margin: 0 0 var(--space-gap-tight);
+}
+
+.staff-custom-fields-table .form-field:last-child {
+  margin-bottom: 0;
+}
+
+.staff-custom-fields-table .table__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-gap-tight);
+}
+
+.staff-custom-fields-table .table__actions .inline-form,
+.staff-custom-fields-table .table__actions .button {
+  width: 100%;
+}
