@@ -146,6 +146,7 @@ func handleConfigChanged(cfg *api.ConfigResponse) {
 			return
 		}
 		cmd := exec.Command(exe, os.Args[1:]...)
+		cmd.Env = append(os.Environ(), "MYPORTAL_TRAY_RESTART=1")
 		if startErr := cmd.Start(); startErr != nil {
 			logger.Warn("config_changed restart: Start: %v", startErr)
 			return
