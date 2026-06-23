@@ -80,9 +80,15 @@ async def list_rooms(
     rows = await db.fetch_all(
         f"""SELECT r.*,
                (SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count,
-               CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name
+               CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name,
+               COALESCE(NULLIF(a.name, ''), NULLIF(td.hostname, ''), td.device_uid) AS device_name,
+               c.name AS company_name,
+               td.console_user AS console_user
             FROM chat_rooms r
             LEFT JOIN users u ON u.id = r.assigned_tech_user_id
+            LEFT JOIN tray_devices td ON td.id = r.tray_device_id
+            LEFT JOIN assets a ON a.id = td.asset_id
+            LEFT JOIN companies c ON c.id = r.company_id
             {unattended_join}
             WHERE {where}
             ORDER BY r.updated_at DESC LIMIT %s OFFSET %s""",

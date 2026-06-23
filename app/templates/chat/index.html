@@ -41,7 +41,70 @@
           </select>
         </div>
         {% endif %}
+        <div class="tickets-toolbar__field">
+          <label class="form-label" for="chat-table-filter">Filter chats</label>
+          <input
+            id="chat-table-filter"
+            type="search"
+            class="form-input"
+            placeholder="Filter chats…"
+            data-table-filter="chat-rooms-table"
+          />
+        </div>
       </form>
+      <div class="ticket-columns" data-chat-columns>
+        <button type="button" class="button button--ghost ticket-columns__toggle" data-columns-toggle aria-haspopup="true" aria-expanded="false">
+          Columns
+          <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+        </button>
+        <div class="ticket-columns__panel" data-columns-panel hidden>
+          <p class="ticket-columns__title">Toggle columns</p>
+          <div class="ticket-columns__options">
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="id" checked />
+              <span>ID</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="subject" checked disabled />
+              <span>Subject</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="device" checked />
+              <span>Device</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="company" checked />
+              <span>Company</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="console-user" checked />
+              <span>Console user</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="status" checked />
+              <span>Status</span>
+            </label>
+            {% if is_staff %}
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="assigned" checked />
+              <span>Assigned to</span>
+            </label>
+            {% endif %}
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="created" checked />
+              <span>Created</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="last-message" checked />
+              <span>Last message</span>
+            </label>
+            <label class="ticket-columns__option">
+              <input type="checkbox" class="chat-column-toggle" data-column="actions" checked />
+              <span>Actions</span>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
   </header>
   {% if not rooms %}
@@ -51,34 +114,40 @@
     <table class="table" id="chat-rooms-table" data-table>
       <thead>
         <tr>
-          <th scope="col" data-sort="int">ID</th>
-          <th scope="col" data-sort="string">Subject</th>
-          <th scope="col" data-sort="string">Status</th>
+          <th scope="col" data-column="id" data-sort="int">ID</th>
+          <th scope="col" data-column="subject" data-sort="string">Subject</th>
+          <th scope="col" data-column="device" data-sort="string">Device</th>
+          <th scope="col" data-column="company" data-sort="string">Company</th>
+          <th scope="col" data-column="console-user" data-sort="string">Console user</th>
+          <th scope="col" data-column="status" data-sort="string">Status</th>
           {% if is_staff %}
-          <th scope="col" data-sort="string">Assigned to</th>
+          <th scope="col" data-column="assigned" data-sort="string">Assigned to</th>
           {% endif %}
-          <th scope="col" data-sort="date">Created</th>
-          <th scope="col" data-sort="date">Last message</th>
-          <th scope="col">Actions</th>
+          <th scope="col" data-column="created" data-sort="date">Created</th>
+          <th scope="col" data-column="last-message" data-sort="date">Last message</th>
+          <th scope="col" data-column="actions">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for room in rooms %}
         <tr>
-          <td>{{ room.id }}</td>
-          <td>
+          <td data-column="id" data-label="ID">{{ room.id }}</td>
+          <td data-column="subject" data-label="Subject">
             <a href="/chat/{{ room.id }}">{{ room.subject | e }}</a>
             {% if is_staff and room.status == 'open' and (room.tech_participant_count is not defined or room.tech_participant_count == 0) %}
               <span class="badge badge--warning" title="No technician has joined this chat">Unattended</span>
             {% endif %}
           </td>
-          <td>
+          <td data-column="device" data-label="Device">{{ room.device_name or '—' }}</td>
+          <td data-column="company" data-label="Company">{{ room.company_name or '—' }}</td>
+          <td data-column="console-user" data-label="Console user">{{ room.console_user or '—' }}</td>
+          <td data-column="status" data-label="Status">
             <span class="badge badge--{% if room.status == 'open' %}operational{% else %}neutral{% endif %}">
               {{ room.status | capitalize }}
             </span>
           </td>
           {% if is_staff %}
-          <td>
+          <td data-column="assigned" data-label="Assigned to">
             {% if room.assigned_tech_display_name %}
               {{ room.assigned_tech_display_name | e }}
             {% elif room.assigned_tech_user_id %}
@@ -88,9 +157,9 @@
             {% endif %}
           </td>
           {% endif %}
-          <td>{{ room.created_at | default('—') }}</td>
-          <td>{{ room.last_message_at | default('—') }}</td>
-          <td class="table-actions">
+          <td data-column="created" data-label="Created">{{ room.created_at | default('—') }}</td>
+          <td data-column="last-message" data-label="Last message">{{ room.last_message_at | default('—') }}</td>
+          <td class="table-actions" data-column="actions" data-label="Actions">
             <a href="/chat/{{ room.id }}" class="button button--sm">Open</a>
             {% if is_staff and room.status == 'open' %}
               <button class="button button--sm button--secondary btn-assign-join"
@@ -134,6 +203,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', path='js/chat_columns.js') }}" defer></script>
 <script>
 (function () {
   const openBtn = document.querySelector('[data-create-chat-modal-open]');
