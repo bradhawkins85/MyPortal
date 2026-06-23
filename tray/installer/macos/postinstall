@@ -1,32 +1,51 @@
 #!/bin/bash
 # Package postinstall script — runs as root after the pkg payload is extracted.
-# Loads the LaunchDaemon and registers the LaunchAgent for all current users.
-set -euo pipefail
+# Loads the LaunchDaemon and registers the LaunchAgent for current users.
+set -u
 
 BIN_DIR="/Library/MyPortal/Tray"
 DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
 AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
 LOG_DIR="/Library/Logs/MyPortal/tray"
+STATE_DIR="/Library/Application Support/MyPortal/Tray"
 
-# Create log directory.
-mkdir -p "$LOG_DIR"
-chmod 755 "$LOG_DIR"
+warn() {
+    echo "Warning: $*" >&2
+}
 
-# Make binaries executable.
-chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui"
+# Create service-owned directories before launchd evaluates stdio paths or the
+# daemon tries to write its state. Missing parent directories can make a pkg look
+# like it failed even though the payload was installed.
+mkdir -p "$LOG_DIR" "$STATE_DIR" || warn "failed to create support directories"
+chmod 755 "/Library/Logs/MyPortal" "$LOG_DIR" 2>/dev/null || true
+chmod 755 "/Library/Application Support/MyPortal" "$STATE_DIR" 2>/dev/null || true
 
-# Load the daemon (stops and reloads if already running).
-if launchctl list io.myportal.tray.service &>/dev/null; then
-    launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
+# Make payload executables runnable.
+chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true
+
+# Stop any existing jobs before bootstrapping the newly installed plists. Prefer
+# modern launchctl verbs and fall back to load/unload for older macOS releases.
+launchctl bootout system "$DAEMON_PLIST" 2>/dev/null || launchctl unload "$DAEMON_PLIST" 2>/dev/null || true
+if ! launchctl bootstrap system "$DAEMON_PLIST" 2>/dev/null; then
+    if ! launchctl load -w "$DAEMON_PLIST" 2>/dev/null; then
+        warn "failed to load $DAEMON_PLIST; the service should start after reboot or can be loaded manually"
+    fi
 fi
-launchctl load -w "$DAEMON_PLIST"
+launchctl enable system/io.myportal.tray.service 2>/dev/null || true
+launchctl kickstart -k system/io.myportal.tray.service 2>/dev/null || true
 
-# Register the agent for all currently logged-in users.
-# New user sessions will pick it up automatically from /Library/LaunchAgents.
-for uid in $(ps -axo uid= -c Aqua 2>/dev/null | sort -u); do
-    if [[ "$uid" -ge 500 ]]; then
-        launchctl asuser "$uid" launchctl load -w "$AGENT_PLIST" 2>/dev/null || true
+# Register the agent for the active console user and any other GUI sessions.
+# New sessions will also pick it up automatically from /Library/LaunchAgents.
+for uid in $(stat -f '%u' /dev/console 2>/dev/null; ps -axo uid= 2>/dev/null | sort -u); do
+    if [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 500 ]]; then
+        launchctl bootout "gui/$uid" "$AGENT_PLIST" 2>/dev/null || launchctl asuser "$uid" launchctl unload "$AGENT_PLIST" 2>/dev/null || true
+        if ! launchctl bootstrap "gui/$uid" "$AGENT_PLIST" 2>/dev/null; then
+            launchctl asuser "$uid" launchctl load -w "$AGENT_PLIST" 2>/dev/null || true
+        fi
+        launchctl enable "gui/$uid/io.myportal.tray.agent" 2>/dev/null || true
+        launchctl kickstart -k "gui/$uid/io.myportal.tray.agent" 2>/dev/null || true
     fi
 done
 
 echo "MyPortal Tray postinstall complete."
+exit 0

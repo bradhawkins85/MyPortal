@@ -187,6 +187,19 @@ See [docs/tray_app.md](../docs/tray_app.md) for the full architecture document.
 MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/macos/install.sh
 ```
 
+
+### macOS uninstaller
+
+The macOS package bundles an uninstaller at `/Library/MyPortal/Tray/uninstall.sh`:
+
+```bash
+sudo /Library/MyPortal/Tray/uninstall.sh
+# Remove config, enrolment state, and logs as well:
+sudo /Library/MyPortal/Tray/uninstall.sh --purge
+```
+
+The default uninstall stops launchd jobs and removes installed binaries/plists while preserving configuration, state, and logs for troubleshooting or reinstall.
+
 ## Security model
 
 - The install token is **single-company** and **rotatable** from the admin UI.

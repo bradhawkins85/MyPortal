@@ -19,6 +19,7 @@ mkdir -p "$PAYLOAD_DIR/Library/LaunchAgents"
 # Binaries (cross-compiled by Makefile).
 cp ../../dist/darwin/myportal-tray-service "$PAYLOAD_DIR$INSTALL_LOCATION/"
 cp ../../dist/darwin/myportal-tray-ui     "$PAYLOAD_DIR$INSTALL_LOCATION/"
+cp uninstall.sh "$PAYLOAD_DIR$INSTALL_LOCATION/"
 
 # Dedicated chat shell: an Electron .app bundle pre-built on a macOS runner.
 # The tray UI launches the binary inside this bundle directly for an isolated
@@ -31,6 +32,8 @@ else
     echo "Warning: dist/darwin/myportal-tray-chat.app not found; chat shell will not be included in this package." >&2
     echo "  Run 'make build-chat-shell-mac' on a macOS host first, or download the chat-shell-darwin CI artifact." >&2
 fi
+
+chmod +x "$PAYLOAD_DIR$INSTALL_LOCATION/uninstall.sh"
 
 # Plists.
 cp io.myportal.tray.service.plist "$PAYLOAD_DIR/Library/LaunchDaemons/"
