@@ -218,27 +218,30 @@ async def list_devices(
 
 
 async def list_active_devices_by_asset_ids(asset_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """Return one active tray device per asset ID keyed by asset ID."""
-    if not asset_ids:
-        return {}
+    """Return one active tray device per asset ID keyed by asset ID.
+
+    Query each asset with a bound parameter instead of interpolating a
+    dynamically-sized ``IN`` clause. This keeps user-controlled asset IDs out
+    of SQL strings and satisfies static security scanners.
+    """
     unique_ids = list(dict.fromkeys(int(asset_id) for asset_id in asset_ids if asset_id))
     if not unique_ids:
         return {}
-    placeholder = "?" if db.is_sqlite() else "%s"
-    placeholders = ", ".join([placeholder] * len(unique_ids))
-    rows = await db.fetch_all(
-        f"""SELECT * FROM tray_devices
-           WHERE status = 'active' AND asset_id IN ({placeholders})
-           ORDER BY last_seen_utc DESC, updated_at DESC, id DESC""",
-        tuple(unique_ids),
+
+    query = (
+        "SELECT * FROM tray_devices "
+        "WHERE status = 'active' AND asset_id = ? "
+        "ORDER BY last_seen_utc DESC, updated_at DESC, id DESC LIMIT 1"
+        if db.is_sqlite()
+        else "SELECT * FROM tray_devices "
+        "WHERE status = 'active' AND asset_id = %s "
+        "ORDER BY last_seen_utc DESC, updated_at DESC, id DESC LIMIT 1"
     )
     devices_by_asset: dict[int, dict[str, Any]] = {}
-    for row in rows or []:
-        item = dict(row)
-        asset_id = item.get("asset_id")
-        if asset_id is None:
-            continue
-        devices_by_asset.setdefault(int(asset_id), item)
+    for asset_id in unique_ids:
+        row = await db.fetch_one(query, (asset_id,))
+        if row:
+            devices_by_asset[asset_id] = dict(row)
     return devices_by_asset
 
 
