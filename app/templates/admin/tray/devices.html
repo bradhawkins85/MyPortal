@@ -16,6 +16,26 @@
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <p class="card__lede">Endpoints that have enrolled with the MyPortal tray service. Use the menu configurations and install tokens pages to provision new fleets.</p>
+      <div class="info-grid info-grid--compact" aria-label="Tray release loaded on this server">
+        <div class="info-grid__item">
+          <span class="info-grid__label">Server tray app release</span>
+          <strong>{{ tray_release.version or 'Not loaded' }}</strong>
+          {% if tray_release.release_tag and tray_release.release_tag != tray_release.version %}
+            <span class="data-table__sub">GitHub tag {{ tray_release.release_tag }}</span>
+          {% endif %}
+        </div>
+        <div class="info-grid__item">
+          <span class="info-grid__label">Loaded installers</span>
+          <strong>{{ tray_release.loaded_assets|length }}</strong>
+          <span class="data-table__sub">
+            {% if tray_release.loaded_assets %}
+              {{ tray_release.loaded_assets | map(attribute='name') | join(', ') }}
+            {% else %}
+              No GitHub release assets are cached on this server yet.
+            {% endif %}
+          </span>
+        </div>
+      </div>
       <form method="get" class="filter-grid" id="tray-device-filter">
         <div class="form-field">
           <label class="form-label" for="filter-search">Search</label>
