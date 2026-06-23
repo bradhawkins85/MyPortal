@@ -162,7 +162,7 @@
 
   <div id="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
     {% if not messages %}
-    <div id="chat-empty">No messages yet. Say hello!</div>
+    <div id="chat-empty">No messages yet, say hello from your Matrix client app</div>
     {% endif %}
     {% for msg in messages %}
     <div class="chat-message{% if msg.sender_matrix_id == ('@tray-device-' ~ device_id ~ ':tray') %} chat-message--self{% endif %}"

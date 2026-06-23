@@ -258,7 +258,7 @@
           }
           const data = await response.json();
           if (data.room_id) {
-            window.location.href = `/chat?room=${encodeURIComponent(data.room_id)}`;
+            window.location.href = `/chat/${encodeURIComponent(data.room_id)}`;
             return;
           }
           throw new Error('Chat room was not returned.');
