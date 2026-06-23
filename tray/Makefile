@@ -114,9 +114,11 @@ build-chat-shell-mac:
 	        (cd chat-shell && npm ci && CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac); \
 	        mkdir -p $(DIST)/darwin; \
 	        echo "Copying .app bundle to myportal-tray-chat.app..."; \
-	        app_bundle=$$(find chat-shell/dist -maxdepth 3 -type d -name "MyPortal Chat.app" | sort | head -n 1); \
+	        app_bundle=$$(find chat-shell/dist -maxdepth 3 -type d \
+	            \( -name "myportal-tray-chat.app" -o -name "MyPortal Chat.app" \) \
+	            | sort | head -n 1); \
 	        if [ -z "$$app_bundle" ]; then \
-	            echo "Error: electron-builder did not create MyPortal Chat.app under chat-shell/dist."; \
+	            echo "Error: electron-builder did not create a macOS chat shell .app under chat-shell/dist."; \
 	            echo "Available chat-shell/dist contents:"; \
 	            find chat-shell/dist -maxdepth 3 -print 2>/dev/null | sort; \
 	            exit 1; \
