@@ -109,6 +109,67 @@ def _is_current(asset_name: str, metadata: dict[str, Any]) -> bool:
     )
 
 
+def _parse_release_version(tag_name: str | None) -> str | None:
+    """Return a display-friendly version from a GitHub release tag."""
+
+    if not tag_name:
+        return None
+    tag = str(tag_name).strip()
+    return tag[1:] if tag.lower().startswith("v") and len(tag) > 1 else tag
+
+
+def get_cached_latest_release_info() -> dict[str, Any]:
+    """Return metadata for the latest tray release currently cached on this server.
+
+    The server downloads installer assets from GitHub Releases and stores the
+    corresponding release metadata next to each asset.  This helper reads those
+    local metadata files only, so admin pages show the release actually loaded on
+    the MyPortal server instead of making an interactive GitHub request.
+    """
+
+    loaded_assets: list[dict[str, Any]] = []
+    latest: dict[str, Any] | None = None
+    for asset_name in _ASSET_NAMES:
+        metadata_file = _metadata_path(asset_name)
+        try:
+            metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        asset_path = _TRAY_STATIC_DIR / asset_name
+        if not asset_path.is_file():
+            continue
+
+        asset_info = {
+            "name": asset_name,
+            "size": metadata.get("asset_size"),
+            "updated_at": metadata.get("asset_updated_at"),
+            "download_url": metadata.get("download_url"),
+        }
+        loaded_assets.append(asset_info)
+
+        metadata_updated_at = str(metadata.get("asset_updated_at") or "")
+        latest_updated_at = str(latest.get("asset_updated_at") or "") if latest else ""
+        if latest is None or metadata_updated_at > latest_updated_at:
+            latest = metadata
+
+    if latest is None:
+        return {
+            "version": None,
+            "release_tag": None,
+            "loaded_assets": loaded_assets,
+        }
+
+    release_tag = latest.get("release_tag")
+    return {
+        "version": _parse_release_version(release_tag),
+        "release_tag": release_tag,
+        "release_id": latest.get("release_id"),
+        "asset_updated_at": latest.get("asset_updated_at"),
+        "loaded_assets": loaded_assets,
+    }
+
+
 async def fetch_latest_tray_installers(
     *,
     repo: str,
