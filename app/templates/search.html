@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}AI Search{% endblock %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">AI Search</span>
+    <span class="header__title-meta">Search permitted portal content using natural language.</span>
+  </div>
+{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Create ticket", "type": "link", "href": "/tickets", "variant": "ghost"},
+    {"label": "Knowledge base", "type": "link", "href": "/knowledge-base", "variant": "ghost"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+<section class="dashboard__section dashboard__section--agent search-workspace" aria-labelledby="ai-search-heading">
+  <article class="card card--panel agent-panel" data-agent-panel>
+    <header class="agent-panel__header">
+      <h2 id="ai-search-heading" class="agent-panel__title">Search accessible content</h2>
+      <p class="agent-panel__subtitle">
+        Ask a question in plain English. The assistant only searches records already permitted for your account,
+        such as visible knowledge base articles, your accessible tickets, and shop content available to your company.
+      </p>
+    </header>
+
+    <form class="agent-panel__form" data-agent-form>
+      <label class="agent-panel__label" for="agent-search-query">What are you looking for?</label>
+      <div class="agent-panel__controls">
+        <textarea
+          id="agent-search-query"
+          class="agent-panel__input search-workspace__textarea"
+          name="query"
+          rows="4"
+          maxlength="2000"
+          placeholder="For example: show me recent VPN tickets, password reset guidance, or available laptop bundles"
+          required
+          data-agent-input
+        ></textarea>
+        <button class="button button--primary agent-panel__submit" type="submit" data-agent-submit>
+          Search
+        </button>
+      </div>
+      <p class="agent-panel__hint">
+        Results are generated through the configured Ollama, llama.cpp, or OpenAI-compatible integration and include the source records used.
+      </p>
+    </form>
+
+    <div class="agent-panel__status" role="status" aria-live="polite" data-agent-status></div>
+
+    <section class="agent-panel__results" hidden data-agent-results>
+      <article class="agent-answer" hidden data-agent-answer>
+        <h3 class="agent-answer__heading">Answer</h3>
+        <div class="agent-answer__body" data-agent-answer-body></div>
+      </article>
+
+      <article class="agent-sources" hidden data-agent-sources>
+        <h3 class="agent-sources__heading">Permitted sources searched</h3>
+        <div class="agent-sources__lists" data-agent-source-lists></div>
+      </article>
+
+      <div class="agent-panel__actions">
+        <a class="button button--ghost" href="/tickets" hidden data-agent-create-ticket>Create a support ticket</a>
+      </div>
+    </section>
+  </article>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/agent.js') }}" defer></script>
+{% endblock %}
