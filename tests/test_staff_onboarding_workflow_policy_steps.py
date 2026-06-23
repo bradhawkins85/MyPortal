@@ -185,6 +185,31 @@ def test_workflow_step_catalogs_include_pause_for_webhook():
     assert offboarding_types["wait_for_webhook"]["name"] == "Pause For Webhook"
 
 
+
+
+def test_workflow_policy_response_includes_pause_for_webhook_preview(monkeypatch):
+    monkeypatch.setattr(staff_handlers.settings, "public_base_url", "https://portal.example.test")
+    monkeypatch.setattr(staff_handlers.settings, "portal_url", None)
+
+    response = staff_handlers._normalise_workflow_policy_response(
+        {
+            "id": 10,
+            "company_id": 7,
+            "direction": "onboarding",
+            "workflow_key": "starter",
+            "workflow_name": "Starter",
+            "config": {
+                "steps": [
+                    {"type": "wait_for_webhook", "name": "Pause For Webhook", "config": {"type": "wait_for_webhook"}},
+                ],
+            },
+        }
+    )
+
+    preview = response["config_json"]["steps"][0]["webhook_preview"]
+    assert preview["webhook_url"].startswith("https://portal.example.test/api/staff/workflow-webhooks/")
+    assert len(preview["post_key"]) == 43
+
 def test_normalise_custom_field_group_mappings_supports_dict_and_list_inputs():
     from_dict = workflows._normalise_custom_field_group_mappings(
         {"custom_field_group_mappings": {"field_one": ["group-a", "group-b"], "field_two": "group-c,group-d"}}
