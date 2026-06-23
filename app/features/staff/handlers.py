@@ -684,6 +684,14 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Sends workflow details to the requesting user using workflow/system variables.",
     },
     {
+        "type": "wait_for_webhook",
+        "name": "Pause For Webhook",
+        "description": (
+            "Pauses the workflow until the generated webhook URL receives a POST callback with the matching postKey. "
+            "Use this when an external automation must complete before the workflow continues."
+        ),
+    },
+    {
         "type": "http_get",
         "name": "HTTP GET request",
         "description": "Calls an external endpoint with optional headers/query parameters and stores response variables.",
@@ -787,6 +795,14 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "email_requestor",
         "name": "Email requestor",
         "description": "Sends onboarding details (for example login/password) to the requesting user using workflow/system variables.",
+    },
+    {
+        "type": "wait_for_webhook",
+        "name": "Pause For Webhook",
+        "description": (
+            "Pauses the workflow until the generated webhook URL receives a POST callback with the matching postKey. "
+            "Use this when an external automation must complete before the workflow continues."
+        ),
     },
     {
         "type": "http_get",
