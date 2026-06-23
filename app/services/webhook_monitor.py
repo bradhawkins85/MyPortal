@@ -8,6 +8,8 @@ import httpx
 from app.core.logging import log_error, log_info
 from app.repositories import webhook_events as webhook_repo
 
+_STAFF_WORKFLOW_RESUME_SOURCE = "staff_workflow_http_post"
+
 _MAX_BACKOFF_SECONDS = 3600
 _SENSITIVE_HEADERS = {
     "authorization",
@@ -60,6 +62,7 @@ async def enqueue_event(
     max_attempts: int = 3,
     backoff_seconds: int = 300,
     attempt_immediately: bool = True,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     event = await webhook_repo.create_event(
         name=name,
@@ -69,6 +72,7 @@ async def enqueue_event(
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
         direction="outgoing",
+        metadata=metadata,
     )
     if attempt_immediately and event.get("id"):
         event_id = int(event["id"])
@@ -397,6 +401,7 @@ async def _attempt_event(event: dict[str, Any]) -> None:
                 response_body=response_body,
             )
             log_info("Webhook delivered", event_id=event_id, status=response_status)
+            await _resume_staff_workflow_after_delivery(event_id=event_id, event=event)
             return
         error_message = f"Unexpected status {response.status_code}"
     except Exception as exc:  # pragma: no cover - network safety
@@ -445,3 +450,23 @@ async def _attempt_event(event: dict[str, Any]) -> None:
 def _calculate_next_attempt(backoff_seconds: int, attempt: int) -> datetime:
     delay = min(backoff_seconds * (2 ** (attempt - 1)), _MAX_BACKOFF_SECONDS)
     return datetime.now(timezone.utc) + timedelta(seconds=delay)
+
+
+async def _resume_staff_workflow_after_delivery(*, event_id: int, event: dict[str, Any]) -> None:
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    if metadata.get("resume_source") != _STAFF_WORKFLOW_RESUME_SOURCE:
+        return
+    try:
+        from app.services import staff_onboarding_workflows as workflow_service
+
+        await workflow_service.resume_paused_workflow_execution(
+            execution_id=int(metadata["execution_id"]),
+            initiated_by_user_id=None,
+        )
+    except Exception as exc:  # pragma: no cover - defensive scheduler safety
+        log_error(
+            "Failed to resume staff workflow after webhook delivery",
+            event_id=event_id,
+            execution_id=metadata.get("execution_id"),
+            error=str(exc),
+        )

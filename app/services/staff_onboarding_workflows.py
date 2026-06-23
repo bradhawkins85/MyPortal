@@ -29,6 +29,7 @@ from app.services import m365 as m365_service
 from app.services.m365 import M365Error
 from app.services import notifications as notifications_service
 from app.services import system_variables
+from app.services import webhook_monitor
 from app.services import tickets as tickets_service
 from app.security.api_keys import hash_api_key
 
@@ -1082,6 +1083,8 @@ async def _execute_policy_step(
     staff: dict[str, Any],
     policy_config: dict[str, Any],
     vars_map: dict[str, Any],
+    execution_id: int | None = None,
+    step_name: str | None = None,
 ) -> dict[str, Any]:
     async def _resolve_step_user_id() -> str:
         configured_user_id = str(
@@ -1132,6 +1135,35 @@ async def _execute_policy_step(
             parsed_body = _parse_json_text(body)
             if parsed_body is not None:
                 body = parsed_body
+        failure_policy = _resolve_step_failure_policy(step)
+        use_monitor = method == "POST" and failure_policy["mode"] == "pause" and execution_id is not None
+        if use_monitor:
+            event = await webhook_monitor.enqueue_event(
+                name=f"Staff workflow webhook: {step_name or step.get('name') or 'http_post'}",
+                target_url=url,
+                payload=body,
+                headers={str(k): str(v) for k, v in headers.items()},
+                max_attempts=_resolve_step_max_retries(step, default_max_retries=3),
+                backoff_seconds=max(1, int(step.get("backoff_seconds") or 300)),
+                attempt_immediately=False,
+                metadata={
+                    "resume_source": "staff_workflow_http_post",
+                    "execution_id": int(execution_id),
+                    "step_name": str(step_name or step.get("name") or "http_post"),
+                },
+            )
+            if str(event.get("status") or "").lower() == "succeeded":
+                return {
+                    "status_code": event.get("response_status"),
+                    "body": _normalize_plain_text_payload(str(event.get("response_body") or "")),
+                    "webhook_event_id": event.get("id"),
+                }
+            return {
+                "pause": True,
+                "reason": "webhook_delivery_pending",
+                "webhook_event_id": event.get("id"),
+                "webhook_status": event.get("status"),
+            }
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             response = await client.request(
@@ -2666,6 +2698,8 @@ async def _execute_policy_steps(
                     staff=staff,
                     policy_config=policy_config,
                     vars_map=vars_map,
+                    execution_id=execution_id,
+                    step_name=step_name,
                 ),
             )
         except WorkflowStepError as exc:
