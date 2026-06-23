@@ -62,7 +62,9 @@ async def _load_module_settings() -> dict[str, Any] | None:
             return _MODULE_SETTINGS_CACHE
         try:
             module = await modules_service.get_module("syncro", redact=False)
-        except RuntimeError as exc:  # pragma: no cover - database may be unavailable during tests
+        except (
+            RuntimeError
+        ) as exc:  # pragma: no cover - database may be unavailable during tests
             log_error("Unable to load Syncro module configuration", error=str(exc))
             module = None
         if not module:
@@ -73,8 +75,11 @@ async def _load_module_settings() -> dict[str, Any] | None:
                 "enabled": bool(module.get("enabled")),
                 "base_url": str(settings_payload.get("base_url") or "").strip(),
                 "api_key": str(settings_payload.get("api_key") or "").strip(),
-                "rate_limit_per_minute": _coerce_rate_limit(settings_payload.get("rate_limit_per_minute")),
-                "ticket_status_mappings": settings_payload.get("ticket_status_mappings") or [],
+                "rate_limit_per_minute": _coerce_rate_limit(
+                    settings_payload.get("rate_limit_per_minute")
+                ),
+                "ticket_status_mappings": settings_payload.get("ticket_status_mappings")
+                or [],
             }
         _MODULE_SETTINGS_EXPIRY = now + 30.0
     return _MODULE_SETTINGS_CACHE
@@ -86,7 +91,9 @@ async def _get_effective_settings() -> dict[str, Any]:
         raise SyncroConfigurationError("Syncro module is disabled")
     settings = get_settings()
     base_url = _normalise_base_url(
-        module_settings.get("base_url") if module_settings else settings.syncro_webhook_url or ""
+        module_settings.get("base_url")
+        if module_settings
+        else settings.syncro_webhook_url or ""
     )
     if not base_url:
         raise SyncroConfigurationError("Syncro base URL is not configured")
@@ -94,15 +101,14 @@ async def _get_effective_settings() -> dict[str, Any]:
     if not api_key:
         api_key = str(settings.syncro_api_key or "").strip()
     rate_limit = (
-        module_settings.get("rate_limit_per_minute")
-        if module_settings
-        else 180
+        module_settings.get("rate_limit_per_minute") if module_settings else 180
     )
     return {
         "base_url": base_url,
         "api_key": api_key or None,
         "rate_limit_per_minute": _coerce_rate_limit(rate_limit),
-        "ticket_status_mappings": (module_settings or {}).get("ticket_status_mappings") or [],
+        "ticket_status_mappings": (module_settings or {}).get("ticket_status_mappings")
+        or [],
     }
 
 
@@ -211,7 +217,9 @@ async def _request(
     rate_limiter: AsyncRateLimiter | None = None,
 ) -> Any:
     settings = await _get_effective_settings()
-    limiter = rate_limiter or await _get_or_create_rate_limiter(settings["rate_limit_per_minute"])
+    limiter = rate_limiter or await _get_or_create_rate_limiter(
+        settings["rate_limit_per_minute"]
+    )
     await limiter.acquire()
     base_url = settings["base_url"]
     url = f"{base_url}{path if path.startswith('/') else f'/{path}'}"
@@ -236,7 +244,11 @@ async def _request(
             backoff_seconds=0,
         )
     except Exception as exc:  # pragma: no cover - webhook monitor safety
-        log_error("Failed to record Syncro request in webhook monitor", url=url, error=str(exc))
+        log_error(
+            "Failed to record Syncro request in webhook monitor",
+            url=url,
+            error=str(exc),
+        )
         webhook_event = None
 
     event_id: int | None = None
@@ -402,6 +414,70 @@ def _extract_collection(data: Any, *keys: str) -> list[dict[str, Any]]:
     return []
 
 
+def _first_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+async def find_contact_by_email(email: str) -> dict[str, Any] | None:
+    """Find a Syncro contact by email using the configured API."""
+
+    normalised = str(email or "").strip().lower()
+    if not normalised:
+        return None
+    payload = await _request("GET", "/contacts", params={"email": normalised})
+    for contact in _extract_collection(payload, "contacts", "data"):
+        candidate = (
+            str(_first_value(contact, "email", "email_address") or "").strip().lower()
+        )
+        if candidate == normalised:
+            return contact
+    return None
+
+
+def build_ticket_payload(
+    *,
+    subject: str,
+    description: str | None,
+    customer_id: str | int | None = None,
+    contact_id: str | int | None = None,
+    requester_email: str | None = None,
+    requester_name: str | None = None,
+) -> dict[str, Any]:
+    """Build a Syncro ticket create payload while omitting empty values."""
+
+    ticket: dict[str, Any] = {
+        "subject": subject,
+        "problem_type": "Other",
+        "status": "New",
+    }
+    if description:
+        ticket["description"] = description
+    if customer_id:
+        ticket["customer_id"] = customer_id
+    if contact_id:
+        ticket["contact_id"] = contact_id
+    if requester_email:
+        ticket["email"] = requester_email
+    if requester_name:
+        ticket["name"] = requester_name
+    return {"ticket": ticket}
+
+
+async def create_ticket(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create a ticket in Syncro and return the resulting ticket payload."""
+
+    response = await _request("POST", "/tickets", json=payload, timeout=20.0)
+    if isinstance(response, dict):
+        ticket = response.get("ticket") if "ticket" in response else response
+        if isinstance(ticket, dict):
+            return dict(ticket)
+    raise SyncroAPIError("Syncro ticket create response was not a ticket object")
+
+
 async def get_contacts(customer_id: str | int) -> list[dict[str, Any]]:
     payload = await _request("GET", "/contacts", params={"customer_id": customer_id})
     return _extract_collection(payload, "contacts", "data")
@@ -463,7 +539,9 @@ async def download_file(
 ) -> tuple[bytes, str | None]:
     """Download a Syncro-hosted file using the configured API credentials."""
     settings = await _get_effective_settings()
-    limiter = rate_limiter or await _get_or_create_rate_limiter(settings["rate_limit_per_minute"])
+    limiter = rate_limiter or await _get_or_create_rate_limiter(
+        settings["rate_limit_per_minute"]
+    )
     await limiter.acquire()
     candidate = str(url_or_path or "").strip()
     if not candidate:
@@ -478,7 +556,9 @@ async def download_file(
             raise SyncroAPIError("Syncro download URL must use HTTP or HTTPS")
         url = candidate
     headers: dict[str, str] = {}
-    if settings.get("api_key") and (is_relative or urlparse(url).netloc == urlparse(base_url).netloc):
+    if settings.get("api_key") and (
+        is_relative or urlparse(url).netloc == urlparse(base_url).netloc
+    ):
         headers["Authorization"] = f"Bearer {settings['api_key']}"
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         try:
@@ -487,8 +567,14 @@ async def download_file(
             log_error("Syncro file download failed", url=url, error=str(exc))
             raise SyncroAPIError(str(exc)) from exc
     if response.status_code >= 400:
-        log_error("Syncro file download responded with error", url=url, status=response.status_code)
-        raise SyncroAPIError(f"Syncro file download responded with {response.status_code}")
+        log_error(
+            "Syncro file download responded with error",
+            url=url,
+            status=response.status_code,
+        )
+        raise SyncroAPIError(
+            f"Syncro file download responded with {response.status_code}"
+        )
     return response.content, response.headers.get("content-type")
 
 
@@ -658,7 +744,11 @@ def extract_asset_details(asset: dict[str, Any]) -> dict[str, Any]:
         asset.get("os_name")
         or props.get("os_name")
         or props.get("os")
-        or (kabuto.get("os", {}).get("name") if isinstance(kabuto.get("os"), dict) else None)
+        or (
+            kabuto.get("os", {}).get("name")
+            if isinstance(kabuto.get("os"), dict)
+            else None
+        )
     )
 
     cpu_name = asset.get("cpu_name") or props.get("cpu_name")
@@ -669,12 +759,18 @@ def extract_asset_details(asset: dict[str, Any]) -> dict[str, Any]:
         else:
             cpu_name = first_cpu
 
-    last_sync = asset.get("last_sync") or props.get("last_sync") or kabuto.get("last_synced_at")
+    last_sync = (
+        asset.get("last_sync") or props.get("last_sync") or kabuto.get("last_synced_at")
+    )
 
     motherboard_manufacturer = (
         asset.get("motherboard_manufacturer")
         or props.get("motherboard_manufacturer")
-        or (kabuto.get("motherboard", {}).get("manufacturer") if isinstance(kabuto.get("motherboard"), dict) else None)
+        or (
+            kabuto.get("motherboard", {}).get("manufacturer")
+            if isinstance(kabuto.get("motherboard"), dict)
+            else None
+        )
     )
 
     form_factor = (
@@ -684,7 +780,9 @@ def extract_asset_details(asset: dict[str, Any]) -> dict[str, Any]:
         or general.get("form_factor")
     )
 
-    last_user = asset.get("last_user") or props.get("last_user") or kabuto.get("last_user")
+    last_user = (
+        asset.get("last_user") or props.get("last_user") or kabuto.get("last_user")
+    )
 
     cpu_age_candidates = [
         asset.get("cpu_age"),
@@ -716,9 +814,7 @@ def extract_asset_details(asset: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "id": asset.get("id"),
-        "name": asset.get("name")
-        or props.get("device_name")
-        or general.get("name"),
+        "name": asset.get("name") or props.get("device_name") or general.get("name"),
         "type": asset.get("type") or props.get("type") or general.get("type"),
         "serial_number": asset.get("serial_number")
         or props.get("serial_number")
