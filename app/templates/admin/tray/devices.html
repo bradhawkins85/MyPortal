@@ -45,7 +45,6 @@
               <th scope="col">Status</th>
               <th scope="col">OS</th>
               <th scope="col">Console user</th>
-              <th scope="col">Asset link</th>
               <th scope="col">Last seen</th>
               <th scope="col">Agent</th>
               <th scope="col" class="data-table__col--actions">Actions</th>
@@ -70,13 +69,6 @@
                 <td>{{ device.os or '—' }} {{ device.os_version or '' }}</td>
                 <td>{{ device.console_user or '—' }}</td>
                 <td>
-                  {% if device.asset_id %}
-                    <a href="/assets/{{ device.asset_id }}">Asset #{{ device.asset_id }}</a>
-                  {% else %}
-                    <span class="status status--neutral">Unlinked</span>
-                  {% endif %}
-                </td>
-                <td>
                   {% if device.last_seen_utc %}
                     <span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>
                   {% else %}
@@ -85,9 +77,6 @@
                 </td>
                 <td>{{ device.agent_version or '—' }}</td>
                 <td class="data-table__col--actions">
-                  {% if device.status == 'active' and matrix_enabled %}
-                    <button type="button" class="button button--small button--primary" data-tray-chat data-device-uid="{{ device.device_uid }}">Open chat</button>
-                  {% endif %}
                   {% if device.status != 'revoked' %}
                     <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -119,30 +108,4 @@
   </section>
 </div>
 
-<script type="module">
-  // Helper to launch a tray-initiated chat from this admin list.
-  const csrf = "{{ csrf_token }}";
-  document.querySelectorAll('[data-tray-chat]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const uid = btn.dataset.deviceUid;
-      btn.disabled = true;
-      try {
-        const resp = await fetch(`/api/tray/${encodeURIComponent(uid)}/chat/start`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'Accept': 'application/json'},
-          body: JSON.stringify({subject: 'Helpdesk chat'})
-        });
-        if (!resp.ok) throw new Error(await resp.text());
-        const data = await resp.json();
-        if (data.room_id) {
-          window.location.href = `/chat?room=${data.room_id}`;
-        }
-      } catch (err) {
-        alert('Failed to open chat: ' + err.message);
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  });
-</script>
 {% endblock %}

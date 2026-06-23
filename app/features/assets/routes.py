@@ -13,6 +13,7 @@ from app.core.logging import log_info
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import companies as company_repo
+from app.repositories import tray as tray_repo
 from app.repositories import user_companies as user_company_repo
 
 
@@ -213,8 +214,13 @@ async def assets_page(request: Request):
 
     asset_ids = [r["id"] for r in prepared if r.get("id")]
     cf_values_by_asset = await asset_custom_fields_repo.get_all_asset_field_values(asset_ids)
+    tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
 
     for record in prepared:
+        tray_device = tray_devices_by_asset.get(int(record["id"])) if record.get("id") else None
+        record["tray_device_uid"] = tray_device.get("device_uid") if tray_device else None
+        record["tray_device_hostname"] = tray_device.get("hostname") if tray_device else None
+        record["can_open_chat"] = bool(record["tray_device_uid"] and main_module.settings.matrix_enabled)
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
         for field_def in field_definitions:
@@ -240,6 +246,9 @@ async def assets_page(request: Request):
         "expired_warranty": expired_warranty,
         "active_warranty": active_warranty,
     }
+    has_asset_actions = bool(user.get("is_super_admin")) or any(
+        bool(asset.get("can_open_chat")) for asset in prepared
+    )
 
     extra = {
         "title": "Assets",
@@ -250,6 +259,8 @@ async def assets_page(request: Request):
         "has_assets": bool(prepared),
         "can_export_assets": can_export_assets,
         "is_super_admin": bool(user.get("is_super_admin")),
+        "has_asset_actions": has_asset_actions,
+        "matrix_enabled": main_module.settings.matrix_enabled,
     }
     return await main_module._render_template("assets/index.html", request, user, extra=extra)
 
