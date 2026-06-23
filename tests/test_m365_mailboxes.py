@@ -11,7 +11,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -1902,6 +1902,48 @@ async def test_fetch_exo_archive_mailbox_sizes_short_circuits_on_403():
 
     assert result == {}
     assert call_count == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_enable_user_archive_enables_auto_expanding_archive():
+    with (
+        patch.object(
+            m365_service,
+            "_acquire_exo_access_token",
+            AsyncMock(return_value=("exo-token", "tenant-1")),
+        ),
+        patch.object(m365_service, "_exo_invoke_command", AsyncMock()) as invoke_mock,
+        patch.object(
+            m365_service.m365_repo,
+            "set_mailbox_archive_enabled",
+            AsyncMock(),
+        ) as set_archive_mock,
+    ):
+        await m365_service.enable_user_archive(7, "user@example.com")
+
+    assert invoke_mock.await_args_list == [
+        call(
+            "exo-token",
+            "tenant-1",
+            "Enable-Mailbox",
+            {"Identity": "user@example.com", "Archive": True},
+        ),
+        call(
+            "exo-token",
+            "tenant-1",
+            "Enable-Mailbox",
+            {"Identity": "user@example.com", "AutoExpandingArchive": True},
+        ),
+    ]
+    set_archive_mock.assert_awaited_once_with(7, "user@example.com")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_enable_user_archive_requires_upn():
+    with pytest.raises(M365Error) as exc_info:
+        await m365_service.enable_user_archive(7, " ")
+
+    assert exc_info.value.http_status == 400
 
 
 @pytest.mark.anyio("asyncio")
