@@ -2953,6 +2953,19 @@ async def _extract_switch_company_payload(request: Request) -> dict[str, Any]:
     return data
 
 
+@app.get("/search", response_class=HTMLResponse)
+async def ai_search_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    return await _render_template(
+        "search.html",
+        request,
+        user,
+        extra={"title": "AI Search"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     user, redirect = await _require_authenticated_user(request)

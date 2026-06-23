@@ -156,6 +156,16 @@
             </a>
           </li>
           {% endif %}
+          {% if has_authenticated_user %}
+          <li class="menu__item">
+            <a href="/search" {% if current_path.startswith('/search') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.06l4.24 4.24a1 1 0 0 1-1.4 1.4l-4.24-4.24A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Zm.88 2.52.52 1.58 1.58.52a.5.5 0 0 1 0 .96l-1.58.52-.52 1.58a.5.5 0 0 1-.96 0l-.52-1.58-1.58-.52a.5.5 0 0 1 0-.96l1.58-.52.52-1.58a.5.5 0 0 1 .96 0Z"/></svg>
+              </span>
+              <span class="menu__label">Search</span>
+            </a>
+          </li>
+          {% endif %}
           {% if can_access_service_status %}
           <li class="menu__item">
             <a href="/service-status" {% if current_path.startswith('/service-status') %}aria-current="page"{% endif %}>
