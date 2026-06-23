@@ -69,6 +69,7 @@ whoami = _matrix.whoami
 sanitize_localpart = _matrix.sanitize_localpart
 set_user_power_level = _matrix.set_user_power_level
 get_power_levels = _matrix.get_power_levels
+set_room_name = _matrix.set_room_name
 
 
 # ---------------------------------------------------------------------------
@@ -335,3 +336,20 @@ def test_set_power_level_function_exists():
     """matrix service must expose set_user_power_level."""
     assert callable(set_user_power_level), "set_user_power_level must be callable"
     assert callable(get_power_levels), "get_power_levels must be callable"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_set_room_name_success(monkeypatch):
+    monkeypatch.setattr(_matrix._settings, "matrix_homeserver_url", "https://matrix.example.com")
+    monkeypatch.setattr(_matrix._settings, "matrix_bot_access_token", "test_token")
+
+    route = respx.put(
+        "https://matrix.example.com/_matrix/client/v3/rooms/!abc123:example.com/state/m.room.name/"
+    ).mock(return_value=httpx.Response(200, json={}))
+
+    result = await set_room_name("!abc123:example.com", "Renamed chat")
+
+    assert result == {}
+    assert route.called
+    assert route.calls.last.request.content == b'{"name":"Renamed chat"}'

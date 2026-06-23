@@ -16,6 +16,7 @@ from app.repositories import matrix_ai_tag_synonyms as synonyms_repo
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatRoomCreate,
+    ChatRoomRename,
     ExternalInviteCreate,
     AiTagSynonymGroupCreate,
     AiTagSynonymGroupUpdate,
@@ -349,6 +350,51 @@ async def send_message(
     )
 
     return JSONResponse(msg_data, status_code=201)
+
+
+@router.patch("/rooms/{room_id}", summary="Rename a chat room (technician/admin)")
+async def rename_room(
+    room_id: int,
+    request: Request,
+    body: ChatRoomRename,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    _require_matrix_enabled()
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        raise HTTPException(status_code=403, detail="Only technicians or admins can rename chats")
+
+    room = await chat_repo.get_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    new_subject = body.subject.strip()
+    if not new_subject:
+        raise HTTPException(status_code=422, detail="Chat subject cannot be blank")
+
+    old_subject = room.get("subject")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    await chat_repo.update_room(room_id, subject=new_subject, updated_at=now)
+
+    try:
+        await matrix_service.set_room_name(room["matrix_room_id"], new_subject)
+    except Exception as exc:
+        log_error("Failed to rename Matrix room", room_id=room_id, error=str(exc))
+
+    await audit_service.log_action(
+        action="rename",
+        entity_type="chat_room",
+        entity_id=room_id,
+        user_id=current_user["id"],
+        old_value={"subject": old_subject},
+        new_value={"subject": new_subject},
+    )
+
+    updated = await chat_repo.get_room(room_id) or {**dict(room), "subject": new_subject, "updated_at": now}
+    await refresh_notifier.broadcast_refresh(
+        topics=[f"chat:room:{room_id}", "chat:rooms"],
+        data={"room_id": room_id, "subject": new_subject},
+    )
+    return JSONResponse(_serialize(dict(updated)))
 
 
 @router.post("/rooms/{room_id}/ticket", summary="Create or return a ticket linked to a chat room")

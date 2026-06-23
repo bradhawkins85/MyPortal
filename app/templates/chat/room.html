@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block header_title %}Chat: {{ room.subject | e }}{% endblock %}
+{% block header_title %}Chat: <span id="chat-room-title">{{ room.subject | e }}</span>{% endblock %}
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_actions %}
@@ -12,6 +12,7 @@
         {% else %}
           <button class="button button--sm button--primary" id="btn-create-ticket" data-room-id="{{ room.id }}">Chat to Ticket</button>
         {% endif %}
+        <button class="button button--sm" id="btn-rename-room" data-room-id="{{ room.id }}" aria-haspopup="dialog" aria-controls="rename-modal">Rename chat</button>
         <button class="button button--sm" id="btn-join-room" data-room-id="{{ room.id }}">Join room</button>
         <button class="button button--sm button--secondary" id="btn-assign-room" data-room-id="{{ room.id }}"
                 data-assigned="{{ room.assigned_tech_user_id | default('') }}"
@@ -39,7 +40,7 @@
   {% if room.subject %}
   <span class="chat-meta-bar__item">
     <strong>Subject:</strong>
-    {{ room.subject | e }}
+    <span id="chat-room-subject">{{ room.subject | e }}</span>
   </span>
   {% endif %}
   {% if room.creator_display_name %}
@@ -151,6 +152,33 @@
   <div class="alert alert--info">This chat is closed and no longer accepting messages.</div>
   {% endif %}
 </div>
+
+
+{% if is_staff %}
+<!-- Rename chat modal -->
+<div id="rename-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="rename-modal-title" hidden>
+  <div class="modal__backdrop" data-rename-modal-close></div>
+  <div class="modal__panel">
+    <header class="modal__header">
+      <h2 id="rename-modal-title" class="modal__title">Rename chat</h2>
+      <button type="button" class="modal__close" data-rename-modal-close aria-label="Close">×</button>
+    </header>
+    <form id="rename-form" class="modal__body">
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <div class="form-group">
+        <label class="form-label required" for="rename-subject">Chat name</label>
+        <input type="text" id="rename-subject" name="subject" class="form-input" value="{{ room.subject | e }}" required maxlength="500" />
+      </div>
+      <footer class="modal__footer">
+        <button type="submit" class="button button--primary" id="rename-submit-btn">Save name</button>
+        <button type="button" class="button button--ghost" data-rename-modal-close>Cancel</button>
+      </footer>
+    </form>
+  </div>
+</div>
+{% endif %}
 
 {% if matrix_is_self_hosted and is_staff %}
 <!-- Invite to Matrix modal -->
@@ -459,6 +487,50 @@
       }
     } catch {}
   }, 5000);
+
+
+  const renameBtn = document.getElementById('btn-rename-room');
+  const renameModal = document.getElementById('rename-modal');
+  const renameForm = document.getElementById('rename-form');
+  const renameInput = document.getElementById('rename-subject');
+  const renameCloseBtns = renameModal?.querySelectorAll('[data-rename-modal-close]') || [];
+  renameBtn?.addEventListener('click', () => {
+    if (!renameModal) return;
+    renameModal.hidden = false;
+    renameInput?.focus();
+    renameInput?.select();
+  });
+  renameCloseBtns.forEach((button) => button.addEventListener('click', () => { if (renameModal) renameModal.hidden = true; }));
+  renameForm?.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const subject = (renameInput?.value || '').trim();
+    if (!subject) { showPortalToast('Chat name is required.', 'error'); return; }
+    const btn = document.getElementById('rename-submit-btn');
+    btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/chat/rooms/${roomId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+        body: JSON.stringify({subject}),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const updatedSubject = data.subject || subject;
+        document.getElementById('chat-room-title').textContent = updatedSubject;
+        document.getElementById('chat-room-subject').textContent = updatedSubject;
+        document.title = document.title.replace(originalTitle, `Chat: ${updatedSubject}`);
+        if (renameModal) renameModal.hidden = true;
+        showPortalToast('Chat renamed.', 'success');
+      } else {
+        const err = await resp.json();
+        showPortalToast(err.detail || 'Failed to rename chat', 'error');
+      }
+    } catch(err) {
+      showPortalToast('Network error: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   document.getElementById('btn-create-ticket')?.addEventListener('click', async function() {
     if (!confirm('Create a ticket from this chat transcript? Public replies will sync while the chat remains open.')) return;
