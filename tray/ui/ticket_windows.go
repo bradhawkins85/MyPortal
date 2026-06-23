@@ -575,8 +575,16 @@ func parseTicketDialogOutput(output string) (ticketFormResult, error) {
 // Ticket WinForms dialog, persists prefill values to HKCU, and submits the
 // ticket to the portal.
 func openNewTicketDialog(cfg *api.ConfigResponse) {
+	openTicketDialogWithEndpoint(cfg, "/api/tray/submit-ticket", "Submit Ticket")
+}
+
+func openSyncroTicketDialog(cfg *api.ConfigResponse) {
+	openTicketDialogWithEndpoint(cfg, "/api/tray/submit-syncro-ticket", "Create Syncro Ticket")
+}
+
+func openTicketDialogWithEndpoint(cfg *api.ConfigResponse, submitPath string, notificationTitle string) {
 	if gPortalURL == "" {
-		showOSNotification("Submit Ticket", "Portal connection not yet established. Please try again shortly.")
+		showOSNotification(notificationTitle, "Portal connection not yet established. Please try again shortly.")
 		return
 	}
 
@@ -635,17 +643,17 @@ func openNewTicketDialog(cfg *api.ConfigResponse) {
 	}
 
 	if result.Name == "" || result.Email == "" || result.Subject == "" {
-		showOSNotification("Submit Ticket", "Name, email and subject are required.")
+		showOSNotification(notificationTitle, "Name, email and subject are required.")
 		return
 	}
 
-	if err := submitTicketToPortal(result); err != nil {
+	if err := submitTicketToPortal(result, submitPath); err != nil {
 		logger.Warn("openNewTicketDialog: submit: %v", err)
-		showOSNotification("Submit Ticket", fmt.Sprintf("Could not submit ticket: %v", err))
+		showOSNotification(notificationTitle, fmt.Sprintf("Could not submit ticket: %v", err))
 		return
 	}
 
-	showOSNotification("Submit Ticket", "Your ticket has been submitted. We will be in touch soon.")
+	showOSNotification(notificationTitle, "Your ticket has been submitted. We will be in touch soon.")
 }
 
 func newTicketDialogCommand(scriptPath string) *exec.Cmd {
@@ -699,8 +707,12 @@ func fetchTicketQuestions() []api.TicketQuestion {
 // pooling.  A 15-second timeout is sufficient for a simple JSON POST.
 var ticketHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
-// submitTicketToPortal posts the ticket to POST /api/tray/submit-ticket.
-func submitTicketToPortal(result ticketFormResult) error {
+// submitTicketToPortal posts the ticket to the requested tray ticket endpoint.
+func submitTicketToPortal(result ticketFormResult, submitPaths ...string) error {
+	submitPath := "/api/tray/submit-ticket"
+	if len(submitPaths) > 0 {
+		submitPath = submitPaths[0]
+	}
 	type submitAnswer struct {
 		QuestionID int    `json:"question_id"`
 		Value      string `json:"value"`
@@ -742,7 +754,13 @@ func submitTicketToPortal(result ticketFormResult) error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	url := strings.TrimRight(gPortalURL, "/") + "/api/tray/submit-ticket"
+	if strings.TrimSpace(submitPath) == "" {
+		submitPath = "/api/tray/submit-ticket"
+	}
+	if !strings.HasPrefix(submitPath, "/") {
+		submitPath = "/" + submitPath
+	}
+	url := strings.TrimRight(gPortalURL, "/") + submitPath
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)

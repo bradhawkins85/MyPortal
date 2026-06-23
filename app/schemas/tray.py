@@ -51,6 +51,7 @@ class TrayMenuNode(BaseModel):
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.
     * ``open_chat`` — opens the chat window.
     * ``submit_ticket`` — opens the submit-a-ticket dialog.
+    * ``submit_syncro_ticket`` — opens the same dialog and creates the ticket in Syncro.
     * ``TRMM_Script`` — asks MyPortal to run a selected Tactical RMM script on the linked asset.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.

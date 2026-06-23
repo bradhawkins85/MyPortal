@@ -38,6 +38,7 @@ from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
+from app.repositories import staff as staff_repo
 from app.schemas.tray import (
     TrayChatStartRequest,
     TrayChatStartResponse,
@@ -65,6 +66,7 @@ from app.services import matrix as matrix_service
 from app.services import matrix_ai_waiting_assistant
 from app.services import tacticalrmm as tacticalrmm_service
 from app.services import tickets as tickets_service
+from app.services import syncro as syncro_service
 from app.services import tray as tray_service
 from app.services import tray_ticket_questions as tq_service
 from app.services.sanitization import sanitize_rich_text
@@ -90,6 +92,78 @@ def _serialise_popup_chat_value(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_serialise_popup_chat_value(item) for item in obj]
     return obj
+
+
+def _compose_ticket_description(
+    *,
+    payload: TrayTicketSubmitRequest,
+    normalised_email: str,
+    include_contact_block: bool,
+    questions: list[Any] | None,
+    submitted_answers: list[dict[str, Any]],
+) -> str | None:
+    """Build the shared tray ticket description for MyPortal and Syncro."""
+
+    description_parts: list[str] = []
+    if include_contact_block:
+        safe_name = _html.escape(payload.name)
+        safe_email = _html.escape(normalised_email)
+        contact_line = f"**Name:** {safe_name}"
+        if payload.phone:
+            safe_phone = _html.escape(payload.phone)
+            contact_line += f"  |  **Phone:** {safe_phone}"
+        contact_line += f"  |  **Email:** {safe_email}"
+        description_parts.append(contact_line)
+        description_parts.append("")
+
+    if payload.description:
+        description_parts.append(payload.description)
+
+    if questions and submitted_answers:
+        additional = tq_service.build_additional_details(questions, submitted_answers)
+        if additional:
+            if description_parts:
+                description_parts.append("")
+            description_parts.append(additional)
+
+    return "\n".join(description_parts) if description_parts else None
+
+
+async def _resolve_tray_device(
+    payload: TrayTicketSubmitRequest, request: Request
+) -> dict[str, Any]:
+    device = None
+    auth_header = request.headers.get("Authorization", "")
+    token = ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if token:
+        device = await tray_repo.get_device_by_auth_hash(tray_service.hash_token(token))
+        if not device:
+            raise HTTPException(
+                status_code=401, detail="Tray device authentication failed"
+            )
+    if device is None and payload.device_uid:
+        device = await tray_repo.get_device_by_uid(payload.device_uid)
+    if not device or device.get("status") == "revoked":
+        raise HTTPException(status_code=404, detail="Device not found")
+    return device
+
+
+async def _validate_tray_answers(
+    company_id: int | None, payload: TrayTicketSubmitRequest
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    submitted_answers = [
+        {"question_id": a.question_id, "value": a.value}
+        for a in (payload.answers or [])
+    ]
+    questions = await tq_service.get_questions_for_company(company_id)
+    if questions:
+        errors = tq_service.validate_answers(questions, submitted_answers)
+        if errors:
+            raise HTTPException(status_code=422, detail="; ".join(errors))
+    return questions, submitted_answers
+
 
 # ---------------------------------------------------------------------------
 # Device-facing endpoints
@@ -313,9 +387,7 @@ async def heartbeat(
     request: Request,
     device: dict = Depends(get_current_tray_device),
 ) -> JSONResponse:
-    client_ip = payload.last_ip or (
-        request.client.host if request.client else None
-    )
+    client_ip = payload.last_ip or (request.client.host if request.client else None)
     await tray_repo.update_device_heartbeat(
         int(device["id"]),
         console_user=payload.console_user,
@@ -504,6 +576,106 @@ async def tray_submit_ticket(
     )
 
 
+@router.post(
+    "/submit-syncro-ticket",
+    response_model=TrayTicketSubmitResponse,
+    summary="Submit a support ticket from a tray device directly to Syncro",
+)
+async def tray_submit_syncro_ticket(
+    payload: TrayTicketSubmitRequest,
+    request: Request,
+) -> TrayTicketSubmitResponse:
+    """Create a Syncro ticket using the same tray Submit Ticket form.
+
+    The tray device is authenticated the same way as normal MyPortal ticket
+    submission.  The requester email is resolved against local Syncro-backed
+    staff data first, then against Syncro contacts, so the created ticket is
+    linked directly to the matching Syncro contact and customer where possible.
+    """
+
+    device = await _resolve_tray_device(payload, request)
+    company_id: int | None = device.get("company_id")
+    normalised_email = payload.email.strip().lower()
+
+    questions, submitted_answers = await _validate_tray_answers(company_id, payload)
+
+    syncro_customer_id: str | int | None = None
+    syncro_contact_id: str | int | None = None
+
+    if company_id is not None:
+        company = await companies_repo.get_company_by_id(int(company_id))
+        if company and company.get("syncro_company_id"):
+            syncro_customer_id = str(company.get("syncro_company_id"))
+        staff = await staff_repo.get_staff_by_company_and_email(
+            int(company_id), normalised_email
+        )
+        if staff and staff.get("syncro_contact_id"):
+            syncro_contact_id = str(staff.get("syncro_contact_id"))
+
+    if syncro_contact_id is None:
+        staff = await staff_repo.get_staff_by_email(normalised_email)
+        if staff and staff.get("syncro_contact_id"):
+            syncro_contact_id = str(staff.get("syncro_contact_id"))
+            if syncro_customer_id is None and staff.get("company_id"):
+                staff_company = await companies_repo.get_company_by_id(
+                    int(staff["company_id"])
+                )
+                if staff_company and staff_company.get("syncro_company_id"):
+                    syncro_customer_id = str(staff_company.get("syncro_company_id"))
+
+    if syncro_contact_id is None or syncro_customer_id is None:
+        contact = await syncro_service.find_contact_by_email(normalised_email)
+        if contact:
+            syncro_contact_id = syncro_contact_id or contact.get("id")
+            syncro_customer_id = (
+                syncro_customer_id
+                or contact.get("customer_id")
+                or contact.get("customerId")
+            )
+
+    full_description = _compose_ticket_description(
+        payload=payload,
+        normalised_email=normalised_email,
+        include_contact_block=syncro_contact_id is None,
+        questions=questions,
+        submitted_answers=submitted_answers,
+    )
+
+    syncro_payload = syncro_service.build_ticket_payload(
+        subject=payload.subject.strip(),
+        description=full_description,
+        customer_id=syncro_customer_id,
+        contact_id=syncro_contact_id,
+        requester_email=normalised_email if syncro_contact_id is None else None,
+        requester_name=payload.name.strip() if syncro_contact_id is None else None,
+    )
+    try:
+        ticket = await syncro_service.create_ticket(syncro_payload)
+    except syncro_service.SyncroConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except syncro_service.SyncroAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    raw_ticket_id = ticket.get("id") or ticket.get("number") or 0
+    try:
+        ticket_id = int(raw_ticket_id)
+    except (TypeError, ValueError):
+        ticket_id = 0
+
+    log_info(
+        "Tray Syncro ticket submitted",
+        device_uid=device.get("uid") or payload.device_uid,
+        syncro_ticket_id=raw_ticket_id,
+        syncro_customer_id=syncro_customer_id,
+        syncro_contact_id=syncro_contact_id,
+    )
+
+    return TrayTicketSubmitResponse(
+        ticket_id=ticket_id,
+        ticket_number=str(ticket.get("number") or raw_ticket_id or "") or None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Admin endpoints (install tokens + menu configs)
 # ---------------------------------------------------------------------------
@@ -580,7 +752,9 @@ async def create_menu_config(
         name=payload.name,
         scope=payload.scope,
         scope_ref_id=payload.scope_ref_id,
-        payload_json=json.dumps([n.model_dump(exclude_none=True) for n in payload.payload]),
+        payload_json=json.dumps(
+            [n.model_dump(exclude_none=True) for n in payload.payload]
+        ),
         display_text=safe_text,
         env_allowlist=",".join(payload.env_allowlist),
         branding_icon_url=payload.branding_icon_url,
@@ -604,7 +778,9 @@ async def update_menu_config(
         raise HTTPException(status_code=404, detail="Configuration not found")
     payload_json = None
     if payload.payload is not None:
-        payload_json = json.dumps([n.model_dump(exclude_none=True) for n in payload.payload])
+        payload_json = json.dumps(
+            [n.model_dump(exclude_none=True) for n in payload.payload]
+        )
     safe_text = (
         _sanitise_display_text(payload.display_text)
         if payload.display_text is not None
@@ -648,8 +824,12 @@ async def list_devices(
     status_filter: str | None = None,
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
-        raise HTTPException(status_code=403, detail="Helpdesk technician privileges required")
+    if not (
+        current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    ):
+        raise HTTPException(
+            status_code=403, detail="Helpdesk technician privileges required"
+        )
     rows = await tray_repo.list_devices(company_id=company_id, status=status_filter)
     return JSONResponse([_serialise_device(row) for row in rows])
 
@@ -736,7 +916,9 @@ async def start_device_chat(
         raise HTTPException(status_code=404, detail="Matrix chat is not enabled")
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device or device.get("status") != "active":
-        raise HTTPException(status_code=404, detail="Tray device not found or not active")
+        raise HTTPException(
+            status_code=404, detail="Tray device not found or not active"
+        )
 
     company = None
     if device.get("company_id"):
@@ -768,7 +950,9 @@ async def start_device_chat(
             matrix_room_id = matrix_resp.get("room_id", "")
         except Exception as exc:
             log_error("Failed to create Matrix room for tray chat", error=str(exc))
-            raise HTTPException(status_code=502, detail="Failed to create chat room") from exc
+            raise HTTPException(
+                status_code=502, detail="Failed to create chat room"
+            ) from exc
 
         room = await chat_repo.create_room(
             subject=subject,
@@ -802,7 +986,9 @@ async def start_device_chat(
                     error=str(exc),
                 )
             try:
-                await matrix_service.set_user_power_level(matrix_room_id, tech_mxid, 100)
+                await matrix_service.set_user_power_level(
+                    matrix_room_id, tech_mxid, 100
+                )
             except Exception as exc:
                 log_error(
                     "Failed to set Matrix power level during tray chat auto-assign",
@@ -953,7 +1139,8 @@ async def admin_create_ticket_question(
 ) -> JSONResponse:
     if payload.scope == "company" and payload.company_id is None:
         raise HTTPException(
-            status_code=422, detail="company_id is required for company-scoped questions"
+            status_code=422,
+            detail="company_id is required for company-scoped questions",
         )
     record = await tq_repo.create_question(
         scope=payload.scope,
@@ -973,7 +1160,9 @@ async def admin_create_ticket_question(
             [c.model_dump() for c in payload.conditions],
         )
     record["conditions"] = [c.model_dump() for c in payload.conditions]
-    return JSONResponse(_serialise_question(record) | {"conditions": record["conditions"]})
+    return JSONResponse(
+        _serialise_question(record) | {"conditions": record["conditions"]}
+    )
 
 
 @router.put(
@@ -1105,12 +1294,15 @@ async def _attach_room_to_device(room_id: int, device_id: int) -> None:
             (device_id, room_id),
         )
     except Exception as exc:  # pragma: no cover - defensive
-        log_error("Failed to link chat room to tray device", room_id=room_id, error=str(exc))
+        log_error(
+            "Failed to link chat room to tray device", room_id=room_id, error=str(exc)
+        )
 
 
 # ---------------------------------------------------------------------------
 # Phase 5 – Auto-update version endpoint
 # ---------------------------------------------------------------------------
+
 
 # _rollout_bucket returns a deterministic integer in [0, 100) for a given
 # device identifier, used to assign a device to a rollout cohort.
@@ -1143,7 +1335,9 @@ async def get_tray_version(request: Request) -> JSONResponse:
     if not row:
         row = await tray_repo.get_latest_tray_version("all")
     if not row:
-        return JSONResponse({"version": "0.0.0", "download_url": None, "required": False})
+        return JSONResponse(
+            {"version": "0.0.0", "download_url": None, "required": False}
+        )
 
     rollout_percent = int(row.get("rollout_percent") or 100)
 
@@ -1171,11 +1365,13 @@ async def get_tray_version(request: Request) -> JSONResponse:
             if fallback:
                 row = fallback
 
-    return JSONResponse({
-        "version": row["version"],
-        "download_url": row.get("download_url"),
-        "required": bool(row.get("required")),
-    })
+    return JSONResponse(
+        {
+            "version": row["version"],
+            "download_url": row.get("download_url"),
+            "required": bool(row.get("required")),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1251,18 +1447,24 @@ async def admin_list_diagnostics(
     current_user: dict = Depends(require_super_admin),
 ) -> JSONResponse:
     rows = await tray_repo.list_diagnostics(device_id=device_id)
-    return JSONResponse([
-        {
-            "id": int(r["id"]),
-            "device_id": int(r["device_id"]),
-            "device_uid": r.get("device_uid"),
-            "hostname": r.get("hostname"),
-            "filename": r["filename"],
-            "size_bytes": int(r.get("size_bytes") or 0),
-            "uploaded_at": r["uploaded_at"].isoformat() if hasattr(r.get("uploaded_at"), "isoformat") else str(r.get("uploaded_at")),
-        }
-        for r in rows
-    ])
+    return JSONResponse(
+        [
+            {
+                "id": int(r["id"]),
+                "device_id": int(r["device_id"]),
+                "device_uid": r.get("device_uid"),
+                "hostname": r.get("hostname"),
+                "filename": r["filename"],
+                "size_bytes": int(r.get("size_bytes") or 0),
+                "uploaded_at": (
+                    r["uploaded_at"].isoformat()
+                    if hasattr(r.get("uploaded_at"), "isoformat")
+                    else str(r.get("uploaded_at"))
+                ),
+            }
+            for r in rows
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1303,7 +1505,9 @@ async def admin_publish_version(
         published_by_user_id=int(current_user["id"]),
         rollout_percent=rollout_percent,
     )
-    return JSONResponse({"published": True, "version": version, "rollout_percent": rollout_percent})
+    return JSONResponse(
+        {"published": True, "version": version, "rollout_percent": rollout_percent}
+    )
 
 
 @router.patch(
@@ -1323,8 +1527,12 @@ async def admin_update_version_rollout(
     body = await request.json()
     rollout_percent = int(body.get("rollout_percent", 100))
     rollout_percent = max(1, min(100, rollout_percent))
-    await tray_repo.update_tray_version_rollout(version_id, rollout_percent=rollout_percent)
-    return JSONResponse({"updated": True, "version_id": version_id, "rollout_percent": rollout_percent})
+    await tray_repo.update_tray_version_rollout(
+        version_id, rollout_percent=rollout_percent
+    )
+    return JSONResponse(
+        {"updated": True, "version_id": version_id, "rollout_percent": rollout_percent}
+    )
 
 
 @router.get(
@@ -1342,27 +1550,29 @@ async def admin_list_versions(
             r["version"], r["platform"]
         )
         rollout_start = r.get("rollout_start_at")
-        result.append({
-            "id": int(r["id"]),
-            "version": r["version"],
-            "platform": r["platform"],
-            "download_url": r["download_url"],
-            "required": bool(r.get("required")),
-            "enabled": bool(r.get("enabled")),
-            "rollout_percent": int(r.get("rollout_percent") or 100),
-            "rollout_start_at": (
-                rollout_start.isoformat()
-                if hasattr(rollout_start, "isoformat")
-                else str(rollout_start) if rollout_start else None
-            ),
-            "devices_on_version": devices_on_version,
-            "total_devices": total_devices,
-            "published_at": (
-                r["published_at"].isoformat()
-                if hasattr(r.get("published_at"), "isoformat")
-                else str(r.get("published_at"))
-            ),
-        })
+        result.append(
+            {
+                "id": int(r["id"]),
+                "version": r["version"],
+                "platform": r["platform"],
+                "download_url": r["download_url"],
+                "required": bool(r.get("required")),
+                "enabled": bool(r.get("enabled")),
+                "rollout_percent": int(r.get("rollout_percent") or 100),
+                "rollout_start_at": (
+                    rollout_start.isoformat()
+                    if hasattr(rollout_start, "isoformat")
+                    else str(rollout_start) if rollout_start else None
+                ),
+                "devices_on_version": devices_on_version,
+                "total_devices": total_devices,
+                "published_at": (
+                    r["published_at"].isoformat()
+                    if hasattr(r.get("published_at"), "isoformat")
+                    else str(r.get("published_at"))
+                ),
+            }
+        )
     return JSONResponse(result)
 
 
@@ -1390,16 +1600,24 @@ async def push_notification_to_device(
     """
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Device not found."
+        )
     if device.get("status") != "active":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Device is not active.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Device is not active."
+        )
 
     body = await request.json()
     title = str(body.get("title", "MyPortal")).strip()[:200]
     notification_body = str(body.get("body", "")).strip()[:1000]
 
-    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required.")
+    if not (
+        current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Helpdesk access required."
+        )
 
     payload = {
         "type": "show_notification",
@@ -1509,7 +1727,9 @@ async def issue_chat_token(
     company_id: int | None = device.get("company_id")
     if company_id:
         company = await companies_repo.get_company_by_id(int(company_id))
-        if not (company and company.get("tray_chat_enabled") and _settings.matrix_enabled):
+        if not (
+            company and company.get("tray_chat_enabled") and _settings.matrix_enabled
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Chat is not enabled for this device",
@@ -1526,9 +1746,13 @@ async def issue_chat_token(
     if room_id is not None:
         requested_room = await chat_repo.get_room(int(room_id))
         if not requested_room:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat room not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Chat room not found"
+            )
         if requested_room.get("status") != "open":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed"
+            )
     else:
         # When no room was explicitly requested, reconnect to the device's
         # existing open chat room (if any) so the user continues the same
@@ -1583,14 +1807,20 @@ async def popup_chat_get_room(
     """
     session = _parse_popup_session(request)
     if not session:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session"
+        )
 
     if session.get("room_id") != room_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch"
+        )
 
     room = await chat_repo.get_room(room_id)
     if not room:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Room not found"
+        )
 
     messages = await chat_repo.get_messages(room_id, limit=50)
 
@@ -1618,33 +1848,49 @@ async def popup_chat_send_message(
     """
     session = _parse_popup_session(request)
     if not session:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid popup session"
+        )
 
     if session.get("room_id") != room_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Room mismatch"
+        )
 
     # Validate CSRF token from the X-Tray-CSRF header.
     csrf_header = request.headers.get("X-Tray-CSRF", "")
     if not secrets.compare_digest(csrf_header, session.get("csrf", "")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed"
+        )
 
     body: dict[str, Any] = {}
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body"
+        )
 
     message_body = str(body.get("body", "")).strip()
     if not message_body:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message body is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Message body is required"
+        )
     if len(message_body) > 65535:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message too long")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Message too long"
+        )
 
     room = await chat_repo.get_room(room_id)
     if not room:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Room not found"
+        )
     if room.get("status") != "open":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Chat room is closed"
+        )
 
     device_id: int = int(session["device_id"])
     device = await tray_repo.get_device_by_id(device_id)
@@ -1707,8 +1953,12 @@ async def popup_chat_send_message(
     except Exception:
         pass
 
-    msg_data = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()}
-    await chat_ntfy_notifications.notify_chat_reply(room=room, message=msg_data, actor=None)
+    msg_data = {
+        k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()
+    }
+    await chat_ntfy_notifications.notify_chat_reply(
+        room=room, message=msg_data, actor=None
+    )
 
     return JSONResponse(
         msg_data,
