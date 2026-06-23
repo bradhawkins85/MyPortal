@@ -3,7 +3,9 @@
 package main
 
 import (
+	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -21,19 +23,34 @@ func acquireSingleInstanceLock() (bool, error) {
 		return false, err
 	}
 
-	handle, err := windows.CreateMutex(nil, true, namePtr)
-	if err == windows.ERROR_ALREADY_EXISTS {
-		if handle != 0 {
-			_ = windows.CloseHandle(handle)
-		}
-		return false, nil
-	}
-	if err != nil {
-		return false, err
+	// During a deliberate self-restart the replacement process can start before
+	// the old process has fully unwound systray.Run and released its mutex. Treat
+	// that narrow overlap as expected and wait briefly instead of exiting as a
+	// duplicate, otherwise a config/icon refresh can leave no UI process running.
+	deadline := time.Now()
+	if os.Getenv("MYPORTAL_TRAY_RESTART") == "1" {
+		deadline = deadline.Add(10 * time.Second)
 	}
 
-	singleInstanceMutex = handle
-	return true, nil
+	for {
+		handle, err := windows.CreateMutex(nil, true, namePtr)
+		if err == windows.ERROR_ALREADY_EXISTS {
+			if handle != 0 {
+				_ = windows.CloseHandle(handle)
+			}
+			if time.Now().Before(deadline) {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+
+		singleInstanceMutex = handle
+		return true, nil
+	}
 }
 
 func releaseSingleInstanceLock() {
