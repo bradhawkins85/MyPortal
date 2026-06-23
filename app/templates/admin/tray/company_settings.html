@@ -38,9 +38,21 @@
           <label class="form-label form-label--checkbox">
             <input
               type="checkbox"
+              name="customer_chat_enabled"
+              value="1"
+              {% if company.customer_chat_enabled is not defined or company.customer_chat_enabled %}checked{% endif %}
+            />
+            Enable customer chat (requires Matrix)
+          </label>
+          <p class="form-helper">When enabled, customers in this company can open and continue Matrix-backed support chats from the portal and tray app.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label form-label--checkbox">
+            <input
+              type="checkbox"
               name="tray_chat_enabled"
               value="1"
-              {% if company.tray_chat_enabled %}checked{% endif %}
+              {% if company.tray_chat_enabled is not defined or company.tray_chat_enabled %}checked{% endif %}
             />
             Enable technician-initiated chat (requires Matrix)
           </label>
@@ -52,7 +64,7 @@
               type="checkbox"
               name="tray_notifications_enabled"
               value="1"
-              {% if company.tray_notifications_enabled %}checked{% endif %}
+              {% if company.tray_notifications_enabled is not defined or company.tray_notifications_enabled %}checked{% endif %}
             />
             Enable desktop push notifications
           </label>
