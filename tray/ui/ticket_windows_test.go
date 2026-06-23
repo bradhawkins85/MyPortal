@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,60 @@ func TestBuildTicketScriptNoQuestions(t *testing.T) {
 	// No Update-Visibility call needed when there are no conditions.
 	if strings.Contains(script, "Update-Visibility") {
 		t.Error("expected no Update-Visibility function for scripts with no questions")
+	}
+}
+
+func TestBuildTicketScriptUsesBrandIconEnvironment(t *testing.T) {
+	script := buildTicketScript(nil)
+
+	for _, want := range []string{
+		"$brandIconPath = $Env:MP_BRAND_ICON_PATH",
+		"New-Object System.Drawing.Icon($brandIconPath)",
+		"$ico.ToBitmap()",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("expected script to contain %q", want)
+		}
+	}
+}
+
+func TestPrepareTicketBrandIconDownloadsPortalIcon(t *testing.T) {
+	oldPortalURL, oldAuthToken, oldClient := gPortalURL, gAuthToken, ticketHTTPClient
+	defer func() {
+		gPortalURL = oldPortalURL
+		gAuthToken = oldAuthToken
+		ticketHTTPClient = oldClient
+	}()
+
+	ico := []byte{0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 16, 16, 0, 0}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tray/icon.ico" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-abc" {
+			t.Fatalf("unexpected Authorization header: %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(ico)
+	}))
+	defer server.Close()
+
+	gPortalURL = server.URL
+	gAuthToken = "token-abc"
+	ticketHTTPClient = server.Client()
+	ticketHTTPClient.Timeout = 5 * time.Second
+
+	path, cleanup := prepareTicketBrandIcon(nil)
+	if cleanup == nil {
+		t.Fatal("expected cleanup function")
+	}
+	defer cleanup()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read temp icon: %v", err)
+	}
+	if string(data) != string(ico) {
+		t.Fatalf("unexpected icon bytes: %#v", data)
 	}
 }
 
