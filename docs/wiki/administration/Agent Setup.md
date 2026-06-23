@@ -20,7 +20,7 @@ The MyPortal agent provides a permission-aware assistant that searches knowledge
 
 ## Using the agent
 
-- The dashboard now includes an **Agent** panel above the existing overview cards. Enter a question such as _"How do I reset the VPN appliance?"_ to search for matching knowledge base articles, your own tickets, and relevant product recommendations.
+- The left menu includes **Search**, which opens the AI Search workspace at `/search`. Enter a question such as _"How do I reset the VPN appliance?"_ to search for matching knowledge base articles, your own accessible tickets, and relevant product recommendations.
 - Results show a structured answer (rendered in Markdown-style text) followed by cited sources. Source identifiers use `[KB:slug]`, `[Ticket:#id]`, or `[Product:SKU]` markers.
 - The agent only operates on data available to the current user:
   - Knowledge base visibility is enforced through the existing permission scopes.
