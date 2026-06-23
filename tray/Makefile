@@ -111,11 +111,18 @@ build-chat-shell-mac:
 	@case "$(HOST_OS)" in \
 	    Darwin) \
 	        echo "Building chat shell for macOS (x64 + arm64)..."; \
-	        (cd chat-shell && npm ci && npm run build:mac); \
+	        (cd chat-shell && npm ci && CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:mac); \
 	        mkdir -p $(DIST)/darwin; \
-	        echo "Renaming .app bundle to myportal-tray-chat.app..."; \
+	        echo "Copying .app bundle to myportal-tray-chat.app..."; \
+	        app_bundle=$$(find chat-shell/dist -maxdepth 3 -type d -name "MyPortal Chat.app" | sort | head -n 1); \
+	        if [ -z "$$app_bundle" ]; then \
+	            echo "Error: electron-builder did not create MyPortal Chat.app under chat-shell/dist."; \
+	            echo "Available chat-shell/dist contents:"; \
+	            find chat-shell/dist -maxdepth 3 -print 2>/dev/null | sort; \
+	            exit 1; \
+	        fi; \
 	        rm -rf $(DIST)/darwin/myportal-tray-chat.app; \
-	        cp -R "chat-shell/dist/mac/MyPortal Chat.app" $(DIST)/darwin/myportal-tray-chat.app ;; \
+	        cp -R "$$app_bundle" $(DIST)/darwin/myportal-tray-chat.app ;; \
 	    *) \
 	        echo "Skipping macOS chat shell build: electron-builder --mac requires a macOS host (host: $(HOST_OS))."; \
 	        echo "Run 'make build-chat-shell-mac' on a macOS machine, or build via the GitHub Actions macos-latest runner."; \
