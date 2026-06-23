@@ -75,7 +75,8 @@ in an isolated window completely separate from the user's browser sessions.
 It **must be built on the target platform** (electron-builder constraint). The macOS build runs the icon generation script before invoking electron-builder.
 
 ```sh
-# On a Windows host — produces dist/windows/myportal-tray-chat.exe
+# On a Windows host — produces dist/windows/chat-shell/ with the
+# myportal-tray-chat.exe executable and persistent Electron runtime files
 make build-chat-shell-win
 
 # On a macOS host — produces dist/darwin/myportal-tray-chat.app
@@ -93,7 +94,7 @@ the MSI / .pkg installer jobs run.
 # building on Linux/macOS, see wixtoolset/issues#7154). The Makefile
 # automatically passes `-acceptEula wix7` to satisfy the FireGiant OSMF
 # EULA (https://docs.firegiant.com/wix/osmf/).
-# Requires dist/windows/myportal-tray-chat.exe from build-chat-shell-win.
+# Requires dist/windows/chat-shell/ from build-chat-shell-win.
 make build-msi          # produces dist/windows/myportal-tray.msi
 
 # macOS .pkg (requires pkgbuild/productbuild — macOS only)
@@ -130,7 +131,7 @@ three-tier launch strategy:
 
 | Tier | Method | Isolation |
 |------|--------|-----------|
-| 1 | **Dedicated chat shell** (`myportal-tray-chat`) | Full — Electron `persist:myportal-tray-chat` session partition, completely separate from all browsers |
+| 1 | **Dedicated chat shell** (`myportal-tray-chat`) | Full — Electron `persist:myportal-tray-chat` session partition, completely separate from all browsers; Windows installs use an unpacked Electron runtime so DLL/EXE payloads persist under `%ProgramFiles%\MyPortalTray\chat-shell` instead of extracting to `%TEMP%` on each launch |
 | 2 | Chromium-based browser in `--app=` mode with `--user-data-dir` isolation | Partial — separate profile but same browser binary |
 | 3 | Default system browser | None — shares user's browser session |
 
@@ -144,7 +145,7 @@ controls this behaviour:
 | `"shell"` | Require tier 1; warn and abort if the shell is absent (no silent fallback) |
 
 The chat shell binary is installed to:
-- **Windows**: `%ProgramFiles%\MyPortalTray\myportal-tray-chat.exe`
+- **Windows**: `%ProgramFiles%\MyPortalTray\chat-shell\myportal-tray-chat.exe` (current unpacked Electron install) or `%ProgramFiles%\MyPortalTray\myportal-tray-chat.exe` (legacy single-file install fallback)
 - **macOS**: `/Library/MyPortal/Tray/myportal-tray-chat.app/Contents/MacOS/myportal-tray-chat`
 
 ## Configuration

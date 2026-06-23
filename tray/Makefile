@@ -84,7 +84,7 @@ build-darwin-universal: build-darwin-amd64 build-darwin-arm64
 # Chat shell — dedicated Electron chat window (platform-native builds)
 #
 # electron-builder is platform-specific:
-#   --win  must run on a Windows host (produces myportal-tray-chat.exe)
+#   --win  must run on a Windows host (produces win-unpacked/ with myportal-tray-chat.exe and Electron runtime files)
 #   --mac  must run on a macOS host   (produces myportal-tray-chat.app)
 #
 # Like build-msi, these targets print an explanatory message and exit
@@ -100,7 +100,14 @@ build-chat-shell-win:
 	        echo "Building chat shell for Windows..."; \
 	        (cd chat-shell && npm ci && npm run build:win); \
 	        mkdir -p $(DIST)/windows; \
-	        cp chat-shell/dist/myportal-tray-chat.exe $(DIST)/windows/ ;; \
+	        rm -rf $(DIST)/windows/chat-shell; \
+	        if [ ! -d chat-shell/dist/win-unpacked ]; then \
+	            echo "Error: electron-builder did not create chat-shell/dist/win-unpacked."; \
+	            echo "Available chat-shell/dist contents:"; \
+	            find chat-shell/dist -maxdepth 2 -print 2>/dev/null | sort; \
+	            exit 1; \
+	        fi; \
+	        cp -R chat-shell/dist/win-unpacked $(DIST)/windows/chat-shell ;; \
 	    *) \
 	        echo "Skipping Windows chat shell build: electron-builder --win requires a Windows host (host: $(HOST_OS))."; \
 	        echo "Run 'make build-chat-shell-win' on a Windows machine, or build via the GitHub Actions windows-latest runner."; \
