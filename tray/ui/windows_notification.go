@@ -61,7 +61,7 @@ $notification.Group = 'myportal'
 
 func showChatSessionNotification(title, body, chatURL string) {
 	ensureWindowsToastShortcut()
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", windowsPersistentChatToastEncodedCommand(title, body, chatURL))
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", windowsPersistentChatToastEncodedCommand(title, body, chatURL))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
 }
@@ -74,7 +74,7 @@ func ensureWindowsToastShortcut() {
 		}
 		shortcut := filepath.Join(os.Getenv("APPDATA"), "Microsoft", "Windows", "Start Menu", "Programs", "MyPortal Tray.lnk")
 		script := windowsToastShortcutScript(exe, shortcut, windowsToastAppID, trayDisplayName(gConfig), windowsToastIconPath())
-		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encodePowerShellCommand(script))
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", encodePowerShellCommand(script))
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 		_ = cmd.Run()
 	})
@@ -138,9 +138,27 @@ $toast = $xml.GetElementsByTagName('toast')[0]
 [void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))`
 	if show {
 		script += `
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('` + powershellSingleQuotedString(appID) + `').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
+try {
+    [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('` + powershellSingleQuotedString(appID) + `').Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+} catch {
+` + windowsFormsBalloonFallbackScript(title, body) + `
+}`
 	}
 	return script
+}
+
+func windowsFormsBalloonFallbackScript(title, body string) string {
+	return `    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $notify = New-Object System.Windows.Forms.NotifyIcon
+    $notify.Icon = [System.Drawing.SystemIcons]::Information
+    $notify.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
+    $notify.BalloonTipTitle = '` + powershellSingleQuotedString(title) + `'
+    $notify.BalloonTipText = '` + powershellSingleQuotedString(body) + `'
+    $notify.Visible = $true
+    $notify.ShowBalloonTip(10000)
+    Start-Sleep -Seconds 11
+    $notify.Dispose()`
 }
 
 func windowsToastIconURL() string {
