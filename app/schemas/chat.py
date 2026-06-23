@@ -58,6 +58,10 @@ class ChatMessageCreate(BaseModel):
     body: str = Field(..., min_length=1, max_length=65535)
 
 
+class ChatRoomRename(BaseModel):
+    subject: str = Field(..., min_length=1, max_length=500)
+
+
 class ChatMessageResponse(BaseModel):
     id: int
     room_id: int

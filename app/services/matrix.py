@@ -128,6 +128,16 @@ async def create_room(
     return await _request("POST", "/_matrix/client/v3/createRoom", headers=_bot_headers(), json=body)
 
 
+async def set_room_name(room_id: str, name: str) -> dict[str, Any]:
+    """Set the Matrix room display name using the bot token."""
+    return await _request(
+        "PUT",
+        f"/_matrix/client/v3/rooms/{room_id}/state/m.room.name/",
+        headers=_bot_headers(),
+        json={"name": name},
+    )
+
+
 async def invite_user(room_id: str, user_id: str) -> dict[str, Any]:
     """Invite a user to a room."""
     return await _request(
