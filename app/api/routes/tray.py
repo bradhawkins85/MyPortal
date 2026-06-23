@@ -756,6 +756,7 @@ async def start_device_chat(
     room = await chat_repo.get_open_room_by_device_id(int(device["id"]))
     matrix_room_id = str((room or {}).get("matrix_room_id") or "")
 
+    created_room = False
     if not room:
         # Reuse Matrix room creation + chat_rooms persistence so the message
         # appears in the standard /chat experience.
@@ -780,6 +781,51 @@ async def start_device_chat(
 
         # Link the room back to its device so the UI can highlight it.
         await _attach_room_to_device(int(room["id"]), int(device["id"]))
+        created_room = True
+
+    if created_room and not room.get("assigned_tech_user_id"):
+        room_id = int(room["id"])
+        user_id = int(current_user["id"])
+        await chat_repo.reassign_tech(room_id, user_id)
+        await matrix_ai_waiting_assistant.handle_technician_takeover(room_id, user_id)
+
+        tech_mxid = current_user.get("matrix_user_id") or ""
+        bot_mxid = _settings.matrix_bot_user_id or ""
+        if tech_mxid:
+            try:
+                await matrix_service.invite_user(matrix_room_id, tech_mxid)
+            except Exception as exc:
+                log_error(
+                    "Failed to invite technician to tray chat during auto-assign",
+                    room_id=room_id,
+                    mxid=tech_mxid,
+                    error=str(exc),
+                )
+            try:
+                await matrix_service.set_user_power_level(matrix_room_id, tech_mxid, 100)
+            except Exception as exc:
+                log_error(
+                    "Failed to set Matrix power level during tray chat auto-assign",
+                    room_id=room_id,
+                    mxid=tech_mxid,
+                    error=str(exc),
+                )
+            await chat_repo.add_participant(
+                room_id, tech_mxid, role="technician", user_id=user_id
+            )
+        elif bot_mxid:
+            try:
+                await matrix_service.invite_user(matrix_room_id, bot_mxid)
+            except Exception as exc:
+                log_error(
+                    "Failed to invite bot user to tray chat during auto-assign",
+                    room_id=room_id,
+                    mxid=bot_mxid,
+                    error=str(exc),
+                )
+            await chat_repo.add_participant(
+                room_id, bot_mxid, role="technician", user_id=user_id
+            )
 
     initial_message = (payload.message or "").strip()[:4000]
     initiator_name = current_user.get("display_name") or current_user.get("email")
