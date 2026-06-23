@@ -711,6 +711,21 @@ async def create_install_token(
         created_by_user_id=int(current_user["id"]),
         expires_at=payload.expires_at,
     )
+    if payload.company_id is not None:
+        company = await companies_repo.get_company_by_id(int(payload.company_id))
+        trmm_client_id = str((company or {}).get("tacticalrmm_client_id") or "").strip()
+        if trmm_client_id:
+            try:
+                await tray_service.update_trmm_client_token_field(
+                    trmm_client_id=trmm_client_id,
+                    token=raw_token,
+                )
+            except Exception as exc:  # pragma: no cover - external integration
+                log_error(
+                    "Failed to publish tray install token to Tactical RMM",
+                    company_id=payload.company_id,
+                    error=str(exc),
+                )
     response = _serialise_token(record)
     response["token"] = raw_token
     return TrayInstallTokenResponse(**response)
