@@ -78,6 +78,28 @@ class AgentSourceAsset(BaseModel):
     last_sync: Optional[str] = None
 
 
+class AgentSourceCompany(BaseModel):
+    id: int
+    name: str
+    syncro_company_id: Optional[str] = None
+
+
+class AgentSourceIssueAssignment(BaseModel):
+    company_id: Optional[int] = None
+    company_name: Optional[str] = None
+    status: Optional[str] = None
+    status_label: Optional[str] = None
+
+
+class AgentSourceIssue(BaseModel):
+    id: int
+    name: str
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    updated_at: Optional[str] = None
+    assignments: list[AgentSourceIssueAssignment] = Field(default_factory=list)
+
+
 class AgentSourceFeaturePackItem(BaseModel):
     title: str
     summary: Optional[str] = None
@@ -94,6 +116,8 @@ class AgentSources(BaseModel):
     chats: list[AgentSourceChat] = Field(default_factory=list)
     orders: list[AgentSourceOrder] = Field(default_factory=list)
     assets: list[AgentSourceAsset] = Field(default_factory=list)
+    companies: list[AgentSourceCompany] = Field(default_factory=list)
+    issues: list[AgentSourceIssue] = Field(default_factory=list)
     feature_packs: dict[str, list[AgentSourceFeaturePackItem]] = Field(
         default_factory=dict
     )
