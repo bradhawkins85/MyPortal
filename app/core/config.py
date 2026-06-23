@@ -219,20 +219,30 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
     )
+    app_log_path: Path | None = Field(
+        default=Path("/var/log/myportal/myportal.log"),
+        validation_alias="APP_LOG_PATH",
+        description=(
+            "Main application log file. Receives the same INFO-and-above server "
+            "events sent to journald/stdout, with one entry per line and the "
+            "feature pack field included for filtering. Set empty to disable."
+        ),
+    )
     fail2ban_log_path: Path | None = Field(
         default=None,
         validation_alias="FAIL2BAN_LOG_PATH",
     )
     log_rotation: str | None = Field(
-        default="50 MB",
+        default="00:00",
         validation_alias="LOG_ROTATION",
         description=(
-            "Loguru rotation policy for the disk log sink. Accepts a size (e.g. '50 MB'), "
-            "an interval (e.g. '1 day'), or a clock time (e.g. '00:00'). Set empty to disable."
+            "Loguru rotation policy for disk log sinks. Defaults to midnight daily. "
+            "Accepts a size (e.g. '50 MB'), an interval (e.g. '1 day'), or a clock "
+            "time (e.g. '00:00'). Set empty to disable."
         ),
     )
     log_retention: str | None = Field(
-        default="30 days",
+        default="7 days",
         validation_alias="LOG_RETENTION",
         description=(
             "Loguru retention policy controlling how long old rotated log files are kept "
@@ -484,6 +494,21 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             # Split on '#' and take the first part, then strip whitespace
             value = value.split("#")[0].strip()
+        return value
+
+
+    @field_validator(
+        "app_log_path",
+        "fail2ban_log_path",
+        "error_log_path",
+        mode="before",
+    )
+    @classmethod
+    def _empty_string_to_none_for_paths(cls, value: Path | str | None) -> Path | str | None:
+        """Coerce blank path environment variables to ``None`` so file sinks can be disabled."""
+
+        if isinstance(value, str) and value.strip() == "":
+            return None
         return value
 
     @field_validator(
