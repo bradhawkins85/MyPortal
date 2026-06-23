@@ -8,9 +8,78 @@ DAEMON_PLIST="/Library/LaunchDaemons/io.myportal.tray.service.plist"
 AGENT_PLIST="/Library/LaunchAgents/io.myportal.tray.agent.plist"
 LOG_DIR="/Library/Logs/MyPortal/tray"
 STATE_DIR="/Library/Application Support/MyPortal/Tray"
+ENV_FILE="/Library/Preferences/io.myportal.tray.env"
 
 warn() {
     echo "Warning: $*" >&2
+}
+
+prompt_console_user() {
+    local prompt="$1"
+    local default_answer="${2:-}"
+    local hidden="${3:-false}"
+    local uid
+    uid="$(stat -f '%u' /dev/console 2>/dev/null || echo "")"
+
+    if ! [[ "$uid" =~ ^[0-9]+$ ]] || [ "$uid" -lt 500 ]; then
+        return 1
+    fi
+
+    if [ "$hidden" = "true" ]; then
+        launchctl asuser "$uid" osascript - "$prompt" "$default_answer" 2>/dev/null <<'APPLESCRIPT'
+on run argv
+    set dialogResult to display dialog (item 1 of argv) default answer (item 2 of argv) with title "MyPortal Tray Setup" buttons {"Cancel", "Continue"} default button "Continue" with hidden answer
+    return text returned of dialogResult
+end run
+APPLESCRIPT
+    else
+        launchctl asuser "$uid" osascript - "$prompt" "$default_answer" 2>/dev/null <<'APPLESCRIPT'
+on run argv
+    set dialogResult to display dialog (item 1 of argv) default answer (item 2 of argv) with title "MyPortal Tray Setup" buttons {"Cancel", "Continue"} default button "Continue"
+    return text returned of dialogResult
+end run
+APPLESCRIPT
+    fi
+}
+
+write_env_file() {
+    local portal_url="$1"
+    local enrol_token="$2"
+    local auto_update="${3:-true}"
+
+    umask 077
+    cat > "$ENV_FILE" <<EOF_ENV
+MYPORTAL_URL=${portal_url}
+ENROL_TOKEN=${enrol_token}
+AUTO_UPDATE=${auto_update}
+EOF_ENV
+    chmod 600 "$ENV_FILE" 2>/dev/null || true
+}
+
+ensure_configuration() {
+    # Silent/RMM installs should pre-create ENV_FILE (for example with the DMG's
+    # silent-install.sh). If a deployment system exports these variables into the
+    # package environment, persist them before launchd starts the service.
+    if [ -n "${MYPORTAL_URL:-}" ] && [ -n "${ENROL_TOKEN:-}" ]; then
+        write_env_file "$MYPORTAL_URL" "$ENROL_TOKEN" "${AUTO_UPDATE:-true}"
+        return 0
+    fi
+
+    if [ -s "$ENV_FILE" ] && grep -q '^MYPORTAL_URL=' "$ENV_FILE" && grep -q '^ENROL_TOKEN=' "$ENV_FILE"; then
+        return 0
+    fi
+
+    echo "MyPortal Tray configuration is missing; prompting for manual install settings."
+    local portal_url enrol_token
+    portal_url="$(prompt_console_user 'Enter the MyPortal portal URL, for example https://portal.example.com:' 'https://' 'false' || true)"
+    enrol_token="$(prompt_console_user 'Enter the MyPortal enrolment token:' '' 'true' || true)"
+
+    if [ -z "$portal_url" ] || [ -z "$enrol_token" ]; then
+        warn "MYPORTAL_URL and ENROL_TOKEN are required. Install completed, but the tray service will not be configured until $ENV_FILE is created."
+        return 0
+    fi
+
+    write_env_file "$portal_url" "$enrol_token" "${AUTO_UPDATE:-true}"
 }
 
 # Create service-owned directories before launchd evaluates stdio paths or the
@@ -19,6 +88,8 @@ warn() {
 mkdir -p "$LOG_DIR" "$STATE_DIR" || warn "failed to create support directories"
 chmod 755 "/Library/Logs/MyPortal" "$LOG_DIR" 2>/dev/null || true
 chmod 755 "/Library/Application Support/MyPortal" "$STATE_DIR" 2>/dev/null || true
+
+ensure_configuration
 
 # Make payload executables runnable.
 chmod +x "$BIN_DIR/myportal-tray-service" "$BIN_DIR/myportal-tray-ui" "$BIN_DIR/uninstall.sh" 2>/dev/null || true
