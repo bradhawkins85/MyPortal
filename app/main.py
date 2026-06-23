@@ -5963,6 +5963,7 @@ async def admin_tray_install_tokens_page(
 
     from app.repositories import tray as tray_repo
     from app.repositories import companies as companies_repo
+    from app.services import tray as tray_service
 
     tokens = await tray_repo.list_install_tokens()
     hidden_revoked_count = 0
@@ -5984,6 +5985,7 @@ async def admin_tray_install_tokens_page(
         "new_token": new_token,
         "now_iso": datetime.now(timezone.utc).isoformat(),
         "portal_url": portal_url,
+        "trmm_token_field_name": tray_service.trmm_client_token_field_name(),
     }
     return await _render_template(
         "admin/tray/install_tokens.html", request, current_user, extra=extra
@@ -6027,6 +6029,54 @@ async def admin_tray_revoke_install_token(token_id: int, request: Request):
 
     await tray_repo.revoke_install_token(token_id)
     return RedirectResponse(url="/admin/tray/install-tokens", status_code=303)
+
+
+@app.post("/admin/tray/install-tokens/sync-tactical-rmm", response_class=HTMLResponse)
+async def admin_tray_sync_install_tokens_to_tactical_rmm(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    from app.services import modules as modules_service
+    from app.services import tray as tray_service
+
+    try:
+        await modules_service.ensure_tacticalrmm_ready()
+    except ValueError as exc:
+        log_error("Unable to sync tray tokens to Tactical RMM", error=str(exc))
+        return flash_redirect("/admin/tray/install-tokens", str(exc), "error")
+
+    task_id = uuid4().hex
+
+    async def _on_success(summary: Mapping[str, Any]) -> None:
+        log_info(
+            "Tactical RMM tray token sync completed",
+            task_id=task_id,
+            processed=summary.get("processed"),
+            updated=summary.get("updated"),
+            skipped=len(summary.get("skipped") or []),
+            errors=len(summary.get("errors") or []),
+        )
+
+    async def _on_error(exc: Exception) -> None:
+        log_error("Tactical RMM tray token sync failed", task_id=task_id, error=str(exc))
+
+    user_id = int(current_user["id"]) if current_user.get("id") is not None else None
+    background_tasks.queue_background_task(
+        lambda: tray_service.sync_all_company_trmm_tray_tokens(
+            created_by_user_id=user_id
+        ),
+        task_id=task_id,
+        description="tacticalrmm-tray-token-sync",
+        on_complete=_on_success,
+        on_error=_on_error,
+    )
+
+    return flash_redirect(
+        "/admin/tray/install-tokens",
+        f"Tactical RMM tray token sync queued. Task ID: {task_id[:8]}",
+        "success",
+    )
 
 
 @app.get("/admin/tray/configurations", response_class=HTMLResponse)
