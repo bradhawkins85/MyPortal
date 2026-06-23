@@ -38,6 +38,9 @@ func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
 		"AppendChild($xml.CreateTextNode('Script scheduled'))",
 		"AppendChild($xml.CreateTextNode('The requested automation has been scheduled and will run in the background shortly.'))",
 		"CreateToastNotifier('MyPortal.Tray').Show",
+		"catch {",
+		"System.Windows.Forms.NotifyIcon",
+		"ShowBalloonTip(10000)",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("encoded script missing %q:\n%s", want, script)
