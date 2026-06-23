@@ -749,6 +749,10 @@ app.add_middleware(
         "/api/backup-status",
         "/api/tray/enrol",
         "/api/tray/popup-chat",
+        # Public Wait For Webhook callbacks authenticate with an unguessable
+        # webhook URL plus the per-step post key in the JSON payload, not a
+        # browser session. Requiring CSRF here blocks legitimate automation.
+        "/api/staff/workflow-webhooks",
     ),
 )
 
