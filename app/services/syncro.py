@@ -438,6 +438,18 @@ async def find_contact_by_email(email: str) -> dict[str, Any] | None:
     return None
 
 
+def _coerce_int_id(value: str | int | None) -> int | None:
+    """Return a positive integer ID for Syncro payloads, or ``None``."""
+
+    if value in (None, ""):
+        return None
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return None
+    return coerced if coerced > 0 else None
+
+
 def build_ticket_payload(
     *,
     subject: str,
@@ -447,24 +459,37 @@ def build_ticket_payload(
     requester_email: str | None = None,
     requester_name: str | None = None,
 ) -> dict[str, Any]:
-    """Build a Syncro ticket create payload while omitting empty values."""
+    """Build a Syncro ticket create payload while omitting empty values.
 
-    ticket: dict[str, Any] = {
+    Syncro's ticket create endpoint accepts ticket fields at the JSON root, not
+    inside a nested ``ticket`` object. Keeping ``customer_id`` at the root is
+    required for Syncro to associate the new ticket with a customer.
+    """
+
+    payload: dict[str, Any] = {
         "subject": subject,
         "problem_type": "Other",
         "status": "New",
     }
+    customer_id_value = _coerce_int_id(customer_id)
+    contact_id_value = _coerce_int_id(contact_id)
+    if customer_id_value is not None:
+        payload["customer_id"] = customer_id_value
+    if contact_id_value is not None:
+        payload["contact_id"] = contact_id_value
     if description:
-        ticket["description"] = description
-    if customer_id:
-        ticket["customer_id"] = customer_id
-    if contact_id:
-        ticket["contact_id"] = contact_id
+        payload["comments_attributes"] = [
+            {
+                "subject": subject,
+                "body": description,
+                "hidden": False,
+            }
+        ]
     if requester_email:
-        ticket["email"] = requester_email
+        payload["email"] = requester_email
     if requester_name:
-        ticket["name"] = requester_name
-    return {"ticket": ticket}
+        payload["name"] = requester_name
+    return payload
 
 
 async def create_ticket(payload: dict[str, Any]) -> dict[str, Any]:

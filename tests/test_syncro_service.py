@@ -22,7 +22,7 @@ def reset_syncro_caches(monkeypatch):
 async def test_syncro_request_records_webhook_success(reset_syncro_caches):
     recorded: dict[str, list[dict[str, object]] | dict[str, object]] = {"success": []}
 
-    async def fake_get_module(slug: str):
+    async def fake_get_module(slug: str, **_kwargs):
         assert slug == "syncro"
         return {
             "enabled": True,
@@ -110,7 +110,7 @@ async def test_syncro_request_records_webhook_success(reset_syncro_caches):
             }
             return DummyResponse()
 
-    reset_syncro_caches.setattr(syncro.module_repo, "get_module", fake_get_module)
+    reset_syncro_caches.setattr(syncro.modules_service, "get_module", fake_get_module)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "create_manual_event", fake_manual_event)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_success", fake_record_success)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_failure", fake_record_failure)
@@ -131,7 +131,7 @@ async def test_syncro_request_records_webhook_success(reset_syncro_caches):
 async def test_syncro_request_records_webhook_failure(reset_syncro_caches):
     recorded: dict[str, list[dict[str, object]] | dict[str, object]] = {}
 
-    async def fake_get_module(slug: str):
+    async def fake_get_module(slug: str, **_kwargs):
         return {
             "enabled": True,
             "settings": {
@@ -183,7 +183,7 @@ async def test_syncro_request_records_webhook_failure(reset_syncro_caches):
         async def request(self, method, url, headers=None, params=None, json=None):
             raise httpx.HTTPError("boom")
 
-    reset_syncro_caches.setattr(syncro.module_repo, "get_module", fake_get_module)
+    reset_syncro_caches.setattr(syncro.modules_service, "get_module", fake_get_module)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "create_manual_event", fake_manual_event)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_failure", fake_record_failure)
     reset_syncro_caches.setattr(syncro.webhook_monitor, "record_manual_success", fake_record_success)
@@ -196,3 +196,41 @@ async def test_syncro_request_records_webhook_failure(reset_syncro_caches):
     assert recorded["failure"][0]["event_id"] == 654
     assert recorded["failure"][0]["status"] == "error"
     assert recorded["failure"][0]["error_message"] == "boom"
+
+
+def test_build_ticket_payload_uses_syncro_root_ticket_fields():
+    payload = syncro.build_ticket_payload(
+        subject="Need help",
+        description="The workstation is offline",
+        customer_id="123",
+        contact_id="456",
+    )
+
+    assert payload["customer_id"] == 123
+    assert payload["contact_id"] == 456
+    assert payload["subject"] == "Need help"
+    assert "ticket" not in payload
+    assert payload["comments_attributes"] == [
+        {
+            "subject": "Need help",
+            "body": "The workstation is offline",
+            "hidden": False,
+        }
+    ]
+
+
+def test_build_ticket_payload_omits_invalid_optional_ids():
+    payload = syncro.build_ticket_payload(
+        subject="Need help",
+        description=None,
+        customer_id="not-an-id",
+        contact_id=0,
+        requester_email="person@example.com",
+        requester_name="Person Example",
+    )
+
+    assert "customer_id" not in payload
+    assert "contact_id" not in payload
+    assert "comments_attributes" not in payload
+    assert payload["email"] == "person@example.com"
+    assert payload["name"] == "Person Example"
