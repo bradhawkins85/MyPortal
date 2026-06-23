@@ -2704,7 +2704,7 @@ async def on_startup() -> None:
     async def _fetch_tray_msi() -> None:
         from app.services import tray_installer as tray_installer_service
 
-        await tray_installer_service.fetch_latest_tray_msi(
+        await tray_installer_service.fetch_latest_tray_installers(
             repo=settings.github_tray_msi_repo,
             github_token=settings.github_token,
         )
