@@ -268,8 +268,12 @@ func TestSubmitTicketToPortalPostsJSONWithAuth(t *testing.T) {
 	ticketHTTPClient = server.Client()
 	ticketHTTPClient.Timeout = 5 * time.Second
 
-	if err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"}); err != nil {
+	submission, err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"})
+	if err != nil {
 		t.Fatalf("submit ticket: %v", err)
+	}
+	if submission.TicketID != 42 {
+		t.Fatalf("unexpected ticket id: %d", submission.TicketID)
 	}
 }
 
@@ -305,7 +309,7 @@ func TestSubmitTicketToPortalCanUseAuthTokenWithoutDeviceUID(t *testing.T) {
 	ticketHTTPClient = server.Client()
 	ticketHTTPClient.Timeout = 5 * time.Second
 
-	if err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"}); err != nil {
+	if _, err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"}); err != nil {
 		t.Fatalf("submit ticket with auth token only: %v", err)
 	}
 }
@@ -321,8 +325,49 @@ func TestSubmitTicketToPortalRequiresDeviceUIDOrAuthToken(t *testing.T) {
 	gDeviceUID = ""
 	gAuthToken = ""
 
-	err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"})
-	if err == nil || !strings.Contains(err.Error(), "device UID or auth token") {
-		t.Fatalf("expected device UID/auth token error, got %v", err)
+	_, err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"})
+	if err == nil || !strings.Contains(err.Error(), "device is not ready") {
+		t.Fatalf("expected device readiness error, got %v", err)
+	}
+}
+
+func TestSubmitTicketToPortalReturnsFriendlyServerError(t *testing.T) {
+	oldPortalURL, oldDeviceUID, oldAuthToken, oldClient := gPortalURL, gDeviceUID, gAuthToken, ticketHTTPClient
+	defer func() {
+		gPortalURL = oldPortalURL
+		gDeviceUID = oldDeviceUID
+		gAuthToken = oldAuthToken
+		ticketHTTPClient = oldClient
+	}()
+
+	gDeviceUID = "device-123"
+	gAuthToken = "token-abc"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"detail":"Syncro ticket system is unavailable"}`))
+	}))
+	defer server.Close()
+
+	gPortalURL = server.URL
+	ticketHTTPClient = server.Client()
+	ticketHTTPClient.Timeout = 5 * time.Second
+
+	_, err := submitTicketToPortal(ticketFormResult{Name: "Jane", Email: "jane@example.com", Subject: "Help"})
+	if err == nil {
+		t.Fatal("expected friendly submission error")
+	}
+	if strings.Contains(err.Error(), "HTTP") || strings.Contains(err.Error(), "502") {
+		t.Fatalf("error should not expose HTTP status codes: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Ticket submission failed: Syncro ticket system is unavailable") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTicketSubmissionResponseSuccessMessageIncludesTicketNumber(t *testing.T) {
+	message := (ticketSubmissionResponse{TicketID: 42, TicketNumber: "T-42"}).SuccessMessage()
+	if !strings.Contains(message, "T-42") || strings.Contains(message, "HTTP") {
+		t.Fatalf("unexpected success message: %q", message)
 	}
 }

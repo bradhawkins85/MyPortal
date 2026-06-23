@@ -647,13 +647,14 @@ func openTicketDialogWithEndpoint(cfg *api.ConfigResponse, submitPath string, no
 		return
 	}
 
-	if err := submitTicketToPortal(result, submitPath); err != nil {
+	submission, err := submitTicketToPortal(result, submitPath)
+	if err != nil {
 		logger.Warn("openNewTicketDialog: submit: %v", err)
-		showOSNotification(notificationTitle, fmt.Sprintf("Could not submit ticket: %v", err))
+		showOSNotification(notificationTitle, err.Error())
 		return
 	}
 
-	showOSNotification(notificationTitle, "Your ticket has been submitted. We will be in touch soon.")
+	showOSNotification(notificationTitle, submission.SuccessMessage())
 }
 
 func newTicketDialogCommand(scriptPath string) *exec.Cmd {
@@ -707,8 +708,86 @@ func fetchTicketQuestions() []api.TicketQuestion {
 // pooling.  A 15-second timeout is sufficient for a simple JSON POST.
 var ticketHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
+type ticketSubmissionResponse struct {
+	TicketID     int    `json:"ticket_id"`
+	TicketNumber string `json:"ticket_number"`
+}
+
+func (r ticketSubmissionResponse) SuccessMessage() string {
+	ticketNumber := strings.TrimSpace(r.TicketNumber)
+	if ticketNumber != "" {
+		return fmt.Sprintf("Your ticket %s has been submitted. We will be in touch soon.", ticketNumber)
+	}
+	if r.TicketID > 0 {
+		return fmt.Sprintf("Your ticket #%d has been submitted. We will be in touch soon.", r.TicketID)
+	}
+	return "Your ticket has been submitted. We will be in touch soon."
+}
+
+type apiErrorResponse struct {
+	Detail any `json:"detail"`
+	Error  any `json:"error"`
+}
+
+func friendlyTicketSubmitError(statusCode int, body []byte) error {
+	message := extractAPIErrorMessage(body)
+	if message != "" {
+		return fmt.Errorf("Ticket submission failed: %s", message)
+	}
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("Ticket submission failed because this device is not authorised. Please contact support.")
+	case http.StatusNotFound:
+		return fmt.Errorf("Ticket submission failed because this device is not registered. Please contact support.")
+	case http.StatusUnprocessableEntity, http.StatusBadRequest:
+		return fmt.Errorf("Ticket submission failed because some required information is missing or invalid. Please review the form and try again.")
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return fmt.Errorf("Ticket submission failed because the ticket system is temporarily unavailable. Please try again shortly.")
+	default:
+		return fmt.Errorf("Ticket submission failed. Please try again shortly or contact support.")
+	}
+}
+
+func extractAPIErrorMessage(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+	var payload apiErrorResponse
+	if err := json.Unmarshal(body, &payload); err == nil {
+		for _, candidate := range []any{payload.Detail, payload.Error} {
+			if msg := stringifyAPIErrorValue(candidate); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
+func stringifyAPIErrorValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if msg := stringifyAPIErrorValue(item); msg != "" {
+				parts = append(parts, msg)
+			}
+		}
+		return strings.Join(parts, "; ")
+	case map[string]any:
+		for _, key := range []string{"msg", "message", "detail", "error"} {
+			if msg := stringifyAPIErrorValue(v[key]); msg != "" {
+				return msg
+			}
+		}
+	}
+	return ""
+}
+
 // submitTicketToPortal posts the ticket to the requested tray ticket endpoint.
-func submitTicketToPortal(result ticketFormResult, submitPaths ...string) error {
+func submitTicketToPortal(result ticketFormResult, submitPaths ...string) (ticketSubmissionResponse, error) {
 	submitPath := "/api/tray/submit-ticket"
 	if len(submitPaths) > 0 {
 		submitPath = submitPaths[0]
@@ -738,7 +817,7 @@ func submitTicketToPortal(result ticketFormResult, submitPaths ...string) error 
 		deviceUID = strings.TrimSpace(gDeviceUID)
 	}
 	if deviceUID == "" && strings.TrimSpace(gAuthToken) == "" {
-		return fmt.Errorf("device UID or auth token is not available yet")
+		return ticketSubmissionResponse{}, fmt.Errorf("Ticket submission failed because the device is not ready yet. Please try again shortly.")
 	}
 
 	body, err := json.Marshal(submitRequest{
@@ -751,7 +830,7 @@ func submitTicketToPortal(result ticketFormResult, submitPaths ...string) error 
 		Answers:     answers,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
+		return ticketSubmissionResponse{}, fmt.Errorf("Ticket submission failed before it could be sent. Please try again.")
 	}
 
 	if strings.TrimSpace(submitPath) == "" {
@@ -763,7 +842,7 @@ func submitTicketToPortal(result ticketFormResult, submitPaths ...string) error 
 	url := strings.TrimRight(gPortalURL, "/") + submitPath
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return ticketSubmissionResponse{}, fmt.Errorf("Ticket submission failed before it could be sent. Please try again.")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if gAuthToken != "" {
@@ -771,17 +850,17 @@ func submitTicketToPortal(result ticketFormResult, submitPaths ...string) error 
 	}
 	resp, err := ticketHTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("post: %w", err)
+		return ticketSubmissionResponse{}, fmt.Errorf("Ticket submission failed because the portal could not be reached. Please check your connection and try again.")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		msg := strings.TrimSpace(string(b))
-		if len(b) == 512 {
-			msg += "…"
-		}
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
+		return ticketSubmissionResponse{}, friendlyTicketSubmitError(resp.StatusCode, b)
+	}
+	var submission ticketSubmissionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&submission); err != nil && err != io.EOF {
+		logger.Debug("submitTicketToPortal: could not decode success response: %v", err)
 	}
 	logger.Info("Tray ticket submitted (HTTP %d)", resp.StatusCode)
-	return nil
+	return submission, nil
 }
