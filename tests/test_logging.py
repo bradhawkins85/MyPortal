@@ -1,7 +1,12 @@
 """Tests for logging functionality."""
 
+import os
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
-from app.core.logging import log_debug, log_error, log_info, log_warning
+from loguru import logger
+from app.core.logging import configure_logging, log_debug, log_error, log_info, log_warning
 
 
 def test_log_info_without_metadata():
@@ -42,3 +47,70 @@ def test_log_debug_without_metadata():
 def test_log_debug_with_metadata():
     """Test log_debug works with metadata."""
     log_debug("Test debug message with metadata", query="SELECT *", duration_ms=25.5)
+
+
+def test_configure_logging_writes_application_log_one_line_per_entry(tmp_path):
+    """Application log file includes feature field and escapes embedded newlines."""
+    log_path = tmp_path / "myportal.log"
+
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    with patch.dict(
+        os.environ,
+        {
+            "SESSION_SECRET": "test-secret",
+            "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "APP_LOG_PATH": str(log_path),
+            "LOG_ROTATION": "",
+            "LOG_RETENTION": "",
+            "LOG_COMPRESSION": "",
+        },
+    ):
+        configure_logging()
+        logger.bind(feature="tickets").info("first line\nsecond line")
+        logger.complete()
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert "| INFO | - | - | tickets |" in lines[0]
+    assert "first line\\nsecond line" in lines[0]
+    get_settings.cache_clear()
+    logger.remove()
+
+
+def test_default_application_log_rotation_and_retention():
+    """Main file log defaults to daily rotation and seven-day retention."""
+    from app.core.config import Settings
+
+    with patch.dict(
+        os.environ,
+        {
+            "SESSION_SECRET": "test-secret",
+            "TOTP_ENCRYPTION_KEY": "test-totp-key",
+        },
+        clear=True,
+    ):
+        settings = Settings()
+
+    assert settings.app_log_path == Path("/var/log/myportal/myportal.log")
+    assert settings.log_rotation == "00:00"
+    assert settings.log_retention == "7 days"
+
+
+def test_blank_application_log_path_disables_file_sink():
+    """APP_LOG_PATH can be set empty in .env to disable the main file log."""
+    from app.core.config import Settings
+
+    with patch.dict(
+        os.environ,
+        {
+            "SESSION_SECRET": "test-secret",
+            "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "APP_LOG_PATH": "",
+        },
+        clear=True,
+    ):
+        settings = Settings()
+
+    assert settings.app_log_path is None
