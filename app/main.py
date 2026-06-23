@@ -489,6 +489,7 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "queue_transcriptions": "Queue transcriptions",
     "process_transcription": "Process transcription",
     "sync_huntress": "Sync Huntress data",
+    "update_tray_icon_installer": "Update Tray Icon Installer",
 }
 
 app = FastAPI(
@@ -5635,6 +5636,7 @@ async def admin_scheduled_tasks(
         {"value": "sync_unifi_talk_recordings", "label": "Sync Unifi Talk recordings"},
         {"value": "queue_transcriptions", "label": "Queue transcriptions"},
         {"value": "process_transcription", "label": "Process transcription"},
+        {"value": "update_tray_icon_installer", "label": "Update Tray Icon Installer"},
     ]
     command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
     existing_commands = {task.get("command") for task in tasks if task.get("command")}
