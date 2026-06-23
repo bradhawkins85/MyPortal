@@ -217,9 +217,13 @@ async def update_trmm_client_token_field(
         # name-based fallback so the sync still works on APIs that accept names.
         custom_field_payload = {"name": custom_field_name, "string_value": token}
 
-    body = {"custom_fields": [custom_field_payload]}
+    # Tactical RMM's client update API is implemented as ``put`` (not
+    # ``patch``) and expects a top-level ``client`` object even when only
+    # custom fields are being updated.  Sending PATCH here causes TRMM to
+    # return HTTP 405: ``Method \"PATCH\" not allowed.``
+    body = {"client": {}, "custom_fields": [custom_field_payload]}
     return await tacticalrmm_service._call_endpoint(
-        f"/clients/{client_id}/", method="PATCH", body=body
+        f"/clients/{client_id}/", method="PUT", body=body
     )
 
 
