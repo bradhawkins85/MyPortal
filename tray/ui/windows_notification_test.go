@@ -37,7 +37,7 @@ func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
 		"$appLogo.SetAttribute('src', 'https://portal.example.test/tray/icon.ico')",
 		"AppendChild($xml.CreateTextNode('Script scheduled'))",
 		"AppendChild($xml.CreateTextNode('The requested automation has been scheduled and will run in the background shortly.'))",
-		"CreateToastNotifier('Acme Support').Show",
+		"CreateToastNotifier('MyPortal.Tray').Show",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("encoded script missing %q:\n%s", want, script)
@@ -45,5 +45,20 @@ func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
 	}
 	if strings.Contains(script, ".InnerText =") {
 		t.Fatalf("encoded script should not use InnerText assignment:\n%s", script)
+	}
+}
+
+func TestWindowsToastShortcutScriptSetsAppUserModelID(t *testing.T) {
+	script := windowsToastShortcutScript(`C:\\Program Files\\MyPortal\\tray.exe`, `C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\MyPortal Tray.lnk`, windowsToastAppID, "MyPortal", `C:\\Program Files\\MyPortal\\tray.exe`)
+	for _, want := range []string{
+		"ToastShortcut",
+		"IPropertyStore",
+		"9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3",
+		"[ToastShortcut]::SetAppId",
+		"MyPortal.Tray",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("shortcut script missing %q:\n%s", want, script)
+		}
 	}
 }
