@@ -34,6 +34,10 @@ MyPortal Tray Installer
 
 Open myportal-tray.pkg to install the MyPortal tray service and user agent.
 
+The package installs an uninstaller at:
+  /Library/MyPortal/Tray/uninstall.sh
+Run it with sudo, optionally adding --purge to remove configuration, state, and logs.
+
 For RMM deployment, use installer/macos/install.sh from the source repository
 or download the package directly from your MyPortal server:
   /static/tray/myportal-tray.pkg
