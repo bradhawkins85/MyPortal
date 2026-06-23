@@ -2382,6 +2382,21 @@ async def admin_company_tray_create_token(company_id: int, request: Request):
         token_prefix=tray_service.token_prefix(raw_token),
         created_by_user_id=int(current_user["id"]),
     )
+    trmm_client_id = str(company.get("tacticalrmm_client_id") or "").strip()
+    if trmm_client_id:
+        try:
+            await tray_service.update_trmm_client_token_field(
+                trmm_client_id=trmm_client_id,
+                token=raw_token,
+            )
+        except Exception as exc:
+            from app.core.logging import log_error
+
+            log_error(
+                "Failed to publish company tray token to Tactical RMM",
+                company_id=company_id,
+                error=str(exc),
+            )
     cid = int(company_id)
     return RedirectResponse(
         url=f"/admin/companies/{cid}/tray?" + urlencode({"new_token": raw_token}),

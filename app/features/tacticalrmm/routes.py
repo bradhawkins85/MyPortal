@@ -21,6 +21,12 @@ router.add_api_route(
     methods=["POST"],
     response_class=HTMLResponse,
 )
+router.add_api_route(
+    "/admin/modules/tacticalrmm/sync-tray-tokens",
+    handlers.admin_sync_tray_tokens_to_tactical_rmm,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
 
 
 __all__ = ["router"]
