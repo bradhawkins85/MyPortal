@@ -29,6 +29,7 @@ from app.services import staff_onboarding_workflows as staff_onboarding_workflow
 from app.services import subscription_price_changes
 from app.services import subscription_renewals
 from app.services import tickets as tickets_service
+from app.services import tray_installer as tray_installer_service
 from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import xero as xero_service
@@ -793,6 +794,20 @@ class SchedulerService:
                     output = await self.run_system_update(force_restart=force_restart)
                     if output:
                         details = output
+                elif command == "update_tray_icon_installer":
+                    settings = get_settings()
+                    updated = await tray_installer_service.fetch_latest_tray_msi(
+                        repo=settings.github_tray_msi_repo,
+                        github_token=settings.github_token,
+                    )
+                    details = json.dumps(
+                        {
+                            "repo": settings.github_tray_msi_repo,
+                            "asset": "myportal-tray.msi",
+                            "updated": updated,
+                        },
+                        default=str,
+                    )
                 elif command == "create_scheduled_ticket":
                     # Parse JSON payload from task description
                     task_description = task.get("description") or ""
