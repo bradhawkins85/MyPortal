@@ -5209,6 +5209,59 @@ async def enable_user_archive(company_id: int, upn: str) -> None:
     )
 
 
+def _normalise_inbox_rule(rule: dict[str, Any], index: int) -> dict[str, Any]:
+    """Convert an Exchange Online inbox rule response into UI-friendly fields."""
+    name = str(rule.get("Name") or rule.get("DisplayName") or "").strip()
+    if not name:
+        name = f"Rule {index + 1}"
+    return {
+        "id": str(
+            rule.get("Identity")
+            or rule.get("RuleIdentity")
+            or rule.get("Guid")
+            or name
+        ),
+        "title": name,
+        "enabled": bool(rule.get("Enabled", True)),
+        "priority": rule.get("Priority"),
+        "description": str(rule.get("Description") or "").strip(),
+        "raw": rule,
+    }
+
+
+async def get_mailbox_rules(company_id: int, upn: str) -> list[dict[str, Any]]:
+    """Return inbox rules configured for a mailbox using Exchange Online."""
+    normalised = str(upn or "").strip()
+    if not normalised:
+        raise M365Error("A user principal name is required", http_status=400)
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    data = await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Get-InboxRule",
+        {"Mailbox": normalised},
+    )
+    rows = data.get("value") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, list):
+        rows = []
+    rules = [
+        _normalise_inbox_rule(row, index)
+        for index, row in enumerate(rows)
+        if isinstance(row, dict)
+    ]
+    rules.sort(
+        key=lambda r: (
+            r.get("priority") is None,
+            r.get("priority") or 0,
+            str(r.get("title") or "").lower(),
+        )
+    )
+    return rules
+
+
 async def start_managed_folder_assistant(company_id: int, upn: str) -> None:
     """Start Managed Folder Assistant for a specific mailbox ``upn``."""
     normalised = str(upn or "").strip()
