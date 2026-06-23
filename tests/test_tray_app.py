@@ -1166,3 +1166,26 @@ def test_tray_icon_rejects_invalid_magic_bytes():
     assert not is_valid_ico(b"")
     assert not is_valid_ico(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
     assert not is_valid_ico(b"\x00\x00\x02\x00" + b"\x00" * 20)
+
+
+def test_assets_open_chat_uses_path_room_url():
+    source = Path("app/static/js/assets.js").read_text()
+    assert "window.location.href = `/chat/${encodeURIComponent(data.room_id)}`;" in source
+    assert "window.location.href = `/chat?room=${encodeURIComponent(data.room_id)}`;" not in source
+
+
+def test_tray_chat_start_auto_assigns_created_room():
+    source = Path("app/api/routes/tray.py").read_text()
+    assert "created_room and not room.get(\"assigned_tech_user_id\")" in source
+    assert "await chat_repo.reassign_tech(room_id, user_id)" in source
+    assert "handle_technician_takeover(room_id, user_id)" in source
+
+
+def test_empty_chat_message_mentions_matrix_client_app():
+    room_template = Path("app/templates/chat/room.html").read_text()
+    popup_template = Path("app/templates/tray/chat_popup.html").read_text()
+    expected = "No messages yet, say hello from your Matrix client app"
+    assert expected in room_template
+    assert expected in popup_template
+    assert "No messages yet. Say hello!" not in room_template
+    assert "No messages yet. Say hello!" not in popup_template
