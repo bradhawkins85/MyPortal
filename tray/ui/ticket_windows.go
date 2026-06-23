@@ -104,6 +104,7 @@ public static class NativeMethods {
 $prefillName  = $Env:MP_PREFILL_NAME
 $prefillEmail = $Env:MP_PREFILL_EMAIL
 $prefillPhone = $Env:MP_PREFILL_PHONE
+$brandIconPath = $Env:MP_BRAND_ICON_PATH
 
 $colorInk = [System.Drawing.ColorTranslator]::FromHtml('#1f2937')
 $colorMuted = [System.Drawing.ColorTranslator]::FromHtml('#64748b')
@@ -169,7 +170,16 @@ function New-RoundedRectPath($x, $y, $w, $h, $r) {
     return $path
 }
 function New-BrandBitmap($size) {
-    # Mirrors app/static/logo.svg using GDI+ so the tray dialog has the branded
+    if (-not [string]::IsNullOrWhiteSpace($brandIconPath) -and [System.IO.File]::Exists($brandIconPath)) {
+        try {
+            $ico = New-Object System.Drawing.Icon($brandIconPath, $size, $size)
+            return $ico.ToBitmap()
+        } catch {
+            # Fall back to the generated MyPortal mark if the downloaded icon
+            # cannot be decoded by System.Drawing on this Windows version.
+        }
+    }
+    # Mirrors app/static/logo.svg using GDI+ so the tray dialog has a branded
     # image and window icon without shipping generated binary assets.
     $bmp = New-Object System.Drawing.Bitmap($size, $size)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -217,8 +227,17 @@ $form.BackColor = [System.Drawing.Color]::White
 $form.Font = $fontBase
 $form.AutoScroll = $true
 $form.ClientSize = New-Object System.Drawing.Size(780, 760)
-$brandIcon = New-BrandBitmap 32
-$form.Icon = [System.Drawing.Icon]::FromHandle($brandIcon.GetHicon())
+if (-not [string]::IsNullOrWhiteSpace($brandIconPath) -and [System.IO.File]::Exists($brandIconPath)) {
+    try {
+        $form.Icon = New-Object System.Drawing.Icon($brandIconPath)
+    } catch {
+        $brandIcon = New-BrandBitmap 32
+        $form.Icon = [System.Drawing.Icon]::FromHandle($brandIcon.GetHicon())
+    }
+} else {
+    $brandIcon = New-BrandBitmap 32
+    $form.Icon = [System.Drawing.Icon]::FromHandle($brandIcon.GetHicon())
+}
 
 $logo = New-Object System.Windows.Forms.PictureBox
 $logo.Image = New-BrandBitmap 116
@@ -571,6 +590,68 @@ func parseTicketDialogOutput(output string) (ticketFormResult, error) {
 	return result, fmt.Errorf("invalid dialog JSON")
 }
 
+// prepareTicketBrandIcon downloads the same branded .ico used by the running
+// system tray icon so the Submit Ticket dialog matches /admin/tray/branding.
+// The returned cleanup function removes the temporary icon file after the
+// PowerShell dialog process has exited.
+func prepareTicketBrandIcon(cfg *api.ConfigResponse) (string, func()) {
+	if gPortalURL == "" {
+		return "", nil
+	}
+	iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
+	if cfg != nil && strings.TrimSpace(cfg.BrandingIconURL) != "" {
+		configuredURL := strings.TrimSpace(cfg.BrandingIconURL)
+		if strings.HasPrefix(configuredURL, "http://") || strings.HasPrefix(configuredURL, "https://") {
+			iconURL = configuredURL
+		} else if strings.HasPrefix(configuredURL, "/") {
+			iconURL = strings.TrimRight(gPortalURL, "/") + configuredURL
+		}
+	}
+
+	req, err := newHTTPRequest("GET", iconURL, nil)
+	if err != nil {
+		logger.Debug("prepareTicketBrandIcon: build request: %v", err)
+		return "", nil
+	}
+	resp, err := ticketHTTPClient.Do(req)
+	if err != nil {
+		logger.Debug("prepareTicketBrandIcon: fetch %s: %v", iconURL, err)
+		return "", nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		logger.Debug("prepareTicketBrandIcon: fetch %s returned HTTP %d", iconURL, resp.StatusCode)
+		return "", nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		logger.Debug("prepareTicketBrandIcon: read response: %v", err)
+		return "", nil
+	}
+	if len(data) < 4 || data[0] != 0x00 || data[1] != 0x00 || data[2] != 0x01 || data[3] != 0x00 {
+		logger.Debug("prepareTicketBrandIcon: response was not valid ICO data")
+		return "", nil
+	}
+	f, err := os.CreateTemp("", "mp-ticket-brand-*.ico")
+	if err != nil {
+		logger.Debug("prepareTicketBrandIcon: create temp icon: %v", err)
+		return "", nil
+	}
+	path := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(path)
+		logger.Debug("prepareTicketBrandIcon: write temp icon: %v", err)
+		return "", nil
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		logger.Debug("prepareTicketBrandIcon: close temp icon: %v", err)
+		return "", nil
+	}
+	return path, func() { _ = os.Remove(path) }
+}
+
 // openNewTicketDialog loads dynamic questions from the portal, shows the New
 // Ticket WinForms dialog, persists prefill values to HKCU, and submits the
 // ticket to the portal.
@@ -608,12 +689,17 @@ func openTicketDialogWithEndpoint(cfg *api.ConfigResponse, submitPath string, no
 	sf.Close()
 
 	prefillName, prefillEmail, prefillPhone := loadTicketPrefill()
+	brandIconPath, brandIconCleanup := prepareTicketBrandIcon(cfg)
+	if brandIconCleanup != nil {
+		defer brandIconCleanup()
+	}
 
 	cmd := newTicketDialogCommand(scriptPath)
 	cmd.Env = append(os.Environ(),
 		"MP_PREFILL_NAME="+prefillName,
 		"MP_PREFILL_EMAIL="+prefillEmail,
 		"MP_PREFILL_PHONE="+prefillPhone,
+		"MP_BRAND_ICON_PATH="+brandIconPath,
 	)
 
 	out, err := cmd.Output()
