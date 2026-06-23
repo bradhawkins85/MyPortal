@@ -33,7 +33,8 @@ func TestWindowsToastEncodedCommandAppendsTextNodes(t *testing.T) {
 	script := string(utf16.Decode(units))
 	for _, want := range []string{
 		"$textNodes = $xml.GetElementsByTagName('text')",
-		"$xml.GetElementsByTagName('image')[0].SetAttribute('src', 'https://portal.example.test/tray/icon.ico')",
+		"$appLogo.SetAttribute('placement', 'appLogoOverride')",
+		"$appLogo.SetAttribute('src', 'https://portal.example.test/tray/icon.ico')",
 		"AppendChild($xml.CreateTextNode('Script scheduled'))",
 		"AppendChild($xml.CreateTextNode('The requested automation has been scheduled and will run in the background shortly.'))",
 		"CreateToastNotifier('Acme Support').Show",
