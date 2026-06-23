@@ -24,7 +24,6 @@ from .helpers import (
     _staff_member_matches_company_email_domains,
 )
 
-
 CompanyWorkflowPolicyUpsertSchema = main_module.CompanyWorkflowPolicyUpsertSchema
 WorkflowConfigSchema = main_module.WorkflowConfigSchema
 _parse_input_datetime = main_module._parse_input_datetime
@@ -68,7 +67,9 @@ def _html_to_text(html: str) -> str:
     return text.replace("&nbsp;", " ").strip()
 
 
-async def _render_message_email(slug: str, context: dict[str, Any], default_html: str) -> tuple[str, str]:
+async def _render_message_email(
+    slug: str, context: dict[str, Any], default_html: str
+) -> tuple[str, str]:
     rendered, content_type = await message_templates_service.render_template_content(
         slug,
         context,
@@ -77,7 +78,12 @@ async def _render_message_email(slug: str, context: dict[str, Any], default_html
     )
     if content_type == "text/html":
         return rendered, _html_to_text(rendered)
-    return "<p>" + escape(rendered).replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>", rendered
+    return (
+        "<p>"
+        + escape(rendered).replace("\n\n", "</p><p>").replace("\n", "<br>")
+        + "</p>",
+        rendered,
+    )
 
 
 _STAFF_EDIT_REQUEST_FIELDS: tuple[tuple[str, str, str, str], ...] = (
@@ -108,7 +114,9 @@ _STAFF_WORKFLOW_LIFECYCLE_FIELDS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _payload_has_key(payload: Mapping[str, Any], snake_key: str, camel_key: str) -> bool:
+def _payload_has_key(
+    payload: Mapping[str, Any], snake_key: str, camel_key: str
+) -> bool:
     return snake_key in payload or camel_key in payload
 
 
@@ -155,25 +163,34 @@ def _format_change_value(value: Any) -> str:
 
 def _staff_display_name(staff_member: Mapping[str, Any]) -> str:
     name = " ".join(
-        part for part in (
+        part
+        for part in (
             str(staff_member.get("first_name") or "").strip(),
             str(staff_member.get("last_name") or "").strip(),
-        ) if part
+        )
+        if part
     )
-    return name or str(staff_member.get("email") or f"Staff #{staff_member.get('id')}").strip()
+    return (
+        name
+        or str(staff_member.get("email") or f"Staff #{staff_member.get('id')}").strip()
+    )
 
 
 def _user_display_name(user: Mapping[str, Any]) -> str:
     name = " ".join(
-        part for part in (
+        part
+        for part in (
             str(user.get("first_name") or "").strip(),
             str(user.get("last_name") or "").strip(),
-        ) if part
+        )
+        if part
     )
     return name or str(user.get("email") or f"User #{user.get('id')}").strip()
 
 
-def _staff_edit_request_changes(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _staff_edit_request_changes(
+    existing: Mapping[str, Any], payload: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     changes: list[dict[str, Any]] = []
     for field_name, payload_key, section, label in _STAFF_EDIT_REQUEST_FIELDS:
         if not _payload_has_key(payload, field_name, payload_key):
@@ -182,31 +199,54 @@ def _staff_edit_request_changes(existing: Mapping[str, Any], payload: Mapping[st
         current = existing.get(field_name)
         if _normalise_change_value(current) == _normalise_change_value(requested):
             continue
-        changes.append({"section": section, "label": label, "current": current, "requested": requested})
+        changes.append(
+            {
+                "section": section,
+                "label": label,
+                "current": current,
+                "requested": requested,
+            }
+        )
 
     raw_custom_fields = _payload_value(payload, "custom_fields", "customFields")
     if isinstance(raw_custom_fields, Mapping):
-        existing_custom = existing.get("custom_fields") if isinstance(existing.get("custom_fields"), Mapping) else {}
-        for name, requested in sorted(raw_custom_fields.items(), key=lambda item: str(item[0]).lower()):
-            current = existing_custom.get(name) if isinstance(existing_custom, Mapping) else None
+        existing_custom = (
+            existing.get("custom_fields")
+            if isinstance(existing.get("custom_fields"), Mapping)
+            else {}
+        )
+        for name, requested in sorted(
+            raw_custom_fields.items(), key=lambda item: str(item[0]).lower()
+        ):
+            current = (
+                existing_custom.get(name)
+                if isinstance(existing_custom, Mapping)
+                else None
+            )
             if _normalise_change_value(current) == _normalise_change_value(requested):
                 continue
-            changes.append({
-                "section": "Custom fields",
-                "label": str(name),
-                "current": current,
-                "requested": requested,
-            })
+            changes.append(
+                {
+                    "section": "Custom fields",
+                    "label": str(name),
+                    "current": current,
+                    "requested": requested,
+                }
+            )
     return changes
 
 
-def _changed_workflow_lifecycle_fields(existing: Mapping[str, Any], payload: Mapping[str, Any]) -> list[str]:
+def _changed_workflow_lifecycle_fields(
+    existing: Mapping[str, Any], payload: Mapping[str, Any]
+) -> list[str]:
     changed: list[str] = []
     for field_name, payload_key, label in _STAFF_WORKFLOW_LIFECYCLE_FIELDS:
         if not _payload_has_key(payload, field_name, payload_key):
             continue
         requested = _payload_value(payload, field_name, payload_key)
-        if _normalise_lifecycle_value(field_name, existing.get(field_name)) != _normalise_lifecycle_value(field_name, requested):
+        if _normalise_lifecycle_value(
+            field_name, existing.get(field_name)
+        ) != _normalise_lifecycle_value(field_name, requested):
             changed.append(label)
     return changed
 
@@ -222,7 +262,10 @@ def _render_staff_edit_ticket_description(
     requester_name = _user_display_name(requester)
     requester_email = str(requester.get("email") or "").strip() or "(no email)"
     staff_email = str(existing.get("email") or "").strip() or "(no email)"
-    company_name = str((company or {}).get("name") or existing.get("company_name") or "").strip() or "(unknown company)"
+    company_name = (
+        str((company or {}).get("name") or existing.get("company_name") or "").strip()
+        or "(unknown company)"
+    )
     lines = [
         "A staff details change request was submitted from the Staff page.",
         "",
@@ -269,7 +312,8 @@ async def _create_staff_edit_request_ticket(
         subject=f"Staff change request: {staff_name}",
         description=description,
         requester_id=requester_id,
-        company_id=int(existing.get("company_id") or user.get("company_id") or 0) or None,
+        company_id=int(existing.get("company_id") or user.get("company_id") or 0)
+        or None,
         assigned_user_id=None,
         priority="normal",
         status="new",
@@ -282,7 +326,28 @@ async def _create_staff_edit_request_ticket(
     )
 
 
-async def _get_current_user_staff_department(user: dict[str, Any], company_id: int) -> str | None:
+async def _get_current_user_staff_record(
+    user: dict[str, Any], company_id: int
+) -> dict[str, Any] | None:
+    user_email = str(user.get("email") or "").strip()
+    if not user_email:
+        return None
+    return await staff_repo.get_staff_by_company_and_email(company_id, user_email)
+
+
+async def _get_current_user_staff_job_title(
+    user: dict[str, Any], company_id: int
+) -> str | None:
+    staff_record = await _get_current_user_staff_record(user, company_id)
+    if not staff_record:
+        return None
+    job_title = str(staff_record.get("job_title") or "").strip()
+    return job_title or None
+
+
+async def _get_current_user_staff_department(
+    user: dict[str, Any], company_id: int
+) -> str | None:
     user_email = str(user.get("email") or "").strip().lower()
     if not user_email:
         return None
@@ -329,7 +394,9 @@ async def staff_page(
     ).get("menu.staff", "none")
     has_write_staff_menu_access = raw_staff_menu_access == "write"
     has_staff_menu_access = raw_staff_menu_access in {"read", "write"}
-    staff_access_scope = _normalize_staff_access_scope(membership_data.get("staff_permission", staff_permission))
+    staff_access_scope = _normalize_staff_access_scope(
+        membership_data.get("staff_permission", staff_permission)
+    )
     can_edit_staff = bool(
         is_super_admin
         or is_helpdesk_technician
@@ -362,10 +429,26 @@ async def staff_page(
     offboarding_email_forwarding_enabled: bool = True
     has_m365: bool = False
     if company_id is not None:
-        field_config = await staff_field_config_service.load_effective_company_staff_fields(
-            company_id
+        field_config = (
+            await staff_field_config_service.load_effective_company_staff_fields(
+                company_id
+            )
         )
-        custom_field_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+        requester_job_title = (
+            None
+            if is_super_admin
+            else await _get_current_user_staff_job_title(user, company_id)
+        )
+        custom_field_definitions = (
+            await staff_custom_fields_repo.list_field_definitions(
+                company_id,
+                requester_email=(
+                    None if is_super_admin else str(user.get("email") or "").strip()
+                ),
+                requester_job_title=requester_job_title,
+                include_restricted=is_super_admin,
+            )
+        )
         staff_members = await staff_repo.list_staff(
             company_id,
             enabled=enabled_filter,
@@ -379,7 +462,10 @@ async def staff_page(
             list((company_record or {}).get("email_domains") or []),
         )
         offboarding_email_forwarding_enabled = bool(
-            int((company_record or {}).get("offboarding_email_forwarding_enabled", 1) or 1)
+            int(
+                (company_record or {}).get("offboarding_email_forwarding_enabled", 1)
+                or 1
+            )
         )
         m365_creds = await m365_service.get_credentials(company_id)
         has_m365 = bool(m365_creds)
@@ -388,20 +474,38 @@ async def staff_page(
                 company_id, status="pending"
             )
         workflow_map = await staff_workflow_repo.list_executions_for_staff_ids(
-            [int(member["id"]) for member in staff_members if member.get("id") is not None]
+            [
+                int(member["id"])
+                for member in staff_members
+                if member.get("id") is not None
+            ]
         )
         execution_ids = [
             int(execution["id"])
             for execution in workflow_map.values()
             if execution and execution.get("id") is not None
         ]
-        workflow_step_logs = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
-        external_checkpoint_logs = await staff_workflow_repo.list_external_checkpoints_for_execution_ids(execution_ids)
+        workflow_step_logs = await staff_workflow_repo.list_step_logs_for_execution_ids(
+            execution_ids
+        )
+        external_checkpoint_logs = (
+            await staff_workflow_repo.list_external_checkpoints_for_execution_ids(
+                execution_ids
+            )
+        )
         for member in staff_members:
-            execution = workflow_map.get(int(member["id"])) if member.get("id") is not None else None
+            execution = (
+                workflow_map.get(int(member["id"]))
+                if member.get("id") is not None
+                else None
+            )
             member["workflow_status"] = _serialise_for_json(execution)
-            member["workflow_next_run_at"] = _serialise_for_json((execution or {}).get("scheduled_for_utc"))
-            member["workflow_requested_timezone"] = (execution or {}).get("requested_timezone")
+            member["workflow_next_run_at"] = _serialise_for_json(
+                (execution or {}).get("scheduled_for_utc")
+            )
+            member["workflow_requested_timezone"] = (execution or {}).get(
+                "requested_timezone"
+            )
             member["workflow_is_overdue"] = False
             raw_next_run = (execution or {}).get("scheduled_for_utc")
             next_run_at: datetime | None = None
@@ -413,7 +517,9 @@ async def staff_page(
                 )
             elif isinstance(raw_next_run, str) and raw_next_run.strip():
                 try:
-                    parsed_next_run = datetime.fromisoformat(raw_next_run.strip().replace("Z", "+00:00"))
+                    parsed_next_run = datetime.fromisoformat(
+                        raw_next_run.strip().replace("Z", "+00:00")
+                    )
                 except ValueError:
                     parsed_next_run = None
                 if parsed_next_run is not None:
@@ -422,9 +528,22 @@ async def staff_page(
                         if parsed_next_run.tzinfo is not None
                         else parsed_next_run
                     )
-            workflow_state = str((execution or {}).get("state") or member.get("onboarding_status") or "requested").strip().lower()
-            if next_run_at is not None and workflow_state in {"approved", "offboarding_approved"}:
-                member["workflow_is_overdue"] = next_run_at <= datetime.now(timezone.utc).replace(tzinfo=None)
+            workflow_state = (
+                str(
+                    (execution or {}).get("state")
+                    or member.get("onboarding_status")
+                    or "requested"
+                )
+                .strip()
+                .lower()
+            )
+            if next_run_at is not None and workflow_state in {
+                "approved",
+                "offboarding_approved",
+            }:
+                member["workflow_is_overdue"] = next_run_at <= datetime.now(
+                    timezone.utc
+                ).replace(tzinfo=None)
             staff_id = member.get("id")
             audit_logs: list[dict[str, Any]] = []
             if staff_id is not None:
@@ -433,19 +552,29 @@ async def staff_page(
                     entity_id=int(staff_id),
                     limit=50,
                 )
-            audit_logs = sorted(audit_logs, key=lambda entry: entry.get("created_at") or datetime.min)
+            audit_logs = sorted(
+                audit_logs, key=lambda entry: entry.get("created_at") or datetime.min
+            )
             timeline: list[dict[str, Any]] = []
             approver_user_ids: list[int] = []
             for entry in audit_logs:
                 action = str(entry.get("action") or "").strip()
-                metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
-                if action in {"staff.onboarding.requested", "staff.offboarding.requested"}:
+                metadata = (
+                    entry.get("metadata")
+                    if isinstance(entry.get("metadata"), dict)
+                    else {}
+                )
+                if action in {
+                    "staff.onboarding.requested",
+                    "staff.offboarding.requested",
+                }:
                     raw_ids = metadata.get("approver_user_ids")
                     if isinstance(raw_ids, list):
                         approver_user_ids = [
                             int(raw_id)
                             for raw_id in raw_ids
-                            if isinstance(raw_id, int) or (isinstance(raw_id, str) and raw_id.isdigit())
+                            if isinstance(raw_id, int)
+                            or (isinstance(raw_id, str) and raw_id.isdigit())
                         ]
                 timeline.append(
                     {
@@ -467,7 +596,8 @@ async def staff_page(
                 for step in workflow_step_logs.get(execution_id, []):
                     timeline.append(
                         {
-                            "timestamp": step.get("started_at") or step.get("completed_at"),
+                            "timestamp": step.get("started_at")
+                            or step.get("completed_at"),
                             "event_type": "workflow_step",
                             "event": f"{step.get('step_name')} ({step.get('status')})",
                             "actor": "Workflow engine",
@@ -480,46 +610,67 @@ async def staff_page(
                 for checkpoint in external_checkpoint_logs.get(execution_id, []):
                     timeline.append(
                         {
-                            "timestamp": checkpoint.get("updated_at") or checkpoint.get("created_at"),
+                            "timestamp": checkpoint.get("updated_at")
+                            or checkpoint.get("created_at"),
                             "event_type": "external_callback",
                             "event": f"external checkpoint {checkpoint.get('status')}",
-                            "actor": f"API key #{checkpoint.get('confirmed_by_api_key_id')}" if checkpoint.get("confirmed_by_api_key_id") else "External system",
+                            "actor": (
+                                f"API key #{checkpoint.get('confirmed_by_api_key_id')}"
+                                if checkpoint.get("confirmed_by_api_key_id")
+                                else "External system"
+                            ),
                             "details": {
                                 "source": checkpoint.get("source"),
-                                "proof_reference_id": checkpoint.get("proof_reference_id"),
+                                "proof_reference_id": checkpoint.get(
+                                    "proof_reference_id"
+                                ),
                                 "payload_hash": checkpoint.get("payload_hash"),
                             },
                         }
                     )
-            timeline = sorted(timeline, key=lambda entry: entry.get("timestamp") or datetime.min)
+            timeline = sorted(
+                timeline, key=lambda entry: entry.get("timestamp") or datetime.min
+            )
             timeline = cast(list[dict[str, Any]], _serialise_for_json(timeline))
             member["onboarding_timeline"] = timeline
             if workflow_state == "waiting_external":
-                current_step = str((execution or {}).get("current_step") or "await_external_confirmation")
+                current_step = str(
+                    (execution or {}).get("current_step")
+                    or "await_external_confirmation"
+                )
                 member["onboarding_pending_details"] = (
                     f"Waiting for external completion: callback pending for step "
                     f"{current_step.replace('_', ' ')}."
                 )
-            elif workflow_state in {"awaiting_approval", "offboarding_awaiting_approval"}:
+            elif workflow_state in {
+                "awaiting_approval",
+                "offboarding_awaiting_approval",
+            }:
                 if approver_emails:
                     member["onboarding_pending_details"] = (
                         "Waiting for approval from: " + ", ".join(approver_emails)
                     )
                 else:
-                    member["onboarding_pending_details"] = "Waiting for approval from authorized approvers."
+                    member["onboarding_pending_details"] = (
+                        "Waiting for approval from authorized approvers."
+                    )
             else:
                 member["onboarding_pending_details"] = None
         company_email_domains = list((company or {}).get("email_domains") or [])
         staff_pending_offboarding_requests = [
             member
             for member in staff_members
-            if str(member.get("account_action") or "").strip().lower() == "offboard requested"
-            or str(member.get("onboarding_status") or "").strip().lower() == staff_onboarding_workflow_service.STATE_OFFBOARDING_AWAITING_APPROVAL
+            if str(member.get("account_action") or "").strip().lower()
+            == "offboard requested"
+            or str(member.get("onboarding_status") or "").strip().lower()
+            == staff_onboarding_workflow_service.STATE_OFFBOARDING_AWAITING_APPROVAL
         ]
         staff_members = [
             member
             for member in staff_members
-            if _staff_member_matches_company_email_domains(member, company_email_domains)
+            if _staff_member_matches_company_email_domains(
+                member, company_email_domains
+            )
         ]
         if not is_super_admin and staff_permission == 1:
             user_email = (user.get("email") or "").lower()
@@ -567,17 +718,28 @@ async def staff_page(
         "can_approve_onboarding": can_approve_onboarding,
         "departments": departments,
         "staff_members": cast(list[dict[str, Any]], _serialise_for_json(staff_members)),
-        "staff_pending_requests": cast(list[dict[str, Any]], _serialise_for_json(staff_pending_requests)),
-        "staff_pending_offboarding_requests": cast(list[dict[str, Any]], _serialise_for_json(staff_pending_offboarding_requests)),
+        "staff_pending_requests": cast(
+            list[dict[str, Any]], _serialise_for_json(staff_pending_requests)
+        ),
+        "staff_pending_offboarding_requests": cast(
+            list[dict[str, Any]],
+            _serialise_for_json(staff_pending_offboarding_requests),
+        ),
         "enabled_filter": enabled_value,
         "department_filter": department_filter,
         "show_ex_staff": show_ex_staff_flag,
         "staff_field_config": field_config,
-        "staff_custom_field_definitions": cast(list[dict[str, Any]], _serialise_for_json(custom_field_definitions)),
-        "active_staff_for_offboarding": cast(list[dict[str, Any]], _serialise_for_json(active_staff_for_offboarding)),
+        "staff_custom_field_definitions": cast(
+            list[dict[str, Any]], _serialise_for_json(custom_field_definitions)
+        ),
+        "active_staff_for_offboarding": cast(
+            list[dict[str, Any]], _serialise_for_json(active_staff_for_offboarding)
+        ),
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
         "has_m365": has_m365,
-        "manual_onedrive_export_enabled": bool(str((company_record or {}).get("onedrive_export_drive_id") or "").strip()),
+        "manual_onedrive_export_enabled": bool(
+            str((company_record or {}).get("onedrive_export_drive_id") or "").strip()
+        ),
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
 
@@ -1074,9 +1236,19 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
             {"name": "to", "label": "To addresses", "type": "text", "default": ""},
             {"name": "cc", "label": "CC addresses", "type": "text", "default": ""},
             {"name": "bcc", "label": "BCC addresses", "type": "text", "default": ""},
-            {"name": "subject", "label": "Email subject", "type": "text", "default": ""},
+            {
+                "name": "subject",
+                "label": "Email subject",
+                "type": "text",
+                "default": "",
+            },
             {"name": "body", "label": "Email body", "type": "textarea", "default": ""},
-            {"name": "is_html", "label": "Body is HTML", "type": "checkbox", "default": False},
+            {
+                "name": "is_html",
+                "label": "Body is HTML",
+                "type": "checkbox",
+                "default": False,
+            },
             {
                 "name": "reply_to",
                 "label": "Reply-to address",
@@ -1106,12 +1278,22 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "textarea",
                 "default": "Account provisioning complete for ${vars.staff.full_name}.",
             },
-            {"name": "is_html", "label": "Body is HTML", "type": "checkbox", "default": False},
+            {
+                "name": "is_html",
+                "label": "Body is HTML",
+                "type": "checkbox",
+                "default": False,
+            },
         ],
     },
     "offboard_account": {
         "fields": [
-            {"name": "disable_sign_in", "label": "Disable sign-in", "type": "checkbox", "default": True},
+            {
+                "name": "disable_sign_in",
+                "label": "Disable sign-in",
+                "type": "checkbox",
+                "default": True,
+            },
             {
                 "name": "convert_to_shared_mailbox",
                 "label": "Convert to shared mailbox",
@@ -1119,7 +1301,12 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "default": False,
                 "description": "Converts the Exchange Online mailbox to Shared before assigned licenses are removed.",
             },
-            {"name": "revoke_licenses", "label": "Remove assigned licenses", "type": "checkbox", "default": False},
+            {
+                "name": "revoke_licenses",
+                "label": "Remove assigned licenses",
+                "type": "checkbox",
+                "default": False,
+            },
             {
                 "name": "remove_from_groups",
                 "label": "Remove from groups",
@@ -1203,13 +1390,28 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     },
     "m365_update_org_fields": {
         "fields": [
-            {"name": "department", "label": "Department value", "type": "text", "default": "Former Staff"},
-            {"name": "company_name", "label": "Company value", "type": "text", "default": "Former Staff"},
+            {
+                "name": "department",
+                "label": "Department value",
+                "type": "text",
+                "default": "Former Staff",
+            },
+            {
+                "name": "company_name",
+                "label": "Company value",
+                "type": "text",
+                "default": "Former Staff",
+            },
         ],
     },
     "m365_hide_from_gal": {
         "fields": [
-            {"name": "hidden", "label": "Hide from GAL", "type": "checkbox", "default": True},
+            {
+                "name": "hidden",
+                "label": "Hide from GAL",
+                "type": "checkbox",
+                "default": True,
+            },
             {
                 "name": "property_path",
                 "label": "Graph property path",
@@ -1220,7 +1422,12 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
     },
     "m365_identity_hygiene": {
         "fields": [
-            {"name": "revoke_sign_in_sessions", "label": "Revoke sign-in sessions", "type": "checkbox", "default": True},
+            {
+                "name": "revoke_sign_in_sessions",
+                "label": "Revoke sign-in sessions",
+                "type": "checkbox",
+                "default": True,
+            },
         ],
     },
     "m365_add_teams_group_member": {
@@ -1381,7 +1588,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "textarea",
                 "default": "{}",
                 "description": "JSON object of headers. Values can include ${vars.*}.",
-                "example": "{\"Authorization\":\"Bearer ${vars.system.api_token}\"}",
+                "example": '{"Authorization":"Bearer ${vars.system.api_token}"}',
             },
             {
                 "name": "query_params_json",
@@ -1389,7 +1596,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "textarea",
                 "default": "{}",
                 "description": "JSON object of query parameters.",
-                "example": "{\"staffId\":\"${vars.staff_id}\",\"status\":\"active\"}",
+                "example": '{"staffId":"${vars.staff_id}","status":"active"}',
             },
             {
                 "name": "store_json",
@@ -1397,7 +1604,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "textarea",
                 "default": "{}",
                 "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
-                "example": "{\"external_user_id\":\"body.id\",\"sync_status\":\"body.status\"}",
+                "example": '{"external_user_id":"body.id","sync_status":"body.status"}',
             },
             {
                 "name": "timeout_seconds",
@@ -1421,7 +1628,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "name": "headers_json",
                 "label": "Headers (JSON object)",
                 "type": "textarea",
-                "default": "{\"Content-Type\":\"application/json\"}",
+                "default": '{"Content-Type":"application/json"}',
                 "description": "JSON object of headers. Values can include ${vars.*}.",
             },
             {
@@ -1437,7 +1644,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "textarea",
                 "default": "{}",
                 "description": "JSON object/array sent as request body. Supports ${vars.*}.",
-                "example": "{\"email\":\"${vars.staff.email}\",\"firstName\":\"${vars.staff.first_name}\"}",
+                "example": '{"email":"${vars.staff.email}","firstName":"${vars.staff.first_name}"}',
             },
             {
                 "name": "store_json",
@@ -1445,7 +1652,7 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "textarea",
                 "default": "{}",
                 "description": "Map variable name to response path (e.g. body.id). Values persist only for this workflow run.",
-                "example": "{\"external_user_id\":\"body.id\",\"external_ticket_id\":\"body.ticket.id\"}",
+                "example": '{"external_user_id":"body.id","external_ticket_id":"body.ticket.id"}',
             },
             {
                 "name": "timeout_seconds",
@@ -1469,9 +1676,9 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "name": "store_json",
                 "label": "Workflow variables to store (JSON object)",
                 "type": "textarea",
-                "default": "{\"external_text\":\"body\"}",
+                "default": '{"external_text":"body"}',
                 "description": "Map variable name to response path. CURL response is stored as plain text in `body`.",
-                "example": "{\"external_text\":\"body\"}",
+                "example": '{"external_text":"body"}',
             },
             {
                 "name": "timeout_seconds",
@@ -1685,7 +1892,9 @@ def _collect_validation_errors(exc: ValidationError) -> list[str]:
     return errors or ["Invalid workflow policy payload."]
 
 
-def _parse_json_object(value: Any, *, field_name: str) -> tuple[dict[str, Any] | None, str | None]:
+def _parse_json_object(
+    value: Any, *, field_name: str
+) -> tuple[dict[str, Any] | None, str | None]:
     if value is None or value == "":
         return {}, None
     if isinstance(value, dict):
@@ -1704,7 +1913,9 @@ def _parse_json_object(value: Any, *, field_name: str) -> tuple[dict[str, Any] |
     return None, f"{field_name} must be a JSON object."
 
 
-def _parse_json_list(value: Any, *, field_name: str) -> tuple[list[Any] | None, str | None]:
+def _parse_json_list(
+    value: Any, *, field_name: str
+) -> tuple[list[Any] | None, str | None]:
     if value is None or value == "":
         return None, None
     if isinstance(value, list):
@@ -1744,16 +1955,23 @@ def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, A
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": "Invalid workflow config.", "errors": _collect_validation_errors(exc)},
+            detail={
+                "message": "Invalid workflow config.",
+                "errors": _collect_validation_errors(exc),
+            },
         ) from exc
     return validated.model_dump(mode="python")
 
 
 def _workflow_webhook_base_url() -> str:
-    return str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+    return (
+        str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+    )
 
 
-def _add_wait_for_webhook_previews(config: dict[str, Any], *, company_id: int, direction: str, workflow_key: str) -> dict[str, Any]:
+def _add_wait_for_webhook_previews(
+    config: dict[str, Any], *, company_id: int, direction: str, workflow_key: str
+) -> dict[str, Any]:
     normalised = _normalise_workflow_config(config)
     steps = normalised.get("steps")
     if not isinstance(steps, list):
@@ -1763,15 +1981,21 @@ def _add_wait_for_webhook_previews(config: dict[str, Any], *, company_id: int, d
         if not isinstance(step, dict):
             continue
         step_config = step.get("config") if isinstance(step.get("config"), dict) else {}
-        step_type = str(step.get("type") or step_config.get("type") or "").strip().lower()
+        step_type = (
+            str(step.get("type") or step_config.get("type") or "").strip().lower()
+        )
         if step_type not in {"wait_external_checkpoint", "wait_for_webhook"}:
             continue
-        step_name = str(step.get("name") or step.get("_workflow_step_name") or f"step_{index + 1}")
-        webhook_public_id, webhook_post_key = staff_onboarding_workflow_service._build_static_workflow_webhook_credentials(
-            company_id=company_id,
-            direction=direction,
-            workflow_key=workflow_key,
-            step_name=step_name,
+        step_name = str(
+            step.get("name") or step.get("_workflow_step_name") or f"step_{index + 1}"
+        )
+        webhook_public_id, webhook_post_key = (
+            staff_onboarding_workflow_service._build_static_workflow_webhook_credentials(
+                company_id=company_id,
+                direction=direction,
+                workflow_key=workflow_key,
+                step_name=step_name,
+            )
         )
         webhook_path = f"/api/staff/workflow-webhooks/{webhook_public_id}"
         step["webhook_preview"] = {
@@ -1809,21 +2033,35 @@ def _normalise_workflow_policy_response(
     }
 
 
-async def _extract_workflow_policy_payload(request: Request) -> CompanyWorkflowPolicyUpsertSchema:
+async def _extract_workflow_policy_payload(
+    request: Request,
+) -> CompanyWorkflowPolicyUpsertSchema:
     if _request_prefers_json(request):
         payload: dict[str, Any] = await request.json()
     else:
         form = await request.form()
         payload = {str(key): form.get(key) for key in form.keys()}
         if "enabled" in payload:
-            payload["enabled"] = str(payload.get("enabled")).strip().lower() in {"1", "true", "on", "yes"}
+            payload["enabled"] = str(payload.get("enabled")).strip().lower() in {
+                "1",
+                "true",
+                "on",
+                "yes",
+            }
         elif "is_enabled" in payload:
-            payload["enabled"] = str(payload.get("is_enabled")).strip().lower() in {"1", "true", "on", "yes"}
+            payload["enabled"] = str(payload.get("is_enabled")).strip().lower() in {
+                "1",
+                "true",
+                "on",
+                "yes",
+            }
         elif "enabled_present" in payload or "is_enabled_present" in payload:
             payload["enabled"] = False
 
     config_obj, config_error = _parse_json_object(
-        payload.get("config") or payload.get("config_json") or payload.get("configJson"),
+        payload.get("config")
+        or payload.get("config_json")
+        or payload.get("configJson"),
         field_name="config_json",
     )
     if config_error:
@@ -1833,7 +2071,9 @@ async def _extract_workflow_policy_payload(request: Request) -> CompanyWorkflowP
         )
 
     steps_list, steps_error = _parse_json_list(
-        payload.get("steps") or payload.get("step_definitions") or payload.get("stepDefinitions"),
+        payload.get("steps")
+        or payload.get("step_definitions")
+        or payload.get("stepDefinitions"),
         field_name="steps",
     )
     if steps_error:
@@ -1862,7 +2102,10 @@ async def _extract_workflow_policy_payload(request: Request) -> CompanyWorkflowP
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": "Invalid workflow policy fields.", "errors": _collect_validation_errors(exc)},
+            detail={
+                "message": "Invalid workflow policy fields.",
+                "errors": _collect_validation_errors(exc),
+            },
         ) from exc
 
 
@@ -1892,7 +2135,9 @@ async def staff_onboarding_workflow_page(request: Request):
         "staff_permission": staff_permission,
         "company": company,
     }
-    return await _render_template("staff/workflows_onboarding.html", request, user, extra=extra)
+    return await _render_template(
+        "staff/workflows_onboarding.html", request, user, extra=extra
+    )
 
 
 async def staff_onboarding_workflow_policy(request: Request):
@@ -1912,8 +2157,12 @@ async def staff_onboarding_workflow_policy(request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
-    policy = await staff_workflow_repo.get_company_workflow_policy(company_id, direction=staff_workflow_repo.DIRECTION_ONBOARDING)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
+    policy = await staff_workflow_repo.get_company_workflow_policy(
+        company_id, direction=staff_workflow_repo.DIRECTION_ONBOARDING
+    )
     return JSONResponse(
         {
             "policy": _normalise_workflow_policy_response(policy),
@@ -1941,11 +2190,14 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     policy_input = await _extract_workflow_policy_payload(request)
     updated = await staff_workflow_repo.upsert_company_workflow_policy(
         company_id=company_id,
-        workflow_key=policy_input.workflow_key or staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
+        workflow_key=policy_input.workflow_key
+        or staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
         is_enabled=bool(policy_input.enabled),
         max_retries=int(policy_input.max_retries),
         config=policy_input.config,
@@ -1961,7 +2213,9 @@ async def upsert_staff_onboarding_workflow_policy(request: Request):
         entity_id=company_id,
         metadata={"policy": _normalise_workflow_policy_response(updated)},
     )
-    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated)})
+    return JSONResponse(
+        {"success": True, "policy": _normalise_workflow_policy_response(updated)}
+    )
 
 
 async def staff_offboarding_workflow_page(request: Request):
@@ -1990,7 +2244,9 @@ async def staff_offboarding_workflow_page(request: Request):
         "staff_permission": staff_permission,
         "company": company,
     }
-    return await _render_template("staff/workflows_offboarding.html", request, user, extra=extra)
+    return await _render_template(
+        "staff/workflows_offboarding.html", request, user, extra=extra
+    )
 
 
 async def staff_offboarding_workflow_policy(request: Request):
@@ -2010,7 +2266,9 @@ async def staff_offboarding_workflow_policy(request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     policy = await staff_workflow_repo.get_company_workflow_policy(
         company_id,
         default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
@@ -2046,7 +2304,9 @@ async def upsert_staff_offboarding_workflow_policy(request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     policy_input = await _extract_workflow_policy_payload(request)
     updated = await staff_workflow_repo.upsert_company_workflow_policy(
         company_id=company_id,
@@ -2100,16 +2360,37 @@ async def list_staff_workflow_policies(direction: str, request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     direction = direction.strip().lower()
-    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
-    default_key = staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
-    policies = await staff_workflow_repo.list_company_workflow_policies(company_id, direction=direction)
-    catalog = _OFFBOARDING_STEP_CATALOG if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else _ONBOARDING_STEP_CATALOG
+    if direction not in (
+        staff_workflow_repo.DIRECTION_ONBOARDING,
+        staff_workflow_repo.DIRECTION_OFFBOARDING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be 'onboarding' or 'offboarding'",
+        )
+    default_key = (
+        staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+        else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    )
+    policies = await staff_workflow_repo.list_company_workflow_policies(
+        company_id, direction=direction
+    )
+    catalog = (
+        _OFFBOARDING_STEP_CATALOG
+        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+        else _ONBOARDING_STEP_CATALOG
+    )
     return JSONResponse(
         {
-            "policies": [_normalise_workflow_policy_response(p, default_workflow_key=default_key) for p in policies],
+            "policies": [
+                _normalise_workflow_policy_response(p, default_workflow_key=default_key)
+                for p in policies
+            ],
             "step_catalog": catalog,
             "step_form_schema": _WORKFLOW_STEP_FORM_SCHEMA,
         }
@@ -2133,11 +2414,23 @@ async def create_staff_workflow_policy(direction: str, request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     direction = direction.strip().lower()
-    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
-    default_key = staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    if direction not in (
+        staff_workflow_repo.DIRECTION_ONBOARDING,
+        staff_workflow_repo.DIRECTION_OFFBOARDING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be 'onboarding' or 'offboarding'",
+        )
+    default_key = (
+        staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+        else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    )
     policy_input = await _extract_workflow_policy_payload(request)
     updated = await staff_workflow_repo.upsert_company_workflow_policy(
         company_id=company_id,
@@ -2156,12 +2449,25 @@ async def create_staff_workflow_policy(direction: str, request: Request):
         action=f"staff.workflows.{direction}.policy.created",
         entity_type="company",
         entity_id=company_id,
-        metadata={"policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)},
+        metadata={
+            "policy": _normalise_workflow_policy_response(
+                updated, default_workflow_key=default_key
+            )
+        },
     )
-    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)})
+    return JSONResponse(
+        {
+            "success": True,
+            "policy": _normalise_workflow_policy_response(
+                updated, default_workflow_key=default_key
+            ),
+        }
+    )
 
 
-async def update_staff_workflow_policy(direction: str, policy_id: int, request: Request):
+async def update_staff_workflow_policy(
+    direction: str, policy_id: int, request: Request
+):
     (
         user,
         _membership,
@@ -2178,18 +2484,35 @@ async def update_staff_workflow_policy(direction: str, policy_id: int, request: 
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     direction = direction.strip().lower()
-    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
-    existing = await staff_workflow_repo.get_company_workflow_policy_by_id(policy_id, company_id)
+    if direction not in (
+        staff_workflow_repo.DIRECTION_ONBOARDING,
+        staff_workflow_repo.DIRECTION_OFFBOARDING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be 'onboarding' or 'offboarding'",
+        )
+    existing = await staff_workflow_repo.get_company_workflow_policy_by_id(
+        policy_id, company_id
+    )
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found")
-    default_key = staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY if direction == staff_workflow_repo.DIRECTION_OFFBOARDING else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found"
+        )
+    default_key = (
+        staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+        if direction == staff_workflow_repo.DIRECTION_OFFBOARDING
+        else staff_workflow_repo.DEFAULT_WORKFLOW_KEY
+    )
     policy_input = await _extract_workflow_policy_payload(request)
     updated = await staff_workflow_repo.upsert_company_workflow_policy(
         company_id=company_id,
-        workflow_key=policy_input.workflow_key or str(existing.get("workflow_key") or default_key),
+        workflow_key=policy_input.workflow_key
+        or str(existing.get("workflow_key") or default_key),
         is_enabled=bool(policy_input.enabled),
         max_retries=int(policy_input.max_retries),
         config=policy_input.config,
@@ -2204,12 +2527,26 @@ async def update_staff_workflow_policy(direction: str, policy_id: int, request: 
         action=f"staff.workflows.{direction}.policy.updated",
         entity_type="company",
         entity_id=company_id,
-        metadata={"policy_id": policy_id, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)},
+        metadata={
+            "policy_id": policy_id,
+            "policy": _normalise_workflow_policy_response(
+                updated, default_workflow_key=default_key
+            ),
+        },
     )
-    return JSONResponse({"success": True, "policy": _normalise_workflow_policy_response(updated, default_workflow_key=default_key)})
+    return JSONResponse(
+        {
+            "success": True,
+            "policy": _normalise_workflow_policy_response(
+                updated, default_workflow_key=default_key
+            ),
+        }
+    )
 
 
-async def delete_staff_workflow_policy(direction: str, policy_id: int, request: Request):
+async def delete_staff_workflow_policy(
+    direction: str, policy_id: int, request: Request
+):
     (
         user,
         _membership,
@@ -2226,13 +2563,25 @@ async def delete_staff_workflow_policy(direction: str, policy_id: int, request: 
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     direction = direction.strip().lower()
-    if direction not in (staff_workflow_repo.DIRECTION_ONBOARDING, staff_workflow_repo.DIRECTION_OFFBOARDING):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="direction must be 'onboarding' or 'offboarding'")
-    deleted = await staff_workflow_repo.delete_company_workflow_policy(policy_id, company_id)
+    if direction not in (
+        staff_workflow_repo.DIRECTION_ONBOARDING,
+        staff_workflow_repo.DIRECTION_OFFBOARDING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direction must be 'onboarding' or 'offboarding'",
+        )
+    deleted = await staff_workflow_repo.delete_company_workflow_policy(
+        policy_id, company_id
+    )
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workflow policy not found"
+        )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
         action=f"staff.workflows.{direction}.policy.deleted",
@@ -2262,7 +2611,9 @@ async def staff_workflow_history_page(request: Request):
 
     is_super_admin = bool(user.get("is_super_admin"))
     if not is_super_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required"
+        )
 
     extra = {
         "title": "Workflow execution history",
@@ -2271,7 +2622,9 @@ async def staff_workflow_history_page(request: Request):
         "staff_permission": staff_permission,
         "company": company,
     }
-    return await _render_template("staff/workflow_history.html", request, user, extra=extra)
+    return await _render_template(
+        "staff/workflow_history.html", request, user, extra=extra
+    )
 
 
 async def staff_workflow_history_recent(request: Request):
@@ -2291,11 +2644,17 @@ async def staff_workflow_history_recent(request: Request):
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required"
+        )
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
 
-    direction_param = str(request.query_params.get("direction") or "").strip().lower() or None
+    direction_param = (
+        str(request.query_params.get("direction") or "").strip().lower() or None
+    )
     limit_param = min(max(1, int(request.query_params.get("limit") or "100")), 500)
     executions = await staff_workflow_repo.list_recent_executions_for_company(
         company_id, limit=limit_param, direction=direction_param
@@ -2311,7 +2670,9 @@ async def staff_workflow_history_recent(request: Request):
             if member:
                 staff_map[sid] = member
 
-    step_logs_map = await staff_workflow_repo.list_step_logs_for_execution_ids(execution_ids)
+    step_logs_map = await staff_workflow_repo.list_step_logs_for_execution_ids(
+        execution_ids
+    )
 
     def _serialise_dt(val: Any) -> str | None:
         if isinstance(val, datetime):
@@ -2338,33 +2699,38 @@ async def staff_workflow_history_recent(request: Request):
                     res_p = json.loads(res_p)
                 except Exception:
                     res_p = {}
-            steps.append({
-                "id": int(log.get("id") or 0),
-                "stepName": str(log.get("step_name") or ""),
-                "status": str(log.get("status") or ""),
-                "attempt": int(log.get("attempt") or 1),
-                "requestPayload": req_p or {},
-                "responsePayload": res_p or {},
-                "errorMessage": log.get("error_message"),
-                "startedAt": _serialise_dt(log.get("started_at")),
-                "completedAt": _serialise_dt(log.get("completed_at")),
-            })
-        items.append({
-            "executionId": ex_id,
-            "staffId": sid,
-            "staffName": f"{member.get('first_name', '')} {member.get('last_name', '')}".strip() or f"Staff #{sid}",
-            "direction": str(ex.get("direction") or "onboarding"),
-            "state": str(ex.get("state") or ""),
-            "workflowKey": str(ex.get("workflow_key") or ""),
-            "currentStep": ex.get("current_step"),
-            "retriesUsed": int(ex.get("retries_used") or 0),
-            "lastError": ex.get("last_error"),
-            "helpdeskTicketId": ex.get("helpdesk_ticket_id"),
-            "requestedAt": _serialise_dt(ex.get("requested_at")),
-            "startedAt": _serialise_dt(ex.get("started_at")),
-            "completedAt": _serialise_dt(ex.get("completed_at")),
-            "steps": steps,
-        })
+            steps.append(
+                {
+                    "id": int(log.get("id") or 0),
+                    "stepName": str(log.get("step_name") or ""),
+                    "status": str(log.get("status") or ""),
+                    "attempt": int(log.get("attempt") or 1),
+                    "requestPayload": req_p or {},
+                    "responsePayload": res_p or {},
+                    "errorMessage": log.get("error_message"),
+                    "startedAt": _serialise_dt(log.get("started_at")),
+                    "completedAt": _serialise_dt(log.get("completed_at")),
+                }
+            )
+        items.append(
+            {
+                "executionId": ex_id,
+                "staffId": sid,
+                "staffName": f"{member.get('first_name', '')} {member.get('last_name', '')}".strip()
+                or f"Staff #{sid}",
+                "direction": str(ex.get("direction") or "onboarding"),
+                "state": str(ex.get("state") or ""),
+                "workflowKey": str(ex.get("workflow_key") or ""),
+                "currentStep": ex.get("current_step"),
+                "retriesUsed": int(ex.get("retries_used") or 0),
+                "lastError": ex.get("last_error"),
+                "helpdeskTicketId": ex.get("helpdesk_ticket_id"),
+                "requestedAt": _serialise_dt(ex.get("requested_at")),
+                "startedAt": _serialise_dt(ex.get("started_at")),
+                "completedAt": _serialise_dt(ex.get("completed_at")),
+                "steps": steps,
+            }
+        )
     return JSONResponse({"executions": items, "total": len(items)})
 
 
@@ -2385,15 +2751,21 @@ async def retry_workflow_execution(execution_id: int, request: Request):
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required"
+        )
 
     try:
-        result = await staff_onboarding_workflow_service.retry_failed_workflow_execution(
-            execution_id=execution_id,
-            initiated_by_user_id=int(user["id"]),
+        result = (
+            await staff_onboarding_workflow_service.retry_failed_workflow_execution(
+                execution_id=execution_id,
+                initiated_by_user_id=int(user["id"]),
+            )
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     return JSONResponse(result)
 
 
@@ -2414,15 +2786,21 @@ async def resume_workflow_execution(execution_id: int, request: Request):
     if redirect:
         return redirect
     if not bool(user.get("is_super_admin")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required"
+        )
 
     try:
-        result = await staff_onboarding_workflow_service.resume_paused_workflow_execution(
-            execution_id=execution_id,
-            initiated_by_user_id=int(user["id"]),
+        result = (
+            await staff_onboarding_workflow_service.resume_paused_workflow_execution(
+                execution_id=execution_id,
+                initiated_by_user_id=int(user["id"]),
+            )
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     return JSONResponse(result)
 
 
@@ -2438,11 +2816,15 @@ async def create_staff_member(request: Request):
     if redirect:
         return redirect
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company"
+        )
     is_super_admin = bool(user.get("is_super_admin"))
 
     form = await request.form()
-    field_config = await staff_field_config_service.load_effective_company_staff_fields(company_id)
+    field_config = await staff_field_config_service.load_effective_company_staff_fields(
+        company_id
+    )
     submitted = {str(key): form.get(key) for key in form.keys()}
     values, validation_errors = staff_field_config_service.validate_staff_form_values(
         submitted, field_config
@@ -2464,12 +2846,15 @@ async def create_staff_member(request: Request):
 
     mobile_phone = str(values.get("mobile_phone") or "").strip() or None
     raw_date_onboarded = str(submitted.get("date_onboarded") or "").strip()
-    submitted_timezone = str(
-        submitted.get("browser_timezone")
-        or submitted.get("onboarding_timezone")
-        or submitted.get("date_onboarded_timezone")
-        or ""
-    ).strip() or None
+    submitted_timezone = (
+        str(
+            submitted.get("browser_timezone")
+            or submitted.get("onboarding_timezone")
+            or submitted.get("date_onboarded_timezone")
+            or ""
+        ).strip()
+        or None
+    )
     date_onboarded = _parse_local_datetime_to_utc(
         raw_date_onboarded,
         timezone_name=submitted_timezone,
@@ -2484,7 +2869,13 @@ async def create_staff_member(request: Request):
                 detail="Department staff access can only request staff for your department",
             )
 
-    custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+    requester_job_title = await _get_current_user_staff_job_title(user, company_id)
+    custom_definitions = await staff_custom_fields_repo.list_field_definitions(
+        company_id,
+        requester_email=str(user.get("email") or "").strip(),
+        requester_job_title=requester_job_title,
+        include_restricted=False,
+    )
     custom_values: dict[str, Any] = {}
     for definition in custom_definitions:
         key = str(definition.get("name") or "").strip()
@@ -2493,10 +2884,17 @@ async def create_staff_member(request: Request):
         field_type = str(definition.get("field_type") or "text")
         raw_value = form.get(key)
         if field_type == "checkbox":
-            custom_values[key] = str(raw_value or "").lower() in {"1", "true", "on", "yes"}
+            custom_values[key] = str(raw_value or "").lower() in {
+                "1",
+                "true",
+                "on",
+                "yes",
+            }
         elif field_type == "multiselect":
             raw_values = form.getlist(key)
-            custom_values[key] = ",".join(v for v in (str(v).strip() for v in raw_values) if v) or None
+            custom_values[key] = (
+                ",".join(v for v in (str(v).strip() for v in raw_values) if v) or None
+            )
         else:
             custom_values[key] = str(raw_value or "").strip() or None
 
@@ -2517,18 +2915,20 @@ async def create_staff_member(request: Request):
         requested_at=datetime.now(tz=timezone.utc),
     )
 
-    approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
-        company_id=company_id,
-        staff={
-            "id": created["id"],
-            "company_id": company_id,
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "onboarding_status": "awaiting_approval",
-            "approval_status": "pending",
-        },
-        requester_user_id=requester_id,
+    approver_user_ids = (
+        await staff_onboarding_workflow_service.notify_staff_approval_requested(
+            company_id=company_id,
+            staff={
+                "id": created["id"],
+                "company_id": company_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "onboarding_status": "awaiting_approval",
+                "approval_status": "pending",
+            },
+            requester_user_id=requester_id,
+        )
     )
     await audit_service.log_action(
         user_id=requester_id,
@@ -2563,19 +2963,31 @@ async def update_staff_member(staff_id: int, request: Request):
 
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
 
     is_super_admin = bool(user.get("is_super_admin"))
     if not is_super_admin and existing.get("company_id") != company_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     if not is_super_admin and staff_permission == 1:
-        user_department = await _get_current_user_staff_department(user, int(company_id or 0))
-        if not _departments_match(user_department, str(existing.get("department") or "").strip() or None):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        user_department = await _get_current_user_staff_department(
+            user, int(company_id or 0)
+        )
+        if not _departments_match(
+            user_department, str(existing.get("department") or "").strip() or None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+            )
 
     payload = await request.json()
     if not isinstance(payload, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request payload"
+        )
 
     def get_value(*keys: str) -> Any:
         for key in keys:
@@ -2601,7 +3013,11 @@ async def update_staff_member(staff_id: int, request: Request):
         )
         await audit_service.log_action(
             user_id=int(user["id"]) if user.get("id") is not None else None,
-            action="staff.change_request.ticket_created" if ticket else "staff.change_request.no_changes",
+            action=(
+                "staff.change_request.ticket_created"
+                if ticket
+                else "staff.change_request.no_changes"
+            ),
             entity_type="staff",
             entity_id=staff_id,
             metadata={
@@ -2609,25 +3025,43 @@ async def update_staff_member(staff_id: int, request: Request):
                 "ticket_id": ticket.get("id") if isinstance(ticket, Mapping) else None,
             },
         )
-        return JSONResponse({
-            "success": True,
-            "ticket": ticket,
-            "message": (
-                "A ticket has been created for a technician to review the requested staff changes."
-                if ticket
-                else "No staff changes were requested."
-            ),
-        })
+        return JSONResponse(
+            {
+                "success": True,
+                "ticket": ticket,
+                "message": (
+                    "A ticket has been created for a technician to review the requested staff changes."
+                    if ticket
+                    else "No staff changes were requested."
+                ),
+            }
+        )
 
     if is_super_admin:
-        first_name = (get_value("firstName", "first_name") or existing.get("first_name") or "").strip()
-        last_name = (get_value("lastName", "last_name") or existing.get("last_name") or "").strip()
+        first_name = (
+            get_value("firstName", "first_name") or existing.get("first_name") or ""
+        ).strip()
+        last_name = (
+            get_value("lastName", "last_name") or existing.get("last_name") or ""
+        ).strip()
         email = (get_value("email") or existing.get("email") or "").strip()
-        mobile_phone = (get_value("mobilePhone", "mobile_phone") or existing.get("mobile_phone") or "").strip() or None
-        date_onboarded = _parse_input_datetime(get_value("dateOnboarded", "date_onboarded"), assume_midnight=True) or _parse_input_datetime(existing.get("date_onboarded"))
-        if existing.get("date_onboarded") and not get_value("dateOnboarded", "date_onboarded"):
+        mobile_phone = (
+            get_value("mobilePhone", "mobile_phone")
+            or existing.get("mobile_phone")
+            or ""
+        ).strip() or None
+        date_onboarded = _parse_input_datetime(
+            get_value("dateOnboarded", "date_onboarded"), assume_midnight=True
+        ) or _parse_input_datetime(existing.get("date_onboarded"))
+        if existing.get("date_onboarded") and not get_value(
+            "dateOnboarded", "date_onboarded"
+        ):
             date_onboarded = _parse_input_datetime(existing.get("date_onboarded"))
-        enabled = bool(get_value("enabled") if get_value("enabled") is not None else existing.get("enabled", True))
+        enabled = bool(
+            get_value("enabled")
+            if get_value("enabled") is not None
+            else existing.get("enabled", True)
+        )
         street = get_value("street") or existing.get("street")
         city = get_value("city") or existing.get("city")
         state_val = get_value("state") or existing.get("state")
@@ -2636,8 +3070,12 @@ async def update_staff_member(staff_id: int, request: Request):
         department = get_value("department") or existing.get("department")
         job_title = get_value("jobTitle", "job_title") or existing.get("job_title")
         org_company = get_value("company", "org_company") or existing.get("org_company")
-        manager_name = get_value("managerName", "manager_name") or existing.get("manager_name")
-        account_action = get_value("accountAction", "account_action") or existing.get("account_action")
+        manager_name = get_value("managerName", "manager_name") or existing.get(
+            "manager_name"
+        )
+        account_action = get_value("accountAction", "account_action") or existing.get(
+            "account_action"
+        )
     else:
         first_name = existing.get("first_name") or ""
         last_name = existing.get("last_name") or ""
@@ -2656,7 +3094,9 @@ async def update_staff_member(staff_id: int, request: Request):
         manager_name = existing.get("manager_name")
         account_action = existing.get("account_action")
 
-    date_offboarded = _parse_input_datetime(get_value("dateOffboarded", "date_offboarded"))
+    date_offboarded = _parse_input_datetime(
+        get_value("dateOffboarded", "date_offboarded")
+    )
     if date_offboarded is None and existing.get("date_offboarded"):
         date_offboarded = _parse_input_datetime(existing.get("date_offboarded"))
 
@@ -2697,7 +3137,9 @@ async def update_staff_member(staff_id: int, request: Request):
         if refreshed:
             updated = refreshed
 
-    requested_status = str(get_value("onboardingStatus", "onboarding_status") or "").strip().lower()
+    requested_status = (
+        str(get_value("onboardingStatus", "onboarding_status") or "").strip().lower()
+    )
     if requested_status in {
         staff_onboarding_workflow_service.STATE_APPROVED,
         staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED,
@@ -2705,15 +3147,20 @@ async def update_staff_member(staff_id: int, request: Request):
         await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
             company_id=int(updated.get("company_id") or company_id or 0),
             staff_id=staff_id,
-            initiated_by_user_id=int(user["id"]) if user.get("id") is not None else None,
+            initiated_by_user_id=(
+                int(user["id"]) if user.get("id") is not None else None
+            ),
             direction=(
                 staff_onboarding_workflow_service.DIRECTION_OFFBOARDING
-                if requested_status == staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
+                if requested_status
+                == staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
                 else staff_onboarding_workflow_service.DIRECTION_ONBOARDING
             ),
         )
 
-    updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    updated["workflow_status"] = (
+        await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    )
     return JSONResponse({"success": True, "staff": updated})
 
 
@@ -2731,36 +3178,59 @@ async def request_staff_offboarding(staff_id: int, request: Request):
 
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
 
     is_super_admin = bool(user.get("is_super_admin"))
     if not is_super_admin and existing.get("company_id") != company_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     if not is_super_admin and staff_permission == 1:
         user_department = await _get_current_user_staff_department(user, company_id)
         target_department = str(existing.get("department") or "").strip() or None
         if not _departments_match(user_department, target_department):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+            )
 
-    if not bool(existing.get("enabled", False)) or bool(existing.get("is_ex_staff", False)):
+    if not bool(existing.get("enabled", False)) or bool(
+        existing.get("is_ex_staff", False)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only active staff members can be offboarding requested",
         )
 
-    if str(existing.get("account_action") or "").strip().lower() == "offboard requested":
+    if (
+        str(existing.get("account_action") or "").strip().lower()
+        == "offboard requested"
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An offboarding request is already pending for this staff member",
         )
 
     payload = await request.json()
-    offboarding_type = str(payload.get("offboardingType") or payload.get("offboarding_type") or payload.get("type") or "").strip()
+    offboarding_type = str(
+        payload.get("offboardingType")
+        or payload.get("offboarding_type")
+        or payload.get("type")
+        or ""
+    ).strip()
     legacy_reason = str(payload.get("reason") or "").strip()
     if not offboarding_type and legacy_reason in {"Resignation", "Termination"}:
         offboarding_type = legacy_reason
-    requested_at_raw = str(payload.get("requestedAt", payload.get("requested_at")) or "").strip()
-    requested_timezone = str(payload.get("requestedTimezone") or payload.get("requested_timezone") or "").strip() or None
+    requested_at_raw = str(
+        payload.get("requestedAt", payload.get("requested_at")) or ""
+    ).strip()
+    requested_timezone = (
+        str(
+            payload.get("requestedTimezone") or payload.get("requested_timezone") or ""
+        ).strip()
+        or None
+    )
     requested_at = _parse_local_datetime_to_utc(
         requested_at_raw,
         timezone_name=requested_timezone,
@@ -2769,9 +3239,22 @@ async def request_staff_offboarding(staff_id: int, request: Request):
     company_email_domains = list((company or {}).get("email_domains") or [])
 
     # Optional offboarding request fields
-    out_of_office_message = str(payload.get("outOfOfficeMessage") or payload.get("out_of_office_message") or "").strip() or None
-    email_forward_to_staff_id_raw = payload.get("emailForwardToStaffId") or payload.get("email_forward_to_staff_id")
-    mailbox_grant_staff_ids_raw = payload.get("mailboxGrantStaffIds") or payload.get("mailbox_grant_staff_ids") or []
+    out_of_office_message = (
+        str(
+            payload.get("outOfOfficeMessage")
+            or payload.get("out_of_office_message")
+            or ""
+        ).strip()
+        or None
+    )
+    email_forward_to_staff_id_raw = payload.get("emailForwardToStaffId") or payload.get(
+        "email_forward_to_staff_id"
+    )
+    mailbox_grant_staff_ids_raw = (
+        payload.get("mailboxGrantStaffIds")
+        or payload.get("mailbox_grant_staff_ids")
+        or []
+    )
 
     # Resolve email forwarding target
     email_forward_to: str | None = None
@@ -2779,19 +3262,35 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         try:
             forward_staff_id = int(email_forward_to_staff_id_raw)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid emailForwardToStaffId")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid emailForwardToStaffId",
+            )
         forward_staff = await staff_repo.get_staff_by_id(forward_staff_id)
         if not forward_staff or not forward_staff.get("email"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target staff not found")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email forwarding target staff not found",
+            )
         if int(forward_staff.get("company_id") or 0) != int(company_id or 0):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must belong to this company")
-        if (
-            not bool(forward_staff.get("enabled", False))
-            or bool(forward_staff.get("is_ex_staff", False))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email forwarding target must belong to this company",
+            )
+        if not bool(forward_staff.get("enabled", False)) or bool(
+            forward_staff.get("is_ex_staff", False)
         ):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must be an active staff member")
-        if not _staff_member_is_offboarding_mail_choice(forward_staff, company_email_domains):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email forwarding target must use an allowed company email domain")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email forwarding target must be an active staff member",
+            )
+        if not _staff_member_is_offboarding_mail_choice(
+            forward_staff, company_email_domains
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email forwarding target must use an allowed company email domain",
+            )
         email_forward_to = str(forward_staff["email"]).strip().lower()
 
     # Resolve mailbox grant access list
@@ -2801,29 +3300,53 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             try:
                 grant_staff_id = int(raw_id)
             except (TypeError, ValueError):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mailboxGrantStaffIds entry")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid mailboxGrantStaffIds entry",
+                )
             grant_staff = await staff_repo.get_staff_by_id(grant_staff_id)
             if not grant_staff or not grant_staff.get("email"):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant staff #{grant_staff_id} not found")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Mailbox grant staff #{grant_staff_id} not found",
+                )
             if int(grant_staff.get("company_id") or 0) != int(company_id or 0):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must belong to this company")
-            if (
-                not bool(grant_staff.get("enabled", False))
-                or bool(grant_staff.get("is_ex_staff", False))
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Mailbox grant target #{grant_staff_id} must belong to this company",
+                )
+            if not bool(grant_staff.get("enabled", False)) or bool(
+                grant_staff.get("is_ex_staff", False)
             ):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must be an active staff member")
-            if not _staff_member_is_offboarding_mail_choice(grant_staff, company_email_domains):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mailbox grant target #{grant_staff_id} must use an allowed company email domain")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Mailbox grant target #{grant_staff_id} must be an active staff member",
+                )
+            if not _staff_member_is_offboarding_mail_choice(
+                grant_staff, company_email_domains
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Mailbox grant target #{grant_staff_id} must use an allowed company email domain",
+                )
             grant_email = str(grant_staff["email"]).strip().lower()
             if grant_email not in mailbox_grant_emails:
                 mailbox_grant_emails.append(grant_email)
 
-    mailbox_grant_emails_json: str | None = json.dumps(mailbox_grant_emails) if mailbox_grant_emails else None
+    mailbox_grant_emails_json: str | None = (
+        json.dumps(mailbox_grant_emails) if mailbox_grant_emails else None
+    )
 
     if offboarding_type not in {"Resignation", "Termination"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Offboarding type must be Resignation or Termination")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Offboarding type must be Resignation or Termination",
+        )
     if len(notes or "") > 2000:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Notes must be 2000 characters or fewer")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Notes must be 2000 characters or fewer",
+        )
     if not requested_at_raw or not _raw_value_includes_time(requested_at_raw):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2835,7 +3358,11 @@ async def request_staff_offboarding(staff_id: int, request: Request):
             detail="A valid requested offboarding date/time is required",
         )
 
-    request_notes = f"Type: {offboarding_type}" if not notes else f"Type: {offboarding_type}\n\nNotes: {notes}"
+    request_notes = (
+        f"Type: {offboarding_type}"
+        if not notes
+        else f"Type: {offboarding_type}\n\nNotes: {notes}"
+    )
 
     updated = await staff_repo.update_staff(
         staff_id,
@@ -2875,11 +3402,13 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         offboarding_mailbox_grant_emails=mailbox_grant_emails_json,
     )
 
-    approver_user_ids = await staff_onboarding_workflow_service.notify_staff_approval_requested(
-        company_id=int(updated["company_id"]),
-        staff=updated,
-        requester_user_id=int(user["id"]) if user.get("id") is not None else None,
-        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+    approver_user_ids = (
+        await staff_onboarding_workflow_service.notify_staff_approval_requested(
+            company_id=int(updated["company_id"]),
+            staff=updated,
+            requester_user_id=int(user["id"]) if user.get("id") is not None else None,
+            direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+        )
     )
     await audit_service.log_action(
         user_id=int(user["id"]) if user.get("id") is not None else None,
@@ -2907,15 +3436,20 @@ async def request_staff_offboarding(staff_id: int, request: Request):
         default_workflow_key=staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY,
         direction=staff_workflow_repo.DIRECTION_OFFBOARDING,
     )
-    scheduled_for_utc, normalized_timezone = staff_onboarding_workflow_service._compute_scheduled_execution(
-        staff=updated,
-        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
-        requested_timezone=requested_timezone,
+    scheduled_for_utc, normalized_timezone = (
+        staff_onboarding_workflow_service._compute_scheduled_execution(
+            staff=updated,
+            direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+            requested_timezone=requested_timezone,
+        )
     )
     await staff_workflow_repo.create_or_reset_execution(
         company_id=int(updated["company_id"]),
         staff_id=staff_id,
-        workflow_key=str(policy.get("workflow_key") or staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY),
+        workflow_key=str(
+            policy.get("workflow_key")
+            or staff_workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
+        ),
         direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
         scheduled_for_utc=scheduled_for_utc,
         requested_timezone=normalized_timezone,
@@ -2937,7 +3471,9 @@ async def delete_staff_member(staff_id: int, request: Request):
         return redirect
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     await staff_repo.delete_staff(staff_id)
     return JSONResponse({"success": True})
 
@@ -2959,14 +3495,20 @@ async def set_staff_enabled(request: Request):
     try:
         staff_id = int(staff_id_raw)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid staff identifier")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid staff identifier"
+        )
     enabled = str(enabled_raw).lower() in {"1", "true", "on"}
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     is_super_admin = bool(user.get("is_super_admin"))
     if not is_super_admin and existing.get("company_id") != company_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     await staff_repo.set_enabled(staff_id, enabled)
     return RedirectResponse(url="/staff", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -2984,13 +3526,20 @@ async def verify_staff_member(staff_id: int, request: Request):
         return redirect
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     if not staff.get("mobile_phone"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No mobile phone for staff member")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No mobile phone for staff member",
+        )
 
     await staff_repo.purge_expired_verification_codes()
     code = f"{secrets.randbelow(900000) + 100000:06d}"
-    admin_name = " ".join(filter(None, [user.get("first_name"), user.get("last_name")])).strip()
+    admin_name = " ".join(
+        filter(None, [user.get("first_name"), user.get("last_name")])
+    ).strip()
     await staff_repo.upsert_verification_code(
         staff_id,
         code=code,
@@ -2999,7 +3548,7 @@ async def verify_staff_member(staff_id: int, request: Request):
 
     staff_company = await company_repo.get_company_by_id(staff.get("company_id"))
     company_name = staff_company.get("name") if staff_company else ""
-    
+
     # Construct SMS message
     message_parts = [f"Your verification code is: {code}"]
     if admin_name:
@@ -3007,7 +3556,7 @@ async def verify_staff_member(staff_id: int, request: Request):
     if company_name:
         message_parts.append(f"Company: {company_name}")
     message = " | ".join(message_parts)
-    
+
     # Send SMS via SMS Gateway module
     result: dict[str, Any] = {}
     try:
@@ -3023,16 +3572,22 @@ async def verify_staff_member(staff_id: int, request: Request):
         log_error("SMS Gateway module failed", staff_id=staff_id, error=str(exc))
         result = {"status": "error", "error": str(exc)}
 
-    status_code = int(result.get("response_status")) if result.get("response_status") is not None else None
+    status_code = (
+        int(result.get("response_status"))
+        if result.get("response_status") is not None
+        else None
+    )
     # Accept both "succeeded" and "queued" as success states
     # (background=False should always return "succeeded", but we check "queued" defensively)
     success = result.get("status") in {"succeeded", "queued"}
 
-    return JSONResponse({
-        "success": success,
-        "status": status_code,
-        "code": code,
-    })
+    return JSONResponse(
+        {
+            "success": success,
+            "status": status_code,
+            "code": code,
+        }
+    )
 
 
 async def invite_staff_member(staff_id: int, request: Request):
@@ -3048,11 +3603,17 @@ async def invite_staff_member(staff_id: int, request: Request):
         return redirect
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     if not staff.get("email"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No email for staff member")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No email for staff member"
+        )
     if not bool(user.get("is_super_admin")) and staff.get("company_id") != company_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
 
     existing_user = await user_repo.get_user_by_email(staff["email"])
     if existing_user:
@@ -3104,7 +3665,10 @@ async def invite_staff_member(staff_id: int, request: Request):
     portal_url = str(settings.portal_url).rstrip("/") if settings.portal_url else ""
     template_context = {
         "app": {"name": settings.app_name},
-        "portal": {"url": portal_url, "login_url": f"{portal_url}/login" if portal_url else "/login"},
+        "portal": {
+            "url": portal_url,
+            "login_url": f"{portal_url}/login" if portal_url else "/login",
+        },
         "user": {
             "email": staff.get("email") or "",
             "first_name": staff.get("first_name") or "",
@@ -3121,10 +3685,12 @@ async def invite_staff_member(staff_id: int, request: Request):
     default_html = (
         "<p>Hello {{ user.name }},</p>"
         f"<p>You've been invited to access {{{{ app.name }}}}{company_sentence}.</p>"
-        "<p><a href=\"{{ invitation.link }}\">Set your password and activate your account</a></p>"
+        '<p><a href="{{ invitation.link }}">Set your password and activate your account</a></p>'
         "<p>The link expires in 7 days. If you were not expecting this invitation you can ignore this email.</p>"
     )
-    html_body, text_body = await _render_message_email("staff_invitation", template_context, default_html)
+    html_body, text_body = await _render_message_email(
+        "staff_invitation", template_context, default_html
+    )
     try:
         sent, event_metadata = await email_service.send_email(
             subject=f"You're invited to {settings.app_name}",
@@ -3138,22 +3704,36 @@ async def invite_staff_member(staff_id: int, request: Request):
                 "Staff invitation email skipped due to SMTP configuration",
                 staff_id=staff_id,
                 invited_user_id=created_user["id"],
-                event_id=(event_metadata or {}).get("id") if isinstance(event_metadata, dict) else None,
+                event_id=(
+                    (event_metadata or {}).get("id")
+                    if isinstance(event_metadata, dict)
+                    else None
+                ),
             )
         else:
             log_info(
                 "Staff invitation email sent",
                 staff_id=staff_id,
                 invited_user_id=created_user["id"],
-                event_id=(event_metadata or {}).get("id") if isinstance(event_metadata, dict) else None,
+                event_id=(
+                    (event_metadata or {}).get("id")
+                    if isinstance(event_metadata, dict)
+                    else None
+                ),
             )
-    except email_service.EmailDispatchError as exc:  # pragma: no cover - logged for diagnostics
+    except (
+        email_service.EmailDispatchError
+    ) as exc:  # pragma: no cover - logged for diagnostics
         log_error(
             "Failed to send staff invitation email",
             staff_id=staff_id,
             invited_user_id=created_user["id"],
             error=str(exc),
-            event_id=(event_metadata or {}).get("id") if "event_metadata" in locals() and isinstance(event_metadata, dict) else None,
+            event_id=(
+                (event_metadata or {}).get("id")
+                if "event_metadata" in locals() and isinstance(event_metadata, dict)
+                else None
+            ),
         )
 
     log_info(
@@ -3181,12 +3761,18 @@ async def m365_export_staff_onedrive(
 
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     if not bool(user.get("is_super_admin")) and staff.get("company_id") != company_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     staff_company_id = int(staff.get("company_id") or company_id or 0)
     staff_company = await company_repo.get_company_by_id(staff_company_id)
-    destination_drive_id = str((staff_company or {}).get("onedrive_export_drive_id") or "").strip()
+    destination_drive_id = str(
+        (staff_company or {}).get("onedrive_export_drive_id") or ""
+    ).strip()
     if not destination_drive_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3194,10 +3780,14 @@ async def m365_export_staff_onedrive(
         )
 
     user_id = int(user["id"]) if user.get("id") is not None else None
-    destination_parent_item_id = str(settings.m365_onedrive_export_destination_parent_item_id or "root")
+    destination_parent_item_id = str(
+        settings.m365_onedrive_export_destination_parent_item_id or "root"
+    )
     mark_source_read_only = bool(settings.m365_onedrive_export_mark_source_read_only)
     copy_timeout_seconds = int(settings.m365_onedrive_export_copy_timeout_seconds)
-    folder_conflict_behavior = str(settings.m365_onedrive_export_folder_conflict_behavior or "fail")
+    folder_conflict_behavior = str(
+        settings.m365_onedrive_export_folder_conflict_behavior or "fail"
+    )
 
     async def _run_onedrive_export_task() -> None:
         try:
@@ -3219,7 +3809,9 @@ async def m365_export_staff_onedrive(
                 metadata={
                     "email": staff.get("email"),
                     "destination_drive_id": result.get("destination_drive_id"),
-                    "destination_parent_item_id": result.get("destination_parent_item_id"),
+                    "destination_parent_item_id": result.get(
+                        "destination_parent_item_id"
+                    ),
                     "destination_folder_id": result.get("destination_folder_id"),
                     "destination_folder_name": result.get("destination_folder_name"),
                     "copy_status": result.get("copy_status"),
@@ -3228,7 +3820,9 @@ async def m365_export_staff_onedrive(
                 },
             )
             folder_name = (
-                result.get("destination_folder_name") or staff.get("email") or "the selected staff member"
+                result.get("destination_folder_name")
+                or staff.get("email")
+                or "the selected staff member"
             )
             await notifications_service.emit_notification(
                 event_type="staff.m365.onedrive_export.completed",
@@ -3236,8 +3830,15 @@ async def m365_export_staff_onedrive(
                 user_id=user_id,
                 metadata={"staff_id": staff_id, "export": result},
             )
-        except (staff_onboarding_workflow_service.WorkflowStepError, m365_service.M365Error) as exc:
-            log_error("OneDrive export background task failed", staff_id=staff_id, error=str(exc))
+        except (
+            staff_onboarding_workflow_service.WorkflowStepError,
+            m365_service.M365Error,
+        ) as exc:
+            log_error(
+                "OneDrive export background task failed",
+                staff_id=staff_id,
+                error=str(exc),
+            )
             await notifications_service.emit_notification(
                 event_type="staff.m365.onedrive_export.failed",
                 message=f"OneDrive export failed for {staff.get('email') or 'the selected staff member'}: {exc}",
@@ -3249,7 +3850,11 @@ async def m365_export_staff_onedrive(
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive background task guard
-            log_error("OneDrive export background task crashed", staff_id=staff_id, error=str(exc))
+            log_error(
+                "OneDrive export background task crashed",
+                staff_id=staff_id,
+                error=str(exc),
+            )
             await notifications_service.emit_notification(
                 event_type="staff.m365.onedrive_export.failed",
                 message=f"OneDrive export failed for {staff.get('email') or 'the selected staff member'}: {exc}",
@@ -3288,10 +3893,15 @@ async def m365_reset_staff_password(staff_id: int, request: Request):
         return redirect
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     email = str(staff.get("email") or "").strip()
     if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Staff member has no email address")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Staff member has no email address",
+        )
     staff_company_id = int(staff.get("company_id") or 0)
     try:
         new_password = await m365_service.reset_user_password(staff_company_id, email)
@@ -3328,20 +3938,32 @@ async def m365_set_staff_sign_in(staff_id: int, request: Request):
         return redirect
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
     email = str(staff.get("email") or "").strip()
     if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Staff member has no email address")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Staff member has no email address",
+        )
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body"
+        )
     if "enabled" not in body:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="'enabled' field is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'enabled' field is required",
+        )
     enabled = bool(body["enabled"])
     staff_company_id = int(staff.get("company_id") or 0)
     try:
-        await m365_service.set_user_sign_in_enabled(staff_company_id, email, enabled=enabled)
+        await m365_service.set_user_sign_in_enabled(
+            staff_company_id, email, enabled=enabled
+        )
     except m365_service.M365Error as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     await audit_service.log_action(

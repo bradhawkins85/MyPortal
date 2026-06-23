@@ -535,6 +535,16 @@
               <input class="form-input" id="new-custom-options" name="options" placeholder="small:Small, medium:Medium" />
             </div>
             <div class="form-field">
+              <label class="form-label" for="new-custom-visible-job-titles">Visible to job titles</label>
+              <input class="form-input" id="new-custom-visible-job-titles" name="visible_to_job_titles" placeholder="Manager, Department Manager" />
+              <p class="form-help">Optional comma-separated list. Leave blank to show this field to all requestors.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="new-custom-visible-requestors">Visible to requestors</label>
+              <input class="form-input" id="new-custom-visible-requestors" name="visible_to_requester_emails" placeholder="manager@example.com, approver@example.com" />
+              <p class="form-help">Optional comma-separated requester email allow-list. Job title and requester lists are combined.</p>
+            </div>
+            <div class="form-field">
               <label class="form-label" for="new-custom-condition-parent">Conditional parent field key</label>
               <input class="form-input" id="new-custom-condition-parent" name="condition_parent_name" placeholder="e.g. needs_uniform" />
             </div>
@@ -570,6 +580,7 @@
                   <th>Sort</th>
                   <th>Active</th>
                   <th>Conditional logic</th>
+                  <th>Visibility</th>
                   <th>Options</th>
                   <th>Actions</th>
                 </tr>
@@ -607,6 +618,16 @@
                           <textarea class="form-input" name="condition_value" rows="6" placeholder='one_of: sales, support, hr&#10;Use JSON for select_map, e.g. {&quot;sales&quot;:&quot;a,b,c&quot;,&quot;fallback&quot;:&quot;other&quot;}'>{{ field.condition_value or '' }}</textarea>
                         </div>
                       </td>
+                      <td>
+                        <div class="form-field">
+                          <label class="form-label">Job titles</label>
+                          <input class="form-input" name="visible_to_job_titles" value="{{ field.visible_to_job_titles or '' }}" placeholder="Manager, Department Manager" />
+                        </div>
+                        <div class="form-field">
+                          <label class="form-label">Requestor emails</label>
+                          <input class="form-input" name="visible_to_requester_emails" value="{{ field.visible_to_requester_emails or '' }}" placeholder="manager@example.com" />
+                        </div>
+                      </td>
                       <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
                       <td class="table__actions">
                         <button type="submit" class="button button--ghost">Save</button>
@@ -618,7 +639,7 @@
                       </td>
                   </tr>
                 {% else %}
-                  <tr><td colspan="10" class="table__empty">No custom fields defined.</td></tr>
+                  <tr><td colspan="11" class="table__empty">No custom fields defined.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
