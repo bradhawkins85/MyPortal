@@ -373,6 +373,7 @@
             type: stepType,
             enabled: step.enabled !== false,
             config: { ...stepConfig, type: stepType },
+            webhook_preview: step.webhook_preview && typeof step.webhook_preview === 'object' ? { ...step.webhook_preview } : null,
             retry_policy: parsedPolicies.retry_policy,
             failure_policy: parsedPolicies.failure_policy,
           };
@@ -553,8 +554,31 @@
               return;
             }
             const result = await response.json();
-            wf.id = result.policy && result.policy.id;
+            const savedPolicy = result.policy || {};
+            wf.id = savedPolicy.id || wf.id;
+            wf.workflow_key = savedPolicy.workflow_key || wf.workflow_key;
+            wf.workflow_name = savedPolicy.workflow_name || wf.workflow_name;
+            wf.delay_type = savedPolicy.delay_type || wf.delay_type;
+            wf.enabled = savedPolicy.enabled !== false;
+            wf.max_retries = Number(savedPolicy.max_retries || wf.max_retries || 0);
+            wf.existingConfig = savedPolicy.config_json || wf.existingConfig || {};
+            const savedSteps = Array.isArray((wf.existingConfig || {})[STEP_LIST_KEY]) ? (wf.existingConfig || {})[STEP_LIST_KEY] : [];
+            wf.steps = savedSteps.map((step) => {
+              const stepType = step.type || step.key || 'offboard_account';
+              const stepConfig = step.config && typeof step.config === 'object' ? { ...step.config } : { type: stepType };
+              const parsedPolicies = readPolicies({ ...step, config: stepConfig });
+              return {
+                name: step.name || stepType || 'offboarding-step',
+                type: stepType,
+                enabled: step.enabled !== false,
+                config: { ...stepConfig, type: stepType },
+                webhook_preview: step.webhook_preview && typeof step.webhook_preview === 'object' ? { ...step.webhook_preview } : null,
+                retry_policy: parsedPolicies.retry_policy,
+                failure_policy: parsedPolicies.failure_policy,
+              };
+            });
             titleEl.textContent = wf.workflow_name || wf.workflow_key || 'Offboarding workflow';
+            renderStepsForWorkflow(wf, stepsContainer);
             messageEl.textContent = 'Workflow saved.';
           } catch {
             messageEl.textContent = 'Failed to save workflow.';
