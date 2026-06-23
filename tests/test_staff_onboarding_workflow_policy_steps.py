@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services import staff_onboarding_workflows as workflows
+from app.features.staff import handlers as staff_handlers
 from app.features.staff.handlers import _normalise_workflow_config
 
 
@@ -174,6 +175,14 @@ def test_normalise_workflow_config_preserves_existing_key():
     result = _normalise_workflow_config(raw_config)
 
     assert result["steps"][0]["key"] == "my_custom_key"
+
+
+def test_workflow_step_catalogs_include_pause_for_webhook():
+    onboarding_types = {step["type"]: step for step in staff_handlers._ONBOARDING_STEP_CATALOG}
+    offboarding_types = {step["type"]: step for step in staff_handlers._OFFBOARDING_STEP_CATALOG}
+
+    assert onboarding_types["wait_for_webhook"]["name"] == "Pause For Webhook"
+    assert offboarding_types["wait_for_webhook"]["name"] == "Pause For Webhook"
 
 
 def test_normalise_custom_field_group_mappings_supports_dict_and_list_inputs():
