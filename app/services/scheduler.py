@@ -796,15 +796,15 @@ class SchedulerService:
                         details = output
                 elif command == "update_tray_icon_installer":
                     settings = get_settings()
-                    updated = await tray_installer_service.fetch_latest_tray_msi(
+                    updated_assets = await tray_installer_service.fetch_latest_tray_installers(
                         repo=settings.github_tray_msi_repo,
                         github_token=settings.github_token,
                     )
                     details = json.dumps(
                         {
                             "repo": settings.github_tray_msi_repo,
-                            "asset": "myportal-tray.msi",
-                            "updated": updated,
+                            "assets": updated_assets,
+                            "updated": any(updated_assets.values()),
                         },
                         default=str,
                     )
