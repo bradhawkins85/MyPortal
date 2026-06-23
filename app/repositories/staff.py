@@ -96,12 +96,16 @@ def _map_staff_row(row: dict[str, Any]) -> dict[str, Any]:
         mapped["verification_code"] = None
     mapped["date_onboarded"] = _serialize_datetime(mapped.get("date_onboarded"))
     mapped["date_offboarded"] = _serialize_datetime(mapped.get("date_offboarded"))
-    mapped["onboarding_completed_at"] = _serialize_datetime(mapped.get("onboarding_completed_at"))
+    mapped["onboarding_completed_at"] = _serialize_datetime(
+        mapped.get("onboarding_completed_at")
+    )
     mapped["requested_at"] = _serialize_datetime(mapped.get("requested_at"))
     mapped["approved_at"] = _serialize_datetime(mapped.get("approved_at"))
     mapped["m365_last_sign_in"] = _serialize_datetime(mapped.get("m365_last_sign_in"))
     if "portal_last_login_at" in mapped:
-        mapped["portal_last_login_at"] = _serialize_datetime(mapped.get("portal_last_login_at"))
+        mapped["portal_last_login_at"] = _serialize_datetime(
+            mapped.get("portal_last_login_at")
+        )
     mapped["created_at"] = _serialize_datetime(mapped.get("created_at"))
     mapped["updated_at"] = _serialize_datetime(mapped.get("updated_at"))
     mapped["onboarding_complete"] = bool(int(mapped.get("onboarding_complete", 0)))
@@ -202,14 +206,14 @@ async def list_staff(
     if due_only:
         conditions.append("e.scheduled_for_utc IS NOT NULL")
         conditions.append("e.scheduled_for_utc <= %s")
-        conditions.append("LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')")
+        conditions.append(
+            "LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')"
+        )
         params.append(datetime.now(timezone.utc).replace(tzinfo=None))
     decoded_cursor = _decode_staff_cursor(cursor)
     if decoded_cursor is not None:
         cursor_updated_at, cursor_staff_id = decoded_cursor
-        conditions.append(
-            "(s.updated_at > %s OR (s.updated_at = %s AND s.id > %s))"
-        )
+        conditions.append("(s.updated_at > %s OR (s.updated_at = %s AND s.id > %s))")
         params.extend([cursor_updated_at, cursor_updated_at, cursor_staff_id])
     where_clause = " AND ".join(conditions)
     portal_last_login_select = (
@@ -310,14 +314,18 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
         record["user_id"] = user_id_int
         record["id"] = user_id_int if user_id_int is not None else staff_id_int
         record["requester_value"] = (
-            f"user:{user_id_int}" if user_id_int is not None else f"staff:{staff_id_int}"
+            f"user:{user_id_int}"
+            if user_id_int is not None
+            else f"staff:{staff_id_int}"
         )
         record["is_registered_user"] = user_id_int is not None
         results.append(record)
     return _dedupe_by_normalized_email(results)
 
 
-async def get_enabled_staff_requester(company_id: int, staff_id: int) -> dict[str, Any] | None:
+async def get_enabled_staff_requester(
+    company_id: int, staff_id: int
+) -> dict[str, Any] | None:
     options = await list_enabled_staff_users(company_id)
     for option in options:
         if option.get("staff_id") == staff_id:
@@ -394,7 +402,9 @@ async def list_all_staff(
     if due_only:
         conditions.append("e.scheduled_for_utc IS NOT NULL")
         conditions.append("e.scheduled_for_utc <= %s")
-        conditions.append("LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')")
+        conditions.append(
+            "LOWER(COALESCE(e.state, '')) IN ('approved', 'offboarding_approved')"
+        )
         params.append(datetime.now(timezone.utc).replace(tzinfo=None))
     where_clause = " AND ".join(conditions)
     sql = """
@@ -516,6 +526,23 @@ async def get_staff_by_company_and_email(
         WHERE s.company_id = %s AND LOWER(s.email) = LOWER(%s)
         """,
         (company_id, email),
+    )
+    return _map_staff_row(row) if row else None
+
+
+async def get_staff_by_email(email: str) -> dict[str, Any] | None:
+    """Return the first staff record matching ``email`` across companies."""
+
+    row = await db.fetch_one(
+        """
+        SELECT s.*, svc.code AS verification_code, svc.admin_name AS verification_admin_name
+        FROM staff AS s
+        LEFT JOIN staff_verification_codes AS svc ON svc.staff_id = s.id
+        WHERE LOWER(s.email) = LOWER(%s)
+        ORDER BY s.enabled DESC, s.id ASC
+        LIMIT 1
+        """,
+        (email,),
     )
     return _map_staff_row(row) if row else None
 
@@ -735,7 +762,11 @@ async def update_staff(
             account_action,
             syncro_contact_id,
             onboarding_status,
-            (1 if onboarding_complete else 0) if onboarding_complete is not None else None,
+            (
+                (1 if onboarding_complete else 0)
+                if onboarding_complete is not None
+                else None
+            ),
             _coerce_datetime(onboarding_completed_at),
             approval_status,
             requested_by_user_id,
@@ -757,7 +788,9 @@ async def update_staff(
     return updated
 
 
-async def reset_staff_onboarding_status(staff_id: int, *, onboarding_status: str) -> None:
+async def reset_staff_onboarding_status(
+    staff_id: int, *, onboarding_status: str
+) -> None:
     """Reset onboarding-related fields for a staff record."""
     await db.execute(
         """
@@ -776,7 +809,9 @@ async def delete_staff(staff_id: int) -> None:
     await db.execute("DELETE FROM staff WHERE id = %s", (staff_id,))
 
 
-async def update_m365_last_sign_in(staff_id: int, last_sign_in: datetime | None) -> None:
+async def update_m365_last_sign_in(
+    staff_id: int, last_sign_in: datetime | None
+) -> None:
     """Update only the m365_last_sign_in field for a staff record."""
     await db.execute(
         "UPDATE staff SET m365_last_sign_in = %s WHERE id = %s",
@@ -804,7 +839,9 @@ async def delete_m365_staff_not_in(company_id: int, keep_emails: set[str]) -> in
     return len(to_delete)
 
 
-async def list_active_staff_for_offboarding(company_id: int, *, exclude_staff_id: int | None = None) -> list[dict[str, Any]]:
+async def list_active_staff_for_offboarding(
+    company_id: int, *, exclude_staff_id: int | None = None
+) -> list[dict[str, Any]]:
     """Return enabled, non-ex-staff members for the given company.
 
     Used to populate email-forwarding and mailbox-access dropdowns on the

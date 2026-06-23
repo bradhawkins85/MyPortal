@@ -281,6 +281,18 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 			}
 		}()
 
+	case "submit_syncro_ticket":
+		label := node.Label
+		if label == "" {
+			label = "Create Syncro Ticket"
+		}
+		item := addTrayMenuItem(parent, label, "Create a support ticket in Syncro")
+		go func() {
+			for range item.ClickedCh {
+				go openSyncroTicketDialog(cfg)
+			}
+		}()
+
 	case "TRMM_Script", "trmm_script":
 		label := node.Label
 		if label == "" {
