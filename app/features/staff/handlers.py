@@ -1749,23 +1749,63 @@ def _normalise_workflow_config(raw_config: dict[str, Any] | None) -> dict[str, A
     return validated.model_dump(mode="python")
 
 
+def _workflow_webhook_base_url() -> str:
+    return str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+
+
+def _add_wait_for_webhook_previews(config: dict[str, Any], *, company_id: int, direction: str, workflow_key: str) -> dict[str, Any]:
+    normalised = _normalise_workflow_config(config)
+    steps = normalised.get("steps")
+    if not isinstance(steps, list):
+        return normalised
+    base_url = _workflow_webhook_base_url()
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        step_config = step.get("config") if isinstance(step.get("config"), dict) else {}
+        step_type = str(step.get("type") or step_config.get("type") or "").strip().lower()
+        if step_type not in {"wait_external_checkpoint", "wait_for_webhook"}:
+            continue
+        step_name = str(step.get("name") or step.get("_workflow_step_name") or f"step_{index + 1}")
+        webhook_public_id, webhook_post_key = staff_onboarding_workflow_service._build_static_workflow_webhook_credentials(
+            company_id=company_id,
+            direction=direction,
+            workflow_key=workflow_key,
+            step_name=step_name,
+        )
+        webhook_path = f"/api/staff/workflow-webhooks/{webhook_public_id}"
+        step["webhook_preview"] = {
+            "webhook_url": f"{base_url}{webhook_path}" if base_url else webhook_path,
+            "post_key": webhook_post_key,
+        }
+    return normalised
+
+
 def _normalise_workflow_policy_response(
     policy: dict[str, Any],
     *,
     default_workflow_key: str = staff_workflow_repo.DEFAULT_WORKFLOW_KEY,
 ) -> dict[str, Any]:
     config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
+    company_id = int(policy.get("company_id") or 0)
+    direction = str(policy.get("direction") or staff_workflow_repo.DIRECTION_ONBOARDING)
+    workflow_key = str(policy.get("workflow_key") or default_workflow_key)
     return {
         "id": policy.get("id"),
-        "company_id": int(policy.get("company_id") or 0),
-        "direction": str(policy.get("direction") or staff_workflow_repo.DIRECTION_ONBOARDING),
-        "workflow_key": str(policy.get("workflow_key") or default_workflow_key),
+        "company_id": company_id,
+        "direction": direction,
+        "workflow_key": workflow_key,
         "workflow_name": policy.get("workflow_name"),
         "delay_type": str(policy.get("delay_type") or "scheduled"),
         "sort_order": int(policy.get("sort_order") or 0),
         "enabled": bool(policy.get("is_enabled", True)),
         "max_retries": max(0, int(policy.get("max_retries") or 0)),
-        "config_json": _normalise_workflow_config(config),
+        "config_json": _add_wait_for_webhook_previews(
+            config,
+            company_id=company_id,
+            direction=direction,
+            workflow_key=workflow_key,
+        ),
     }
 
 
