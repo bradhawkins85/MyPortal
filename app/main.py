@@ -3613,11 +3613,12 @@ async def sync_m365_mailboxes(request: Request):
 
 @app.post("/m365/mailboxes/enable-archive", response_class=JSONResponse, tags=["Microsoft 365"])
 async def enable_m365_user_archive(request: Request):
-    """Enable the in-place archive mailbox for a user via Exchange Online PowerShell.
+    """Enable in-place and auto-expanding archive for a user via Exchange Online PowerShell.
 
-    Issues ``Enable-Mailbox -Identity <upn> -Archive`` for the supplied UPN.  The
-    UPN must belong to a known user mailbox in this company; otherwise a 404 is
-    returned.  Requires super-admin privileges.
+    Issues ``Enable-Mailbox -Identity <upn> -Archive`` followed by
+    ``Enable-Mailbox -Identity <upn> -AutoExpandingArchive`` for the supplied
+    UPN. The UPN must belong to a known user mailbox in this company; otherwise
+    a 404 is returned. Requires mailbox write privileges.
     """
     user, membership, company, company_id, redirect = await _load_license_context(request)
     if redirect:
@@ -3649,10 +3650,10 @@ async def enable_m365_user_archive(request: Request):
     except m365_service.M365Error as exc:
         logger.exception("Failed to enable in-place archive for UPN %s", upn)
         return JSONResponse(
-            {"error": "Unable to enable in-place archive at this time."},
+            {"error": "Unable to enable in-place and auto-expanding archive at this time."},
             status_code=503,
         )
-    log_info("M365 in-place archive enable requested", company_id=company_id, user_id=user.get("id"), upn=upn)
+    log_info("M365 in-place and auto-expanding archive enable requested", company_id=company_id, user_id=user.get("id"), upn=upn)
     return JSONResponse({"enabled": True})
 
 
