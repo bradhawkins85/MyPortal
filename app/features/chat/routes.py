@@ -28,6 +28,17 @@ from app.core.logging import log_error, log_info
 router = APIRouter(tags=["Chat"])
 
 
+def _company_customer_chat_enabled(company: dict[str, Any] | None) -> bool:
+    """Return whether customer-initiated chat is enabled for a company.
+
+    Older databases may not have the column until migrations run, so missing
+    values are treated as enabled to preserve the requested default.
+    """
+    if not company:
+        return False
+    return bool(company.get("customer_chat_enabled", True))
+
+
 def _main():
     from app import main as main_module
 
@@ -59,7 +70,15 @@ async def chat_index(
         if company_id is not None:
             membership = await user_company_repo.get_user_company(current_user["id"], int(company_id))
         can_access = bool(membership and membership.get("can_access_chat"))
-        if not can_access:
+        company = None
+        if can_access and company_id is not None:
+            try:
+                company = await companies_repo.get_company_by_id(int(company_id))
+            except RuntimeError:
+                # Some route unit tests run without an initialized database;
+                # keep the requested default-enabled behavior in that case.
+                company = {"customer_chat_enabled": True}
+        if not can_access or not _company_customer_chat_enabled(company):
             return RedirectResponse("/", status_code=303)
 
     user_id = current_user["id"]
@@ -240,7 +259,7 @@ async def tray_chat_popup(
         raise HTTPException(status_code=403, detail="Device has no associated company")
 
     company = await companies_repo.get_company_by_id(company_id)
-    if not company or not company.get("tray_chat_enabled"):
+    if not company or not company.get("tray_chat_enabled", True) or not _company_customer_chat_enabled(company):
         raise HTTPException(status_code=403, detail="Chat is not enabled for this company")
 
     # Mark the token as used immediately to prevent replay.

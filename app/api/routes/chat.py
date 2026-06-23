@@ -11,6 +11,7 @@ from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import chat as chat_repo
+from app.repositories import companies as companies_repo
 from app.repositories import matrix_ai_tag_synonyms as synonyms_repo
 from app.schemas.chat import (
     ChatMessageCreate,
@@ -32,6 +33,12 @@ from app.services.realtime import refresh_notifier
 from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
+
+
+def _company_customer_chat_enabled(company: dict[str, Any] | None) -> bool:
+    if not company:
+        return False
+    return bool(company.get("customer_chat_enabled", True))
 
 _settings = get_settings()
 _INVITE_EXPIRE_HOURS = 72
@@ -163,6 +170,10 @@ async def create_room(
     _require_matrix_enabled()
     user_id = current_user["id"]
     company_id = current_user.get("company_id")
+    if not (current_user.get("is_super_admin") or current_user.get("is_helpdesk_technician")):
+        company = await companies_repo.get_company_by_id(int(company_id)) if company_id is not None else None
+        if not _company_customer_chat_enabled(company):
+            raise HTTPException(status_code=403, detail="Chat is not enabled for this company")
 
     try:
         matrix_resp = await matrix_service.create_room(

@@ -73,9 +73,9 @@ CREATE TABLE IF NOT EXISTS tray_command_log (
 -- was opened via the tray-app push-to-device flow.
 ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS tray_device_id INT NULL;
 
--- Per-company toggle for technician-initiated tray chats. Default is OFF
--- so the feature is opt-in per the security model.
-ALTER TABLE companies ADD COLUMN IF NOT EXISTS tray_chat_enabled TINYINT(1) NOT NULL DEFAULT 0;
+-- Per-company toggle for technician-initiated tray chats. Default is ON
+-- so new companies have support chat available unless an admin disables it.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS tray_chat_enabled TINYINT(1) NOT NULL DEFAULT 1;
 
 CREATE INDEX IF NOT EXISTS idx_tray_devices_company ON tray_devices (company_id);
 CREATE INDEX IF NOT EXISTS idx_tray_devices_asset ON tray_devices (asset_id);
