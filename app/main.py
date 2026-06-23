@@ -5804,6 +5804,7 @@ async def admin_tray_devices_page(
         return RedirectResponse(url="/", status_code=303)
 
     from app.repositories import tray as tray_repo
+    from app.services import tray_installer as tray_installer_service
 
     devices = await tray_repo.list_devices(status=(status or None))
     if search:
@@ -5819,6 +5820,7 @@ async def admin_tray_devices_page(
         "devices": devices,
         "filters": {"search": search or "", "status": status or ""},
         "matrix_enabled": settings.matrix_enabled,
+        "tray_release": tray_installer_service.get_cached_latest_release_info(),
     }
     return await _render_template("admin/tray/devices.html", request, current_user, extra=extra)
 

@@ -3186,6 +3186,33 @@ button.header-title-menu__link {
   margin: 1.5rem 0;
 }
 
+.info-grid {
+  display: grid;
+  gap: var(--space-gap-roomy);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.info-grid--compact {
+  margin: 0.85rem 0 1rem;
+}
+
+.info-grid__item {
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 0.85rem;
+  padding: 0.85rem 1rem;
+}
+
+.info-grid__label {
+  color: var(--text-muted, rgba(148, 163, 184, 0.85));
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+
 .filter-grid {
   display: grid;
   gap: var(--space-gap-roomy);
