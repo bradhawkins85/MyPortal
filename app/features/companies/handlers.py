@@ -2339,11 +2339,13 @@ async def admin_company_tray_settings_save(company_id: int, request: Request):
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
+    customer_chat_enabled = 1 if form.get("customer_chat_enabled") else 0
     tray_chat_enabled = 1 if form.get("tray_chat_enabled") else 0
     tray_notifications_enabled = 1 if form.get("tray_notifications_enabled") else 0
 
     await companies_repo.update_company(
         company_id,
+        customer_chat_enabled=customer_chat_enabled,
         tray_chat_enabled=tray_chat_enabled,
         tray_notifications_enabled=tray_notifications_enabled,
     )

@@ -42,4 +42,4 @@ CREATE INDEX IF NOT EXISTS idx_tray_versions_platform ON tray_versions (platform
 -- Per-company push-notification toggle (Phase 6).
 -- Allows admins to enable OS-native desktop notifications pushed from the
 -- server to enrolled tray devices.
-ALTER TABLE companies ADD COLUMN IF NOT EXISTS tray_notifications_enabled TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS tray_notifications_enabled TINYINT(1) NOT NULL DEFAULT 1;
