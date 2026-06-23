@@ -116,7 +116,7 @@ def test_api_key_header_skips_csrf_validation():
     assert response.json() == {"status": "created"}
 
 
-def test_main_app_exempts_tray_popup_chat_path():
+def test_main_app_exempts_public_callback_paths():
     from app.main import app as main_app
 
     csrf_middleware = next(
@@ -126,3 +126,4 @@ def test_main_app_exempts_tray_popup_chat_path():
     assert csrf_middleware is not None
     exempt_paths = csrf_middleware.kwargs.get("exempt_paths", ())
     assert "/api/tray/popup-chat" in exempt_paths
+    assert "/api/staff/workflow-webhooks" in exempt_paths
