@@ -123,8 +123,10 @@ async def _render_companies_dashboard(
     from app.repositories import roles as role_repo
     from app.repositories import user_companies as user_company_repo
 
-    is_super_admin, managed_companies, membership_lookup = await _get_company_management_scope(
-        request, user, include_archived=include_archived
+    is_super_admin, managed_companies, membership_lookup = (
+        await _get_company_management_scope(
+            request, user, include_archived=include_archived
+        )
     )
 
     company_ids_with_rows: list[tuple[int, dict[str, Any]]] = []
@@ -140,17 +142,25 @@ async def _render_companies_dashboard(
 
     if company_ids_with_rows:
         credentials_rows = await asyncio.gather(
-            *(m365_repo.get_credentials(company_id) for company_id, _ in company_ids_with_rows)
+            *(
+                m365_repo.get_credentials(company_id)
+                for company_id, _ in company_ids_with_rows
+            )
         )
         for (_, company), credentials in zip(company_ids_with_rows, credentials_rows):
             company["m365_tenant_id"] = (credentials or {}).get("tenant_id", "").strip()
 
     ordered_company_ids: list[int] = [
-        int(company["id"]) for company in managed_companies if company.get("id") is not None
+        int(company["id"])
+        for company in managed_companies
+        if company.get("id") is not None
     ]
 
     effective_company_id = selected_company_id
-    if effective_company_id is not None and effective_company_id not in ordered_company_ids:
+    if (
+        effective_company_id is not None
+        and effective_company_id not in ordered_company_ids
+    ):
         effective_company_id = ordered_company_ids[0] if ordered_company_ids else None
 
     if effective_company_id is None and not is_super_admin and ordered_company_ids:
@@ -201,10 +211,14 @@ async def _render_companies_dashboard(
         "temporary_password": temporary_password,
         "invited_email": invited_email,
         "show_archived": include_archived,
-        "admin_credentials_configured": bool(all(await _main()._get_m365_admin_credentials())),
+        "admin_credentials_configured": bool(
+            all(await _main()._get_m365_admin_credentials())
+        ),
     }
 
-    response = await _main()._render_template("admin/companies.html", request, user, extra=extra)
+    response = await _main()._render_template(
+        "admin/companies.html", request, user, extra=extra
+    )
     response.status_code = status_code
     return response
 
@@ -237,9 +251,13 @@ async def _render_company_edit_page(
 
     company_record = await company_repo.get_company_by_id(company_id)
     if not company_record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Company not found"
+        )
 
-    is_super_admin, managed_companies, _ = await _get_company_management_scope(request, user)
+    is_super_admin, managed_companies, _ = await _get_company_management_scope(
+        request, user
+    )
 
     assignments: list[dict[str, Any]] = []
     role_options: list[dict[str, Any]] = []
@@ -281,8 +299,10 @@ async def _render_company_edit_page(
                 continue
             staff_rows = await staff_repo.list_staff_with_users(managed_company_id)
             staff_directory[managed_company_id] = staff_rows
-            pending_assignments = await pending_staff_access_repo.list_assignments_for_company(
-                managed_company_id
+            pending_assignments = (
+                await pending_staff_access_repo.list_assignments_for_company(
+                    managed_company_id
+                )
             )
             pending_assignments_map[managed_company_id] = pending_assignments
             pending_lookup = {
@@ -356,8 +376,8 @@ async def _render_company_edit_page(
 
         pending_entries = pending_assignments_map.get(company_id)
         if pending_entries is None:
-            pending_entries = await pending_staff_access_repo.list_assignments_for_company(
-                company_id
+            pending_entries = (
+                await pending_staff_access_repo.list_assignments_for_company(company_id)
             )
         staff_rows_current = staff_directory.get(company_id)
         if staff_rows_current is None:
@@ -415,7 +435,9 @@ async def _render_company_edit_page(
                 except (TypeError, ValueError):
                     role_id_value = None
 
-            staff_permission_value = _normalize_staff_access_scope(pending_entry.get("staff_permission"))
+            staff_permission_value = _normalize_staff_access_scope(
+                pending_entry.get("staff_permission")
+            )
 
             pending_record: dict[str, Any] = {
                 "company_id": pending_entry.get("company_id") or company_id,
@@ -426,10 +448,15 @@ async def _render_company_edit_page(
                 "last_name": last_name,
                 "membership_id": None,
                 "membership_role_id": role_id_value,
-                "membership_role_name": role_lookup.get(role_id_value) if role_id_value is not None else None,
+                "membership_role_name": (
+                    role_lookup.get(role_id_value)
+                    if role_id_value is not None
+                    else None
+                ),
                 "staff_permission": staff_permission_value,
                 "staff_permission_label": permission_label_lookup.get(
-                    staff_permission_value, permission_label_lookup.get(0, "No staff access")
+                    staff_permission_value,
+                    permission_label_lookup.get(0, "No staff access"),
                 ),
                 "can_manage_staff": bool(pending_entry.get("can_manage_staff", False)),
                 "is_pending": True,
@@ -478,8 +505,12 @@ async def _render_company_edit_page(
             "tacticalrmm_client_id",
             (company_record.get("tacticalrmm_client_id") or "").strip(),
         ),
-        "xero_id": _string_value("xero_id", (company_record.get("xero_id") or "").strip()),
-        "hudu_id": _string_value("hudu_id", (company_record.get("hudu_id") or "").strip()),
+        "xero_id": _string_value(
+            "xero_id", (company_record.get("xero_id") or "").strip()
+        ),
+        "hudu_id": _string_value(
+            "hudu_id", (company_record.get("hudu_id") or "").strip()
+        ),
         "huntress_organization_id": _string_value(
             "huntress_organization_id",
             (company_record.get("huntress_organization_id") or "").strip(),
@@ -487,21 +518,27 @@ async def _render_company_edit_page(
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
         "payment_method": _string_value(
-            "payment_method", (company_record.get("payment_method") or "invoice_prepay").strip()
+            "payment_method",
+            (company_record.get("payment_method") or "invoice_prepay").strip(),
         ),
         "require_po": _bool_value("require_po", bool(company_record.get("require_po"))),
         "offboarding_email_forwarding_enabled": _bool_value(
             "offboarding_email_forwarding_enabled",
-            bool(int(company_record.get("offboarding_email_forwarding_enabled", 1) or 1)),
+            bool(
+                int(company_record.get("offboarding_email_forwarding_enabled", 1) or 1)
+            ),
         ),
         "onedrive_export_site_id": _string_value(
-            "onedrive_export_site_id", (company_record.get("onedrive_export_site_id") or "").strip()
+            "onedrive_export_site_id",
+            (company_record.get("onedrive_export_site_id") or "").strip(),
         ),
         "onedrive_export_drive_id": _string_value(
-            "onedrive_export_drive_id", (company_record.get("onedrive_export_drive_id") or "").strip()
+            "onedrive_export_drive_id",
+            (company_record.get("onedrive_export_drive_id") or "").strip(),
         ),
         "onedrive_export_site_name": _string_value(
-            "onedrive_export_site_name", (company_record.get("onedrive_export_site_name") or "").strip()
+            "onedrive_export_site_name",
+            (company_record.get("onedrive_export_site_name") or "").strip(),
         ),
         "trello_board_id": _string_value(
             "trello_board_id", (company_record.get("trello_board_id") or "").strip()
@@ -578,7 +615,9 @@ async def _render_company_edit_page(
         except ValueError:
             assign_user_id = None
     assign_role_id = _assign_int("role_id")
-    assign_staff_permission = _normalize_staff_access_scope(_assign_int("staff_permission", 0))
+    assign_staff_permission = _normalize_staff_access_scope(
+        _assign_int("staff_permission", 0)
+    )
     assign_can_manage_staff = _assign_bool("can_manage_staff", False)
     assign_permissions: dict[str, bool] = {}
     for column in _COMPANY_PERMISSION_COLUMNS:
@@ -587,7 +626,9 @@ async def _render_company_edit_page(
             continue
         assign_permissions[field] = _assign_bool(field, False)
 
-    assign_user_options = company_user_options.get(assign_company_id, []) if is_super_admin else []
+    assign_user_options = (
+        company_user_options.get(assign_company_id, []) if is_super_admin else []
+    )
 
     company_automation_tasks: list[dict[str, Any]] = []
     automation_command_options: list[dict[str, str]] = []
@@ -597,7 +638,9 @@ async def _render_company_edit_page(
         # Build the set of commands that belong to disabled modules so they can be excluded.
         try:
             all_modules = await modules_service.list_modules()
-            disabled_module_slugs = {m["slug"] for m in all_modules if not m.get("enabled")}
+            disabled_module_slugs = {
+                m["slug"] for m in all_modules if not m.get("enabled")
+            }
         except Exception:  # pragma: no cover - defensive fallback
             disabled_module_slugs = set()
         disabled_commands: set[str] = set()
@@ -624,11 +667,17 @@ async def _render_company_edit_page(
             {"value": "queue_transcriptions", "label": "Queue transcriptions"},
             {"value": "process_transcription", "label": "Process transcription"},
         ]
-        automation_command_options = [o for o in automation_command_options if o["value"] not in disabled_commands]
-        default_command_values = {option["value"] for option in automation_command_options}
+        automation_command_options = [
+            o for o in automation_command_options if o["value"] not in disabled_commands
+        ]
+        default_command_values = {
+            option["value"] for option in automation_command_options
+        }
 
         try:
-            tasks = await scheduled_tasks_repo.list_tasks(include_inactive=show_inactive_tasks)
+            tasks = await scheduled_tasks_repo.list_tasks(
+                include_inactive=show_inactive_tasks
+            )
         except Exception:  # pragma: no cover - fallback to keep page rendering
             tasks = []
 
@@ -640,7 +689,9 @@ async def _render_company_edit_page(
 
             raw_company_id = task.get("company_id")
             try:
-                task_company_id = int(raw_company_id) if raw_company_id is not None else None
+                task_company_id = (
+                    int(raw_company_id) if raw_company_id is not None else None
+                )
             except (TypeError, ValueError):
                 task_company_id = None
 
@@ -649,17 +700,24 @@ async def _render_company_edit_page(
 
             serialised_task = _main()._serialise_mapping(task)
             serialised_task["last_run_iso"] = _main()._to_iso(task.get("last_run_at"))
-            serialised_task["company_name"] = (company_record.get("name") or "").strip() or f"Company #{company_id}"
+            serialised_task["company_name"] = (
+                company_record.get("name") or ""
+            ).strip() or f"Company #{company_id}"
             company_automation_tasks.append(serialised_task)
 
         for command in sorted(existing_commands):
-            if command and command not in default_command_values and command not in disabled_commands:
+            if (
+                command
+                and command not in default_command_values
+                and command not in disabled_commands
+            ):
                 automation_command_options.append({"value": command, "label": command})
 
         automation_company_options = [
             {
                 "value": str(company_id),
-                "label": (company_record.get("name") or "").strip() or f"Company #{company_id}",
+                "label": (company_record.get("name") or "").strip()
+                or f"Company #{company_id}",
             }
         ]
 
@@ -685,8 +743,10 @@ async def _render_company_edit_page(
     company_staff = []
     if is_super_admin:
         try:
-            billing_contacts = await billing_contacts_repo.list_billing_contacts_for_company(
-                company_id
+            billing_contacts = (
+                await billing_contacts_repo.list_billing_contacts_for_company(
+                    company_id
+                )
             )
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" in str(exc):
@@ -730,7 +790,9 @@ async def _render_company_edit_page(
     staff_custom_field_definitions: list[dict[str, Any]] = []
     if is_super_admin:
         staff_field_config = (
-            await staff_field_config_service.load_effective_company_staff_fields(company_id)
+            await staff_field_config_service.load_effective_company_staff_fields(
+                company_id
+            )
         )
         staff_custom_field_definitions = (
             await staff_custom_fields_repo.list_company_owned_definitions(company_id)
@@ -741,6 +803,7 @@ async def _render_company_edit_page(
     if is_super_admin:
         try:
             from app.repositories import tray as tray_repo
+
             tray_tokens = await tray_repo.list_install_tokens(company_id=company_id)
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" in str(exc):
@@ -783,13 +846,17 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
-        "m365_admin_credentials_configured": bool(all(await _main()._get_m365_admin_credentials(company_id))),
+        "m365_admin_credentials_configured": bool(
+            all(await _main()._get_m365_admin_credentials(company_id))
+        ),
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,
         "tray_tokens": tray_tokens,
     }
 
-    response = await _main()._render_template("admin/company_edit.html", request, user, extra=extra)
+    response = await _main()._render_template(
+        "admin/company_edit.html", request, user, extra=extra
+    )
     response.status_code = status_code
     return response
 
@@ -840,7 +907,11 @@ def _parse_staff_custom_field_condition(
             except (TypeError, ValueError):
                 return parent_name, operator, normalized_condition_value or None
             if isinstance(parsed_map, dict):
-                return parent_name, operator, json.dumps(parsed_map, separators=(",", ":"))
+                return (
+                    parent_name,
+                    operator,
+                    json.dumps(parsed_map, separators=(",", ":")),
+                )
         return parent_name, operator, normalized_condition_value or None
     if operator in {"is_checked", "is_not_checked"}:
         normalized_condition_value = None
@@ -848,6 +919,21 @@ def _parse_staff_custom_field_condition(
         fallback_operator = "is_checked" if operator == "equals" else "is_not_checked"
         return parent_name, fallback_operator, None
     return parent_name, operator, normalized_condition_value or None
+
+
+def _normalize_staff_custom_field_visibility(value: Any) -> str | None:
+    entries: list[str] = []
+    seen: set[str] = set()
+    for part in str(value or "").replace(";", ",").split(","):
+        item = part.strip()
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(item)
+    return ", ".join(entries) or None
 
 
 async def _ensure_company_permission(
@@ -865,16 +951,22 @@ async def _ensure_company_permission(
         return
     membership = membership_lookup.get(company_id)
     if not membership:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     staff_permission = _normalize_staff_access_scope(membership.get("staff_permission"))
     if require_admin and not bool(membership.get("is_admin")):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
     if (
         require_staff_manager
         and staff_permission < _STAFF_PERMISSION_ALL
         and not bool(membership.get("can_manage_staff"))
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
 
 
 async def admin_companies_page(
@@ -1085,11 +1177,15 @@ async def admin_assign_user_to_company(request: Request):
                 if not field:
                     continue
                 permission_values[field] = (
-                    _main()._parse_bool(form.get(field)) if field in form_keys else False
+                    _main()._parse_bool(form.get(field))
+                    if field in form_keys
+                    else False
                 )
 
             if "can_manage_staff" in form_keys:
-                can_manage_staff_value = _main()._parse_bool(form.get("can_manage_staff"))
+                can_manage_staff_value = _main()._parse_bool(
+                    form.get("can_manage_staff")
+                )
             else:
                 can_manage_staff_value = False
 
@@ -1131,9 +1227,7 @@ async def admin_assign_user_to_company(request: Request):
                 role_id=role_id_value,
             )
 
-            success_message = (
-                f"Saved pending access for {email}. Permissions will activate after sign-up."
-            )
+            success_message = f"Saved pending access for {email}. Permissions will activate after sign-up."
             return _main()._company_edit_redirect(
                 company_id=company_id,
                 success=success_message,
@@ -1229,7 +1323,9 @@ async def admin_assign_user_to_company(request: Request):
         if membership:
             membership_id = membership.get("id")
             if membership_id is not None and membership.get("role_id") != role_id:
-                await membership_repo.update_membership(int(membership_id), role_id=role_id)
+                await membership_repo.update_membership(
+                    int(membership_id), role_id=role_id
+                )
 
     return _main()._company_edit_redirect(
         company_id=company_id,
@@ -1277,9 +1373,15 @@ async def admin_update_company(company_id: int, request: Request):
         except json.JSONDecodeError:
             selection_data = {}
         if isinstance(selection_data, dict):
-            onedrive_export_site_id_raw = str(selection_data.get("site_id") or "").strip()
-            onedrive_export_drive_id_raw = str(selection_data.get("drive_id") or "").strip()
-            onedrive_export_site_name_raw = str(selection_data.get("site_name") or "").strip()[:255]
+            onedrive_export_site_id_raw = str(
+                selection_data.get("site_id") or ""
+            ).strip()
+            onedrive_export_drive_id_raw = str(
+                selection_data.get("drive_id") or ""
+            ).strip()
+            onedrive_export_site_name_raw = str(
+                selection_data.get("site_name") or ""
+            ).strip()[:255]
     _selected_methods = [
         m
         for m, enabled in [
@@ -1289,7 +1391,9 @@ async def admin_update_company(company_id: int, request: Request):
         ]
         if enabled
     ]
-    payment_method = ",".join(_selected_methods) if _selected_methods else "invoice_prepay"
+    payment_method = (
+        ",".join(_selected_methods) if _selected_methods else "invoice_prepay"
+    )
     raw_email_domains = form.get("emailDomains")
     email_domains_text = str(raw_email_domains) if raw_email_domains is not None else ""
     existing = await company_repo.get_company_by_id(company_id)
@@ -1298,9 +1402,15 @@ async def admin_update_company(company_id: int, request: Request):
             status_code=status.HTTP_404_NOT_FOUND, detail="Company not found"
         )
     if "onedriveExportSite" not in form:
-        onedrive_export_site_id_raw = str(existing.get("onedrive_export_site_id") or "").strip()
-        onedrive_export_drive_id_raw = str(existing.get("onedrive_export_drive_id") or "").strip()
-        onedrive_export_site_name_raw = str(existing.get("onedrive_export_site_name") or "").strip()[:255]
+        onedrive_export_site_id_raw = str(
+            existing.get("onedrive_export_site_id") or ""
+        ).strip()
+        onedrive_export_drive_id_raw = str(
+            existing.get("onedrive_export_drive_id") or ""
+        ).strip()
+        onedrive_export_site_name_raw = str(
+            existing.get("onedrive_export_site_name") or ""
+        ).strip()[:255]
     form_values = {
         "name": name,
         "syncro_company_id": syncro_company_raw,
@@ -1340,7 +1450,9 @@ async def admin_update_company(company_id: int, request: Request):
             error_message="Enter a company name.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-    if onedrive_export_selection_raw and (not onedrive_export_site_id_raw or not onedrive_export_drive_id_raw):
+    if onedrive_export_selection_raw and (
+        not onedrive_export_site_id_raw or not onedrive_export_drive_id_raw
+    ):
         return await _render_company_edit_page(
             request,
             current_user,
@@ -1356,7 +1468,9 @@ async def admin_update_company(company_id: int, request: Request):
     huntress_organization_id = huntress_organization_id_raw or None
     trello_board_id = trello_board_id_raw or None
     trello_api_key: str | None = (
-        trello_api_key_raw if trello_api_key_raw else (existing.get("trello_api_key") or None)
+        trello_api_key_raw
+        if trello_api_key_raw
+        else (existing.get("trello_api_key") or None)
     )
     trello_token: str | None = (
         trello_token_raw if trello_token_raw else (existing.get("trello_token") or None)
@@ -1375,9 +1489,9 @@ async def admin_update_company(company_id: int, request: Request):
         "email_domains": email_domains,
         "payment_method": payment_method,
         "require_po": 1 if require_po else 0,
-        "offboarding_email_forwarding_enabled": 1
-        if offboarding_email_forwarding_enabled
-        else 0,
+        "offboarding_email_forwarding_enabled": (
+            1 if offboarding_email_forwarding_enabled else 0
+        ),
         "onedrive_export_site_id": onedrive_export_site_id_raw or None,
         "onedrive_export_site_name": onedrive_export_site_name_raw or None,
         "onedrive_export_drive_id": onedrive_export_drive_id_raw or None,
@@ -1387,12 +1501,18 @@ async def admin_update_company(company_id: int, request: Request):
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to update company", company_id=company_id, error=str(exc))
         error_message = "Unable to update company. Please try again."
-        if isinstance(exc, aiomysql.IntegrityError) and exc.args and exc.args[0] == 1062:
+        if (
+            isinstance(exc, aiomysql.IntegrityError)
+            and exc.args
+            and exc.args[0] == 1062
+        ):
             match = re.search(r"Duplicate entry '([^']+)'", str(exc))
             if match:
                 error_message = f"The email domain '{match.group(1)}' is already assigned to another company."
             else:
-                error_message = "One of the email domains is already assigned to another company."
+                error_message = (
+                    "One of the email domains is already assigned to another company."
+                )
         return await _render_company_edit_page(
             request,
             current_user,
@@ -1402,7 +1522,9 @@ async def admin_update_company(company_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     if huntress_organization_id:
-        existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
+        existing_commands = await scheduled_tasks_repo.get_commands_for_company(
+            company_id
+        )
         if "sync_huntress" not in existing_commands:
             huntress_task_name = (
                 f"{name} - Sync Huntress data" if name else "Sync Huntress data"
@@ -1478,6 +1600,12 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
             condition_value=str(form.get("condition_value") or ""),
         )
     )
+    visible_to_job_titles = _normalize_staff_custom_field_visibility(
+        form.get("visible_to_job_titles")
+    )
+    visible_to_requester_emails = _normalize_staff_custom_field_visibility(
+        form.get("visible_to_requester_emails")
+    )
     options = _parse_custom_field_options(str(form.get("options") or ""))
     if not name:
         return _main()._company_edit_redirect(
@@ -1498,6 +1626,8 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
         condition_parent_name=condition_parent_name,
         condition_operator=condition_operator,
         condition_value=condition_value,
+        visible_to_job_titles=visible_to_job_titles,
+        visible_to_requester_emails=visible_to_requester_emails,
         options=options,
     )
     return _main()._company_edit_redirect(
@@ -1536,6 +1666,12 @@ async def admin_update_company_staff_custom_field(
             condition_value=str(form.get("condition_value") or ""),
         )
     )
+    visible_to_job_titles = _normalize_staff_custom_field_visibility(
+        form.get("visible_to_job_titles")
+    )
+    visible_to_requester_emails = _normalize_staff_custom_field_visibility(
+        form.get("visible_to_requester_emails")
+    )
     options = _parse_custom_field_options(str(form.get("options") or ""))
     await staff_custom_fields_repo.update_company_definition(
         definition_id,
@@ -1549,6 +1685,8 @@ async def admin_update_company_staff_custom_field(
         condition_parent_name=condition_parent_name,
         condition_operator=condition_operator,
         condition_value=condition_value,
+        visible_to_job_titles=visible_to_job_titles,
+        visible_to_requester_emails=visible_to_requester_emails,
         options=options,
     )
     return _main()._company_edit_redirect(
@@ -1714,7 +1852,9 @@ async def admin_invite_company_user(request: Request):
     )
 
 
-async def admin_update_company_permission(company_id: int, user_id: int, request: Request):
+async def admin_update_company_permission(
+    company_id: int, user_id: int, request: Request
+):
     from app.repositories import user_companies as user_company_repo
 
     current_user, redirect = await _main()._require_authenticated_user(request)
@@ -1743,7 +1883,9 @@ async def admin_update_company_permission(company_id: int, user_id: int, request
     return JSONResponse({"success": True})
 
 
-async def admin_update_staff_permission(company_id: int, user_id: int, request: Request):
+async def admin_update_staff_permission(
+    company_id: int, user_id: int, request: Request
+):
     from app.repositories import user_companies as user_company_repo
 
     current_user, redirect = await _main()._require_authenticated_user(request)
@@ -1799,7 +1941,9 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
             detail="Select a role for the membership",
         )
 
-    membership = await membership_repo.get_membership_by_company_user(company_id, user_id)
+    membership = await membership_repo.get_membership_by_company_user(
+        company_id, user_id
+    )
     if not membership:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found"
@@ -1817,9 +1961,13 @@ async def admin_update_membership_role(company_id: int, user_id: int, request: R
 
     role_record = await role_repo.get_role_by_id(role_id)
     if not role_record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Role not found"
+        )
 
-    updated = await membership_repo.update_membership(int(membership_id), role_id=role_id)
+    updated = await membership_repo.update_membership(
+        int(membership_id), role_id=role_id
+    )
 
     await audit_service.log_action(
         action="membership.role_changed",
@@ -1876,7 +2024,9 @@ async def admin_remove_pending_company_assignment(
     return JSONResponse({"success": True})
 
 
-async def admin_remove_company_assignment(company_id: int, user_id: int, request: Request):
+async def admin_remove_company_assignment(
+    company_id: int, user_id: int, request: Request
+):
     from app.repositories import user_companies as user_company_repo
 
     current_user, redirect = await _main()._require_super_admin_page(request)
@@ -1943,7 +2093,9 @@ async def admin_add_billing_contact(company_id: int, request: Request):
     )
 
 
-async def admin_remove_billing_contact(company_id: int, staff_id: int, request: Request):
+async def admin_remove_billing_contact(
+    company_id: int, staff_id: int, request: Request
+):
     """Remove a staff member as a billing contact for a company."""
     from app.repositories import billing_contacts as billing_contacts_repo
 
@@ -2219,7 +2371,8 @@ async def admin_company_tray_create_token(company_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Company not found")
 
     label = (
-        str(form.get("label", "")).strip() or f"{company.get('name') or 'Company'} token"
+        str(form.get("label", "")).strip()
+        or f"{company.get('name') or 'Company'} token"
     )[:150]
     raw_token = tray_service.generate_install_token()
     await tray_repo.create_install_token(
@@ -2248,8 +2401,7 @@ async def admin_company_tray_revoke_token(
     await tray_repo.revoke_install_token(token_id)
     cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?"
-        + urlencode({"success": "Token revoked."}),
+        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Token revoked."}),
         status_code=303,
     )
 
@@ -2285,7 +2437,10 @@ async def admin_company_ticket_question_new_page(company_id: int, request: Reque
         "error_message": None,
     }
     return await _main()._render_template(
-        "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+        "admin/tray/company_ticket_question_form.html",
+        request,
+        current_user,
+        extra=extra,
     )
 
 
@@ -2316,7 +2471,10 @@ async def admin_company_ticket_question_create(company_id: int, request: Request
             "error_message": "Label is required.",
         }
         return await _main()._render_template(
-            "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+            "admin/tray/company_ticket_question_form.html",
+            request,
+            current_user,
+            extra=extra,
         )
 
     record = await tq_repo.create_question(
@@ -2345,7 +2503,8 @@ async def admin_company_ticket_question_create(company_id: int, request: Request
 
     cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Question created."}),
+        url=f"/admin/companies/{cid}/tray?"
+        + urlencode({"success": "Question created."}),
         status_code=303,
     )
 
@@ -2374,7 +2533,10 @@ async def admin_company_ticket_question_edit_page(
         "error_message": None,
     }
     return await _main()._render_template(
-        "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+        "admin/tray/company_ticket_question_form.html",
+        request,
+        current_user,
+        extra=extra,
     )
 
 
@@ -2414,7 +2576,10 @@ async def admin_company_ticket_question_update(
             "error_message": "Label is required.",
         }
         return await _main()._render_template(
-            "admin/tray/company_ticket_question_form.html", request, current_user, extra=extra
+            "admin/tray/company_ticket_question_form.html",
+            request,
+            current_user,
+            extra=extra,
         )
 
     await tq_repo.update_question(
@@ -2440,7 +2605,8 @@ async def admin_company_ticket_question_update(
 
     cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Question updated."}),
+        url=f"/admin/companies/{cid}/tray?"
+        + urlencode({"success": "Question updated."}),
         status_code=303,
     )
 
@@ -2459,6 +2625,7 @@ async def admin_company_ticket_question_delete(
 
     cid = int(company_id)
     return RedirectResponse(
-        url=f"/admin/companies/{cid}/tray?" + urlencode({"success": "Question deleted."}),
+        url=f"/admin/companies/{cid}/tray?"
+        + urlencode({"success": "Question deleted."}),
         status_code=303,
     )

@@ -11,7 +11,42 @@ def _int_csv(values: list[int]) -> str:
     return ",".join(str(int(value)) for value in values)
 
 
-async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
+def _split_visibility_list(value: Any) -> set[str]:
+    items: set[str] = set()
+    for part in str(value or "").replace(";", ",").split(","):
+        item = part.strip().lower()
+        if item:
+            items.add(item)
+    return items
+
+
+def _definition_is_visible_to_requester(
+    definition: dict[str, Any],
+    *,
+    requester_email: str | None = None,
+    requester_job_title: str | None = None,
+) -> bool:
+    allowed_titles = _split_visibility_list(definition.get("visible_to_job_titles"))
+    allowed_emails = _split_visibility_list(
+        definition.get("visible_to_requester_emails")
+    )
+    if not allowed_titles and not allowed_emails:
+        return True
+    normalized_email = str(requester_email or "").strip().lower()
+    normalized_title = str(requester_job_title or "").strip().lower()
+    return bool(
+        (normalized_email and normalized_email in allowed_emails)
+        or (normalized_title and normalized_title in allowed_titles)
+    )
+
+
+async def list_field_definitions(
+    company_id: int,
+    *,
+    requester_email: str | None = None,
+    requester_job_title: str | None = None,
+    include_restricted: bool = True,
+) -> list[dict[str, Any]]:
     """List effective field definitions for a company (global with company overrides)."""
     rows = await db.fetch_all(
         """
@@ -28,6 +63,8 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
             COALESCE(ovr.condition_parent_name, base.condition_parent_name) AS condition_parent_name,
             COALESCE(ovr.condition_operator, base.condition_operator) AS condition_operator,
             COALESCE(ovr.condition_value, base.condition_value) AS condition_value,
+            COALESCE(ovr.visible_to_job_titles, base.visible_to_job_titles) AS visible_to_job_titles,
+            COALESCE(ovr.visible_to_requester_emails, base.visible_to_requester_emails) AS visible_to_requester_emails,
             COALESCE(ovr.company_id, base.company_id) AS company_id
         FROM staff_custom_field_definitions AS base
         LEFT JOIN staff_custom_field_definitions AS ovr
@@ -45,6 +82,16 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
         (company_id, company_id),
     )
     definitions = [dict(row) for row in (rows or [])]
+    if not include_restricted:
+        definitions = [
+            definition
+            for definition in definitions
+            if _definition_is_visible_to_requester(
+                definition,
+                requester_email=requester_email,
+                requester_job_title=requester_job_title,
+            )
+        ]
     if not definitions:
         return []
 
@@ -65,7 +112,9 @@ async def list_field_definitions(company_id: int) -> list[dict[str, Any]]:
         options_map.setdefault(fid, []).append(
             {
                 "value": str(row.get("option_value") or "").strip(),
-                "label": str(row.get("option_label") or row.get("option_value") or "").strip(),
+                "label": str(
+                    row.get("option_label") or row.get("option_value") or ""
+                ).strip(),
             }
         )
 
@@ -91,6 +140,8 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
             condition_parent_name,
             condition_operator,
             condition_value,
+            visible_to_job_titles,
+            visible_to_requester_emails,
             created_at,
             updated_at
         FROM staff_custom_field_definitions
@@ -123,7 +174,9 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
         options_map.setdefault(fid, []).append(
             {
                 "value": str(row.get("option_value") or "").strip(),
-                "label": str(row.get("option_label") or row.get("option_value") or "").strip(),
+                "label": str(
+                    row.get("option_label") or row.get("option_value") or ""
+                ).strip(),
             }
         )
     for definition in definitions:
@@ -143,6 +196,8 @@ async def create_company_definition(
     condition_parent_name: str | None = None,
     condition_operator: str | None = None,
     condition_value: str | None = None,
+    visible_to_job_titles: str | None = None,
+    visible_to_requester_emails: str | None = None,
     options: list[dict[str, str]] | None = None,
 ) -> int:
     definition_id = await db.execute_returning_lastrowid(
@@ -159,8 +214,10 @@ async def create_company_definition(
             is_active,
             condition_parent_name,
             condition_operator,
-            condition_value
-        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
+            condition_value,
+            visible_to_job_titles,
+            visible_to_requester_emails
+        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -173,6 +230,8 @@ async def create_company_definition(
             condition_parent_name or None,
             condition_operator or None,
             condition_value or None,
+            visible_to_job_titles or None,
+            visible_to_requester_emails or None,
         ),
     )
     if not definition_id:
@@ -194,6 +253,8 @@ async def update_company_definition(
     condition_parent_name: str | None,
     condition_operator: str | None,
     condition_value: str | None,
+    visible_to_job_titles: str | None,
+    visible_to_requester_emails: str | None,
     options: list[dict[str, str]] | None = None,
 ) -> None:
     await db.execute(
@@ -207,7 +268,9 @@ async def update_company_definition(
             is_active = %s,
             condition_parent_name = %s,
             condition_operator = %s,
-            condition_value = %s
+            condition_value = %s,
+            visible_to_job_titles = %s,
+            visible_to_requester_emails = %s
         WHERE id = %s AND company_id = %s
         """,
         (
@@ -220,6 +283,8 @@ async def update_company_definition(
             condition_parent_name or None,
             condition_operator or None,
             condition_value or None,
+            visible_to_job_titles or None,
+            visible_to_requester_emails or None,
             definition_id,
             company_id,
         ),
@@ -234,7 +299,9 @@ async def delete_company_definition(definition_id: int, company_id: int) -> None
     )
 
 
-async def replace_field_options(definition_id: int, options: list[dict[str, str]]) -> None:
+async def replace_field_options(
+    definition_id: int, options: list[dict[str, str]]
+) -> None:
     await db.execute(
         "DELETE FROM staff_custom_field_options WHERE field_definition_id = %s",
         (definition_id,),
@@ -309,9 +376,7 @@ async def set_staff_field_values_by_name(
     if not definitions:
         return
     definition_by_name = {
-        str(item.get("name") or ""): item
-        for item in definitions
-        if item.get("name")
+        str(item.get("name") or ""): item for item in definitions if item.get("name")
     }
     for name, raw_value in (values or {}).items():
         definition = definition_by_name.get(str(name))
