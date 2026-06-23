@@ -162,6 +162,34 @@
         return input;
       };
 
+      const appendWebhookPreview = (step, targetContainer) => {
+        if (String(step.type || '').trim().toLowerCase() !== 'wait_for_webhook') return;
+        const preview = step.webhook_preview && typeof step.webhook_preview === 'object' ? step.webhook_preview : {};
+        const section = document.createElement('section');
+        section.className = 'workflow-section stack-xs';
+        const title = document.createElement('h4');
+        title.className = 'workflow-section__title';
+        title.textContent = 'Webhook callback details';
+        section.appendChild(title);
+        const help = document.createElement('p');
+        help.className = 'text-muted workflow-field-help';
+        help.textContent = preview.webhook_url && preview.post_key
+          ? 'Send a POST request to this URL with the POST Key as postKey in the JSON body. These values are generated from the saved workflow key and step name.'
+          : 'Save the workflow to generate the unique webhook URL and POST Key for this step.';
+        section.appendChild(help);
+        if (preview.webhook_url) {
+          const urlInput = makeInput({ type: 'text' }, preview.webhook_url);
+          urlInput.readOnly = true;
+          section.append(makeLabel('Unique URL'), urlInput);
+        }
+        if (preview.post_key) {
+          const keyInput = makeInput({ type: 'text' }, preview.post_key);
+          keyInput.readOnly = true;
+          section.append(makeLabel('POST Key'), keyInput);
+        }
+        targetContainer.appendChild(section);
+      };
+
       const renderStepsForWorkflow = (wf, stepsContainer) => {
         stepsContainer.innerHTML = '';
         if (!wf.steps.length) {
@@ -259,6 +287,7 @@
           };
 
           actionFields.forEach((field) => appendField(field, body));
+          appendWebhookPreview(step, body);
 
           const retryInput = makeInput({ type: 'number' }, step.retry_policy.max_retries);
           body.append(makeLabel('Max retries'), retryInput);
