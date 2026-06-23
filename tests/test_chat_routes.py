@@ -114,3 +114,22 @@ async def test_chat_index_show_closed_filter_includes_closed(monkeypatch):
     assert list_rooms.await_args.kwargs["status"] is None
     assert captured["template"] == "chat/index.html"
     assert captured["extra"]["show_closed_filter"] is True
+
+
+def test_chat_index_template_exposes_device_company_console_user_columns():
+    source = __import__('pathlib').Path('app/templates/chat/index.html').read_text()
+
+    assert 'data-column="device"' in source
+    assert 'data-column="company"' in source
+    assert 'data-column="console-user"' in source
+    assert 'data-chat-columns' in source
+    assert "js/chat_columns.js" in source
+
+
+def test_chat_room_list_query_includes_device_company_console_user_metadata():
+    source = __import__('pathlib').Path('app/repositories/chat.py').read_text()
+
+    assert 'AS device_name' in source
+    assert 'c.name AS company_name' in source
+    assert 'td.console_user AS console_user' in source
+    assert 'LEFT JOIN tray_devices td ON td.id = r.tray_device_id' in source
