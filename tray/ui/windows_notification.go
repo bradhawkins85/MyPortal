@@ -12,40 +12,13 @@ import (
 
 func windowsToastEncodedCommand(title, body string) string {
 	appName := windowsToastAppName()
-	iconURL := windowsToastIconURL()
-	template := "ToastText02"
-	imageScript := ""
-	if iconURL != "" {
-		template = "ToastImageAndText02"
-		imageScript = `$xml.GetElementsByTagName('image')[0].SetAttribute('src', '` + powershellSingleQuotedString(iconURL) + `')
-`
-	}
-	script := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::` + template + `)
-` + imageScript + `$textNodes = $xml.GetElementsByTagName('text')
-[void]$textNodes.Item(0).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(title) + `'))
-[void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('` + powershellSingleQuotedString(appName) + `').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
+	script := windowsToastScript(title, body, "", appName, windowsToastIconURL(), true)
 	return encodePowerShellCommand(script)
 }
 
 func windowsPersistentChatToastEncodedCommand(title, body, chatURL string) string {
 	appName := windowsToastAppName()
-	iconURL := windowsToastIconURL()
-	template := "ToastText02"
-	imageScript := ""
-	if iconURL != "" {
-		template = "ToastImageAndText02"
-		imageScript = `$xml.GetElementsByTagName('image')[0].SetAttribute('src', '` + powershellSingleQuotedString(iconURL) + `')
-`
-	}
-	script := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::` + template + `)
-` + imageScript + `$toast = $xml.GetElementsByTagName('toast')[0]
-$toast.SetAttribute('scenario', 'reminder')
-$textNodes = $xml.GetElementsByTagName('text')
-[void]$textNodes.Item(0).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(title) + `'))
-[void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))
+	script := windowsToastScript(title, body, "reminder", appName, windowsToastIconURL(), false) + `
 $actions = $xml.CreateElement('actions')
 $open = $xml.CreateElement('action')
 $open.SetAttribute('content', 'Open chat')
@@ -83,6 +56,34 @@ func showChatSessionNotification(title, body, chatURL string) {
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", windowsPersistentChatToastEncodedCommand(title, body, chatURL))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
 	_ = cmd.Start()
+}
+
+func windowsToastScript(title, body, scenario, appName, iconURL string, show bool) string {
+	scenarioScript := ""
+	if scenario != "" {
+		scenarioScript = `$toast.SetAttribute('scenario', '` + powershellSingleQuotedString(scenario) + `')
+`
+	}
+	logoScript := ""
+	if iconURL != "" {
+		logoScript = `$binding = $xml.GetElementsByTagName('binding').Item(0)
+$appLogo = $xml.CreateElement('image')
+$appLogo.SetAttribute('placement', 'appLogoOverride')
+$appLogo.SetAttribute('src', '` + powershellSingleQuotedString(iconURL) + `')
+[void]$binding.InsertBefore($appLogo, $binding.FirstChild)
+`
+	}
+	script := `[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastGeneric)
+$toast = $xml.GetElementsByTagName('toast')[0]
+` + scenarioScript + logoScript + `$textNodes = $xml.GetElementsByTagName('text')
+[void]$textNodes.Item(0).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(title) + `'))
+[void]$textNodes.Item(1).AppendChild($xml.CreateTextNode('` + powershellSingleQuotedString(body) + `'))`
+	if show {
+		script += `
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('` + powershellSingleQuotedString(appName) + `').Show([Windows.UI.Notifications.ToastNotification]::new($xml))`
+	}
+	return script
 }
 
 func windowsToastAppName() string {
