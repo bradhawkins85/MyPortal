@@ -28,27 +28,28 @@
       "signAndEditExecutable": false,
       "target": [
         {
-          "target": "portable",
-          "arch": ["x64"]
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "executableName": "myportal-tray-chat",
-      "artifactName": "myportal-tray-chat.exe"
+      "executableName": "myportal-tray-chat"
     },
     "mac": {
       "target": [
         {
           "target": "dir",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.utilities",
       "darkModeSupport": true,
       "icon": "build/icon.icns",
       "identity": null
-    },
-    "portable": {
-      "artifactName": "myportal-tray-chat.exe"
     },
     "linux": {
       "target": "AppImage"

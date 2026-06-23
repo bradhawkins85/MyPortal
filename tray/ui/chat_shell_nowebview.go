@@ -6,14 +6,15 @@
 // isolated app window, completely separate from the user's browser sessions.
 //
 // Launch priority for openChatWindow on every platform:
-//   1. Dedicated chat shell (myportal-tray-chat[.exe]) — best isolation.
-//   2. Chromium-based browser in --app= mode with --user-data-dir isolation.
-//   3. Default system browser — legacy fallback.
+//  1. Dedicated chat shell (myportal-tray-chat[.exe]) — best isolation.
+//  2. Chromium-based browser in --app= mode with --user-data-dir isolation.
+//  3. Default system browser — legacy fallback.
 //
 // The server-side ChatClientMode field can override this priority:
-//   ""/"app" (default) — use priority order above.
-//   "browser"          — skip to step 3 immediately.
-//   "shell"            — use step 1 only; warn if absent instead of falling back.
+//
+//	""/"app" (default) — use priority order above.
+//	"browser"          — skip to step 3 immediately.
+//	"shell"            — use step 1 only; warn if absent instead of falling back.
 package main
 
 import (
@@ -67,25 +68,36 @@ func findChatShellInDir(dir string) string {
 // "" when the shell is not installed.
 //
 // Search order:
-//  1. Same directory as the running tray UI binary (standard install).
-//  2. Well-known per-platform install paths as a fallback.
+//  1. Same directory as the running tray UI binary (legacy single-file install).
+//  2. chat-shell subdirectory next to the running tray UI binary (standard Windows unpacked Electron install).
+//  3. Well-known per-platform install paths as a fallback.
 func findChatShell() string {
-	// 1. Sibling of own executable (covers standard MSI / .pkg install).
+	// 1. Sibling of own executable (covers legacy single-file MSI installs and macOS .pkg install).
 	if self, err := os.Executable(); err == nil {
-		if p := findChatShellInDir(filepath.Dir(self)); p != "" {
+		selfDir := filepath.Dir(self)
+		if p := findChatShellInDir(selfDir); p != "" {
+			logger.Debug("findChatShell: found at %s", p)
+			return p
+		}
+		if p := findChatShellInDir(filepath.Join(selfDir, "chat-shell")); p != "" {
 			logger.Debug("findChatShell: found at %s", p)
 			return p
 		}
 	}
 
-	// 2. Well-known platform-specific install roots.
+	// 3. Well-known platform-specific install roots.
 	switch runtime.GOOS {
 	case "windows":
 		pf := os.Getenv("ProgramFiles")
 		if pf == "" {
 			pf = `C:\Program Files`
 		}
-		if p := findChatShellInDir(filepath.Join(pf, "MyPortalTray")); p != "" {
+		installDir := filepath.Join(pf, "MyPortalTray")
+		if p := findChatShellInDir(installDir); p != "" {
+			logger.Debug("findChatShell: found at %s", p)
+			return p
+		}
+		if p := findChatShellInDir(filepath.Join(installDir, "chat-shell")); p != "" {
 			logger.Debug("findChatShell: found at %s", p)
 			return p
 		}

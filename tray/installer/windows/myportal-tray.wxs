@@ -42,7 +42,9 @@
 
     <!-- Install directory -->
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLDIR" Name="MyPortalTray" />
+      <Directory Id="INSTALLDIR" Name="MyPortalTray">
+        <Directory Id="CHATSHELLDIR" Name="chat-shell" />
+      </Directory>
     </StandardDirectory>
 
     <!-- Registry key written at install time -->
@@ -94,22 +96,27 @@
           Type="string"
           Value="&quot;[INSTALLDIR]myportal-tray-ui.exe&quot;" />
       </Component>
-      <!--
-        Dedicated chat shell: a minimal Electron app that opens the MyPortal
-        support chat in an isolated window, completely separate from the
-        user's default browser profile.
-      -->
-      <Component Id="ChatShellComponent" Guid="E4F5A6B7-C8D9-0123-EF01-234567890123">
-        <File Id="ChatShellExe"
-              Name="myportal-tray-chat.exe"
-              Source="$(var.BinDir)\myportal-tray-chat.exe"
-              KeyPath="yes" />
-      </Component>
+    </ComponentGroup>
+
+    <!--
+      Dedicated chat shell: a minimal Electron app that opens the MyPortal
+      support chat in an isolated window, completely separate from the
+      user's default browser profile.
+
+      The Windows chat shell is intentionally packaged as Electron's unpacked
+      directory output rather than a portable self-extracting EXE. Portable
+      builds unpack EXE/DLL payloads into %TEMP% on every launch; harvesting
+      the unpacked runtime into CHATSHELLDIR keeps those files in the
+      persistent MyPortal Tray install location.
+    -->
+    <ComponentGroup Id="ChatShellFiles" Directory="CHATSHELLDIR">
+      <Files Include="$(var.BinDir)\chat-shell\**" />
     </ComponentGroup>
 
     <Feature Id="ProductFeature" Title="MyPortal Tray" Level="1">
       <ComponentGroupRef Id="RegistrySettings" />
       <ComponentGroupRef Id="Binaries" />
+      <ComponentGroupRef Id="ChatShellFiles" />
     </Feature>
   </Package>
 </Wix>

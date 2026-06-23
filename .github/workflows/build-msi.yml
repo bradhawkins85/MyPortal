@@ -78,11 +78,17 @@ jobs:
         run: |
           npm ci
           npm run build:win
-      - name: Stage Windows chat shell binary
+      - name: Stage Windows chat shell runtime
         shell: pwsh
         working-directory: tray
         run: |
-          Copy-Item chat-shell\dist\myportal-tray-chat.exe dist\windows\myportal-tray-chat.exe -Force
+          if (-not (Test-Path chat-shell\dist\win-unpacked)) {
+            Write-Host 'Available chat-shell/dist contents:'
+            Get-ChildItem -Recurse -Depth 2 chat-shell\dist | Format-Table -AutoSize
+            throw 'electron-builder did not create chat-shell/dist/win-unpacked'
+          }
+          Remove-Item -Recurse -Force dist\windows\chat-shell -ErrorAction SilentlyContinue
+          Copy-Item chat-shell\dist\win-unpacked dist\windows\chat-shell -Recurse -Force
 
       - name: Build MSI
         shell: pwsh
