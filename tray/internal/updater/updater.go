@@ -105,7 +105,13 @@ func (c *Checker) Run(ctx context.Context) {
 }
 
 func (c *Checker) check(ctx context.Context) {
-	if !c.autoUpdate {
+	c.CheckNow(ctx, false)
+}
+
+// CheckNow runs an immediate update check. When force is true, the check runs
+// even if automatic updates are disabled in the tray configuration.
+func (c *Checker) CheckNow(ctx context.Context, force bool) {
+	if !force && !c.autoUpdate {
 		return
 	}
 	resp, err := c.client.GetVersion(ctx)

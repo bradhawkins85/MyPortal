@@ -103,10 +103,11 @@ func saveState(s persistedState) {
 // -----------------------------------------------------------------
 
 type daemon struct {
-	cfg    *config.Config
-	client *api.Client
-	ipcSrv *ipc.Server
-	stopCh chan struct{}
+	cfg     *config.Config
+	client  *api.Client
+	updater *updater.Checker
+	ipcSrv  *ipc.Server
+	stopCh  chan struct{}
 
 	pendingUIMu      sync.Mutex
 	pendingUIMessage *ipc.Message
@@ -179,8 +180,8 @@ func (d *daemon) run() {
 	// Auto-update checker.
 	updateCtx, cancelUpdate := context.WithCancel(context.Background())
 	defer cancelUpdate()
-	checker := updater.New(d.client, d.cfg.AutoUpdate)
-	go checker.Run(updateCtx)
+	d.updater = updater.New(d.client, d.cfg.AutoUpdate)
+	go d.updater.Run(updateCtx)
 
 	// Main WS + heartbeat loop.
 	go d.wsLoop()
@@ -319,6 +320,12 @@ func (d *daemon) dispatchWSMessage(msgType string, msg map[string]json.RawMessag
 			Type:    "chat_message",
 			Payload: json.RawMessage(rawPayload),
 		})
+	case "update":
+		logger.Info("update command received — checking for tray update")
+		if d.updater == nil {
+			d.updater = updater.New(d.client, d.cfg.AutoUpdate)
+		}
+		go d.updater.CheckNow(context.Background(), true)
 	case "show_notification":
 		if d.ipcSrv != nil {
 			payload := msg["payload"]
