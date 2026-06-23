@@ -104,7 +104,9 @@ async def admin_push_companies_to_tactical_rmm(request: Request):
         request_path=str(request.url),
     )
 
-    success_message = f"Tactical RMM company synchronisation queued. Task ID: {task_id[:8]}"
+    success_message = (
+        f"Tactical RMM company synchronisation queued. Task ID: {task_id[:8]}"
+    )
     query = f"success={quote(success_message)}"
     redirect_url = f"/admin/modules?{query}" if query else "/admin/modules"
 
@@ -196,3 +198,59 @@ async def admin_pull_companies_from_tactical_rmm(request: Request):
     redirect_url = f"/admin/modules?{query}" if query else "/admin/modules"
 
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def admin_sync_tray_tokens_to_tactical_rmm(request: Request):
+    from app.core.logging import log_error, log_info
+    from app.services import background as background_tasks
+    from app.services import modules as modules_service
+    from app.services import tray as tray_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    try:
+        await modules_service.ensure_tacticalrmm_ready()
+    except ValueError as exc:
+        log_error("Unable to sync tray tokens to Tactical RMM", error=str(exc))
+        return await _main()._render_modules_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    task_id = uuid4().hex
+
+    async def _on_success(summary: Mapping[str, Any]) -> None:
+        log_info(
+            "Tactical RMM tray token sync completed",
+            task_id=task_id,
+            processed=summary.get("processed"),
+            updated=summary.get("updated"),
+            skipped=len(summary.get("skipped") or []),
+            errors=len(summary.get("errors") or []),
+        )
+
+    async def _on_error(exc: Exception) -> None:
+        log_error(
+            "Tactical RMM tray token sync failed", task_id=task_id, error=str(exc)
+        )
+
+    user_id = int(current_user["id"]) if current_user.get("id") is not None else None
+    background_tasks.queue_background_task(
+        lambda: tray_service.sync_all_company_trmm_tray_tokens(
+            created_by_user_id=user_id
+        ),
+        task_id=task_id,
+        description="tacticalrmm-tray-token-sync",
+        on_complete=_on_success,
+        on_error=_on_error,
+    )
+
+    success_message = f"Tactical RMM tray token sync queued. Task ID: {task_id[:8]}"
+    return RedirectResponse(
+        url=f"/admin/modules?success={quote(success_message)}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
