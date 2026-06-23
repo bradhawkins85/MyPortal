@@ -3657,6 +3657,40 @@ async def enable_m365_user_archive(request: Request):
     return JSONResponse({"enabled": True})
 
 
+@app.get("/m365/mailboxes/rules", response_class=JSONResponse, tags=["Microsoft 365"])
+async def get_m365_mailbox_rules(request: Request, upn: str):
+    """Return inbox rules for a known mailbox. Super admins only."""
+    user, membership, company, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+
+    user_mbs = await m365_service.get_user_mailboxes(company_id)
+    shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    known_upns = {
+        str(mb.get("user_principal_name") or "").strip().lower()
+        for mb in user_mbs + shared_mbs
+    }
+    if str(upn or "").strip().lower() not in known_upns:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found"
+        )
+
+    try:
+        rules = await m365_service.get_mailbox_rules(company_id, upn)
+        return JSONResponse({"rules": rules})
+    except m365_service.M365Error:
+        logger.exception("Failed to get inbox rules for UPN %s", upn)
+        return JSONResponse(
+            {"error": "Unable to retrieve mailbox rules at this time."},
+            status_code=503,
+        )
+
+
 @app.post("/m365/mailboxes/start-managed-folder-assistant", response_class=JSONResponse, tags=["Microsoft 365"])
 async def start_m365_managed_folder_assistant(request: Request):
     """Start Managed Folder Assistant for a specific mailbox."""

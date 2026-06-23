@@ -82,6 +82,20 @@
                       aria-controls="mailbox-perm-modal"
                     >Mailbox Permissions</button>
                   </li>
+                  {% if is_super_admin %}
+                  <li class="header-title-menu__item" role="none">
+                    <button
+                      type="button"
+                      class="header-title-menu__link"
+                      role="menuitem"
+                      data-rules-btn
+                      data-upn="{{ mb.user_principal_name }}"
+                      data-display-name="{{ mb.display_name or mb.user_principal_name }}"
+                      aria-haspopup="dialog"
+                      aria-controls="mailbox-rules-modal"
+                    >View Rules</button>
+                  </li>
+                  {% endif %}
                   <li class="header-title-menu__item" role="none">
                     <button
                       type="button"
@@ -167,6 +181,31 @@
       </div>
     </div>
   </div>
+
+  {% if is_super_admin %}
+  <div
+    class="modal"
+    id="mailbox-rules-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="mailbox-rules-title"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-rules-modal-close>
+        <span class="visually-hidden">Close mailbox rules</span>
+        &times;
+      </button>
+      <h2 class="modal__title" id="mailbox-rules-title">Mailbox Rules</h2>
+      <div class="modal__body">
+        <p id="rules-loading" style="display:none">Loading&hellip;</p>
+        <p id="rules-error" class="alert alert--error" role="alert" style="display:none"></p>
+        <div id="rules-content" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -582,4 +621,119 @@
     });
   }());
   </script>
+  {% if is_super_admin %}
+  <script>
+  (function () {
+    var modal = document.getElementById('mailbox-rules-modal');
+    if (!modal) return;
+    var closeBtn = modal.querySelector('[data-rules-modal-close]');
+    var titleEl = document.getElementById('mailbox-rules-title');
+    var loadingEl = document.getElementById('rules-loading');
+    var errorEl = document.getElementById('rules-error');
+    var contentEl = document.getElementById('rules-content');
+    var activeTrigger = null;
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(String(str == null ? '' : str)));
+      return div.innerHTML;
+    }
+    function handleKeydown(e) { if (e.key === 'Escape') { e.preventDefault(); closeModal(); } }
+    function openModal(trigger) {
+      activeTrigger = trigger || null;
+      modal.hidden = false;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      document.addEventListener('keydown', handleKeydown);
+      if (closeBtn) closeBtn.focus();
+    }
+    function closeModal() {
+      modal.classList.remove('is-visible');
+      modal.hidden = true;
+      modal.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', handleKeydown);
+      if (activeTrigger && typeof activeTrigger.focus === 'function') activeTrigger.focus();
+      activeTrigger = null;
+    }
+    function formatRawValue(value) {
+      if (value === null || value === undefined || value === '') return '<span class="text-muted">—</span>';
+      if (Array.isArray(value)) return escapeHtml(value.join(', '));
+      if (typeof value === 'object') return '<pre style="white-space:pre-wrap;margin:0">' + escapeHtml(JSON.stringify(value, null, 2)) + '</pre>';
+      return escapeHtml(value);
+    }
+    function buildRule(rule, index) {
+      var details = document.createElement('details');
+      details.className = 'panel';
+      details.style.margin = '0 0 .75rem';
+      var title = rule.title || ('Rule ' + (index + 1));
+      var summary = document.createElement('summary');
+      summary.style.cursor = 'pointer';
+      summary.style.padding = '.75rem 1rem';
+      summary.innerHTML = '<strong>' + escapeHtml(title) + '</strong>' +
+        (rule.enabled === false ? ' <span class="badge badge--warning">Disabled</span>' : '') +
+        (rule.priority !== null && rule.priority !== undefined ? ' <small class="text-muted">Priority ' + escapeHtml(rule.priority) + '</small>' : '');
+      details.appendChild(summary);
+      var body = document.createElement('div');
+      body.style.padding = '0 1rem 1rem';
+      var html = '';
+      if (rule.description) html += '<p>' + escapeHtml(rule.description) + '</p>';
+      var raw = rule.raw || {};
+      var keys = Object.keys(raw).sort();
+      if (keys.length) {
+        html += '<dl class="definition-list">';
+        keys.forEach(function (key) {
+          html += '<dt>' + escapeHtml(key) + '</dt><dd>' + formatRawValue(raw[key]) + '</dd>';
+        });
+        html += '</dl>';
+      }
+      body.innerHTML = html || '<p class="text-muted">No rule details returned.</p>';
+      details.appendChild(body);
+      return details;
+    }
+    function renderRules(rules) {
+      contentEl.innerHTML = '';
+      if (!rules || !rules.length) {
+        var empty = document.createElement('p');
+        empty.className = 'text-muted';
+        empty.textContent = 'No mailbox rules found.';
+        contentEl.appendChild(empty);
+        return;
+      }
+      rules.forEach(function (rule, index) { contentEl.appendChild(buildRule(rule, index)); });
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+    document.querySelectorAll('[data-rules-btn]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var upn = btn.getAttribute('data-upn');
+        var displayName = btn.getAttribute('data-display-name') || upn;
+        titleEl.textContent = 'Mailbox Rules — ' + displayName;
+        loadingEl.style.display = 'block';
+        errorEl.style.display = 'none';
+        contentEl.style.display = 'none';
+        contentEl.innerHTML = '';
+        openModal(btn);
+        fetch('/m365/mailboxes/rules?upn=' + encodeURIComponent(upn))
+          .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+          .then(function (result) {
+            loadingEl.style.display = 'none';
+            if (!result.ok || (result.data && result.data.error)) {
+              errorEl.textContent = (result.data && result.data.error) || 'Failed to load mailbox rules.';
+              errorEl.style.display = 'block';
+              return;
+            }
+            renderRules(result.data.rules || []);
+            contentEl.style.display = 'block';
+          })
+          .catch(function () {
+            loadingEl.style.display = 'none';
+            errorEl.textContent = 'Failed to load mailbox rules. Please try again.';
+            errorEl.style.display = 'block';
+          });
+      });
+    });
+  }());
+  </script>
+  {% endif %}
 {% endblock %}
