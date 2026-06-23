@@ -47,12 +47,13 @@ def test_normalise_workflow_steps_uses_step_type_from_config():
         ]
     }
 
-    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+    steps = workflows._normalise_workflow_steps(
+        policy_config, direction=workflows.DIRECTION_ONBOARDING
+    )
 
     assert len(steps) == 1
     assert steps[0]["name"] == "Create user"
     assert steps[0]["type"] == "m365_create_user"
-
 
 
 def test_normalise_workflow_steps_preserves_hudu_password_label_config():
@@ -70,12 +71,15 @@ def test_normalise_workflow_steps_preserves_hudu_password_label_config():
         ]
     }
 
-    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+    steps = workflows._normalise_workflow_steps(
+        policy_config, direction=workflows.DIRECTION_ONBOARDING
+    )
 
     assert len(steps) == 1
     assert steps[0]["_workflow_step_name"] == "Push password to Hudu"
     assert steps[0]["name"] == "${vars.staff.full_name} - M365 Password"
     assert steps[0]["type"] == "hudu_push_password"
+
 
 def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_direction():
     policy_config = {
@@ -83,7 +87,9 @@ def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_directi
         "offboarding_steps": [{"name": "Hide from GAL", "type": "m365_hide_from_gal"}],
     }
 
-    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_OFFBOARDING)
+    steps = workflows._normalise_workflow_steps(
+        policy_config, direction=workflows.DIRECTION_OFFBOARDING
+    )
 
     assert len(steps) == 1
     assert steps[0]["name"] == "Hide from GAL"
@@ -98,7 +104,9 @@ def test_normalise_workflow_steps_disabled_step_is_skipped():
         ]
     }
 
-    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+    steps = workflows._normalise_workflow_steps(
+        policy_config, direction=workflows.DIRECTION_ONBOARDING
+    )
 
     assert len(steps) == 1
     assert steps[0]["type"] == "provision_account"
@@ -112,7 +120,9 @@ def test_normalise_workflow_steps_no_enabled_key_defaults_to_enabled():
         ]
     }
 
-    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+    steps = workflows._normalise_workflow_steps(
+        policy_config, direction=workflows.DIRECTION_ONBOARDING
+    )
 
     assert len(steps) == 1
     assert steps[0]["type"] == "provision_account"
@@ -132,11 +142,14 @@ def test_normalise_workflow_steps_inner_config_enabled_false_does_not_skip_step(
         ]
     }
 
-    steps = workflows._normalise_workflow_steps(policy_config, direction=workflows.DIRECTION_ONBOARDING)
+    steps = workflows._normalise_workflow_steps(
+        policy_config, direction=workflows.DIRECTION_ONBOARDING
+    )
 
-    assert len(steps) == 1, "Step should execute when only inner config has enabled=False"
+    assert (
+        len(steps) == 1
+    ), "Step should execute when only inner config has enabled=False"
     assert steps[0]["type"] == "provision_account"
-
 
 
 def test_normalise_workflow_config_adds_key_from_type_for_old_format_steps():
@@ -178,17 +191,21 @@ def test_normalise_workflow_config_preserves_existing_key():
 
 
 def test_workflow_step_catalogs_include_pause_for_webhook():
-    onboarding_types = {step["type"]: step for step in staff_handlers._ONBOARDING_STEP_CATALOG}
-    offboarding_types = {step["type"]: step for step in staff_handlers._OFFBOARDING_STEP_CATALOG}
+    onboarding_types = {
+        step["type"]: step for step in staff_handlers._ONBOARDING_STEP_CATALOG
+    }
+    offboarding_types = {
+        step["type"]: step for step in staff_handlers._OFFBOARDING_STEP_CATALOG
+    }
 
     assert onboarding_types["wait_for_webhook"]["name"] == "Pause For Webhook"
     assert offboarding_types["wait_for_webhook"]["name"] == "Pause For Webhook"
 
 
-
-
 def test_workflow_policy_response_includes_pause_for_webhook_preview(monkeypatch):
-    monkeypatch.setattr(staff_handlers.settings, "public_base_url", "https://portal.example.test")
+    monkeypatch.setattr(
+        staff_handlers.settings, "public_base_url", "https://portal.example.test"
+    )
     monkeypatch.setattr(staff_handlers.settings, "portal_url", None)
 
     response = staff_handlers._normalise_workflow_policy_response(
@@ -200,19 +217,31 @@ def test_workflow_policy_response_includes_pause_for_webhook_preview(monkeypatch
             "workflow_name": "Starter",
             "config": {
                 "steps": [
-                    {"type": "wait_for_webhook", "name": "Pause For Webhook", "config": {"type": "wait_for_webhook"}},
+                    {
+                        "type": "wait_for_webhook",
+                        "name": "Pause For Webhook",
+                        "config": {"type": "wait_for_webhook"},
+                    },
                 ],
             },
         }
     )
 
     preview = response["config_json"]["steps"][0]["webhook_preview"]
-    assert preview["webhook_url"].startswith("https://portal.example.test/api/staff/workflow-webhooks/")
+    assert preview["webhook_url"].startswith(
+        "https://portal.example.test/api/staff/workflow-webhooks/"
+    )
     assert len(preview["post_key"]) == 43
+
 
 def test_normalise_custom_field_group_mappings_supports_dict_and_list_inputs():
     from_dict = workflows._normalise_custom_field_group_mappings(
-        {"custom_field_group_mappings": {"field_one": ["group-a", "group-b"], "field_two": "group-c,group-d"}}
+        {
+            "custom_field_group_mappings": {
+                "field_one": ["group-a", "group-b"],
+                "field_two": "group-c,group-d",
+            }
+        }
     )
     from_list = workflows._normalise_custom_field_group_mappings(
         {
@@ -238,7 +267,9 @@ async def test_execute_policy_steps_wait_checkpoint_returns_pause(monkeypatch):
     monkeypatch.setattr(
         workflows,
         "_normalise_workflow_steps",
-        lambda *_args, **_kwargs: [{"name": "Checkpoint", "type": "wait_external_checkpoint"}],
+        lambda *_args, **_kwargs: [
+            {"name": "Checkpoint", "type": "wait_external_checkpoint"}
+        ],
     )
     monkeypatch.setattr(
         workflows.workflow_repo,
@@ -247,8 +278,12 @@ async def test_execute_policy_steps_wait_checkpoint_returns_pause(monkeypatch):
     )
     checkpoint_mock = AsyncMock()
     update_state_mock = AsyncMock()
-    monkeypatch.setattr(workflows.workflow_repo, "create_external_checkpoint", checkpoint_mock)
-    monkeypatch.setattr(workflows.workflow_repo, "update_execution_state", update_state_mock)
+    monkeypatch.setattr(
+        workflows.workflow_repo, "create_external_checkpoint", checkpoint_mock
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo, "update_execution_state", update_state_mock
+    )
 
     result = await workflows._execute_policy_steps(
         execution_id=88,
@@ -303,7 +338,9 @@ async def test_execute_policy_steps_uses_per_step_retry_policy(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_execute_policy_steps_continues_when_step_failure_mode_continue(monkeypatch):
+async def test_execute_policy_steps_continues_when_step_failure_mode_continue(
+    monkeypatch,
+):
     monkeypatch.setattr(
         workflows,
         "_normalise_workflow_steps",
@@ -330,7 +367,9 @@ async def test_execute_policy_steps_continues_when_step_failure_mode_continue(mo
     monkeypatch.setattr(
         workflows,
         "_attempt_step",
-        AsyncMock(side_effect=[workflows.WorkflowStepError("rename failed"), {"hidden": True}]),
+        AsyncMock(
+            side_effect=[workflows.WorkflowStepError("rename failed"), {"hidden": True}]
+        ),
     )
 
     result = await workflows._execute_policy_steps(
@@ -371,7 +410,11 @@ async def test_execute_policy_steps_pauses_when_step_failure_mode_pause(monkeypa
     monkeypatch.setattr(
         workflows,
         "_attempt_step",
-        AsyncMock(side_effect=workflows.WorkflowStepError("create failed", request_payload={"user": "new.user@example.com"})),
+        AsyncMock(
+            side_effect=workflows.WorkflowStepError(
+                "create failed", request_payload={"user": "new.user@example.com"}
+            )
+        ),
     )
 
     result = await workflows._execute_policy_steps(
@@ -393,8 +436,12 @@ async def test_execute_policy_steps_pauses_when_step_failure_mode_pause(monkeypa
 
 
 @pytest.mark.anyio
-async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(monkeypatch):
-    monkeypatch.setattr(workflows, "_normalise_workflow_steps", lambda *_args, **_kwargs: [])
+async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows, "_normalise_workflow_steps", lambda *_args, **_kwargs: []
+    )
     monkeypatch.setattr(
         workflows.workflow_repo,
         "list_step_logs_for_execution_ids",
@@ -409,7 +456,11 @@ async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(m
     )
     attempt_mock = AsyncMock(return_value={"added": True})
     monkeypatch.setattr(workflows, "_attempt_step", attempt_mock)
-    monkeypatch.setattr(workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-123"}))
+    monkeypatch.setattr(
+        workflows,
+        "_resolve_staff_m365_user",
+        AsyncMock(return_value={"id": "user-123"}),
+    )
 
     result = await workflows._execute_policy_steps(
         execution_id=79,
@@ -437,13 +488,20 @@ async def test_execute_policy_steps_assigns_groups_from_selected_custom_fields(m
 
 @pytest.mark.anyio
 async def test_execute_policy_step_adds_user_to_teams_groups(monkeypatch):
-    monkeypatch.setattr(workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"}))
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     graph_post = AsyncMock(return_value={})
     monkeypatch.setattr(workflows.m365_service, "_graph_post", graph_post)
 
     result = await workflows._execute_policy_step(
-        step={"type": "m365_add_teams_group_member", "group_ids_csv": "group-a,group-b"},
+        step={
+            "type": "m365_add_teams_group_member",
+            "group_ids_csv": "group-a,group-b",
+        },
         company_id=9,
         staff={"id": 703, "email": "new.user@example.com"},
         policy_config={},
@@ -457,12 +515,25 @@ async def test_execute_policy_step_adds_user_to_teams_groups(monkeypatch):
 
 @pytest.mark.anyio
 async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatch):
-    monkeypatch.setattr(workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"}))
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows.m365_service,
         "_graph_get",
-        AsyncMock(return_value={"value": [{"id": "perm-1", "grantedToIdentitiesV2": [{"user": {"id": "user-2"}}]}]}),
+        AsyncMock(
+            return_value={
+                "value": [
+                    {
+                        "id": "perm-1",
+                        "grantedToIdentitiesV2": [{"user": {"id": "user-2"}}],
+                    }
+                ]
+            }
+        ),
     )
     graph_delete = AsyncMock(return_value={})
     monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
@@ -482,14 +553,23 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
 
 @pytest.mark.anyio
 async def test_run_offboarding_step_removes_calendar_events_when_enabled(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     remove_calendar_events_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(workflows.m365_service, "remove_calendar_events", remove_calendar_events_mock)
+    monkeypatch.setattr(
+        workflows.m365_service, "remove_calendar_events", remove_calendar_events_mock
+    )
 
     result = await workflows._run_offboarding_step(
         company_id=9,
@@ -509,15 +589,26 @@ async def test_run_offboarding_step_removes_calendar_events_when_enabled(monkeyp
 
 
 @pytest.mark.anyio
-async def test_run_offboarding_step_skips_calendar_event_removal_when_disabled(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+async def test_run_offboarding_step_skips_calendar_event_removal_when_disabled(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     remove_calendar_events_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(workflows.m365_service, "remove_calendar_events", remove_calendar_events_mock)
+    monkeypatch.setattr(
+        workflows.m365_service, "remove_calendar_events", remove_calendar_events_mock
+    )
 
     result = await workflows._run_offboarding_step(
         company_id=9,
@@ -538,11 +629,18 @@ async def test_run_offboarding_step_skips_calendar_event_removal_when_disabled(m
 
 @pytest.mark.anyio
 async def test_run_offboarding_step_disables_mailbox_rules_when_enabled(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     monkeypatch.setattr(
         workflows.m365_service,
@@ -580,12 +678,21 @@ async def test_run_offboarding_step_disables_mailbox_rules_when_enabled(monkeypa
 
 
 @pytest.mark.anyio
-async def test_run_offboarding_step_continues_when_mailbox_rule_patch_forbidden(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+async def test_run_offboarding_step_continues_when_mailbox_rule_patch_forbidden(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     monkeypatch.setattr(
         workflows.m365_service,
@@ -595,7 +702,9 @@ async def test_run_offboarding_step_continues_when_mailbox_rule_patch_forbidden(
     monkeypatch.setattr(
         workflows,
         "_graph_patch",
-        AsyncMock(side_effect=workflows.WorkflowStepError("Forbidden", http_status=403)),
+        AsyncMock(
+            side_effect=workflows.WorkflowStepError("Forbidden", http_status=403)
+        ),
     )
 
     result = await workflows._run_offboarding_step(
@@ -616,12 +725,21 @@ async def test_run_offboarding_step_continues_when_mailbox_rule_patch_forbidden(
 
 
 @pytest.mark.anyio
-async def test_run_offboarding_step_continues_when_mailbox_rules_list_forbidden(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+async def test_run_offboarding_step_continues_when_mailbox_rules_list_forbidden(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     monkeypatch.setattr(
         workflows.m365_service,
@@ -650,12 +768,21 @@ async def test_run_offboarding_step_continues_when_mailbox_rules_list_forbidden(
 
 
 @pytest.mark.anyio
-async def test_run_offboarding_step_skips_mailbox_rule_disable_when_mailbox_missing(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+async def test_run_offboarding_step_skips_mailbox_rule_disable_when_mailbox_missing(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     monkeypatch.setattr(
         workflows.m365_service,
@@ -766,7 +893,9 @@ async def test_execute_policy_step_disable_myportal_account_missing_email(monkey
     get_user = AsyncMock()
     monkeypatch.setattr(workflows.user_repo, "get_user_by_email", get_user)
 
-    with pytest.raises(workflows.WorkflowStepError, match="staff email is not available"):
+    with pytest.raises(
+        workflows.WorkflowStepError, match="staff email is not available"
+    ):
         await workflows._execute_policy_step(
             step={"type": "disable_myportal_account"},
             company_id=9,
@@ -779,12 +908,21 @@ async def test_execute_policy_step_disable_myportal_account_missing_email(monkey
 
 
 @pytest.mark.anyio
-async def test_run_offboarding_step_converts_mailbox_before_license_removal(monkeypatch):
-    monkeypatch.setattr(workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token"))
+async def test_run_offboarding_step_converts_mailbox_before_license_removal(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
     monkeypatch.setattr(
         workflows,
         "_resolve_staff_m365_user",
-        AsyncMock(return_value={"id": "user-2", "userPrincipalName": "offboard.user@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": "user-2",
+                "userPrincipalName": "offboard.user@example.com",
+            }
+        ),
     )
     call_order: list[str] = []
 
@@ -798,15 +936,25 @@ async def test_run_offboarding_step_converts_mailbox_before_license_removal(monk
         assert url.endswith("/users/user-2/licenseDetails")
         return {"value": [{"skuId": "sku-1"}]}
 
-    async def _graph_post(_token: str, url: str, payload: dict[str, object]) -> dict[str, object]:
+    async def _graph_post(
+        _token: str, url: str, payload: dict[str, object]
+    ) -> dict[str, object]:
         call_order.append("remove_licenses")
         assert url.endswith("/users/user-2/assignLicense")
         assert payload == {"addLicenses": [], "removeLicenses": ["sku-1"]}
         return {}
 
-    monkeypatch.setattr(workflows.m365_service, "convert_mailbox_to_shared", AsyncMock(side_effect=_convert))
-    monkeypatch.setattr(workflows.m365_service, "_graph_get", AsyncMock(side_effect=_graph_get))
-    monkeypatch.setattr(workflows.m365_service, "_graph_post", AsyncMock(side_effect=_graph_post))
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "convert_mailbox_to_shared",
+        AsyncMock(side_effect=_convert),
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get", AsyncMock(side_effect=_graph_get)
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_post", AsyncMock(side_effect=_graph_post)
+    )
 
     result = await workflows._run_offboarding_step(
         company_id=9,
@@ -825,3 +973,60 @@ async def test_run_offboarding_step_converts_mailbox_before_license_removal(monk
     assert "convert_to_shared_mailbox" in result["steps_executed"]
     assert result["converted_to_shared_mailbox"] is True
     assert result["licenses_removed"] == 1
+
+
+@pytest.mark.anyio
+async def test_confirm_webhook_checkpoint_marks_wait_step_success_before_resume(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_pending_external_checkpoint_by_webhook_id",
+        AsyncMock(
+            return_value={
+                "id": 12,
+                "company_id": 9,
+                "staff_id": 1001,
+                "execution_id": 88,
+                "webhook_post_key_hash": workflows.hash_api_key("secret-post-key"),
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo, "confirm_external_checkpoint", AsyncMock()
+    )
+    monkeypatch.setattr(workflows.audit_service, "log_action", AsyncMock())
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_execution_by_id",
+        AsyncMock(return_value={"id": 88, "current_step": "2:Pause for webhook"}),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "list_step_logs_for_execution_ids",
+        AsyncMock(return_value={88: []}),
+    )
+    append_log = AsyncMock()
+    monkeypatch.setattr(workflows.workflow_repo, "append_step_log", append_log)
+    resume = AsyncMock(
+        return_value={"state": workflows.STATE_COMPLETED, "execution_id": 88}
+    )
+    monkeypatch.setattr(
+        workflows,
+        "resume_staff_onboarding_workflow_after_external_confirmation",
+        resume,
+    )
+
+    result = await workflows.confirm_webhook_checkpoint_and_resume(
+        webhook_public_id="public-id",
+        post_key="secret-post-key",
+        source="test-webhook",
+        callback_payload={"ok": True},
+    )
+
+    assert result["state"] == workflows.STATE_COMPLETED
+    append_log.assert_awaited_once()
+    assert append_log.await_args.kwargs["execution_id"] == 88
+    assert append_log.await_args.kwargs["step_name"] == "Pause for webhook"
+    assert append_log.await_args.kwargs["status"] == "success"
+    resume.assert_awaited_once()
