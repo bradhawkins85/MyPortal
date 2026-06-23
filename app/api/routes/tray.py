@@ -636,7 +636,7 @@ async def tray_submit_syncro_ticket(
     full_description = _compose_ticket_description(
         payload=payload,
         normalised_email=normalised_email,
-        include_contact_block=syncro_contact_id is None,
+        include_contact_block=True,
         questions=questions,
         submitted_answers=submitted_answers,
     )
