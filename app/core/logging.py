@@ -81,27 +81,76 @@ def get_request_context() -> dict[str, Any]:
     return snapshot
 
 
+def _infer_feature_from_record(record: dict[str, Any]) -> str:
+    """Best-effort feature pack name for logs emitted from app.features modules."""
+
+    module_name = str(record.get("name") or "")
+    prefix = "app.features."
+    if module_name.startswith(prefix):
+        remainder = module_name[len(prefix) :]
+        feature = remainder.split(".", 1)[0].strip()
+        if feature:
+            return feature
+    return "-"
+
+
 def configure_logging() -> None:
     from app.core.config import get_settings
 
     logger.remove()
-    log_format = (
+    console_log_format = (
         "{time:YYYY-MM-DDTHH:mm:ss.SSSZ} | {level} | "
-        "{extra[request_id]} | {extra[user_id]} | {message}\n{exception}"
+        "{extra[request_id]} | {extra[user_id]} | {extra[feature]} | {message}\n{exception}"
+    )
+    file_log_format = (
+        "{time:YYYY-MM-DDTHH:mm:ss.SSSZ} | {level} | "
+        "{extra[request_id]} | {extra[user_id]} | {extra[feature]} | {message}"
     )
 
     # Default extras keep the format string safe even when context is missing.
-    logger.configure(extra={"request_id": "-", "user_id": "-"})
+    logger.configure(extra={"request_id": "-", "user_id": "-", "feature": "-"})
 
-    def _format_record(record: dict[str, Any]) -> str:  # pragma: no cover - thin shim
+    def _prepare_record(record: dict[str, Any]) -> None:
         record.setdefault("extra", {})
         record["extra"].setdefault("request_id", "-")
         record["extra"].setdefault("user_id", "-")
-        return log_format
+        if record["extra"].get("feature") in (None, "", "-"):
+            record["extra"]["feature"] = _infer_feature_from_record(record)
 
-    logger.add(sink=lambda msg: print(msg, end=""), format=_format_record)
+    def _format_console_record(record: dict[str, Any]) -> str:  # pragma: no cover - thin shim
+        _prepare_record(record)
+        return console_log_format
+
+    def _format_file_record(record: dict[str, Any]) -> str:  # pragma: no cover - thin shim
+        _prepare_record(record)
+        record["message"] = str(record["message"]).replace("\r", "\\r").replace("\n", "\\n")
+        return file_log_format + "\n"
+
+    logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record)
 
     settings = get_settings()
+    app_log_path = getattr(settings, "app_log_path", None)
+    if app_log_path:
+        app_log_path = app_log_path.expanduser()
+        if _ensure_log_path(app_log_path):
+            try:
+                rotation = _coerce_optional(getattr(settings, "log_rotation", None))
+                retention = _coerce_optional(getattr(settings, "log_retention", None))
+                compression = _coerce_optional(getattr(settings, "log_compression", None))
+                logger.add(
+                    str(app_log_path),
+                    format=_format_file_record,
+                    level="INFO",
+                    encoding="utf-8",
+                    enqueue=True,
+                    rotation=rotation,
+                    retention=retention,
+                    compression=compression,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging setup
+                logger.warning(
+                    f"APP LOG FILE DISABLED - unable to open file path={app_log_path} error={exc}"
+                )
     log_path = settings.fail2ban_log_path
     if log_path:
         log_path = log_path.expanduser()
@@ -112,7 +161,7 @@ def configure_logging() -> None:
                 compression = _coerce_optional(getattr(settings, "log_compression", None))
                 logger.add(
                     str(log_path),
-                    format=_format_record,
+                    format=_format_file_record,
                     level="INFO",
                     encoding="utf-8",
                     enqueue=True,
@@ -135,7 +184,7 @@ def configure_logging() -> None:
                 compression = _coerce_optional(getattr(settings, "log_compression", None))
                 logger.add(
                     str(error_log_path),
-                    format=_format_record,
+                    format=_format_file_record,
                     level="WARNING",
                     encoding="utf-8",
                     enqueue=True,
