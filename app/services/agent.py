@@ -118,114 +118,133 @@ def _has_membership_flag(
     return any(bool(membership.get(flag)) for membership in memberships)
 
 
-def _build_company_scope_clause(
-    alias: str,
-    company_ids: Sequence[int],
-    params: list[Any],
-) -> str:
-    if not company_ids:
-        return "1=0"
-    placeholders = ", ".join("?" for _ in company_ids)
-    params.extend(company_ids)
-    return f"{alias}.company_id IN ({placeholders})"
+def _coerce_user_id(user: Mapping[str, Any]) -> int:
+    try:
+        return int(user.get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 async def _search_chat_sources(
     query: str,
     *,
     user: Mapping[str, Any],
-    company_ids: Sequence[int],
     is_super_admin: bool,
     can_access_chat: bool,
 ) -> list[dict[str, Any]]:
     if not can_access_chat:
         return []
-    params: list[Any] = []
-    scope_clauses: list[str] = []
-    if is_super_admin:
-        scope_clauses.append("1=1")
-    elif company_ids:
-        scope_clauses.append(_build_company_scope_clause("r", company_ids, params))
-    try:
-        user_id = int(user.get("id") or 0)
-    except (TypeError, ValueError):
-        user_id = 0
-    if user_id > 0:
-        scope_clauses.append(
-            "EXISTS (SELECT 1 FROM chat_room_participants cp WHERE cp.room_id = r.id AND cp.user_id = ?)"
-        )
-        params.append(user_id)
-    if not scope_clauses:
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
         return []
     like = f"%{query}%"
-    params.extend([like, like, like, _CHAT_RESULT_LIMIT])
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id,
                MAX(m.sent_at) AS last_message_at,
                SUBSTR(MAX(m.body), 1, 320) AS matching_message
         FROM chat_rooms r
         LEFT JOIN chat_messages m ON m.room_id = r.id AND m.redacted_at IS NULL
-        WHERE ({' OR '.join(scope_clauses)})
+        WHERE (? = 1
+               OR EXISTS (
+                   SELECT 1 FROM user_companies uc
+                   WHERE uc.company_id = r.company_id AND uc.user_id = ?
+               )
+               OR EXISTS (
+                   SELECT 1 FROM chat_room_participants cp
+                   WHERE cp.room_id = r.id AND cp.user_id = ?
+               ))
           AND (r.subject LIKE ? OR r.room_alias LIKE ? OR m.body LIKE ?)
         GROUP BY r.id, r.subject, r.status, r.company_id, r.updated_at, r.linked_ticket_id
         ORDER BY COALESCE(MAX(m.sent_at), r.updated_at) DESC
         LIMIT ?
         """,
-        tuple(params),
+        (
+            1 if is_super_admin else 0,
+            user_id,
+            user_id,
+            like,
+            like,
+            like,
+            _CHAT_RESULT_LIMIT,
+        ),
     )
     return [dict(row) for row in rows or []]
 
 
 async def _search_order_sources(
-    query: str, *, company_ids: Sequence[int]
+    query: str, *, user: Mapping[str, Any], is_super_admin: bool
 ) -> list[dict[str, Any]]:
-    if not company_ids:
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
         return []
-    params: list[Any] = []
-    scope = _build_company_scope_clause("o", company_ids, params)
     like = f"%{query}%"
-    params.extend([like, like, like, like, _ORDER_RESULT_LIMIT])
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT o.order_number, o.company_id, MAX(o.order_date) AS order_date,
                MAX(o.status) AS status, MAX(o.shipping_status) AS shipping_status,
                MAX(o.po_number) AS po_number, MAX(o.consignment_id) AS consignment_id,
                MAX(o.notes) AS notes, COUNT(*) AS item_count
         FROM shop_orders o
         LEFT JOIN shop_products p ON p.id = o.product_id
-        WHERE {scope}
+        WHERE (? = 1
+               OR EXISTS (
+                   SELECT 1 FROM user_companies uc
+                   WHERE uc.company_id = o.company_id AND uc.user_id = ?
+               ))
           AND (o.order_number LIKE ? OR o.po_number LIKE ? OR o.notes LIKE ? OR p.name LIKE ?)
         GROUP BY o.order_number, o.company_id
         ORDER BY MAX(o.order_date) DESC
         LIMIT ?
         """,
-        tuple(params),
+        (
+            1 if is_super_admin else 0,
+            user_id,
+            like,
+            like,
+            like,
+            like,
+            _ORDER_RESULT_LIMIT,
+        ),
     )
     return [dict(row) for row in rows or []]
 
 
 async def _search_asset_sources(
-    query: str, *, company_ids: Sequence[int]
+    query: str, *, user: Mapping[str, Any], is_super_admin: bool
 ) -> list[dict[str, Any]]:
-    if not company_ids:
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
         return []
-    params: list[Any] = []
-    scope = _build_company_scope_clause("a", company_ids, params)
     like = f"%{query}%"
-    params.extend([like] * 8 + [_ASSET_RESULT_LIMIT])
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT a.id, a.company_id, a.name, a.type, a.serial_number, a.status,
                a.os_name, a.last_user, a.warranty_status, a.last_sync
         FROM assets a
-        WHERE {scope}
+        WHERE (? = 1
+               OR EXISTS (
+                   SELECT 1 FROM user_companies uc
+                   WHERE uc.company_id = a.company_id AND uc.user_id = ?
+               ))
           AND (a.name LIKE ? OR a.type LIKE ? OR a.serial_number LIKE ? OR a.status LIKE ?
                OR a.os_name LIKE ? OR a.last_user LIKE ? OR a.syncro_asset_id LIKE ? OR a.tactical_asset_id LIKE ?)
         ORDER BY COALESCE(a.last_sync, a.name) DESC, a.id DESC
         LIMIT ?
         """,
-        tuple(params),
+        (
+            1 if is_super_admin else 0,
+            user_id,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            _ASSET_RESULT_LIMIT,
+        ),
     )
     return [dict(row) for row in rows or []]
 
@@ -522,7 +541,6 @@ async def execute_agent_query(
         raw_chats = await _search_chat_sources(
             query_text,
             user=user,
-            company_ids=accessible_company_ids,
             is_super_admin=is_super_admin,
             can_access_chat=can_access_chat,
         )
@@ -550,7 +568,7 @@ async def execute_agent_query(
     if can_access_orders:
         try:
             raw_orders = await _search_order_sources(
-                query_text, company_ids=accessible_company_ids
+                query_text, user=user, is_super_admin=is_super_admin
             )
         except Exception as exc:  # pragma: no cover - defensive guard
             log_error("Agent order lookup failed", error=str(exc))
@@ -576,7 +594,7 @@ async def execute_agent_query(
     if can_manage_assets:
         try:
             raw_assets = await _search_asset_sources(
-                query_text, company_ids=accessible_company_ids
+                query_text, user=user, is_super_admin=is_super_admin
             )
         except Exception as exc:  # pragma: no cover - defensive guard
             log_error("Agent asset lookup failed", error=str(exc))
