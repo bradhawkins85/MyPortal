@@ -84,6 +84,19 @@ class AgentSourceCompany(BaseModel):
     syncro_company_id: Optional[str] = None
 
 
+class AgentSourceStaff(BaseModel):
+    id: int
+    company_id: Optional[int] = None
+    name: str
+    email: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
+    enabled: bool = True
+    is_ex_staff: bool = False
+    onboarding_status: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class AgentSourceIssueAssignment(BaseModel):
     company_id: Optional[int] = None
     company_name: Optional[str] = None
@@ -157,6 +170,7 @@ class AgentSources(BaseModel):
     orders: list[AgentSourceOrder] = Field(default_factory=list)
     assets: list[AgentSourceAsset] = Field(default_factory=list)
     companies: list[AgentSourceCompany] = Field(default_factory=list)
+    staff: list[AgentSourceStaff] = Field(default_factory=list)
     issues: list[AgentSourceIssue] = Field(default_factory=list)
     service_status: list[AgentSourceServiceStatus] = Field(default_factory=list)
     backup_jobs: list[AgentSourceBackupJob] = Field(default_factory=list)

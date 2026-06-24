@@ -33,11 +33,11 @@
     if (!items || items.length === 0) {
       return null;
     }
-    const section = document.createElement('section');
+    const section = document.createElement('details');
     section.className = 'agent-sources__group';
-    const heading = document.createElement('h4');
+    const heading = document.createElement('summary');
     heading.className = 'agent-sources__title';
-    heading.textContent = title;
+    heading.textContent = `${title} (${items.length})`;
     section.appendChild(heading);
 
     const list = document.createElement('ul');
@@ -153,6 +153,20 @@
     return `[#${id}] ${name}${syncro}`;
   }
 
+  function formatStaffSource(item) {
+    const id = escapeHtml(item.id);
+    const name = escapeHtml(item.name || `Staff #${item.id}`);
+    const metaParts = [];
+    if (item.email) metaParts.push(`Email: ${escapeHtml(item.email)}`);
+    if (item.job_title) metaParts.push(`Title: ${escapeHtml(item.job_title)}`);
+    if (item.department) metaParts.push(`Department: ${escapeHtml(item.department)}`);
+    if (item.onboarding_status) metaParts.push(`Status: ${escapeHtml(item.onboarding_status)}`);
+    if (item.is_ex_staff) metaParts.push('Ex-staff');
+    else if (item.enabled === false) metaParts.push('Disabled');
+    const meta = metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : '';
+    return `[#${id}] ${name}${meta}`;
+  }
+
   function formatIssueSource(item) {
     const id = escapeHtml(item.id);
     const name = escapeHtml(item.name || `Issue #${item.id}`);
@@ -254,6 +268,9 @@
     }
     if (Array.isArray(sources.companies)) {
       groups.push(createSourceList('Companies', sources.companies, formatCompanySource));
+    }
+    if (Array.isArray(sources.staff)) {
+      groups.push(createSourceList('Staff', sources.staff, formatStaffSource));
     }
     if (Array.isArray(sources.issues)) {
       groups.push(createSourceList('Issues', sources.issues, formatIssueSource));
