@@ -1685,6 +1685,16 @@ async def delete_category(category_id: int) -> bool:
             return cursor.rowcount > 0
 
 
+async def update_product_description(product_id: int, description: str | None) -> dict[str, Any] | None:
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute(
+                "UPDATE shop_products SET description = %s WHERE id = %s",
+                (description, product_id),
+            )
+    return await get_product_by_id(product_id, include_archived=True)
+
+
 async def update_product(
     product_id: int,
     *,

@@ -20,6 +20,7 @@ from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import shop as shop_repo
 from app.repositories import stock_feed as stock_feed_repo
+from app.services import product_descriptions
 
 
 class _ImageTooLargeError(Exception):
@@ -688,6 +689,19 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
                 existing_id = int(existing_product["id"])
             except (TypeError, ValueError):  # pragma: no cover - defensive
                 existing_id = None
+        imported_product = await shop_repo.get_product_by_sku(
+            cleaned_vendor_sku, include_archived=True
+        )
+        if imported_product and not existing_product:
+            try:
+                await product_descriptions.improve_product_description(int(imported_product["id"]))
+            except Exception as exc:  # pragma: no cover - AI/network/database safety
+                log_error(
+                    "Failed to refresh imported product description",
+                    vendor_sku=cleaned_vendor_sku,
+                    product_id=imported_product.get("id"),
+                    error=str(exc),
+                )
         log_info(
             "Imported product from stock feed",
             vendor_sku=cleaned_vendor_sku,
