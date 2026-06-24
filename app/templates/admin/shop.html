@@ -258,6 +258,10 @@
                     <button type="button" class="header-menu__item" role="menuitem" data-product-edit="{{ product.id }}">Edit</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-visibility="{{ product.id }}">Visibility</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-price-history="{{ product.id }}" data-product-sku="{{ product.vendor_sku or product.sku }}">Price History</button>
+                    <form action="/shop/admin/product/{{ product.id }}/refresh-description" method="post" class="header-menu__form">
+                      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                      <button type="submit" class="header-menu__item" role="menuitem">Refresh description</button>
+                    </form>
                     <form action="/shop/admin/product/{{ product.id }}/{{ 'unarchive' if product.archived else 'archive' }}" method="post" class="header-menu__form">
                       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
                       <button type="submit" class="header-menu__item" role="menuitem">{{ 'Unarchive' if product.archived else 'Archive' }}</button>
