@@ -2446,6 +2446,67 @@ async def admin_update_shop_product(
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+async def admin_bulk_refresh_shop_product_descriptions(request: Request):
+    from app.services import audit as audit_service
+    from app.services import product_descriptions
+    from app.repositories import shop as shop_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    include_archived = _form_bool(form, "include_archived")
+    products = await shop_repo.list_products_summary(
+        shop_repo.ProductFilters(include_archived=include_archived, sort="name_asc")
+    )
+
+    refreshed_count = 0
+    failed_count = 0
+    for product in products:
+        product_id = int(product["id"])
+        try:
+            result = await product_descriptions.improve_product_description(product_id)
+        except Exception as exc:  # pragma: no cover - defensive per-item isolation
+            failed_count += 1
+            _main().log_error(
+                "Bulk shop product description refresh failed for product",
+                product_id=product_id,
+                error=str(exc),
+            )
+            continue
+        if result is None:
+            failed_count += 1
+        else:
+            refreshed_count += 1
+
+    await audit_service.record(
+        action="shop.product.description_bulk_refresh",
+        request=request,
+        entity_type="shop.product",
+        metadata={
+            "include_archived": include_archived,
+            "requested_count": len(products),
+            "refreshed_count": refreshed_count,
+            "failed_count": failed_count,
+        },
+    )
+    _main().log_info(
+        "Bulk shop product descriptions refreshed",
+        requested_count=len(products),
+        refreshed_count=refreshed_count,
+        failed_count=failed_count,
+        include_archived=include_archived,
+        refreshed_by=current_user["id"] if current_user else None,
+    )
+
+    level = "warning" if failed_count else "success"
+    message = f"Refreshed {refreshed_count} product description{'s' if refreshed_count != 1 else ''}."
+    if failed_count:
+        message += f" {failed_count} product{'s' if failed_count != 1 else ''} could not be refreshed."
+    return flash_redirect("/admin/shop", message, level)
+
+
 async def admin_refresh_shop_product_description(request: Request, product_id: int):
     from app.services import audit as audit_service
     from app.services import product_descriptions
