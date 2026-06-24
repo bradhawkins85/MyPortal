@@ -160,6 +160,21 @@
     if (item.email) metaParts.push(`Email: ${escapeHtml(item.email)}`);
     if (item.job_title) metaParts.push(`Title: ${escapeHtml(item.job_title)}`);
     if (item.department) metaParts.push(`Department: ${escapeHtml(item.department)}`);
+    if (item.mobile_phone) metaParts.push(`Mobile: ${escapeHtml(item.mobile_phone)}`);
+    if (item.org_company) metaParts.push(`Organisation: ${escapeHtml(item.org_company)}`);
+    if (item.manager_name) metaParts.push(`Manager: ${escapeHtml(item.manager_name)}`);
+    if (item.account_action) metaParts.push(`Account action: ${escapeHtml(item.account_action)}`);
+    if (item.custom_fields && typeof item.custom_fields === 'object') {
+      const customValues = Object.keys(item.custom_fields)
+        .sort()
+        .filter((key) => {
+          const value = item.custom_fields[key];
+          return value != null && value !== '' && !(Array.isArray(value) && value.length === 0);
+        })
+        .slice(0, 5)
+        .map((key) => `${escapeHtml(key)}: ${escapeHtml(item.custom_fields[key])}`);
+      if (customValues.length) metaParts.push(`Custom fields: ${customValues.join(', ')}`);
+    }
     if (item.onboarding_status) metaParts.push(`Status: ${escapeHtml(item.onboarding_status)}`);
     if (item.is_ex_staff) metaParts.push('Ex-staff');
     else if (item.enabled === false) metaParts.push('Disabled');

@@ -91,6 +91,11 @@ class AgentSourceStaff(BaseModel):
     email: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
+    mobile_phone: Optional[str] = None
+    org_company: Optional[str] = None
+    manager_name: Optional[str] = None
+    account_action: Optional[str] = None
+    custom_fields: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     is_ex_staff: bool = False
     onboarding_status: Optional[str] = None
