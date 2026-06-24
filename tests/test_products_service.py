@@ -55,13 +55,37 @@ async def test_import_product_by_vendor_sku_processes_feed_item(monkeypatch):
 
     mock_process = AsyncMock(return_value=True)
     monkeypatch.setattr(products_service, "_process_feed_item", mock_process)
+    refresh = AsyncMock(return_value={"description": "AI", "features": []})
+    monkeypatch.setattr(products_service.product_descriptions, "improve_product_description", refresh)
 
     result = await products_service.import_product_by_vendor_sku("  ABC123  ")
 
     assert result is True
     mock_get_item.assert_awaited_once_with("ABC123")
-    mock_get_product.assert_awaited_once_with("ABC123", include_archived=True)
+    assert mock_get_product.await_args_list == [
+        call("ABC123", include_archived=True),
+        call("ABC123", include_archived=True),
+    ]
     mock_process.assert_awaited_once_with(item, existing_product)
+    refresh.assert_awaited_once_with(42)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_import_product_by_vendor_sku_refreshes_description_for_existing_product(monkeypatch):
+    item = {"sku": "ABC123"}
+    existing_product = {"id": 42}
+
+    monkeypatch.setattr(products_service.stock_feed_repo, "get_item_by_sku", AsyncMock(return_value=item))
+    get_product = AsyncMock(side_effect=[existing_product, existing_product])
+    monkeypatch.setattr(products_service.shop_repo, "get_product_by_sku", get_product)
+    monkeypatch.setattr(products_service, "_process_feed_item", AsyncMock(return_value=True))
+    refresh = AsyncMock(return_value={"description": "AI", "features": []})
+    monkeypatch.setattr(products_service.product_descriptions, "improve_product_description", refresh)
+
+    result = await products_service.import_product_by_vendor_sku("ABC123")
+
+    assert result is True
+    refresh.assert_awaited_once_with(42)
 
 
 @pytest.mark.anyio("asyncio")

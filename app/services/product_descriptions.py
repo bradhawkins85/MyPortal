@@ -13,7 +13,7 @@ from app.services.sanitization import sanitize_rich_text
 _PROMPT = """Below is a product description, without modifying the specifications redesign the layout in a user-friendly and easily readable way.
 
 Return JSON only with this shape:
-{"description_html":"safe HTML using headings, lists and tables", "features":[{"name":"Feature name","value":"Feature value"}]}
+{{"description_html":"safe HTML using headings, lists and tables", "features":[{{"name":"Feature name","value":"Feature value"}}]}}
 
 Product description:
 {description}
@@ -128,7 +128,11 @@ async def improve_product_description(product_id: int) -> dict[str, Any] | None:
     description_html: str | None = None
     features: list[dict[str, Any]] = []
     try:
-        response = await modules_service.trigger_module("ollama", {"prompt": _PROMPT.format(description=original), "format": "json"})
+        response = await modules_service.trigger_module(
+            "ollama",
+            {"prompt": _PROMPT.format(description=original), "format": "json"},
+            background=False,
+        )
         status = str(response.get("status") or "") if isinstance(response, Mapping) else ""
         if status not in {"skipped", "error"}:
             description_html, features = _parse_ai_payload(response.get("response") if isinstance(response, Mapping) else response)
