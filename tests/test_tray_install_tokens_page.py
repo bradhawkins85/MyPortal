@@ -157,3 +157,22 @@ async def test_tray_install_tokens_snippet_prefers_configured_portal_url(monkeyp
     await main.admin_tray_install_tokens_page(_make_request(), new_token="abc")
 
     assert captured["extra"]["portal_url"] == "https://portal.example.com"
+
+
+@pytest.mark.anyio
+async def test_tray_bulk_purge_revoked_install_tokens_calls_repo(monkeypatch):
+    import app.repositories.tray as tray_repo
+
+    monkeypatch.setattr(
+        main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
+    )
+    delete_mock = AsyncMock(return_value=2)
+    monkeypatch.setattr(tray_repo, "delete_revoked_install_tokens", delete_mock)
+
+    response = await main.admin_tray_bulk_purge_revoked_install_tokens(
+        _make_request("/admin/tray/install-tokens/bulk-purge-revoked")
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/tray/install-tokens"
+    delete_mock.assert_awaited_once()

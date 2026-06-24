@@ -6031,6 +6031,26 @@ async def admin_tray_revoke_install_token(token_id: int, request: Request):
     return RedirectResponse(url="/admin/tray/install-tokens", status_code=303)
 
 
+@app.post("/admin/tray/install-tokens/bulk-purge-revoked", response_class=HTMLResponse)
+async def admin_tray_bulk_purge_revoked_install_tokens(request: Request):
+    _current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import tray as tray_repo
+
+    deleted_count = await tray_repo.delete_revoked_install_tokens()
+    if deleted_count <= 0:
+        return flash_redirect(
+            "/admin/tray/install-tokens", "No revoked install tokens to purge.", "info"
+        )
+    suffix = "token" if deleted_count == 1 else "tokens"
+    return flash_redirect(
+        "/admin/tray/install-tokens",
+        f"Purged {deleted_count} revoked install {suffix}.",
+        "success",
+    )
+
+
 @app.post("/admin/tray/install-tokens/sync-tactical-rmm", response_class=HTMLResponse)
 async def admin_tray_sync_install_tokens_to_tactical_rmm(request: Request):
     current_user, redirect = await _require_super_admin_page(request)

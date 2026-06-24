@@ -6,7 +6,8 @@
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "Devices", "type": "link", "variant": "ghost", "href": "/admin/tray/devices"},
-    {"label": "Configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"}
+    {"label": "Configurations", "type": "link", "variant": "ghost", "href": "/admin/tray/configurations"},
+    {"label": "Bulk purge revoked", "type": "form", "variant": "danger", "action": "/admin/tray/install-tokens/bulk-purge-revoked", "confirm": "Purge all revoked tray install tokens? This permanently deletes token audit rows and cannot be undone."}
   ]) }}
 {% endblock %}
 
