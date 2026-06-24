@@ -164,11 +164,164 @@
     container.append(paragraph);
   }
 
+  const RICH_TEXT_ALLOWED_TAGS = new Set([
+    'a',
+    'b',
+    'blockquote',
+    'br',
+    'code',
+    'div',
+    'em',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'hr',
+    'i',
+    'img',
+    'li',
+    'ol',
+    'p',
+    'pre',
+    'span',
+    'strong',
+    'sub',
+    'sup',
+    'table',
+    'tbody',
+    'td',
+    'th',
+    'thead',
+    'tr',
+    'u',
+    'ul',
+  ]);
+  const RICH_TEXT_VOID_TAGS = new Set(['br', 'hr', 'img']);
+  const RICH_TEXT_ALLOWED_ATTRIBUTES = {
+    a: new Set(['href', 'title', 'target', 'rel']),
+    img: new Set(['src', 'alt', 'title', 'width', 'height', 'loading', 'decoding']),
+    span: new Set(['data-mention']),
+    table: new Set(['role']),
+  };
+  const RICH_TEXT_ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:', 'data:']);
+
+  function decodeHtmlEntities(value) {
+    return String(value || '')
+      .replace(/&#(\d+);/g, (_match, codepoint) => String.fromCodePoint(Number(codepoint)))
+      .replace(/&#x([0-9a-f]+);/gi, (_match, codepoint) => String.fromCodePoint(parseInt(codepoint, 16)))
+      .replace(/&nbsp;/g, '\u00a0')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+
+  function isSafeRichTextUrl(value) {
+    const url = String(value || '').trim();
+    if (!url) {
+      return false;
+    }
+    try {
+      return RICH_TEXT_ALLOWED_PROTOCOLS.has(new URL(url, window.location.origin).protocol);
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function applyRichTextAttribute(element, tagName, attributeName, attributeValue) {
+    const allowedAttributes = RICH_TEXT_ALLOWED_ATTRIBUTES[tagName];
+    if (!allowedAttributes || !allowedAttributes.has(attributeName)) {
+      return;
+    }
+
+    const value = decodeHtmlEntities(attributeValue || '');
+    if ((attributeName === 'href' || attributeName === 'src') && !isSafeRichTextUrl(value)) {
+      return;
+    }
+    if ((attributeName === 'width' || attributeName === 'height') && !/^\d{1,4}$/.test(value)) {
+      return;
+    }
+    if (attributeName === 'target' && value !== '_blank') {
+      return;
+    }
+    if (attributeName === 'loading' && !['lazy', 'eager'].includes(value)) {
+      return;
+    }
+    if (attributeName === 'decoding' && !['async', 'sync', 'auto'].includes(value)) {
+      return;
+    }
+    element.setAttribute(attributeName, value);
+    if (tagName === 'a' && attributeName === 'target' && value === '_blank') {
+      element.setAttribute('rel', 'noopener noreferrer');
+    }
+  }
+
+  function appendRichTextHtml(container, html) {
+    const rootStack = [container];
+    const tagPattern = /<\/?[a-zA-Z][^>]*>/g;
+    let cursor = 0;
+    let match;
+
+    while ((match = tagPattern.exec(html)) !== null) {
+      const text = html.slice(cursor, match.index);
+      if (text) {
+        rootStack[rootStack.length - 1].append(document.createTextNode(decodeHtmlEntities(text)));
+      }
+
+      const token = match[0];
+      const closingMatch = token.match(/^<\/\s*([a-zA-Z0-9]+)\s*>$/);
+      if (closingMatch) {
+        const closingTag = closingMatch[1].toLowerCase();
+        for (let index = rootStack.length - 1; index > 0; index -= 1) {
+          if (rootStack[index].tagName && rootStack[index].tagName.toLowerCase() === closingTag) {
+            rootStack.length = index;
+            break;
+          }
+        }
+        cursor = tagPattern.lastIndex;
+        continue;
+      }
+
+      const openingMatch = token.match(/^<\s*([a-zA-Z0-9]+)([^>]*)>$/);
+      if (!openingMatch) {
+        cursor = tagPattern.lastIndex;
+        continue;
+      }
+
+      const tagName = openingMatch[1].toLowerCase();
+      if (!RICH_TEXT_ALLOWED_TAGS.has(tagName)) {
+        cursor = tagPattern.lastIndex;
+        continue;
+      }
+
+      const element = document.createElement(tagName);
+      const attributes = openingMatch[2] || '';
+      attributes.replace(/([a-zA-Z][\w:-]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+))/g, (_attr, rawName, _rawValue, doubleQuoted, singleQuoted, unquoted) => {
+        applyRichTextAttribute(element, tagName, rawName.toLowerCase(), doubleQuoted || singleQuoted || unquoted || '');
+        return '';
+      });
+
+      rootStack[rootStack.length - 1].append(element);
+      if (!RICH_TEXT_VOID_TAGS.has(tagName) && !/\/\s*>$/.test(token)) {
+        rootStack.push(element);
+      }
+      cursor = tagPattern.lastIndex;
+    }
+
+    const remainingText = html.slice(cursor);
+    if (remainingText) {
+      rootStack[rootStack.length - 1].append(document.createTextNode(decodeHtmlEntities(remainingText)));
+    }
+  }
+
   function renderProductDetails(container, product) {
     if (!container) {
       return;
     }
-    container.innerHTML = '';
+    container.replaceChildren();
 
     if (!product) {
       const empty = document.createElement('p');
@@ -203,7 +356,7 @@
       const descriptionDiv = document.createElement('div');
       descriptionDiv.className = 'modal__description rich-text-viewer';
       if (descriptionHtml) {
-        descriptionDiv.innerHTML = descriptionHtml;
+        appendRichTextHtml(descriptionDiv, descriptionHtml);
       } else {
         descriptionDiv.textContent = descriptionText;
       }
