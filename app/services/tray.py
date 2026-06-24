@@ -185,6 +185,14 @@ def _extract_trmm_custom_field_id(
     return None
 
 
+def _coerce_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _iter_trmm_custom_field_definitions(response: Any) -> Iterable[dict[str, Any]]:
     if isinstance(response, list):
         for item in response:
@@ -210,12 +218,49 @@ def _extract_trmm_client_custom_field_definition_id(
         model = str(field.get("model") or "").strip().casefold()
         if name != target_name or model != "client":
             continue
-        raw_id = field.get("id") or field.get("pk") or field.get("field")
-        try:
-            return int(raw_id)
-        except (TypeError, ValueError):
-            return None
+        field_id = _coerce_positive_int(
+            field.get("id") or field.get("pk") or field.get("field")
+        )
+        if field_id is not None:
+            return field_id
     return None
+
+
+def _build_trmm_client_custom_field_payload(
+    client: dict[str, Any], field_id: int, token: str
+) -> list[dict[str, Any]]:
+    """Return TRMM client custom-field values preserving unrelated fields.
+
+    Tactical RMM client responses identify custom-field values by numeric
+    definition IDs in the ``field`` property rather than by field name. When
+    updating a single client field, include the existing field value ``id`` (if
+    present) and keep the rest of the custom-field array intact so the PUT does
+    not accidentally clear unrelated client custom fields.
+    """
+
+    payload: list[dict[str, Any]] = []
+    found_target = False
+    for existing in client.get("custom_fields") or []:
+        if not isinstance(existing, dict):
+            continue
+        existing_field_id = _coerce_positive_int(existing.get("field"))
+        if existing_field_id is None:
+            continue
+        item: dict[str, Any] = {
+            "field": existing_field_id,
+            "value": existing.get("value"),
+        }
+        value_id = _coerce_positive_int(existing.get("id") or existing.get("pk"))
+        if value_id is not None:
+            item["id"] = value_id
+        if existing_field_id == field_id:
+            item["value"] = token
+            found_target = True
+        payload.append(item)
+
+    if not found_target:
+        payload.append({"field": field_id, "value": token})
+    return payload
 
 
 async def update_trmm_client_token_field(
@@ -253,13 +298,15 @@ async def update_trmm_client_token_field(
             f'Tactical RMM client custom field "{custom_field_name}" was not found'
         )
 
-    custom_field_payload = {"field": field_id, "string_value": token}
+    custom_field_payload = _build_trmm_client_custom_field_payload(
+        client, field_id, token
+    )
 
-    # Tactical RMM's custom-field update examples use ``PUT`` with only the
-    # ``custom_fields`` array in the request body.  Keeping the payload scoped
-    # to the client endpoint ensures we update the client-level value, not an
-    # agent or site field.
-    body = {"custom_fields": [custom_field_payload]}
+    # Tactical RMM returns client custom-field values as ``{"field": <id>,
+    # "value": ...}`` entries, often without the field name.  Send the same
+    # value shape back and preserve unrelated fields so updating the tray token
+    # does not clear other client-level custom fields.
+    body = {"custom_fields": custom_field_payload}
     return await tacticalrmm_service._call_endpoint(
         f"/clients/{client_id}/", method="PUT", body=body
     )
