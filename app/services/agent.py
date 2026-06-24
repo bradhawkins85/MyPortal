@@ -215,44 +215,59 @@ async def _search_service_status_sources(
         return []
     rows = await db.fetch_all(
         """
-        SELECT s.id, s.name, s.description, s.status, s.status_message, s.updated_at
+        SELECT
+            s.id,
+            s.name,
+            s.description,
+            s.status,
+            s.status_message,
+            s.updated_at,
+            sc.company_id
         FROM service_status_services s
+        LEFT JOIN service_status_service_companies sc ON sc.service_id = s.id
         WHERE s.is_active = 1
-          AND (
-              ? = 1
-              OR NOT EXISTS (
-                  SELECT 1 FROM service_status_service_companies sc
-                  WHERE sc.service_id = s.id
-              )
-              OR EXISTS (
-                  SELECT 1 FROM service_status_service_companies sc
-                  WHERE sc.service_id = s.id AND sc.company_id IN ({placeholders})
-              )
-          )
           AND (s.name LIKE ? OR s.description LIKE ? OR s.status LIKE ? OR s.status_message LIKE ?)
         ORDER BY s.display_order ASC, s.name ASC
-        LIMIT ?
-        """.format(placeholders=", ".join(["?"] * len(company_ids)) or "NULL"),
+        """,
         (
-            1 if is_super_admin else 0,
-            *company_ids,
             f"%{query}%",
             f"%{query}%",
             f"%{query}%",
             f"%{query}%",
-            _SYSTEM_RESULT_LIMIT,
         ),
     )
-    return [
-        {
-            "id": row.get("id"),
-            "name": row.get("name") or f"Service #{row.get('id')}",
-            "description": _truncate(row.get("description")),
-            "status": row.get("status"),
-            "status_message": _truncate(row.get("status_message")),
-        }
-        for row in rows or []
-    ]
+
+    allowed_company_ids = set(company_ids)
+    services: dict[int, dict[str, Any]] = {}
+    service_company_ids: dict[int, set[int]] = {}
+    for row in rows or []:
+        service_id = row.get("id")
+        if service_id is None:
+            continue
+        services.setdefault(service_id, row)
+        company_id = row.get("company_id")
+        if company_id is not None:
+            service_company_ids.setdefault(service_id, set()).add(company_id)
+
+    sources: list[dict[str, Any]] = []
+    for service_id, row in services.items():
+        restricted_company_ids = service_company_ids.get(service_id, set())
+        is_restricted = bool(restricted_company_ids)
+        is_allowed = bool(restricted_company_ids & allowed_company_ids)
+        if not is_super_admin and is_restricted and not is_allowed:
+            continue
+        sources.append(
+            {
+                "id": row.get("id"),
+                "name": row.get("name") or f"Service #{row.get('id')}",
+                "description": _truncate(row.get("description")),
+                "status": row.get("status"),
+                "status_message": _truncate(row.get("status_message")),
+            }
+        )
+        if len(sources) >= _SYSTEM_RESULT_LIMIT:
+            break
+    return sources
 
 
 async def _search_backup_job_sources(
@@ -341,7 +356,11 @@ async def _search_reporting_query_sources(
 
 
 async def _search_mailbox_sources(
-    query: str, *, memberships: Sequence[Mapping[str, Any]], company_ids: Sequence[int], is_super_admin: bool
+    query: str,
+    *,
+    memberships: Sequence[Mapping[str, Any]],
+    company_ids: Sequence[int],
+    is_super_admin: bool,
 ) -> list[dict[str, Any]]:
     can_user = _has_membership_flag(
         memberships, "can_view_m365_user_mailboxes", is_super_admin=is_super_admin
@@ -351,32 +370,27 @@ async def _search_mailbox_sources(
     )
     if (not can_user and not can_shared) or not company_ids:
         return []
-    mailbox_types = []
-    if can_user:
-        mailbox_types.append("UserMailbox")
-    if can_shared:
-        mailbox_types.append("SharedMailbox")
-    placeholders_companies = ", ".join(["?"] * len(company_ids)) or "NULL"
-    placeholders_types = ", ".join(["?"] * len(mailbox_types))
+    include_user_mailboxes = 1 if can_user else 0
+    include_shared_mailboxes = 1 if can_shared else 0
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT company_id, user_principal_name, display_name, mailbox_type, storage_used_bytes
         FROM m365_mailboxes
-        WHERE company_id IN ({placeholders_companies})
-          AND mailbox_type IN ({placeholders_types})
+        WHERE ((? = 1 AND mailbox_type = ?) OR (? = 1 AND mailbox_type = ?))
           AND (user_principal_name LIKE ? OR display_name LIKE ? OR mailbox_type LIKE ?)
         ORDER BY display_name ASC
-        LIMIT ?
         """,
         (
-            *company_ids,
-            *mailbox_types,
+            include_user_mailboxes,
+            "UserMailbox",
+            include_shared_mailboxes,
+            "SharedMailbox",
             f"%{query}%",
             f"%{query}%",
             f"%{query}%",
-            _SYSTEM_RESULT_LIMIT,
         ),
     )
+    allowed_company_ids = set(company_ids)
     return [
         {
             "company_id": row.get("company_id"),
@@ -387,7 +401,8 @@ async def _search_mailbox_sources(
         }
         for row in rows or []
         if row.get("user_principal_name")
-    ]
+        and row.get("company_id") in allowed_company_ids
+    ][:_SYSTEM_RESULT_LIMIT]
 
 
 async def _search_best_practice_sources(
