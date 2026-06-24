@@ -453,6 +453,25 @@ async def log_command(
     return int(last_id) if last_id else 0
 
 
+async def get_queued_commands_for_device(device_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
+    """Return queued commands for a device in creation order.
+
+    Commands may be queued when an admin action targets a device whose
+    websocket is connected to a different app process or is offline.  The
+    websocket handler drains this queue when the device reconnects so admin
+    actions are not silently lost.
+    """
+
+    placeholder = "?" if db.is_sqlite() else "%s"
+    rows = await db.fetch_all(
+        f"SELECT * FROM tray_command_log "
+        f"WHERE device_id = {placeholder} AND status = 'queued' "
+        f"ORDER BY created_at ASC, id ASC LIMIT {int(limit)}",
+        (device_id,),
+    )
+    return [dict(row) for row in rows]
+
+
 async def mark_command_delivered(command_id: int, *, error: str | None = None) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)

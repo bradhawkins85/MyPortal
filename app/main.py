@@ -970,6 +970,7 @@ async def tray_device_socket(websocket: WebSocket, device_uid: str) -> None:
 
     await websocket.accept()
     tray_service.register_connection(device_uid, websocket)
+    await tray_service.deliver_queued_commands(device)
     try:
         while True:
             try:
@@ -5857,15 +5858,18 @@ async def admin_tray_update_device(device_id: int, request: Request):
         )
 
     payload = {"type": "update"}
-    device_uid = str(device.get("device_uid") or "").strip()
-    delivered = await tray_service.send_to_device(device_uid, payload) if device_uid else False
-    await tray_repo.log_command(
+    command_id = await tray_repo.log_command(
         device_id=int(device["id"]),
         command="update",
         payload_json=json.dumps(payload),
         initiated_by_user_id=current_user.get("id") if current_user else None,
-        status="delivered" if delivered else "queued",
+        status="queued",
     )
+    payload["command_id"] = command_id
+    device_uid = str(device.get("device_uid") or "").strip()
+    delivered = await tray_service.send_to_device(device_uid, payload) if device_uid else False
+    if delivered:
+        await tray_repo.mark_command_delivered(command_id)
     if delivered:
         return flash_redirect(
             "/admin/tray/devices",
