@@ -192,20 +192,22 @@
     appendDetail(container, 'Quantity in cart', product.quantity);
     appendDetail(container, 'Line total', `$${product.line_total}`);
 
-    if (product.description) {
+    const descriptionHtml = typeof product.description_html === 'string' ? product.description_html.trim() : '';
+    const descriptionText = typeof product.description === 'string' ? product.description.trim() : '';
+    if (descriptionHtml || descriptionText) {
       const descriptionTitle = document.createElement('h3');
       descriptionTitle.className = 'modal__subtitle';
       descriptionTitle.textContent = 'Description';
       container.append(descriptionTitle);
 
-      String(product.description)
-        .split(/\r?\n/)
-        .filter((line) => line.trim().length > 0)
-        .forEach((line) => {
-          const paragraph = document.createElement('p');
-          paragraph.textContent = line;
-          container.append(paragraph);
-        });
+      const descriptionDiv = document.createElement('div');
+      descriptionDiv.className = 'modal__description rich-text-viewer';
+      if (descriptionHtml) {
+        descriptionDiv.innerHTML = descriptionHtml;
+      } else {
+        descriptionDiv.textContent = descriptionText;
+      }
+      container.append(descriptionDiv);
     }
   }
 
