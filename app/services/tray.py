@@ -600,6 +600,54 @@ async def send_to_device(
         return False
 
 
+async def deliver_queued_commands(device: dict[str, Any]) -> dict[str, int]:
+    """Send queued commands to a freshly connected device.
+
+    The admin device page logs commands as ``queued`` before attempting live
+    websocket delivery.  If live delivery is impossible (for example the tray
+    is offline or connected to another web worker), this reconnect drain is
+    the reliable path that ensures the tray service eventually receives the
+    command.
+    """
+
+    device_uid = str(device.get("device_uid") or "").strip()
+    if not device_uid:
+        return {"delivered": 0, "failed": 0}
+
+    delivered = 0
+    failed = 0
+    commands = await tray_repo.get_queued_commands_for_device(int(device["id"]))
+    for command in commands:
+        payload: dict[str, Any]
+        raw_payload = command.get("payload_json")
+        if raw_payload:
+            try:
+                parsed = json.loads(raw_payload)
+                payload = parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                payload = {}
+        else:
+            payload = {}
+        payload.setdefault("type", command.get("command"))
+        payload.setdefault("command_id", command.get("id"))
+
+        if await send_to_device(device_uid, payload):
+            await tray_repo.mark_command_delivered(int(command["id"]))
+            delivered += 1
+        else:
+            failed += 1
+            break
+
+    if delivered or failed:
+        log_info(
+            "Tray queued command delivery complete",
+            device_uid=device_uid,
+            delivered=delivered,
+            failed=failed,
+        )
+    return {"delivered": delivered, "failed": failed}
+
+
 async def push_notification_to_company_devices(
     *,
     company_id: int | None,
