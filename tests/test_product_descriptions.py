@@ -32,3 +32,36 @@ def test_parse_ai_payload_sanitizes_html_and_features():
     assert "script" not in (html or "").lower()
     assert "Safe" in (html or "")
     assert features == [{"name": "Warranty", "value": "3 years", "position": 0}]
+
+import pytest
+from unittest.mock import AsyncMock
+
+
+@pytest.mark.anyio("asyncio")
+async def test_improve_product_description_invokes_ollama_synchronously(monkeypatch):
+    monkeypatch.setattr(
+        product_descriptions.shop_repo,
+        "get_product_by_id",
+        AsyncMock(return_value={"id": 10, "description": "CPU: Fast"}),
+    )
+    trigger = AsyncMock(
+        return_value={
+            "status": "success",
+            "response": '{"description_html":"<h3>Overview</h3><p>AI copy</p>","features":[{"name":"CPU","value":"Fast"}]}',
+        }
+    )
+    monkeypatch.setattr(product_descriptions.modules_service, "trigger_module", trigger)
+    update = AsyncMock(return_value={"description": "<h3>Overview</h3><p>AI copy</p>"})
+    monkeypatch.setattr(product_descriptions.shop_repo, "update_product_description", update)
+    replace = AsyncMock()
+    monkeypatch.setattr(product_descriptions.shop_repo, "replace_product_features", replace)
+
+    result = await product_descriptions.improve_product_description(10)
+
+    assert result == {
+        "description": "<h3>Overview</h3><p>AI copy</p>",
+        "features": [{"name": "CPU", "value": "Fast", "position": 0}],
+    }
+    trigger.assert_awaited_once()
+    assert trigger.await_args.args[0] == "ollama"
+    assert trigger.await_args.kwargs["background"] is False
