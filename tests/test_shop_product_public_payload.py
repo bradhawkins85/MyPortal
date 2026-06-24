@@ -1,4 +1,4 @@
-from app import main
+from app.features.shop import handlers
 
 
 def test_public_shop_product_payload_strips_internal_fields() -> None:
@@ -30,7 +30,7 @@ def test_public_shop_product_payload_strips_internal_fields() -> None:
         "scheduled_buy_price": 8.0,
     }
 
-    payload = main._public_shop_product_payload(product, is_vip=False)
+    payload = handlers._public_shop_product_payload(product, is_vip=False)
 
     assert payload["id"] == 10
     assert payload["price"] == 25.0
@@ -50,6 +50,22 @@ def test_public_shop_product_payload_uses_vip_price_for_vip_company() -> None:
         "vip_price": 22.0,
     }
 
-    payload = main._public_shop_product_payload(product, is_vip=True)
+    payload = handlers._public_shop_product_payload(product, is_vip=True)
 
     assert payload["price"] == 22.0
+
+
+def test_public_shop_product_payload_exposes_sanitized_description_html() -> None:
+    product = {
+        "id": 12,
+        "name": "Firewall",
+        "description": "<h3>Specs</h3><script>alert(1)</script><p>Safe</p>",
+    }
+
+    payload = handlers._public_shop_product_payload(product, is_vip=False)
+
+    assert payload["description"] == product["description"]
+    assert "description_html" in payload
+    assert "script" not in payload["description_html"].lower()
+    assert "<h3>Specs</h3>" in payload["description_html"]
+    assert "<p>Safe</p>" in payload["description_html"]
