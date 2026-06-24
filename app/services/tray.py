@@ -175,9 +175,42 @@ def _extract_trmm_custom_field_id(
     for field in client.get("custom_fields") or []:
         if not isinstance(field, dict):
             continue
-        if str(field.get("name") or "").strip() != field_name:
+        if str(field.get("name") or "").strip().casefold() != field_name.casefold():
             continue
         raw_id = field.get("field") or field.get("id") or field.get("pk")
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _iter_trmm_custom_field_definitions(response: Any) -> Iterable[dict[str, Any]]:
+    if isinstance(response, list):
+        for item in response:
+            if isinstance(item, dict):
+                yield item
+        return
+    if isinstance(response, dict):
+        for key in ("results", "custom_fields", "items", "data"):
+            value = response.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        yield item
+                return
+
+
+def _extract_trmm_client_custom_field_definition_id(
+    response: Any, field_name: str
+) -> int | None:
+    target_name = field_name.strip().casefold()
+    for field in _iter_trmm_custom_field_definitions(response):
+        name = str(field.get("name") or "").strip().casefold()
+        model = str(field.get("model") or "").strip().casefold()
+        if name != target_name or model != "client":
+            continue
+        raw_id = field.get("id") or field.get("pk") or field.get("field")
         try:
             return int(raw_id)
         except (TypeError, ValueError):
@@ -208,20 +241,25 @@ async def update_trmm_client_token_field(
     if not isinstance(client, dict):
         client = {}
     field_id = _extract_trmm_custom_field_id(client, custom_field_name)
+    if field_id is None:
+        definitions = await tacticalrmm_service._call_endpoint(
+            "/core/customfields/", method="GET"
+        )
+        field_id = _extract_trmm_client_custom_field_definition_id(
+            definitions, custom_field_name
+        )
+    if field_id is None:
+        raise ValueError(
+            f'Tactical RMM client custom field "{custom_field_name}" was not found'
+        )
 
-    custom_field_payload: dict[str, Any]
-    if field_id is not None:
-        custom_field_payload = {"field": field_id, "string_value": token}
-    else:
-        # Recent TRMM builds expose the field ID in the client response. Keep a
-        # name-based fallback so the sync still works on APIs that accept names.
-        custom_field_payload = {"name": custom_field_name, "string_value": token}
+    custom_field_payload = {"field": field_id, "string_value": token}
 
-    # Tactical RMM's client update API is implemented as ``put`` (not
-    # ``patch``) and expects a top-level ``client`` object even when only
-    # custom fields are being updated.  Sending PATCH here causes TRMM to
-    # return HTTP 405: ``Method \"PATCH\" not allowed.``
-    body = {"client": {}, "custom_fields": [custom_field_payload]}
+    # Tactical RMM's custom-field update examples use ``PUT`` with only the
+    # ``custom_fields`` array in the request body.  Keeping the payload scoped
+    # to the client endpoint ensures we update the client-level value, not an
+    # agent or site field.
+    body = {"custom_fields": [custom_field_payload]}
     return await tacticalrmm_service._call_endpoint(
         f"/clients/{client_id}/", method="PUT", body=body
     )
