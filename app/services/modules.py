@@ -41,6 +41,11 @@ REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
+_TACTICALRMM_RATE_LIMIT_LOCK = asyncio.Lock()
+_TACTICALRMM_LAST_REQUEST_AT: float | None = None
+_TACTICALRMM_DEFAULT_CALLS_PER_SECOND = 1.0
+
+
 # Module slug constants
 XERO_MODULE_SLUG = "xero"
 
@@ -68,6 +73,53 @@ DEFAULT_CHATGPT_TOOLS = [
     "createTicketReply",
     "updateTicket",
 ]
+
+
+def _get_tacticalrmm_calls_per_second() -> float:
+    """Return the configured TacticalRMM request rate limit.
+
+    The value is intentionally loaded from the environment at call time so
+    operators can tune ``TACTICALRMM_CALLS_PER_SECOND`` via the ``.env`` file
+    without storing throttling configuration in the encrypted module settings.
+    Invalid, blank, or non-positive values safely fall back to one request per
+    second.
+    """
+    raw_value = os.getenv("TACTICALRMM_CALLS_PER_SECOND", "").strip()
+    if not raw_value:
+        return _TACTICALRMM_DEFAULT_CALLS_PER_SECOND
+    try:
+        calls_per_second = float(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid TACTICALRMM_CALLS_PER_SECOND value; using default",
+            value=raw_value,
+            default=_TACTICALRMM_DEFAULT_CALLS_PER_SECOND,
+        )
+        return _TACTICALRMM_DEFAULT_CALLS_PER_SECOND
+    if calls_per_second <= 0:
+        logger.warning(
+            "Non-positive TACTICALRMM_CALLS_PER_SECOND value; using default",
+            value=raw_value,
+            default=_TACTICALRMM_DEFAULT_CALLS_PER_SECOND,
+        )
+        return _TACTICALRMM_DEFAULT_CALLS_PER_SECOND
+    return calls_per_second
+
+
+async def _throttle_tacticalrmm_request() -> None:
+    """Serialize TacticalRMM API calls so they respect the configured rate."""
+    global _TACTICALRMM_LAST_REQUEST_AT
+    calls_per_second = _get_tacticalrmm_calls_per_second()
+    min_interval = 1.0 / calls_per_second
+    loop = asyncio.get_running_loop()
+    async with _TACTICALRMM_RATE_LIMIT_LOCK:
+        now = loop.time()
+        if _TACTICALRMM_LAST_REQUEST_AT is not None:
+            wait_seconds = (_TACTICALRMM_LAST_REQUEST_AT + min_interval) - now
+            if wait_seconds > 0:
+                await asyncio.sleep(wait_seconds)
+                now = loop.time()
+        _TACTICALRMM_LAST_REQUEST_AT = now
 
 
 def _hash_secret(secret: str) -> str:
@@ -2814,6 +2866,7 @@ async def _invoke_tacticalrmm(
         event_future.set_result(event_id)
     attempt_number = 1
     try:
+        await _throttle_tacticalrmm_request()
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=True) as client:
             response = await client.request(method, url, json=request_body, headers=headers)
         response.raise_for_status()
