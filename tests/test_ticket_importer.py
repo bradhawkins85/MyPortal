@@ -1710,7 +1710,7 @@ def test_extract_comment_image_candidates_from_html_img():
         {
             "url": "https://example.test/files/image.png",
             "filename": "screen.png",
-            "mime_type": None,
+            "mime_type": "image/png",
         }
     ]
 
@@ -1725,6 +1725,29 @@ def test_extract_comment_image_candidates_from_attachments_only_images():
 
     assert ticket_importer._extract_comment_image_candidates(comment) == [
         {"url": "/attachments/1", "filename": "photo", "mime_type": "image/png"}
+    ]
+
+
+def test_extract_comment_image_candidates_from_nested_inline_attachment_urls():
+    comment = {
+        "body": "Screenshots: [embedded image]",
+        "attachments": [
+            {
+                "attachment": {
+                    "content_url": "https://example.test/ticket-attachments/inline",
+                    "file_name": "[embedded image]",
+                    "content_type": "image/jpeg",
+                }
+            }
+        ],
+    }
+
+    assert ticket_importer._extract_comment_image_candidates(comment) == [
+        {
+            "url": "https://example.test/ticket-attachments/inline",
+            "filename": "[embedded image]",
+            "mime_type": "image/jpeg",
+        }
     ]
 
 
