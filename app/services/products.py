@@ -706,7 +706,7 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
         imported_product = await shop_repo.get_product_by_sku(
             cleaned_vendor_sku, include_archived=True
         )
-        if imported_product and not existing_product:
+        if imported_product and imported_product.get("id"):
             try:
                 await product_descriptions.improve_product_description(int(imported_product["id"]))
             except Exception as exc:  # pragma: no cover - AI/network/database safety
