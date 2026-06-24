@@ -36,6 +36,19 @@
           <a href="/admin/shop/products/new" class="header-title-menu__link" role="menuitem">Add product</a>
         </li>
         <li class="header-title-menu__item" role="none">
+          <form
+            action="/shop/admin/products/bulk-refresh-descriptions"
+            method="post"
+            class="header-title-menu__form"
+            data-confirm="Refresh descriptions for all {{ 'visible active and archived' if show_archived else 'active' }} products? This may take several minutes."
+            onsubmit="return confirm('Refresh descriptions for all {{ 'visible active and archived' if show_archived else 'active' }} products? This may take several minutes.');"
+          >
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            {% if show_archived %}<input type="hidden" name="include_archived" value="1" />{% endif %}
+            <button type="submit" class="header-title-menu__link" role="menuitem">Bulk Refresh Descriptions</button>
+          </form>
+        </li>
+        <li class="header-title-menu__item" role="none">
           <button
             type="button"
             class="header-title-menu__link"
