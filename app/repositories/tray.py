@@ -100,6 +100,16 @@ async def revoke_install_token(token_id: int) -> None:
     )
 
 
+async def delete_revoked_install_tokens() -> int:
+    rows = await db.fetch_all(
+        "SELECT id FROM tray_install_tokens WHERE revoked_at IS NOT NULL"
+    )
+    if not rows:
+        return 0
+    await db.execute("DELETE FROM tray_install_tokens WHERE revoked_at IS NOT NULL")
+    return len(rows)
+
+
 # ---------------------------------------------------------------------------
 # Devices
 # ---------------------------------------------------------------------------

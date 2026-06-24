@@ -743,6 +743,17 @@ async def revoke_install_token(
     return JSONResponse({"status": "revoked"})
 
 
+@router.post(
+    "/admin/install-tokens/bulk-purge-revoked",
+    summary="Purge all revoked install tokens (admin)",
+)
+async def bulk_purge_revoked_install_tokens(
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    deleted_count = await tray_repo.delete_revoked_install_tokens()
+    return JSONResponse({"status": "ok", "deleted_count": deleted_count})
+
+
 @router.get(
     "/admin/configs",
     summary="List tray menu configurations",
