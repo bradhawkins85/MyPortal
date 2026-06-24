@@ -1327,6 +1327,10 @@ html {
   list-style: none;
 }
 
+.header-title-menu__form {
+  display: contents;
+}
+
 .header-title-menu__link {
   display: flex;
   align-items: center;
@@ -1349,7 +1353,8 @@ html {
   appearance: none;
 }
 
-button.header-title-menu__link {
+button.header-title-menu__link,
+.header-title-menu__form .header-title-menu__link {
   width: 100%;
 }
 
