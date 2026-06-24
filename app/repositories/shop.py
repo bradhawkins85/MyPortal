@@ -1625,6 +1625,7 @@ async def list_order_items(order_number: str, company_id: int) -> list[dict[str,
             p.stock_qld,
             p.stock_vic,
             p.stock_sa,
+            p.stock_wa,
             c.is_vip AS is_vip,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_orders AS o
@@ -2153,7 +2154,8 @@ async def mark_product_out_of_stock_by_sku(sku: str) -> None:
             stock_nsw = 0,
             stock_qld = 0,
             stock_vic = 0,
-            stock_sa = 0
+            stock_sa = 0,
+            stock_wa = 0
         WHERE sku = %s OR vendor_sku = %s
         """,
         (cleaned_sku, cleaned_sku),
@@ -2175,6 +2177,7 @@ async def upsert_product_from_feed(
     stock_qld: int,
     stock_vic: int,
     stock_sa: int,
+    stock_wa: int,
     buy_price: Decimal | None,
     weight: Decimal | None,
     length: Decimal | None,
@@ -2188,10 +2191,10 @@ async def upsert_product_from_feed(
         """
         INSERT INTO shop_products
             (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
-             category_id, stock_nsw, stock_qld, stock_vic, stock_sa, buy_price,
+             category_id, stock_nsw, stock_qld, stock_vic, stock_sa, stock_wa, buy_price,
              weight, length, width, height, stock_at, warranty_length, manufacturer)
         VALUES
-            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             name = VALUES(name),
             sku = VALUES(sku),
@@ -2205,6 +2208,7 @@ async def upsert_product_from_feed(
             stock_qld = VALUES(stock_qld),
             stock_vic = VALUES(stock_vic),
             stock_sa = VALUES(stock_sa),
+            stock_wa = VALUES(stock_wa),
             buy_price = VALUES(buy_price),
             weight = VALUES(weight),
             length = VALUES(length),
@@ -2228,6 +2232,7 @@ async def upsert_product_from_feed(
             stock_qld,
             stock_vic,
             stock_sa,
+            stock_wa,
             buy_price,
             weight,
             length,
@@ -2308,6 +2313,7 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised["stock_qld"] = _coerce_int(row.get("stock_qld"), default=0)
     normalised["stock_vic"] = _coerce_int(row.get("stock_vic"), default=0)
     normalised["stock_sa"] = _coerce_int(row.get("stock_sa"), default=0)
+    normalised["stock_wa"] = _coerce_int(row.get("stock_wa"), default=0)
     normalised["archived"] = bool(_coerce_int(row.get("archived"), default=0))
     stock_at = row.get("stock_at")
     if isinstance(stock_at, (datetime, date)):
@@ -2557,6 +2563,7 @@ def _normalise_order_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["stock_qld"] = _coerce_optional_int(row.get("stock_qld"))
     normalised["stock_vic"] = _coerce_optional_int(row.get("stock_vic"))
     normalised["stock_sa"] = _coerce_optional_int(row.get("stock_sa"))
+    normalised["stock_wa"] = _coerce_optional_int(row.get("stock_wa"))
     return normalised
 
 
@@ -2740,6 +2747,7 @@ async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str,
             p.stock_qld,
             p.stock_vic,
             p.stock_sa,
+            p.stock_wa,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_quotes AS q
         INNER JOIN shop_products AS p ON p.id = q.product_id
@@ -2796,4 +2804,5 @@ def _normalise_quote_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["stock_qld"] = _coerce_optional_int(row.get("stock_qld"))
     normalised["stock_vic"] = _coerce_optional_int(row.get("stock_vic"))
     normalised["stock_sa"] = _coerce_optional_int(row.get("stock_sa"))
+    normalised["stock_wa"] = _coerce_optional_int(row.get("stock_wa"))
     return normalised
