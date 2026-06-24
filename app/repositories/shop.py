@@ -11,7 +11,6 @@ import aiomysql
 
 from app.core.database import db
 
-
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
 
 
@@ -36,7 +35,9 @@ def _prepare_product_search_term(search: str | None) -> tuple[str | None, str | 
     return "prefix", f"{term}%"
 
 
-def _append_product_search_filter(conditions: list[str], params: list[Any], search: str | None) -> None:
+def _append_product_search_filter(
+    conditions: list[str], params: list[Any], search: str | None
+) -> None:
     mode, value = _prepare_product_search_term(search)
     if not mode or value is None:
         return
@@ -48,9 +49,7 @@ def _append_product_search_filter(conditions: list[str], params: list[Any], sear
         params.append(value)
         return
 
-    conditions.append(
-        "(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)"
-    )
+    conditions.append("(p.name LIKE %s OR p.sku LIKE %s OR p.vendor_sku LIKE %s)")
     params.extend([value, value, value])
 
 
@@ -74,51 +73,47 @@ class PackageFilters:
 
 
 async def list_categories() -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT id, name, parent_id, display_order 
         FROM shop_categories 
         ORDER BY name
-        """
-    )
+        """)
     categories = [
         {
-            "id": int(row["id"]), 
+            "id": int(row["id"]),
             "name": row["name"],
             "parent_id": _coerce_optional_int(row.get("parent_id")),
             "display_order": _coerce_int(row.get("display_order"), default=0),
         }
         for row in rows
     ]
-    
+
     # Build hierarchical structure
     parent_map: dict[int | None, list[dict[str, Any]]] = {}
     for category in categories:
         parent_id = category.get("parent_id")
         parent_map.setdefault(parent_id, []).append(category)
-    
+
     # Sort all children alphabetically by name
     for children_list in parent_map.values():
         children_list.sort(key=lambda c: c["name"].lower())
-    
+
     # Attach children to parents
     for category in categories:
         category_id = category["id"]
         category["children"] = parent_map.get(category_id, [])
-    
+
     # Return only top-level categories (those without parents), already sorted alphabetically
     return parent_map.get(None, [])
 
 
 async def _fetch_all_categories_raw() -> list[dict[str, Any]]:
     """Fetch all categories from the database as a flat list ordered by name."""
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT id, name, parent_id, display_order 
         FROM shop_categories 
         ORDER BY name
-        """
-    )
+        """)
     return [
         {
             "id": int(row["id"]),
@@ -132,24 +127,24 @@ async def _fetch_all_categories_raw() -> list[dict[str, Any]]:
 
 async def list_all_categories_flat() -> list[dict[str, Any]]:
     """List all categories in a flat structure for admin purposes.
-    
+
     Returns categories ordered alphabetically with children grouped under their parents.
     Parent categories are sorted alphabetically, and each parent's children are also
     sorted alphabetically and appear immediately after their parent. This handles
     all levels of nesting (grandchildren, great-grandchildren, etc.).
     """
     categories = await _fetch_all_categories_raw()
-    
+
     # Build parent-child map
     parent_map: dict[int | None, list[dict[str, Any]]] = {}
     for category in categories:
         parent_id = category.get("parent_id")
         parent_map.setdefault(parent_id, []).append(category)
-    
+
     # Sort all groups alphabetically by name
     for children_list in parent_map.values():
         children_list.sort(key=lambda c: c["name"].lower())
-    
+
     # Recursively build flat list: parent followed by all its descendants
     def add_category_and_descendants(cat_id: int, result: list[dict[str, Any]]) -> None:
         """Add a category and all its descendants to the result list."""
@@ -157,14 +152,14 @@ async def list_all_categories_flat() -> list[dict[str, Any]]:
             result.append(child)
             # Recursively add this child's children
             add_category_and_descendants(child["id"], result)
-    
+
     result: list[dict[str, Any]] = []
     # Start with top-level categories (no parent)
     for parent in parent_map.get(None, []):
         result.append(parent)
         # Add all descendants of this parent
         add_category_and_descendants(parent["id"], result)
-    
+
     return result
 
 
@@ -179,12 +174,12 @@ async def list_categories_with_products() -> list[dict[str, Any]]:
     all_categories = await _fetch_all_categories_raw()
 
     # Find category IDs that have at least one product
-    product_rows = await db.fetch_all(
-        """
+    product_rows = await db.fetch_all("""
         SELECT DISTINCT category_id FROM shop_products WHERE category_id IS NOT NULL
-        """
-    )
-    category_ids_with_products: set[int] = {int(row["category_id"]) for row in product_rows}
+        """)
+    category_ids_with_products: set[int] = {
+        int(row["category_id"]) for row in product_rows
+    }
 
     # Build parent-child map for all categories
     parent_map: dict[int | None, list[dict[str, Any]]] = {}
@@ -193,7 +188,9 @@ async def list_categories_with_products() -> list[dict[str, Any]]:
         parent_map.setdefault(parent_id, []).append(category)
 
     # Determine which category IDs to include: those with products plus their ancestors
-    def get_ancestor_ids(cat: dict[str, Any], cat_by_id: dict[int, dict[str, Any]]) -> list[int]:
+    def get_ancestor_ids(
+        cat: dict[str, Any], cat_by_id: dict[int, dict[str, Any]]
+    ) -> list[int]:
         """Return ancestor IDs for a category (not including itself)."""
         ancestors: list[int] = []
         current = cat
@@ -232,17 +229,15 @@ async def list_categories_with_products() -> list[dict[str, Any]]:
 
 async def get_category_descendants(category_id: int) -> list[int]:
     """Get all descendant category IDs for a given category.
-    
+
     Returns a list of category IDs including the category itself and all its descendants
     (children, grandchildren, etc.).
     """
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT id, parent_id 
         FROM shop_categories
-        """
-    )
-    
+        """)
+
     # Build parent-child map
     parent_map: dict[int, list[int]] = {}
     for row in rows:
@@ -250,11 +245,13 @@ async def get_category_descendants(category_id: int) -> list[int]:
         child_id = int(row["id"])
         if parent_id is not None:
             parent_map.setdefault(parent_id, []).append(child_id)
-    
+
     # Recursively collect all descendants with cycle detection
-    def collect_descendants(cat_id: int, result: set[int], visited: set[int], depth: int = 0) -> None:
+    def collect_descendants(
+        cat_id: int, result: set[int], visited: set[int], depth: int = 0
+    ) -> None:
         """Recursively add all descendants to the result set.
-        
+
         Args:
             cat_id: Category ID to process
             result: Set of all descendant IDs found
@@ -266,16 +263,16 @@ async def get_category_descendants(category_id: int) -> list[int]:
             return
         if cat_id in visited:  # Cycle detection
             return
-        
+
         visited.add(cat_id)
         for child_id in parent_map.get(cat_id, []):
             result.add(child_id)
             collect_descendants(child_id, result, visited, depth + 1)
         visited.remove(cat_id)
-    
+
     descendants: set[int] = {category_id}
     collect_descendants(category_id, descendants, set(), 0)
-    
+
     return list(descendants)
 
 
@@ -594,7 +591,9 @@ async def list_packages(filters: PackageFilters) -> list[dict[str, Any]]:
     if filters.search_term:
         search = f"%{filters.search_term.strip()}%"
         if search.strip("%"):
-            conditions.append("(pkg.name LIKE %s OR pkg.sku LIKE %s OR pkg.description LIKE %s)")
+            conditions.append(
+                "(pkg.name LIKE %s OR pkg.sku LIKE %s OR pkg.description LIKE %s)"
+            )
             params.extend([search, search, search])
     if conditions:
         query.append("WHERE " + " AND ".join(conditions))
@@ -605,7 +604,9 @@ async def list_packages(filters: PackageFilters) -> list[dict[str, Any]]:
     return [_normalise_package(row) for row in rows]
 
 
-async def get_package(package_id: int, *, include_archived: bool = False) -> dict[str, Any] | None:
+async def get_package(
+    package_id: int, *, include_archived: bool = False
+) -> dict[str, Any] | None:
     sql = [
         "SELECT",
         "    pkg.id,",
@@ -915,18 +916,20 @@ async def get_restricted_product_ids(
         """,
         tuple([company_id, *identifiers]),
     )
-    return {_coerce_int(row.get("product_id")) for row in rows if row.get("product_id") is not None}
+    return {
+        _coerce_int(row.get("product_id"))
+        for row in rows
+        if row.get("product_id") is not None
+    }
 
 
 async def list_product_restrictions() -> list[dict[str, Any]]:
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT e.product_id, e.company_id, c.name AS company_name
         FROM shop_product_exclusions AS e
         INNER JOIN companies AS c ON c.id = e.company_id
         ORDER BY c.name
-        """
-    )
+        """)
     restrictions: list[dict[str, Any]] = []
     for row in rows:
         restrictions.append(
@@ -939,7 +942,9 @@ async def list_product_restrictions() -> list[dict[str, Any]]:
     return restrictions
 
 
-async def list_product_restrictions_for_product(product_id: int) -> list[dict[str, Any]]:
+async def list_product_restrictions_for_product(
+    product_id: int,
+) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT e.product_id, e.company_id, c.name AS company_name
@@ -970,8 +975,7 @@ async def list_optional_accessory_products() -> list[dict[str, Any]]:
     result includes the names and SKUs of the parent products that reference
     each accessory.
     """
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT
             p.id,
             p.name,
@@ -993,8 +997,7 @@ async def list_optional_accessory_products() -> list[dict[str, Any]]:
         GROUP BY p.id, p.name, p.sku, p.vendor_sku, p.image_url, p.price,
                  p.vip_price, p.stock, p.archived, p.category_id, c.name
         ORDER BY p.name ASC
-        """
-    )
+        """)
     return [_normalise_optional_accessory_product(row) for row in rows]
 
 
@@ -1040,8 +1043,7 @@ async def sync_pending_optional_accessories() -> int:
     Returns the number of rows inserted or updated.
     """
     # Fetch all stock-feed items that have opt_accessori populated
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT
             sf.sku AS parent_sku,
             sf.opt_accessori,
@@ -1059,8 +1061,7 @@ async def sync_pending_optional_accessories() -> int:
           AND NOT EXISTS (
               SELECT 1 FROM shop_products WHERE sku = sf2.sku AND archived = 0
           )
-        """
-    )
+        """)
 
     if not rows:
         return 0
@@ -1114,41 +1115,35 @@ async def sync_pending_optional_accessories() -> int:
         count += 1
 
     # Remove entries that have since been imported into shop_products
-    await db.execute(
-        """
+    await db.execute("""
         DELETE soa FROM shop_optional_accessories AS soa
         INNER JOIN shop_products AS sp ON sp.sku = soa.sku AND sp.archived = 0
-        """
-    )
+        """)
 
     return count
 
 
 async def list_pending_optional_accessories() -> list[dict[str, Any]]:
     """Return non-dismissed rows from the ``shop_optional_accessories`` staging table."""
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT id, sku, product_name, category_name, rrp, image_url,
                manufacturer, referenced_by_skus, discovered_at
         FROM shop_optional_accessories
         WHERE dismissed = 0
         ORDER BY product_name ASC, sku ASC
-        """
-    )
+        """)
     return [_normalise_pending_optional_accessory(row) for row in rows]
 
 
 async def list_dismissed_optional_accessories() -> list[dict[str, Any]]:
     """Return dismissed rows from the ``shop_optional_accessories`` staging table."""
-    rows = await db.fetch_all(
-        """
+    rows = await db.fetch_all("""
         SELECT id, sku, product_name, category_name, rrp, image_url,
                manufacturer, referenced_by_skus, discovered_at, dismissed_at
         FROM shop_optional_accessories
         WHERE dismissed = 1
         ORDER BY dismissed_at DESC, product_name ASC, sku ASC
-        """
-    )
+        """)
     return [_normalise_pending_optional_accessory(row) for row in rows]
 
 
@@ -1240,7 +1235,7 @@ async def get_category(category_id: int) -> dict[str, Any] | None:
     if not row:
         return None
     return {
-        "id": int(row["id"]), 
+        "id": int(row["id"]),
         "name": row["name"],
         "parent_id": _coerce_optional_int(row.get("parent_id")),
         "display_order": _coerce_int(row.get("display_order"), default=0),
@@ -1470,7 +1465,9 @@ async def create_order(
                 if row and row.get("stock") is not None:
                     previous_stock = int(row["stock"])
                     if previous_stock < quantity:
-                        raise ValueError("Insufficient stock available for this product")
+                        raise ValueError(
+                            "Insufficient stock available for this product"
+                        )
                     new_stock = previous_stock - quantity
                 await cursor.execute(
                     """
@@ -1542,7 +1539,9 @@ async def list_order_summaries(company_id: int) -> list[dict[str, Any]]:
     return [_normalise_order_summary(row) for row in rows]
 
 
-async def get_order_summary(order_number: str, company_id: int) -> dict[str, Any] | None:
+async def get_order_summary(
+    order_number: str, company_id: int
+) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
         SELECT
@@ -1647,14 +1646,16 @@ async def get_category_by_name(name: str) -> dict[str, Any] | None:
     if not row:
         return None
     return {
-        "id": int(row["id"]), 
+        "id": int(row["id"]),
         "name": row["name"],
         "parent_id": _coerce_optional_int(row.get("parent_id")),
         "display_order": _coerce_int(row.get("display_order"), default=0),
     }
 
 
-async def create_category(name: str, parent_id: int | None = None, display_order: int = 0) -> int:
+async def create_category(
+    name: str, parent_id: int | None = None, display_order: int = 0
+) -> int:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
@@ -1665,7 +1666,9 @@ async def create_category(name: str, parent_id: int | None = None, display_order
     return category_id
 
 
-async def update_category(category_id: int, name: str, parent_id: int | None = None, display_order: int = 0) -> bool:
+async def update_category(
+    category_id: int, name: str, parent_id: int | None = None, display_order: int = 0
+) -> bool:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
@@ -1685,7 +1688,9 @@ async def delete_category(category_id: int) -> bool:
             return cursor.rowcount > 0
 
 
-async def update_product_description(product_id: int, description: str | None) -> dict[str, Any] | None:
+async def update_product_description(
+    product_id: int, description: str | None
+) -> dict[str, Any] | None:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
             await cursor.execute(
@@ -1803,12 +1808,20 @@ async def replace_product_recommendations(
     auto_linked: bool = False,
 ) -> None:
     cross_ids = (
-        sorted({int(pid) for pid in cross_sell_ids if int(pid) > 0 and int(pid) != product_id})
+        sorted(
+            {
+                int(pid)
+                for pid in cross_sell_ids
+                if int(pid) > 0 and int(pid) != product_id
+            }
+        )
         if cross_sell_ids is not None
         else None
     )
     upsell_ids_clean = (
-        sorted({int(pid) for pid in upsell_ids if int(pid) > 0 and int(pid) != product_id})
+        sorted(
+            {int(pid) for pid in upsell_ids if int(pid) > 0 and int(pid) != product_id}
+        )
         if upsell_ids is not None
         else None
     )
@@ -1852,7 +1865,10 @@ async def replace_product_recommendations(
                                 " (product_id, related_product_id, is_auto_linked)"
                                 " VALUES (%s, %s, 1)"
                                 " ON DUPLICATE KEY UPDATE is_auto_linked = is_auto_linked",
-                                [(product_id, related_id) for related_id in upsell_ids_clean],
+                                [
+                                    (product_id, related_id)
+                                    for related_id in upsell_ids_clean
+                                ],
                             )
                 else:
                     # Admin-driven replacement: replace all recommendations for the
@@ -1865,10 +1881,15 @@ async def replace_product_recommendations(
                     if cross_ids_for_insert:
                         await cursor.executemany(
                             "INSERT INTO shop_product_cross_sells (product_id, related_product_id) VALUES (%s, %s)",
-                            [(product_id, related_id) for related_id in cross_ids_for_insert],
+                            [
+                                (product_id, related_id)
+                                for related_id in cross_ids_for_insert
+                            ],
                         )
 
-                    upsell_ids_for_insert = upsell_ids_clean if upsell_ids_clean is not None else []
+                    upsell_ids_for_insert = (
+                        upsell_ids_clean if upsell_ids_clean is not None else []
+                    )
                     await cursor.execute(
                         "DELETE FROM shop_product_upsells WHERE product_id = %s",
                         (product_id,),
@@ -1876,7 +1897,10 @@ async def replace_product_recommendations(
                     if upsell_ids_for_insert:
                         await cursor.executemany(
                             "INSERT INTO shop_product_upsells (product_id, related_product_id) VALUES (%s, %s)",
-                            [(product_id, related_id) for related_id in upsell_ids_for_insert],
+                            [
+                                (product_id, related_id)
+                                for related_id in upsell_ids_for_insert
+                            ],
                         )
             except Exception:
                 await conn.rollback()
@@ -2048,9 +2072,9 @@ async def replace_product_exclusions(
                 await conn.commit()
 
 
-
-
-async def search_products_for_admin_lookup(term: str, *, limit: int = 10) -> list[dict[str, Any]]:
+async def search_products_for_admin_lookup(
+    term: str, *, limit: int = 10
+) -> list[dict[str, Any]]:
     cleaned_term = term.strip()
     if not cleaned_term or limit <= 0:
         return []
@@ -2113,6 +2137,27 @@ async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
     )
     rows = await db.fetch_all(sql, tuple(skus) * 2)
     return [_coerce_int(row["id"]) for row in rows if _coerce_int(row.get("id")) > 0]
+
+
+async def mark_product_out_of_stock_by_sku(sku: str) -> None:
+    """Set stock quantities to zero for products matching a feed SKU."""
+
+    cleaned_sku = sku.strip()
+    if not cleaned_sku:
+        return
+
+    await db.execute(
+        """
+        UPDATE shop_products
+        SET stock = 0,
+            stock_nsw = 0,
+            stock_qld = 0,
+            stock_vic = 0,
+            stock_sa = 0
+        WHERE sku = %s OR vendor_sku = %s
+        """,
+        (cleaned_sku, cleaned_sku),
+    )
 
 
 async def upsert_product_from_feed(
@@ -2196,13 +2241,17 @@ async def upsert_product_from_feed(
 
 
 async def _attach_features_to_products(
-    products: list[dict[str, Any]]
+    products: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if not products:
         return products
 
     identifiers = sorted(
-        {int(product.get("id") or 0) for product in products if int(product.get("id") or 0) > 0}
+        {
+            int(product.get("id") or 0)
+            for product in products
+            if int(product.get("id") or 0) > 0
+        }
     )
     features_map: dict[int, list[dict[str, Any]]] = {}
     if identifiers:
@@ -2233,14 +2282,22 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     normalised["id"] = _coerce_int(row.get("id"))
     normalised["category_id"] = _coerce_optional_int(row.get("category_id"))
-    normalised["subscription_category_id"] = _coerce_optional_int(row.get("subscription_category_id"))
+    normalised["subscription_category_id"] = _coerce_optional_int(
+        row.get("subscription_category_id")
+    )
     normalised["commitment_type"] = row.get("commitment_type")
     normalised["payment_frequency"] = row.get("payment_frequency")
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
-    normalised["price_monthly_commitment"] = _coerce_optional_decimal(row.get("price_monthly_commitment"))
-    normalised["price_annual_monthly_payment"] = _coerce_optional_decimal(row.get("price_annual_monthly_payment"))
-    normalised["price_annual_annual_payment"] = _coerce_optional_decimal(row.get("price_annual_annual_payment"))
+    normalised["price_monthly_commitment"] = _coerce_optional_decimal(
+        row.get("price_monthly_commitment")
+    )
+    normalised["price_annual_monthly_payment"] = _coerce_optional_decimal(
+        row.get("price_annual_monthly_payment")
+    )
+    normalised["price_annual_annual_payment"] = _coerce_optional_decimal(
+        row.get("price_annual_annual_payment")
+    )
     normalised["buy_price"] = _coerce_optional_decimal(row.get("buy_price"))
     normalised["weight"] = _coerce_optional_decimal(row.get("weight"))
     normalised["length"] = _coerce_optional_decimal(row.get("length"))
@@ -2278,7 +2335,9 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         "archived": bool(row.get("archived")),
         "category_id": _coerce_optional_int(row.get("category_id")),
         "category_name": row.get("category_name") or None,
-        "duplicate_sku_import": bool(_coerce_int(row.get("duplicate_sku_import"), default=0)),
+        "duplicate_sku_import": bool(
+            _coerce_int(row.get("duplicate_sku_import"), default=0)
+        ),
         "duplicate_sku_count": _coerce_int(row.get("duplicate_sku_count"), default=0),
     }
 
@@ -2572,7 +2631,9 @@ async def list_quote_summaries(company_id: int) -> list[dict[str, Any]]:
     return [_normalise_quote_summary(row) for row in rows]
 
 
-async def get_quote_summary(quote_number: str, company_id: int) -> dict[str, Any] | None:
+async def get_quote_summary(
+    quote_number: str, company_id: int
+) -> dict[str, Any] | None:
     row = await db.fetch_one(
         """
         SELECT
@@ -2637,12 +2698,12 @@ async def assign_quote(
     assigned_user_id: int | None,
 ) -> dict[str, Any] | None:
     """Assign or unassign a quote to a specific user.
-    
+
     Args:
         quote_number: The quote number to assign
         company_id: The company ID that owns the quote
         assigned_user_id: The user ID to assign the quote to, or None to unassign
-        
+
     Returns:
         Updated quote summary if successful, None if quote not found
     """

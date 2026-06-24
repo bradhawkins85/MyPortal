@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import html
 import socket
 from ipaddress import ip_address
 from datetime import date, datetime, timezone
@@ -139,9 +140,7 @@ def _normalise_name(feed_name: str, product: Mapping[str, Any] | None) -> str:
     existing_name = str(product.get("name") or "").strip()
     if not existing_name:
         return feed_name or ""
-    existing_sku = str(
-        product.get("vendor_sku") or product.get("sku") or ""
-    ).strip()
+    existing_sku = str(product.get("vendor_sku") or product.get("sku") or "").strip()
     if existing_sku and existing_name.lower() != existing_sku.lower():
         return existing_name
     return feed_name or existing_name or existing_sku or ""
@@ -164,7 +163,9 @@ async def _download_product_image(image_url: str) -> str | None:
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            async with client.stream("GET", candidate, follow_redirects=True) as response:
+            async with client.stream(
+                "GET", candidate, follow_redirects=True
+            ) as response:
                 if response.status_code != httpx.codes.OK:
                     log_error(
                         "Failed to download product image from feed",
@@ -304,9 +305,7 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
     manufacturer = _optional_text(
         _get_feed_value(element, "Manufacturer", "manufacturer")
     )
-    image_url = _optional_text(
-        _get_feed_value(element, "ImageUrl", "image_url")
-    )
+    image_url = _optional_text(_get_feed_value(element, "ImageUrl", "image_url"))
 
     pub_date_raw = _get_feed_value(element, "pubDate", "pub_date")
     pub_date = _parse_stock_date(pub_date_raw)
@@ -359,12 +358,70 @@ def _format_stock_feed_parse_error(exc: ParseError) -> str:
     return detail
 
 
-def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
+def _extract_stock_code_from_item_xml(item_xml: str) -> str | None:
+    """Best-effort StockCode extraction for malformed feed items."""
+
+    match = re.search(
+        r"<\s*(?:[\w.-]+:)?(?:StockCode|stockcode|stock_code|sku)\b[^>]*>(.*?)</\s*(?:[\w.-]+:)?(?:StockCode|stockcode|stock_code|sku)\s*>",
+        item_xml,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    cleaned = re.sub(r"<[^>]+>", "", match.group(1)).strip()
+    if not cleaned:
+        return None
+    try:
+        cleaned = html.unescape(cleaned)
+    except Exception:
+        pass
+    return cleaned.strip() or None
+
+
+def _parse_stock_feed_xml_with_skipped(
+    payload: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    skipped_skus: list[str] = []
     try:
         root = fromstring(payload)
     except ParseError as exc:
         detail = _format_stock_feed_parse_error(exc)
-        raise ValueError(f"Invalid stock feed XML: {detail}") from exc
+        if "reference to invalid character number" not in detail.lower():
+            raise ValueError(f"Invalid stock feed XML: {detail}") from exc
+
+        items: list[dict[str, Any]] = []
+        item_matches = list(
+            re.finditer(
+                r"<\s*(?:[\w.-]+:)?item\b[^>]*>.*?</\s*(?:[\w.-]+:)?item\s*>",
+                payload,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+        )
+        if not item_matches:
+            raise ValueError(f"Invalid stock feed XML: {detail}") from exc
+
+        for match in item_matches:
+            item_xml = match.group(0)
+            try:
+                parsed = _parse_feed_item(fromstring(item_xml))
+            except ParseError as item_exc:
+                item_detail = _format_stock_feed_parse_error(item_exc)
+                if "reference to invalid character number" not in item_detail.lower():
+                    raise ValueError(
+                        f"Invalid stock feed XML: {item_detail}"
+                    ) from item_exc
+                skipped_sku = _extract_stock_code_from_item_xml(item_xml)
+                if skipped_sku:
+                    skipped_skus.append(skipped_sku)
+                log_error(
+                    "Skipped stock feed item with invalid XML character reference",
+                    sku=skipped_sku or "unknown",
+                    error=item_detail,
+                )
+                continue
+            if parsed:
+                items.append(parsed)
+        return items, skipped_skus
 
     items: list[dict[str, Any]] = []
     for element in root.iter():
@@ -379,10 +436,17 @@ def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
             if parsed:
                 items.append(parsed)
 
+    return items, skipped_skus
+
+
+def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
+    items, _skipped_skus = _parse_stock_feed_xml_with_skipped(payload)
     return items
 
 
-def _flag_duplicate_stock_feed_skus(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _flag_duplicate_stock_feed_skus(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Return feed items with duplicate SKUs collapsed and flagged for review.
 
     The stock feed table is keyed by SKU, so duplicate XML records cannot all be
@@ -436,12 +500,21 @@ async def update_stock_feed() -> int:
         raise
 
     try:
-        items = _parse_stock_feed_xml(response.text)
+        items, skipped_skus = _parse_stock_feed_xml_with_skipped(response.text)
     except ValueError as exc:
         log_error("Failed to parse stock feed", error=str(exc))
         raise
 
     persisted_items = _flag_duplicate_stock_feed_skus(items)
+    for skipped_sku in skipped_skus:
+        try:
+            await shop_repo.mark_product_out_of_stock_by_sku(skipped_sku)
+        except Exception as exc:  # pragma: no cover - best-effort safety
+            log_error(
+                "Failed to mark skipped stock feed item out of stock",
+                sku=skipped_sku,
+                error=str(exc),
+            )
     await stock_feed_repo.replace_feed(persisted_items)
 
     # Record DBP price history for every unique item in the feed.
@@ -455,52 +528,56 @@ async def update_stock_feed() -> int:
         except Exception as exc:  # pragma: no cover - best-effort
             log_error("Failed to record price history", sku=sku, error=str(exc))
 
-    log_info("Stock feed updated", item_count=len(persisted_items), source_item_count=len(items))
+    log_info(
+        "Stock feed updated",
+        item_count=len(persisted_items),
+        source_item_count=len(items),
+    )
     return len(persisted_items)
 
 
 async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
     """
     Parse a category path delimited by ' - ' and create/retrieve the hierarchy.
-    
+
     For example, "Electronics - Computers - Laptops" will:
     1. Create/get "Electronics" (parent)
     2. Create/get "Computers" as child of "Electronics"
     3. Create/get "Laptops" as child of "Computers"
     4. Return the ID of the final category ("Laptops")
-    
+
     Args:
         category_path: A string with category names separated by ' - '
-        
+
     Returns:
         The ID of the final (deepest) category in the hierarchy, or None if invalid
     """
     if not category_path or not category_path.strip():
         return None
-    
+
     # Split by ' - ' delimiter and clean up each part
     parts = [part.strip() for part in category_path.split(" - ")]
     parts = [part for part in parts if part]  # Remove empty parts
-    
+
     if not parts:
         return None
-    
+
     # Fetch all categories once to avoid N+1 queries
     all_categories = await shop_repo.list_all_categories_flat()
-    
+
     # Build lookup dictionary for O(1) access using (name, parent_id) as key
     category_lookup: dict[tuple[str, int | None], dict[str, Any]] = {}
     for cat in all_categories:
         key = (cat["name"], cat.get("parent_id"))
         category_lookup[key] = cat
-    
+
     parent_id: int | None = None
-    
+
     for category_name in parts:
         # Look up existing category with this name and parent
         lookup_key = (category_name, parent_id)
         matching_category = category_lookup.get(lookup_key)
-        
+
         if matching_category:
             # Found exact match (same name and parent)
             category_id = int(matching_category["id"])
@@ -508,9 +585,7 @@ async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
             # Create new category with appropriate parent
             try:
                 category_id = await shop_repo.create_category(
-                    name=category_name,
-                    parent_id=parent_id,
-                    display_order=0
+                    name=category_name, parent_id=parent_id, display_order=0
                 )
                 # Add newly created category to our lookup dictionary
                 new_category = {
@@ -528,10 +603,10 @@ async def _get_or_create_category_hierarchy(category_path: str) -> int | None:
                     error=str(exc),
                 )
                 return None
-        
+
         # This category becomes the parent for the next level
         parent_id = category_id
-    
+
     return parent_id
 
 
@@ -611,9 +686,7 @@ async def _process_feed_item(
         name = code
 
     existing_image_url = (
-        str(current_product.get("image_url") or "").strip()
-        if current_product
-        else ""
+        str(current_product.get("image_url") or "").strip() if current_product else ""
     )
     feed_image_url = str(item.get("image_url") or "").strip()
     image_url: str | None = None
@@ -708,7 +781,9 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
         )
         if imported_product and imported_product.get("id"):
             try:
-                await product_descriptions.improve_product_description(int(imported_product["id"]))
+                await product_descriptions.improve_product_description(
+                    int(imported_product["id"])
+                )
             except Exception as exc:  # pragma: no cover - AI/network/database safety
                 log_error(
                     "Failed to refresh imported product description",
@@ -764,7 +839,10 @@ async def update_products_from_feed() -> None:
             continue
         try:
             if await _process_feed_item(
-                item, existing_product, update_recommendations=False, download_image_if_new=False
+                item,
+                existing_product,
+                update_recommendations=False,
+                download_image_if_new=False,
             ):
                 processed += 1
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -773,6 +851,14 @@ async def update_products_from_feed() -> None:
                 sku=code,
                 error=str(exc),
             )
+            try:
+                await shop_repo.mark_product_out_of_stock_by_sku(code)
+            except Exception as stock_exc:  # pragma: no cover - best-effort safety
+                log_error(
+                    "Failed to mark errored stock feed item out of stock",
+                    sku=code,
+                    error=str(stock_exc),
+                )
 
     # Second pass: set cross-sell associations for products that exist in-store.
     for item in feed_items:
