@@ -205,6 +205,17 @@ async def test_update_stock_feed_requires_config(monkeypatch):
         await products_service.update_stock_feed()
 
 
+def test_parse_stock_feed_xml_reports_parse_error_details():
+    with pytest.raises(ValueError) as exc_info:
+        products_service._parse_stock_feed_xml("<rss><channel></rss>")
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid stock feed XML: ")
+    assert "mismatched tag" in message
+    assert "line 1" in message
+    assert "column" in message
+
+
 @pytest.mark.anyio("asyncio")
 async def test_parse_feed_item_includes_opt_accessori():
     """OptAccessori in XML feed is parsed into the opt_accessori key."""
