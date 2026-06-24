@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from html import unescape
+from html import escape, unescape
 import mimetypes
 from pathlib import PurePosixPath
 import re
@@ -306,8 +306,11 @@ def _filename_for_image_candidate(
     return name[:255]
 
 
-async def _import_comment_images(ticket_id: int, comment: dict[str, Any], author_id: int | None) -> None:
+async def _import_comment_images(
+    ticket_id: int, comment: dict[str, Any], author_id: int | None
+) -> list[dict[str, Any]]:
     candidates = _extract_comment_image_candidates(comment)
+    imported: list[dict[str, Any]] = []
     for index, candidate in enumerate(candidates, start=1):
         try:
             contents, downloaded_type = await syncro.download_file(candidate["url"] or "")
@@ -328,7 +331,7 @@ async def _import_comment_images(ticket_id: int, comment: dict[str, Any], author
                     mime_type=content_type,
                 )
                 continue
-            await attachments_service.save_file_bytes(
+            attachment = await attachments_service.save_file_bytes(
                 ticket_id=ticket_id,
                 contents=contents,
                 original_filename=_filename_for_image_candidate(candidate, content_type, index),
@@ -336,6 +339,8 @@ async def _import_comment_images(ticket_id: int, comment: dict[str, Any], author
                 access_level="closed",
                 uploaded_by_user_id=author_id,
             )
+            if attachment:
+                imported.append(attachment)
         except Exception as exc:  # pragma: no cover - import should continue if an image fails
             log_error(
                 "Failed to import Syncro embedded image",
@@ -343,6 +348,44 @@ async def _import_comment_images(ticket_id: int, comment: dict[str, Any], author
                 url=candidate.get("url"),
                 error=str(exc),
             )
+    return imported
+
+
+def _build_imported_image_markup(ticket_id: int, attachments: list[dict[str, Any]]) -> str:
+    """Build inline image HTML for imported Syncro image attachments."""
+    image_tags: list[str] = []
+    for attachment in attachments:
+        try:
+            attachment_id = int(attachment.get("id"))
+        except (TypeError, ValueError):
+            continue
+        mime_type = str(attachment.get("mime_type") or "").split(";", 1)[0].lower()
+        if mime_type not in _IMAGE_MIME_TYPES:
+            continue
+        alt_text = escape(
+            str(attachment.get("original_filename") or "Syncro embedded image"),
+            quote=True,
+        )
+        src = f"/api/tickets/{ticket_id}/attachments/{attachment_id}/download"
+        image_tags.append(
+            f'<figure class="syncro-embedded-image"><img src="{src}" '
+            f'alt="{alt_text}" loading="lazy"></figure>'
+        )
+    if not image_tags:
+        return ""
+    return '<div class="syncro-embedded-images">' + "".join(image_tags) + "</div>"
+
+
+def _append_imported_image_markup(
+    body: str, ticket_id: int, attachments: list[dict[str, Any]]
+) -> str:
+    image_markup = _build_imported_image_markup(ticket_id, attachments)
+    if not image_markup:
+        return body
+    cleaned = re.sub(r"\[embedded image\]", "", body, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip() or body
+    separator = "\n\n" if cleaned else ""
+    return f"{cleaned}{separator}{image_markup}"
 
 
 def _extract_comment_author_name(comment: dict[str, Any]) -> str | None:
@@ -966,8 +1009,10 @@ async def _sync_ticket_replies(
         if minutes_spent is None and timer_time:
             minutes_spent = timer_time.get(str(comment.get("id")))
         is_billable = _resolve_comment_billable(comment, timer_billable)
+        imported_images = await _import_comment_images(ticket_id, comment, author_id)
+        body_with_images = _append_imported_image_markup(body, ticket_id, imported_images)
         enhanced_body = _build_comment_body_with_header(
-            comment, body, minutes=minutes_spent
+            comment, body_with_images, minutes=minutes_spent
         )
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
@@ -979,7 +1024,6 @@ async def _sync_ticket_replies(
             external_reference=external_ref,
             created_at=created_at,
         )
-        await _import_comment_images(ticket_id, comment, author_id)
         if external_ref:
             known_refs.add(external_ref)
 

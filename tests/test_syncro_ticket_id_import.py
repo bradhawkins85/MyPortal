@@ -129,3 +129,67 @@ def test_syncro_status_mapping_takes_precedence():
         )
         == "pending"
     )
+
+
+def test_append_imported_image_markup_replaces_embedded_placeholder():
+    attachments = [
+        {"id": 42, "mime_type": "image/png", "original_filename": "screenshot.png"},
+    ]
+
+    body = ticket_importer._append_imported_image_markup(
+        "The time entry included this screenshot: [embedded image]",
+        12345,
+        attachments,
+    )
+
+    assert "[embedded image]" not in body
+    assert "/api/tickets/12345/attachments/42/download" in body
+    assert 'alt="screenshot.png"' in body
+    assert "syncro-embedded-image" in body
+
+
+@pytest.mark.anyio
+async def test_syncro_reply_import_embeds_downloaded_time_entry_images(monkeypatch):
+    from app.repositories import tickets as tickets_repo
+
+    created_reply = {}
+
+    async def fake_list_replies(_ticket_id):
+        return []
+
+    async def fake_resolve_author(*args, **kwargs):
+        return None
+
+    async def fake_import_images(ticket_id, comment, author_id):
+        assert ticket_id == 12345
+        assert comment["id"] == 987
+        assert author_id is None
+        return [{"id": 55, "mime_type": "image/jpeg", "original_filename": "photo.jpg"}]
+
+    async def fake_create_reply(**kwargs):
+        created_reply.update(kwargs)
+        return {"id": 1, **kwargs}
+
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(ticket_importer, "_resolve_comment_author_id", fake_resolve_author)
+    monkeypatch.setattr(ticket_importer, "_import_comment_images", fake_import_images)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+
+    await ticket_importer._sync_ticket_replies(
+        12345,
+        [
+            {
+                "id": 987,
+                "body": "Worked on issue [embedded image]",
+                "time_worked": "00:15:00",
+            }
+        ],
+        requester_id=None,
+        contact_email=None,
+    )
+
+    assert created_reply["ticket_id"] == 12345
+    assert created_reply["external_reference"] == "987"
+    assert created_reply["minutes_spent"] == 15
+    assert "[embedded image]" not in created_reply["body"]
+    assert "/api/tickets/12345/attachments/55/download" in created_reply["body"]
