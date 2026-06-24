@@ -134,16 +134,6 @@
     return row;
   }
 
-  function appendPlainTextWithLineBreaks(container, text) {
-    const lines = String(text).split(/\r?\n/);
-    lines.forEach((line, index) => {
-      if (index > 0) {
-        container.appendChild(document.createElement('br'));
-      }
-      container.appendChild(document.createTextNode(line));
-    });
-  }
-
 
   async function fetchProductDetails(productId) {
     const response = await fetch(`/api/shop/products/${productId}`, {
@@ -190,8 +180,12 @@
       container.appendChild(descriptionTitle);
 
       const descriptionDiv = document.createElement('div');
-      descriptionDiv.className = 'modal__description';
-      appendPlainTextWithLineBreaks(descriptionDiv, product.description);
+      descriptionDiv.className = 'modal__description rich-text-viewer';
+      if (product.description_html) {
+        descriptionDiv.innerHTML = product.description_html;
+      } else {
+        descriptionDiv.textContent = product.description;
+      }
       container.appendChild(descriptionDiv);
     }
   }

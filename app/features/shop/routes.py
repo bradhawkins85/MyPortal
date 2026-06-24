@@ -221,6 +221,15 @@ _add(
     status_code=303,
 )
 _add(
+    "/shop/admin/product/{product_id}/refresh-description",
+    handlers.admin_refresh_shop_product_description,
+    ["POST"],
+    status_code=303,
+    summary="Refresh a shop product description and comparison features",
+    tags=["Shop"],
+)
+
+_add(
     "/shop/admin/product/{product_id}/archive",
     handlers.admin_archive_shop_product,
     ["POST"],
