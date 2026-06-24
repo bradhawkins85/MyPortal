@@ -2443,6 +2443,41 @@ async def admin_update_shop_product(
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
+async def admin_refresh_shop_product_description(request: Request, product_id: int):
+    from app.services import audit as audit_service
+    from app.services import product_descriptions
+    from app.repositories import shop as shop_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    result = await product_descriptions.improve_product_description(product_id)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    refreshed = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    await audit_service.record(
+        action="shop.product.description_refresh",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before=product,
+        after=refreshed or result,
+        sensitive_extra_keys=("buy_price",),
+    )
+    _main().log_info(
+        "Shop product description refreshed",
+        product_id=product_id,
+        refreshed_by=current_user["id"] if current_user else None,
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
 async def _handle_shop_product_archive(
     request: Request,
     product_id: int,
