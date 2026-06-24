@@ -16,6 +16,7 @@ from fastapi import File, Form, HTTPException, Query, Request, UploadFile, statu
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.security.flash import flash_redirect
+from app.services.sanitization import sanitize_rich_text
 
 
 def _main():
@@ -406,11 +407,13 @@ async def shop_product_detail_api(request: Request, product_id: int):
 
 
 def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    sanitized_description = sanitize_rich_text(str(product.get("description") or ""))
     payload = {
         "id": product.get("id"),
         "name": product.get("name"),
         "sku": product.get("sku"),
         "description": product.get("description"),
+        "description_html": sanitized_description.html,
         "image_url": product.get("image_url"),
         "price": product.get("price"),
         "vip_price": product.get("vip_price"),
