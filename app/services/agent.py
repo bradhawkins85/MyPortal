@@ -8,10 +8,14 @@ from typing import Any, Mapping, Sequence
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
 from app.core.logging import log_error
+from app.repositories import m365_best_practices as m365_bp_repo
+from app.repositories import reporting as reporting_repo
 from app.repositories import shop as shop_repo
 from app.repositories import tickets as tickets_repo
 from app.services import company_access
+from app.services import backup_jobs as backup_jobs_service
 from app.services import issues as issues_service
+from app.services import reports as reports_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import modules as modules_service
 
@@ -25,6 +29,7 @@ _ASSET_RESULT_LIMIT = 5
 _FEATURE_PACK_RESULT_LIMIT = 5
 _COMPANY_RESULT_LIMIT = 5
 _ISSUE_RESULT_LIMIT = 5
+_SYSTEM_RESULT_LIMIT = 5
 _MAX_SNIPPET_LENGTH = 320
 
 
@@ -195,6 +200,229 @@ async def _search_issue_sources(
                 "assignments": assignments,
             }
         )
+    return sources
+
+
+def _matches_query(query: str, *values: Any) -> bool:
+    needle = query.casefold()
+    return needle in " ".join(str(value or "") for value in values).casefold()
+
+
+async def _search_service_status_sources(
+    query: str, *, company_ids: Sequence[int], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    if not is_super_admin and not company_ids:
+        return []
+    rows = await db.fetch_all(
+        """
+        SELECT s.id, s.name, s.description, s.status, s.status_message, s.updated_at
+        FROM service_status_services s
+        WHERE s.is_active = 1
+          AND (
+              ? = 1
+              OR NOT EXISTS (
+                  SELECT 1 FROM service_status_service_companies sc
+                  WHERE sc.service_id = s.id
+              )
+              OR EXISTS (
+                  SELECT 1 FROM service_status_service_companies sc
+                  WHERE sc.service_id = s.id AND sc.company_id IN ({placeholders})
+              )
+          )
+          AND (s.name LIKE ? OR s.description LIKE ? OR s.status LIKE ? OR s.status_message LIKE ?)
+        ORDER BY s.display_order ASC, s.name ASC
+        LIMIT ?
+        """.format(placeholders=", ".join(["?"] * len(company_ids)) or "NULL"),
+        (
+            1 if is_super_admin else 0,
+            *company_ids,
+            f"%{query}%",
+            f"%{query}%",
+            f"%{query}%",
+            f"%{query}%",
+            _SYSTEM_RESULT_LIMIT,
+        ),
+    )
+    return [
+        {
+            "id": row.get("id"),
+            "name": row.get("name") or f"Service #{row.get('id')}",
+            "description": _truncate(row.get("description")),
+            "status": row.get("status"),
+            "status_message": _truncate(row.get("status_message")),
+        }
+        for row in rows or []
+    ]
+
+
+async def _search_backup_job_sources(
+    query: str, *, company_ids: Sequence[int], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    scoped_ids: Sequence[int | None]
+    if company_ids:
+        scoped_ids = company_ids
+    elif is_super_admin:
+        scoped_ids = [None]
+    else:
+        return []
+    for company_id in scoped_ids:
+        jobs = await backup_jobs_service.list_jobs_with_latest(
+            company_id=company_id, include_inactive=is_super_admin
+        )
+        for job in jobs:
+            if not _matches_query(
+                query,
+                job.get("name"),
+                job.get("description"),
+                job.get("latest_status"),
+                job.get("today_status"),
+            ):
+                continue
+            sources.append(
+                {
+                    "id": job.get("id"),
+                    "company_id": job.get("company_id"),
+                    "name": job.get("name") or f"Backup job #{job.get('id')}",
+                    "description": _truncate(job.get("description")),
+                    "latest_status": job.get("latest_status"),
+                    "today_status": job.get("today_status"),
+                }
+            )
+            if len(sources) >= _SYSTEM_RESULT_LIMIT:
+                return sources
+    return sources
+
+
+def _search_company_report_sources(query: str) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for section in reports_service.REPORT_SECTIONS:
+        if not _matches_query(query, section.key, section.label, section.description):
+            continue
+        sources.append(
+            {
+                "key": section.key,
+                "title": section.label,
+                "description": _truncate(section.description),
+                "source_type": "company_report_section",
+            }
+        )
+        if len(sources) >= _SYSTEM_RESULT_LIMIT:
+            break
+    return sources
+
+
+async def _search_reporting_query_sources(
+    query: str, *, user: Mapping[str, Any], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    user_id = _coerce_user_id(user)
+    if not is_super_admin and user_id <= 0:
+        return []
+    queries = await reporting_repo.list_queries_for_user(
+        user_id, include_all=is_super_admin
+    )
+    sources: list[dict[str, Any]] = []
+    for report in queries:
+        if not _matches_query(
+            query, report.get("name"), report.get("slug"), report.get("description")
+        ):
+            continue
+        sources.append(
+            {
+                "key": str(report.get("slug") or report.get("id")),
+                "title": report.get("name") or f"Report #{report.get('id')}",
+                "description": _truncate(report.get("description")),
+                "source_type": "reporting_query",
+            }
+        )
+        if len(sources) >= _SYSTEM_RESULT_LIMIT:
+            break
+    return sources
+
+
+async def _search_mailbox_sources(
+    query: str, *, memberships: Sequence[Mapping[str, Any]], company_ids: Sequence[int], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    can_user = _has_membership_flag(
+        memberships, "can_view_m365_user_mailboxes", is_super_admin=is_super_admin
+    )
+    can_shared = _has_membership_flag(
+        memberships, "can_view_m365_shared_mailboxes", is_super_admin=is_super_admin
+    )
+    if (not can_user and not can_shared) or not company_ids:
+        return []
+    mailbox_types = []
+    if can_user:
+        mailbox_types.append("UserMailbox")
+    if can_shared:
+        mailbox_types.append("SharedMailbox")
+    placeholders_companies = ", ".join(["?"] * len(company_ids)) or "NULL"
+    placeholders_types = ", ".join(["?"] * len(mailbox_types))
+    rows = await db.fetch_all(
+        f"""
+        SELECT company_id, user_principal_name, display_name, mailbox_type, storage_used_bytes
+        FROM m365_mailboxes
+        WHERE company_id IN ({placeholders_companies})
+          AND mailbox_type IN ({placeholders_types})
+          AND (user_principal_name LIKE ? OR display_name LIKE ? OR mailbox_type LIKE ?)
+        ORDER BY display_name ASC
+        LIMIT ?
+        """,
+        (
+            *company_ids,
+            *mailbox_types,
+            f"%{query}%",
+            f"%{query}%",
+            f"%{query}%",
+            _SYSTEM_RESULT_LIMIT,
+        ),
+    )
+    return [
+        {
+            "company_id": row.get("company_id"),
+            "user_principal_name": row.get("user_principal_name"),
+            "display_name": row.get("display_name") or row.get("user_principal_name"),
+            "mailbox_type": row.get("mailbox_type"),
+            "storage_used_bytes": row.get("storage_used_bytes"),
+        }
+        for row in rows or []
+        if row.get("user_principal_name")
+    ]
+
+
+async def _search_best_practice_sources(
+    query: str, *, memberships: Sequence[Mapping[str, Any]], company_ids: Sequence[int], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    if (
+        not _has_membership_flag(
+            memberships, "can_view_m365_best_practices", is_super_admin=is_super_admin
+        )
+        or not company_ids
+    ):
+        return []
+    sources: list[dict[str, Any]] = []
+    for company_id in company_ids:
+        results = await m365_bp_repo.list_results(company_id)
+        for result in results:
+            if not _matches_query(
+                query,
+                result.get("check_id"),
+                result.get("check_name"),
+                result.get("status"),
+                result.get("details"),
+            ):
+                continue
+            sources.append(
+                {
+                    "company_id": company_id,
+                    "check_id": result.get("check_id"),
+                    "check_name": result.get("check_name") or result.get("check_id"),
+                    "status": result.get("status"),
+                    "details": _truncate(result.get("details")),
+                }
+            )
+            if len(sources) >= _SYSTEM_RESULT_LIMIT:
+                return sources
     return sources
 
 
@@ -442,6 +670,11 @@ async def execute_agent_query(
                 "assets": [],
                 "companies": [],
                 "issues": [],
+                "service_status": [],
+                "backup_jobs": [],
+                "reports": [],
+                "mailboxes": [],
+                "best_practices": [],
                 "feature_packs": {},
             },
             "context": {"companies": []},
@@ -535,6 +768,11 @@ async def execute_agent_query(
         query_text, resolved_memberships
     )
     issue_sources: list[dict[str, Any]] = []
+    service_status_sources: list[dict[str, Any]] = []
+    backup_job_sources: list[dict[str, Any]] = []
+    report_sources: list[dict[str, Any]] = []
+    mailbox_sources: list[dict[str, Any]] = []
+    best_practice_sources: list[dict[str, Any]] = []
     feature_pack_sources: dict[str, list[dict[str, Any]]] = {}
     include_products = _can_access_shop(
         resolved_memberships, is_super_admin=is_super_admin
@@ -705,6 +943,63 @@ async def execute_agent_query(
         log_error("Agent issue lookup failed", error=str(exc))
         issue_sources = []
 
+    for label, lookup in (
+        (
+            "service status",
+            lambda: _search_service_status_sources(
+                query_text, company_ids=accessible_company_ids, is_super_admin=is_super_admin
+            ),
+        ),
+        (
+            "backup job",
+            lambda: _search_backup_job_sources(
+                query_text, company_ids=accessible_company_ids, is_super_admin=is_super_admin
+            ),
+        ),
+        (
+            "mailbox",
+            lambda: _search_mailbox_sources(
+                query_text,
+                memberships=resolved_memberships,
+                company_ids=accessible_company_ids,
+                is_super_admin=is_super_admin,
+            ),
+        ),
+        (
+            "best practice",
+            lambda: _search_best_practice_sources(
+                query_text,
+                memberships=resolved_memberships,
+                company_ids=accessible_company_ids,
+                is_super_admin=is_super_admin,
+            ),
+        ),
+    ):
+        try:
+            result = await lookup()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error(f"Agent {label} lookup failed", error=str(exc))
+            result = []
+        if label == "service status":
+            service_status_sources = result
+        elif label == "backup job":
+            backup_job_sources = result
+        elif label == "mailbox":
+            mailbox_sources = result
+        elif label == "best practice":
+            best_practice_sources = result
+
+    try:
+        report_sources = _search_company_report_sources(
+            query_text
+        ) + await _search_reporting_query_sources(
+            query_text, user=user, is_super_admin=is_super_admin
+        )
+        report_sources = report_sources[:_SYSTEM_RESULT_LIMIT]
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Agent report lookup failed", error=str(exc))
+        report_sources = []
+
     feature_pack_sources = await _search_feature_pack_sources(
         query_text,
         user=user,
@@ -725,6 +1020,11 @@ async def execute_agent_query(
         or asset_sources
         or company_sources
         or issue_sources
+        or service_status_sources
+        or backup_job_sources
+        or report_sources
+        or mailbox_sources
+        or best_practice_sources
         or any(feature_pack_sources.values())
     )
 
@@ -734,7 +1034,7 @@ async def execute_agent_query(
         "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
         "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
         "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], or [Issue:#id].",
+        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
         f"User query: {query_text}",
         "",
     ]
@@ -832,6 +1132,65 @@ async def execute_agent_query(
             ]
             if assignment_labels:
                 parts.append("Assignments: " + ", ".join(assignment_labels))
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if service_status_sources:
+        context_sections.append("Service statuses accessible to the user:")
+        for service in service_status_sources:
+            parts = [f"[ServiceStatus:#{service['id']}] {service['name']}"]
+            if service.get("status"):
+                parts.append(f"status: {service['status']}")
+            if service.get("status_message"):
+                parts.append(service["status_message"])
+            elif service.get("description"):
+                parts.append(service["description"])
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if backup_job_sources:
+        context_sections.append("Backup summary jobs accessible to the user:")
+        for job in backup_job_sources:
+            parts = [f"[BackupJob:#{job['id']}] {job['name']}"]
+            if job.get("today_status"):
+                parts.append(f"today: {job['today_status']}")
+            if job.get("latest_status"):
+                parts.append(f"latest: {job['latest_status']}")
+            if job.get("description"):
+                parts.append(job["description"])
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if report_sources:
+        context_sections.append("Reports accessible to the user:")
+        for report in report_sources:
+            parts = [f"[Report:{report['key']}] {report['title']}"]
+            if report.get("source_type"):
+                parts.append(f"type: {report['source_type']}")
+            if report.get("description"):
+                parts.append(report["description"])
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if mailbox_sources:
+        context_sections.append("Office 365 mailboxes accessible to the user:")
+        for mailbox in mailbox_sources:
+            parts = [f"[Mailbox:{mailbox['user_principal_name']}] {mailbox['display_name']}"]
+            if mailbox.get("mailbox_type"):
+                parts.append(f"type: {mailbox['mailbox_type']}")
+            if mailbox.get("storage_used_bytes") is not None:
+                parts.append(f"storage bytes: {mailbox['storage_used_bytes']}")
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
+    if best_practice_sources:
+        context_sections.append("Microsoft 365 best practices accessible to the user:")
+        for check in best_practice_sources:
+            parts = [f"[BestPractice:{check['check_id']}] {check['check_name']}"]
+            if check.get("status"):
+                parts.append(f"status: {check['status']}")
+            if check.get("details"):
+                parts.append(check["details"])
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
@@ -957,6 +1316,11 @@ async def execute_agent_query(
             "assets": asset_sources,
             "companies": company_sources,
             "issues": issue_sources,
+            "service_status": service_status_sources,
+            "backup_jobs": backup_job_sources,
+            "reports": report_sources,
+            "mailboxes": mailbox_sources,
+            "best_practices": best_practice_sources,
             "feature_packs": feature_pack_sources,
         },
         "context": {"companies": company_context},
