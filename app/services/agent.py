@@ -11,6 +11,7 @@ from app.core.logging import log_error
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import reporting as reporting_repo
 from app.repositories import shop as shop_repo
+from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
 from app.services import company_access
 from app.services import backup_jobs as backup_jobs_service
@@ -28,6 +29,7 @@ _ORDER_RESULT_LIMIT = 5
 _ASSET_RESULT_LIMIT = 5
 _FEATURE_PACK_RESULT_LIMIT = 5
 _COMPANY_RESULT_LIMIT = 5
+_STAFF_RESULT_LIMIT = 5
 _ISSUE_RESULT_LIMIT = 5
 _SYSTEM_RESULT_LIMIT = 5
 _MAX_SNIPPET_LENGTH = 320
@@ -131,6 +133,81 @@ def _coerce_user_id(user: Mapping[str, Any]) -> int:
         return int(user.get("id") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _can_access_staff(
+    memberships: Sequence[Mapping[str, Any]], *, is_super_admin: bool
+) -> bool:
+    if is_super_admin:
+        return True
+    for membership in memberships:
+        try:
+            staff_permission = int(membership.get("staff_permission") or 0)
+        except (TypeError, ValueError):
+            staff_permission = 0
+        if staff_permission > 0 or bool(membership.get("can_manage_staff")):
+            return True
+    return False
+
+
+async def _search_staff_sources(
+    query: str, *, memberships: Sequence[Mapping[str, Any]], is_super_admin: bool
+) -> list[dict[str, Any]]:
+    if not _can_access_staff(memberships, is_super_admin=is_super_admin):
+        return []
+
+    sources: list[dict[str, Any]] = []
+    for membership in memberships:
+        try:
+            company_id = int(membership.get("company_id"))
+        except (TypeError, ValueError):
+            continue
+        try:
+            staff_rows = await staff_repo.list_staff(company_id, page_size=500)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error(
+                "Agent staff lookup failed", company_id=company_id, error=str(exc)
+            )
+            continue
+        for staff_member in staff_rows:
+            if not _matches_query(
+                query,
+                staff_member.get("first_name"),
+                staff_member.get("last_name"),
+                staff_member.get("email"),
+                staff_member.get("job_title"),
+                staff_member.get("department"),
+                staff_member.get("mobile_phone"),
+                staff_member.get("onboarding_status"),
+            ):
+                continue
+            full_name = " ".join(
+                part
+                for part in (
+                    staff_member.get("first_name"),
+                    staff_member.get("last_name"),
+                )
+                if str(part or "").strip()
+            ).strip()
+            sources.append(
+                {
+                    "id": staff_member.get("id"),
+                    "company_id": staff_member.get("company_id"),
+                    "name": full_name
+                    or staff_member.get("email")
+                    or f"Staff #{staff_member.get('id')}",
+                    "email": staff_member.get("email"),
+                    "job_title": staff_member.get("job_title"),
+                    "department": staff_member.get("department"),
+                    "enabled": bool(staff_member.get("enabled")),
+                    "is_ex_staff": bool(staff_member.get("is_ex_staff")),
+                    "onboarding_status": staff_member.get("onboarding_status"),
+                    "updated_at": staff_member.get("updated_at"),
+                }
+            )
+            if len(sources) >= _STAFF_RESULT_LIMIT:
+                return sources
+    return sources
 
 
 def _search_company_sources(
@@ -406,7 +483,11 @@ async def _search_mailbox_sources(
 
 
 async def _search_best_practice_sources(
-    query: str, *, memberships: Sequence[Mapping[str, Any]], company_ids: Sequence[int], is_super_admin: bool
+    query: str,
+    *,
+    memberships: Sequence[Mapping[str, Any]],
+    company_ids: Sequence[int],
+    is_super_admin: bool,
 ) -> list[dict[str, Any]]:
     if (
         not _has_membership_flag(
@@ -684,6 +765,7 @@ async def execute_agent_query(
                 "orders": [],
                 "assets": [],
                 "companies": [],
+                "staff": [],
                 "issues": [],
                 "service_status": [],
                 "backup_jobs": [],
@@ -782,6 +864,7 @@ async def execute_agent_query(
     company_sources: list[dict[str, Any]] = _search_company_sources(
         query_text, resolved_memberships
     )
+    staff_sources: list[dict[str, Any]] = []
     issue_sources: list[dict[str, Any]] = []
     service_status_sources: list[dict[str, Any]] = []
     backup_job_sources: list[dict[str, Any]] = []
@@ -948,6 +1031,14 @@ async def execute_agent_query(
             )
 
     try:
+        staff_sources = await _search_staff_sources(
+            query_text, memberships=resolved_memberships, is_super_admin=is_super_admin
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Agent staff lookup failed", error=str(exc))
+        staff_sources = []
+
+    try:
         issue_sources = await _search_issue_sources(
             query_text,
             memberships=resolved_memberships,
@@ -962,13 +1053,17 @@ async def execute_agent_query(
         (
             "service status",
             lambda: _search_service_status_sources(
-                query_text, company_ids=accessible_company_ids, is_super_admin=is_super_admin
+                query_text,
+                company_ids=accessible_company_ids,
+                is_super_admin=is_super_admin,
             ),
         ),
         (
             "backup job",
             lambda: _search_backup_job_sources(
-                query_text, company_ids=accessible_company_ids, is_super_admin=is_super_admin
+                query_text,
+                company_ids=accessible_company_ids,
+                is_super_admin=is_super_admin,
             ),
         ),
         (
@@ -1034,6 +1129,7 @@ async def execute_agent_query(
         or order_sources
         or asset_sources
         or company_sources
+        or staff_sources
         or issue_sources
         or service_status_sources
         or backup_job_sources
@@ -1049,7 +1145,7 @@ async def execute_agent_query(
         "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
         "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
         "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
+        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Staff:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
         f"User query: {query_text}",
         "",
     ]
@@ -1132,6 +1228,21 @@ async def execute_agent_query(
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
+    if staff_sources:
+        context_sections.append("Staff accessible to the user:")
+        for staff_member in staff_sources:
+            parts = [f"[Staff:#{staff_member['id']}] {staff_member['name']}"]
+            if staff_member.get("email"):
+                parts.append(f"email: {staff_member['email']}")
+            if staff_member.get("job_title"):
+                parts.append(f"title: {staff_member['job_title']}")
+            if staff_member.get("department"):
+                parts.append(f"department: {staff_member['department']}")
+            if staff_member.get("onboarding_status"):
+                parts.append(f"status: {staff_member['onboarding_status']}")
+            context_sections.append("- " + " — ".join(parts))
+        context_sections.append("")
+
     if issue_sources:
         context_sections.append("Issues accessible to the user:")
         for issue in issue_sources:
@@ -1190,7 +1301,9 @@ async def execute_agent_query(
     if mailbox_sources:
         context_sections.append("Office 365 mailboxes accessible to the user:")
         for mailbox in mailbox_sources:
-            parts = [f"[Mailbox:{mailbox['user_principal_name']}] {mailbox['display_name']}"]
+            parts = [
+                f"[Mailbox:{mailbox['user_principal_name']}] {mailbox['display_name']}"
+            ]
             if mailbox.get("mailbox_type"):
                 parts.append(f"type: {mailbox['mailbox_type']}")
             if mailbox.get("storage_used_bytes") is not None:
@@ -1330,6 +1443,7 @@ async def execute_agent_query(
             "orders": order_sources,
             "assets": asset_sources,
             "companies": company_sources,
+            "staff": staff_sources,
             "issues": issue_sources,
             "service_status": service_status_sources,
             "backup_jobs": backup_job_sources,
