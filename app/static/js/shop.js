@@ -134,17 +134,6 @@
     return row;
   }
 
-  function appendPlainTextWithLineBreaks(container, text) {
-    const lines = String(text).split(/\r?\n/);
-    lines.forEach((line, index) => {
-      if (index > 0) {
-        container.appendChild(document.createElement('br'));
-      }
-      container.appendChild(document.createTextNode(line));
-    });
-  }
-
-
   async function fetchProductDetails(productId) {
     const response = await fetch(`/api/shop/products/${productId}`, {
       headers: {
@@ -183,15 +172,21 @@
     container.appendChild(createDetailRow('Price', `$${Number(product.price || 0).toFixed(2)}`));
     container.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
 
-    if (product.description) {
+    const descriptionHtml = typeof product.description_html === 'string' ? product.description_html.trim() : '';
+    const descriptionText = typeof product.description === 'string' ? product.description.trim() : '';
+    if (descriptionHtml || descriptionText) {
       const descriptionTitle = document.createElement('h3');
       descriptionTitle.className = 'modal__subtitle';
       descriptionTitle.textContent = 'Description';
       container.appendChild(descriptionTitle);
 
       const descriptionDiv = document.createElement('div');
-      descriptionDiv.className = 'modal__description';
-      appendPlainTextWithLineBreaks(descriptionDiv, product.description);
+      descriptionDiv.className = 'modal__description rich-text-viewer';
+      if (descriptionHtml) {
+        descriptionDiv.innerHTML = descriptionHtml;
+      } else {
+        descriptionDiv.textContent = descriptionText;
+      }
       container.appendChild(descriptionDiv);
     }
   }
