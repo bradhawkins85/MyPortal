@@ -664,7 +664,8 @@ async def _process_feed_item(
     stock_qld = int(item.get("on_hand_qld") or 0)
     stock_vic = int(item.get("on_hand_vic") or 0)
     stock_sa = int(item.get("on_hand_sa") or 0)
-    stock_total = stock_nsw + stock_qld + stock_vic + stock_sa
+    stock_wa = int(item.get("on_hand_wa") or item.get("on_hand_wau") or 0)
+    stock_total = stock_nsw + stock_qld + stock_vic + stock_sa + stock_wa
 
     buy_price = _to_decimal(item.get("dbp"))
     weight = _to_decimal(item.get("weight"))
@@ -709,6 +710,7 @@ async def _process_feed_item(
         stock_qld=stock_qld,
         stock_vic=stock_vic,
         stock_sa=stock_sa,
+        stock_wa=stock_wa,
         buy_price=buy_price,
         weight=weight,
         length=length,

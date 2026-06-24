@@ -8,6 +8,7 @@ WAREHOUSE_STOCK_FIELDS: tuple[tuple[str, str], ...] = (
     ("QLD", "stock_qld"),
     ("VIC", "stock_vic"),
     ("SA", "stock_sa"),
+    ("WA", "stock_wa"),
 )
 
 _SMALL = "small"
@@ -243,6 +244,20 @@ def _build_shipments(
     return list(shipments.values())
 
 
+def build_cart_shipments(
+    cart_items: Sequence[Mapping[str, Any]],
+    product_lookup: Mapping[int, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Group cart items into dispatch shipments by warehouse.
+
+    Freight rules are charged once for each returned shipment, not once per
+    cart line. This helper is intentionally public so checkout, previews, and
+    future admin tooling can use the same warehouse grouping before applying
+    freight rules.
+    """
+    return _build_shipments(cart_items, product_lookup)
+
+
 def calculate_cart_freight(
     cart_items: Sequence[Mapping[str, Any]],
     product_lookup: Mapping[int, Mapping[str, Any]],
@@ -258,7 +273,7 @@ def calculate_cart_freight(
         cart_subtotal += line_total
     cart_subtotal = _quantize_money(cart_subtotal)
 
-    shipments = _build_shipments(cart_items, product_lookup)
+    shipments = build_cart_shipments(cart_items, product_lookup)
     freight_total = Decimal("0")
     breakdown: list[dict[str, Any]] = []
     for shipment in shipments:
@@ -278,6 +293,8 @@ def calculate_cart_freight(
         breakdown.append(
             {
                 "dispatch_warehouse": shipment.get("dispatch_warehouse"),
+                "shipment_quantity": shipment.get("quantity"),
+                "shipment_subtotal": _quantize_money(shipment.get("subtotal")),
                 "rule_id": first_rule.get("id"),
                 "rule_name": first_rule.get("name"),
                 "applied_rule_ids": [

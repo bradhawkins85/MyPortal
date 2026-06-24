@@ -44,6 +44,7 @@ class OrderItemResponse(BaseModel):
     stock_qld: int | None = Field(default=None, alias="stockQld")
     stock_vic: int | None = Field(default=None, alias="stockVic")
     stock_sa: int | None = Field(default=None, alias="stockSa")
+    stock_wa: int | None = Field(default=None, alias="stockWa")
 
     model_config = {
         "populate_by_name": True,

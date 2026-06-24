@@ -46,6 +46,19 @@
 <div class="management management--single" data-layout>
   <section class="management__content">
     <section class="card card--panel">
+      <div class="card__body">
+        <h2>How shipment-based freight is calculated</h2>
+        <p class="management__intro">
+          Freight is charged once per dispatch shipment, not once per cart item. MyPortal groups the cart by dispatch warehouse first, then evaluates active freight rules for each warehouse shipment.
+        </p>
+        <ul class="management__intro">
+          <li>One warehouse equals one shipment and one freight rule evaluation.</li>
+          <li>If an order ships from QLD and WA, MyPortal creates two shipments and can apply two freight charges.</li>
+          <li>If an order ships from two or three warehouses, the final freight total is the sum of the matching rule charges for those two or three shipments.</li>
+          <li>Use <strong>Stop processing more rules after this rule</strong> when only the first matching charge should apply to a shipment. Leave it unticked when handling surcharges should be added to the base shipment charge.</li>
+          <li>A default fallback rule applies once to each shipment that has no other matching rule.</li>
+        </ul>
+      </div>
       <div class="table-wrapper">
         <table class="table" data-table data-table-id="freight-rules">
           <thead>
@@ -173,7 +186,7 @@
     </button>
     <h2 class="modal__title" id="freight-rule-modal-title">Rule editor</h2>
     <p class="management__intro">
-      Rules are evaluated per dispatch shipment. The first matching active rule by priority applies. Default fallback applies when no other rule matches.
+      Rules are evaluated per dispatch shipment. Matching active rules are applied by priority for each shipment, and processing stops only when a matching rule has “Stop processing” enabled. The default fallback applies to a shipment when no other rule matches.
     </p>
     <form action="{{ form_action }}" method="post" class="form management__form" id="freight-rule-form">
       {% if csrf_token %}
@@ -291,11 +304,11 @@
 (function () {
   const HINTS = {
     product_id: 'Comma-separated product IDs.',
-    cart_total: 'Use dollar values, e.g. between 0,500 for $0.00-$500.00.',
+    cart_total: 'Use dollar values with no upper limit, e.g. between 0,5000 for $0.00-$5,000.00 or gte 5000.',
     item_size: 'Allowed values: small, medium, large.',
     item_weight: 'Match max item weight in kilograms for the shipment.',
     quantity: 'Match shipment quantity.',
-    dispatch_warehouse: 'Warehouse code: NSW, QLD, VIC, SA, or UNALLOCATED.',
+    dispatch_warehouse: 'Warehouse code: NSW, QLD, VIC, SA, WA, or UNALLOCATED.',
   };
   const RESTRICTED_OPERATORS = {
     product_id: ['in', 'equals'],
