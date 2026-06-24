@@ -438,6 +438,7 @@ async def view_cart(
         sku = str(product.get("sku") or item.get("product_sku") or "")
         vendor_sku = product.get("vendor_sku")
         description = product.get("description")
+        description_html = main_module.sanitize_rich_text(str(description or "")).html
         image_url = product.get("image_url")
         line_total = current_price * quantity
         subtotal += line_total
@@ -488,6 +489,7 @@ async def view_cart(
                 "sku": sku,
                 "vendor_sku": vendor_sku,
                 "description": description,
+                "description_html": description_html,
                 "image_url": image_url,
                 "unit_price": f"{current_price:.2f}",
                 "quantity": quantity,
