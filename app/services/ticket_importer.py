@@ -71,14 +71,24 @@ class TicketImportSummary:
     created: int = 0
     updated: int = 0
     skipped: int = 0
+    skipped_reasons: list[str] | None = None
 
-    def record(self, outcome: str) -> None:
+    def record_skip(self, reason: str) -> None:
+        self.skipped += 1
+        reason_text = _clean_text(reason) or "Unknown reason"
+        if self.skipped_reasons is None:
+            self.skipped_reasons = []
+        self.skipped_reasons.append(reason_text)
+
+    def record(self, outcome: str, reason: str | None = None) -> None:
         if outcome == "created":
             self.created += 1
         elif outcome == "updated":
             self.updated += 1
         else:
-            self.skipped += 1
+            if reason is None and outcome.startswith("skipped:"):
+                reason = outcome.split(":", 1)[1].strip()
+            self.record_skip(reason or "Ticket could not be imported")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +97,7 @@ class TicketImportSummary:
             "created": self.created,
             "updated": self.updated,
             "skipped": self.skipped,
+            "skipped_reasons": self.skipped_reasons or [],
         }
 _HTML_NEWLINE_TAGS = re.compile(
     r"<\s*(?:br\s*/?|/(?:p|div|li|tr|table|thead|tbody|tfoot|section|article|header|footer|h[1-6]))\b[^>]*>",
@@ -1128,7 +1139,7 @@ async def _upsert_ticket(
     status_choices = set(allowed_statuses)
     syncro_id = ticket.get("id")
     if syncro_id is None:
-        return "skipped"
+        return "skipped: Syncro ticket payload did not include an id"
     external_reference = str(syncro_id)
     subject = _clean_text(ticket.get("subject") or ticket.get("title") or ticket.get("summary"))
     if not subject:
@@ -1269,8 +1280,8 @@ async def import_ticket_by_id(
     log_info("Starting Syncro ticket import", mode="single", ticket_id=ticket_id)
     ticket = await syncro.get_ticket(ticket_id, rate_limiter=limiter)
     if not ticket:
-        summary.skipped += 1
-        log_info("Syncro ticket import completed", mode="single", fetched=summary.fetched, created=0, updated=0, skipped=1)
+        summary.record_skip(f"Syncro ticket {ticket_id} was not returned by the Syncro API")
+        log_info("Syncro ticket import completed", mode="single", fetched=summary.fetched, created=0, updated=0, skipped=1, skipped_reasons=summary.skipped_reasons)
         return summary
     summary.fetched = 1
     allowed_statuses, default_status, status_mappings = await _get_status_context()
@@ -1300,7 +1311,7 @@ async def import_ticket_range(
     for identifier in range(start_id, end_id + 1):
         ticket = await syncro.get_ticket(identifier, rate_limiter=limiter)
         if not ticket:
-            summary.skipped += 1
+            summary.record_skip(f"Syncro ticket {identifier} was not returned by the Syncro API")
             continue
         summary.fetched += 1
         outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
@@ -1349,8 +1360,9 @@ async def import_all_tickets(
             try:
                 outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
             except Exception as exc:  # pragma: no cover - defensive logging
+                reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
                 log_error("Failed to import Syncro ticket", syncro_id=ticket.get("id"), error=str(exc))
-                summary.skipped += 1
+                summary.record_skip(reason)
                 continue
             summary.record(outcome)
         if total_pages is None:
