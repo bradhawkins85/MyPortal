@@ -677,6 +677,51 @@ def test_invoke_smtp_records_failure(monkeypatch):
     assert result.get("email_event_id") is None
 
 
+def test_tacticalrmm_calls_per_second_defaults_to_one(monkeypatch):
+    monkeypatch.delenv("TACTICALRMM_CALLS_PER_SECOND", raising=False)
+    assert modules._get_tacticalrmm_calls_per_second() == 1.0
+
+
+@pytest.mark.parametrize("raw_value", ["", "0", "-1", "not-a-number"])
+def test_tacticalrmm_calls_per_second_rejects_invalid_values(monkeypatch, raw_value):
+    monkeypatch.setenv("TACTICALRMM_CALLS_PER_SECOND", raw_value)
+    assert modules._get_tacticalrmm_calls_per_second() == 1.0
+
+
+def test_tacticalrmm_calls_per_second_uses_env_value(monkeypatch):
+    monkeypatch.setenv("TACTICALRMM_CALLS_PER_SECOND", "2.5")
+    assert modules._get_tacticalrmm_calls_per_second() == 2.5
+
+
+def test_tacticalrmm_throttle_waits_between_calls(monkeypatch):
+    sleep_calls: list[float] = []
+    current_time = 100.0
+
+    class FakeLoop:
+        def time(self):
+            return current_time
+
+    async def fake_sleep(delay):
+        nonlocal current_time
+        sleep_calls.append(delay)
+        current_time += delay
+
+    monkeypatch.setenv("TACTICALRMM_CALLS_PER_SECOND", "2")
+    monkeypatch.setattr(modules.asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(modules.asyncio, "sleep", fake_sleep)
+    modules._TACTICALRMM_LAST_REQUEST_AT = None
+
+    async def run_throttle_twice():
+        await modules._throttle_tacticalrmm_request()
+        await modules._throttle_tacticalrmm_request()
+
+    try:
+        asyncio.run(run_throttle_twice())
+    finally:
+        modules._TACTICALRMM_LAST_REQUEST_AT = None
+
+    assert sleep_calls == [0.5]
+
 def test_invoke_tacticalrmm_records_success(monkeypatch):
     captured_event: dict[str, object] = {}
 
