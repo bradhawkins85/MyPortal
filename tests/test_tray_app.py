@@ -495,6 +495,54 @@ def test_device_create_update_revoke(tray_db, run):
     assert run(repo.delete_revoked_devices()) == 0
 
 
+def test_delete_revoked_install_tokens(tray_db, run):
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    active_raw = svc.generate_install_token()
+    revoked_one_raw = svc.generate_install_token()
+    revoked_two_raw = svc.generate_install_token()
+    active = run(
+        repo.create_install_token(
+            label="Active",
+            company_id=None,
+            token_hash=svc.hash_token(active_raw),
+            token_prefix=svc.token_prefix(active_raw),
+            created_by_user_id=None,
+        )
+    )
+    revoked_one = run(
+        repo.create_install_token(
+            label="Revoked 1",
+            company_id=None,
+            token_hash=svc.hash_token(revoked_one_raw),
+            token_prefix=svc.token_prefix(revoked_one_raw),
+            created_by_user_id=None,
+        )
+    )
+    revoked_two = run(
+        repo.create_install_token(
+            label="Revoked 2",
+            company_id=None,
+            token_hash=svc.hash_token(revoked_two_raw),
+            token_prefix=svc.token_prefix(revoked_two_raw),
+            created_by_user_id=None,
+        )
+    )
+
+    run(repo.revoke_install_token(int(revoked_one["id"])))
+    run(repo.revoke_install_token(int(revoked_two["id"])))
+
+    deleted_count = run(repo.delete_revoked_install_tokens())
+    assert deleted_count >= 2
+    tokens = run(repo.list_install_tokens())
+    token_ids = {int(token["id"]) for token in tokens}
+    assert int(active["id"]) in token_ids
+    assert int(revoked_one["id"]) not in token_ids
+    assert int(revoked_two["id"]) not in token_ids
+    assert run(repo.delete_revoked_install_tokens()) == 0
+
+
 def test_resolve_config_default_when_no_configs(tray_db, run):
     from app.services import tray as svc
 
