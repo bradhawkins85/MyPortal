@@ -346,11 +346,25 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
     }
 
 
+def _format_stock_feed_parse_error(exc: ParseError) -> str:
+    """Return a safe, actionable description of an XML parse failure."""
+
+    detail = str(exc).strip() or exc.__class__.__name__
+    position = getattr(exc, "position", None)
+    if position:
+        line, column = position
+        location = f"line {line}, column {column}"
+        if location not in detail:
+            detail = f"{detail} at {location}"
+    return detail
+
+
 def _parse_stock_feed_xml(payload: str) -> list[dict[str, Any]]:
     try:
         root = fromstring(payload)
     except ParseError as exc:
-        raise ValueError("Invalid stock feed XML") from exc
+        detail = _format_stock_feed_parse_error(exc)
+        raise ValueError(f"Invalid stock feed XML: {detail}") from exc
 
     items: list[dict[str, Any]] = []
     for element in root.iter():
