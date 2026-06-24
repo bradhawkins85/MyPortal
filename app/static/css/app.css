@@ -8976,6 +8976,11 @@ a.service-card__ai-icon:hover {
   max-width: 90%;
 }
 
+.company-edit-page .form-input,
+.company-edit-page .form-textarea {
+  max-width: 85%;
+}
+
 .ticket-reply-form .form-input,
 .ticket-reply-form .form-textarea,
 .ticket-reply-form .rich-text-editor {
