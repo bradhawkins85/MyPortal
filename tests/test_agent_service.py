@@ -509,3 +509,60 @@ async def test_execute_agent_query_includes_generic_feature_pack_sources(monkeyp
     assert provider_calls[0]["company_ids"] == [1]
     assert result["sources"]["feature_packs"]["backups"][0]["title"] == "Backups policy"
     assert result["has_relevant_sources"] is True
+
+
+@pytest.mark.anyio
+async def test_search_staff_sources_matches_mobile_org_and_custom_fields(monkeypatch):
+    memberships = [
+        {
+            "company_id": 1,
+            "company_name": "Contoso",
+            "can_manage_staff": True,
+            "staff_permission": 3,
+        }
+    ]
+    staff_rows = [
+        {
+            "id": 101,
+            "company_id": 1,
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@example.com",
+            "mobile_phone": "+61 400 555 123",
+            "department": "Engineering",
+            "job_title": "Principal Analyst",
+            "org_company": "Research Org",
+            "manager_name": "Grace Hopper",
+            "account_action": "create",
+            "enabled": True,
+            "is_ex_staff": False,
+            "onboarding_status": "pending",
+            "updated_at": "2026-01-02T03:04:05+00:00",
+        }
+    ]
+
+    monkeypatch.setattr(
+        agent_service.staff_repo, "list_staff", AsyncMock(return_value=staff_rows)
+    )
+    monkeypatch.setattr(
+        agent_service.staff_custom_fields_repo,
+        "get_all_staff_field_values",
+        AsyncMock(return_value={101: {"employment_type": "Contractor", "site": "HQ"}}),
+    )
+
+    mobile_matches = await agent_service._search_staff_sources(
+        "555 123", memberships=memberships, is_super_admin=False
+    )
+    org_matches = await agent_service._search_staff_sources(
+        "Research Org", memberships=memberships, is_super_admin=False
+    )
+    custom_matches = await agent_service._search_staff_sources(
+        "Contractor", memberships=memberships, is_super_admin=False
+    )
+
+    assert mobile_matches[0]["mobile_phone"] == "+61 400 555 123"
+    assert org_matches[0]["org_company"] == "Research Org"
+    assert custom_matches[0]["custom_fields"] == {
+        "employment_type": "Contractor",
+        "site": "HQ",
+    }
