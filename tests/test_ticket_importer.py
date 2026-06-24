@@ -246,6 +246,36 @@ async def test_import_ticket_range_handles_missing(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_ticket_by_id_reports_skip_reason_when_missing(monkeypatch):
+    async def fake_get_ticket(ticket_id, rate_limiter=None):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+
+    summary = await ticket_importer.import_ticket_by_id(404, rate_limiter=None)
+
+    assert summary.skipped == 1
+    assert summary.as_dict()["skipped_reasons"] == ["Syncro ticket 404 was not returned by the Syncro API"]
+
+
+@pytest.mark.anyio
+async def test_upsert_ticket_reports_missing_id_skip_reason(monkeypatch):
+    allowed = {"open", "closed"}
+
+    outcome = await ticket_importer._upsert_ticket(
+        {"subject": "No Syncro id"},
+        allowed,
+        "open",
+        {},
+    )
+    summary = ticket_importer.TicketImportSummary(mode="single", fetched=1)
+    summary.record(outcome)
+
+    assert summary.skipped == 1
+    assert summary.as_dict()["skipped_reasons"] == ["Syncro ticket payload did not include an id"]
+
+
+@pytest.mark.anyio
 async def test_resolve_company_creates_company_when_missing(monkeypatch):
     created_payload: dict[str, Any] = {}
 
