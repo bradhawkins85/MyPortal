@@ -100,6 +100,46 @@ class AgentSourceIssue(BaseModel):
     assignments: list[AgentSourceIssueAssignment] = Field(default_factory=list)
 
 
+class AgentSourceServiceStatus(BaseModel):
+    id: int
+    name: str
+    status: Optional[str] = None
+    status_message: Optional[str] = None
+    description: Optional[str] = None
+
+
+class AgentSourceBackupJob(BaseModel):
+    id: int
+    company_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    latest_status: Optional[str] = None
+    today_status: Optional[str] = None
+
+
+class AgentSourceReport(BaseModel):
+    key: str
+    title: str
+    description: Optional[str] = None
+    source_type: Optional[str] = None
+
+
+class AgentSourceMailbox(BaseModel):
+    user_principal_name: str
+    display_name: str
+    mailbox_type: Optional[str] = None
+    company_id: Optional[int] = None
+    storage_used_bytes: Optional[int] = None
+
+
+class AgentSourceBestPractice(BaseModel):
+    check_id: str
+    check_name: str
+    status: Optional[str] = None
+    details: Optional[str] = None
+    company_id: Optional[int] = None
+
+
 class AgentSourceFeaturePackItem(BaseModel):
     title: str
     summary: Optional[str] = None
@@ -118,6 +158,11 @@ class AgentSources(BaseModel):
     assets: list[AgentSourceAsset] = Field(default_factory=list)
     companies: list[AgentSourceCompany] = Field(default_factory=list)
     issues: list[AgentSourceIssue] = Field(default_factory=list)
+    service_status: list[AgentSourceServiceStatus] = Field(default_factory=list)
+    backup_jobs: list[AgentSourceBackupJob] = Field(default_factory=list)
+    reports: list[AgentSourceReport] = Field(default_factory=list)
+    mailboxes: list[AgentSourceMailbox] = Field(default_factory=list)
+    best_practices: list[AgentSourceBestPractice] = Field(default_factory=list)
     feature_packs: dict[str, list[AgentSourceFeaturePackItem]] = Field(
         default_factory=dict
     )
