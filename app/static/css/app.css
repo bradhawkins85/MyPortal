@@ -10543,3 +10543,40 @@ a.stat-strip__stat:focus-visible {
     margin: 0;
   }
 }
+
+.ticket-related__summary .button {
+  position: relative;
+  z-index: 1;
+}
+
+.ticket-related__actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+.ticket-related__refresh.is-loading {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.ticket-related__status {
+  color: var(--color-text-muted, #64748b);
+  font-size: 0.9rem;
+}
+
+.ticket-related__list {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ticket-related__link {
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  overflow: hidden;
+  text-decoration: none;
+}

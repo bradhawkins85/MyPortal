@@ -155,6 +155,107 @@
     return getCookie('myportal_session_csrf');
   }
 
+
+  function initTicketRelated() {
+    const panel = document.querySelector('[data-ticket-related]');
+    if (!panel) {
+      return;
+    }
+    const ticketId = panel.getAttribute('data-ticket-id');
+    const autoScan = panel.getAttribute('data-auto-scan') === 'true';
+    const refreshButton = panel.querySelector('[data-ticket-related-refresh]');
+    const status = panel.querySelector('[data-ticket-related-status]');
+    const list = panel.querySelector('[data-ticket-related-list]');
+    let hasScanned = false;
+    let isScanning = false;
+
+    function setStatus(message) {
+      if (status) {
+        status.textContent = message || '';
+        status.hidden = !message;
+      }
+    }
+
+    function renderItems(items) {
+      if (!list) {
+        return;
+      }
+      list.innerHTML = '';
+      if (!Array.isArray(items) || items.length === 0) {
+        list.hidden = true;
+        setStatus('No related MyPortal content was found for this ticket.');
+        return;
+      }
+      items.forEach((item) => {
+        const li = document.createElement('li');
+        li.className = 'ticket-related__item';
+        const link = document.createElement('a');
+        link.className = 'ticket-related__link';
+        link.href = item.url || '#';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.label || item.url || 'Related item';
+        link.title = link.textContent;
+        li.appendChild(link);
+        list.appendChild(li);
+      });
+      list.hidden = false;
+      setStatus('');
+    }
+
+    async function scanRelated() {
+      if (!ticketId || isScanning) {
+        return;
+      }
+      isScanning = true;
+      hasScanned = true;
+      if (refreshButton) {
+        refreshButton.disabled = true;
+        refreshButton.classList.add('is-loading');
+      }
+      setStatus('Scanning this ticket for related MyPortal content…');
+      try {
+        const headers = { Accept: 'application/json' };
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
+        const response = await fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/related/rescan`, {
+          method: 'POST',
+          headers,
+        });
+        if (!response.ok) {
+          throw new Error(`Scan failed (${response.status})`);
+        }
+        const payload = await response.json();
+        renderItems(payload.items || []);
+      } catch (error) {
+        console.error('Failed to scan ticket related content:', error);
+        setStatus(error.message || 'Failed to scan related content.');
+      } finally {
+        isScanning = false;
+        if (refreshButton) {
+          refreshButton.disabled = false;
+          refreshButton.classList.remove('is-loading');
+        }
+      }
+    }
+
+    if (refreshButton) {
+      refreshButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        scanRelated();
+      });
+    }
+
+    panel.addEventListener('toggle', () => {
+      if (panel.open && autoScan && !hasScanned) {
+        scanRelated();
+      }
+    });
+  }
+
   function parseMinutesValue(value) {
     if (typeof value !== 'string' || value.trim() === '') {
       return null;
@@ -2114,6 +2215,7 @@
     initialiseTaskManagement();
     initialiseWatcherManagement();
     initialiseAttachmentActions();
+    initTicketRelated();
     convertUtcElements();
     initialiseBookingModal();
   }
