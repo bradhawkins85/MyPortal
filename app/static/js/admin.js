@@ -498,7 +498,22 @@
       const alertBox = document.createElement('div');
       alertBox.className = isError ? 'alert alert--error' : 'alert';
       alertBox.setAttribute('role', isError ? 'alert' : 'status');
-      alertBox.textContent = message;
+      if (Array.isArray(message)) {
+        const [summary, ...details] = message;
+        alertBox.appendChild(document.createTextNode(summary || 'Import completed.'));
+        if (details.length) {
+          const list = document.createElement('ul');
+          list.className = 'list list--compact';
+          details.forEach((detail) => {
+            const item = document.createElement('li');
+            item.textContent = detail;
+            list.appendChild(item);
+          });
+          alertBox.appendChild(list);
+        }
+      } else {
+        alertBox.textContent = message;
+      }
       statusRegion.appendChild(alertBox);
       statusRegion.hidden = false;
     };
@@ -542,10 +557,11 @@
           const created = Number(response?.created ?? 0);
           const updated = Number(response?.updated ?? 0);
           const skipped = Number(response?.skipped ?? 0);
-          renderStatus(
-            `Imported ${fetched} ticket${fetched === 1 ? '' : 's'} (created ${created}, updated ${updated}, skipped ${skipped}).`,
-            false,
-          );
+          const summaryMessage = `Imported ${fetched} ticket${fetched === 1 ? '' : 's'} (created ${created}, updated ${updated}, skipped ${skipped}).`;
+          const skippedReasons = Array.isArray(response?.skipped_reasons)
+            ? response.skipped_reasons
+            : (Array.isArray(response?.skippedReasons) ? response.skippedReasons : []);
+          renderStatus(skippedReasons.length ? [summaryMessage, ...skippedReasons] : summaryMessage, false);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unable to import tickets.';
           renderStatus(message, true);
@@ -556,6 +572,48 @@
         }
       });
     });
+  }
+
+  function bindSyncroStatusMappingRows() {
+    const tbody = document.querySelector('[data-syncro-status-mapping-rows]');
+    if (!tbody) {
+      return;
+    }
+
+    const rowHasValue = (row) => Array.from(row.querySelectorAll('input, select')).some((field) => String(field.value || '').trim());
+
+    const cloneBlankRow = () => {
+      const template = Array.from(tbody.querySelectorAll('[data-syncro-status-mapping-row]')).find((row) => !rowHasValue(row));
+      if (!template) {
+        return null;
+      }
+      const clone = template.cloneNode(true);
+      clone.querySelectorAll('input, select').forEach((field) => {
+        field.value = '';
+      });
+      return clone;
+    };
+
+    const ensureOneBlankRow = () => {
+      const rows = Array.from(tbody.querySelectorAll('[data-syncro-status-mapping-row]'));
+      const blankRows = rows.filter((row) => !rowHasValue(row));
+      if (blankRows.length === 0) {
+        const row = cloneBlankRow() || rows[rows.length - 1]?.cloneNode(true);
+        if (!row) {
+          return;
+        }
+        row.querySelectorAll('input, select').forEach((field) => {
+          field.value = '';
+        });
+        tbody.appendChild(row);
+      } else if (blankRows.length > 1) {
+        blankRows.slice(1).forEach((row) => row.remove());
+      }
+    };
+
+    tbody.addEventListener('input', ensureOneBlankRow);
+    tbody.addEventListener('change', ensureOneBlankRow);
+    ensureOneBlankRow();
   }
 
   function bindSyncroCompanyImportForm() {
@@ -3423,6 +3481,7 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     bindSyncroTicketImportForms();
+    bindSyncroStatusMappingRows();
     bindSyncroCompanyImportForm();
     bindTicketBulkDelete();
     bindTicketStatusAutoSubmit();

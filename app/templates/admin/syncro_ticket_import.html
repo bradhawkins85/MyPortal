@@ -56,13 +56,13 @@
 
 
 
-        <article class="card card--panel">
-          <header class="card__header">
+        <details class="card card--panel" data-syncro-status-mappings>
+          <summary class="card__header">
             <div>
               <h2 class="card__title">Status mappings</h2>
               <p class="card__subtitle">List each Syncro ticket status and choose the MyPortal status that imported tickets should use when the names do not match exactly.</p>
             </div>
-          </header>
+          </summary>
           <form class="card__form" action="/admin/tickets/syncro-import/status-mappings" method="post">
             {% include "partials/csrf.html" %}
             <div class="table-wrapper">
@@ -73,10 +73,10 @@
                     <th scope="col">MyPortal status</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody data-syncro-status-mapping-rows>
                   {% set mappings = syncro_module.ticket_status_mappings or [] %}
                   {% for mapping in mappings %}
-                    <tr>
+                    <tr data-syncro-status-mapping-row>
                       <td data-label="Syncro status">
                         <input name="syncroStatus" class="form-input" maxlength="128" value="{{ mapping.syncro_status }}" placeholder="e.g. Waiting on Customer" />
                       </td>
@@ -89,21 +89,19 @@
                       </td>
                     </tr>
                   {% endfor %}
-                  {% for index in range(3) %}
-                    <tr>
-                      <td data-label="Syncro status">
-                        <input name="syncroStatus" class="form-input" maxlength="128" placeholder="e.g. {{ 'New' if index == 0 else 'In Progress' if index == 1 else 'Customer Reply' }}" />
-                      </td>
-                      <td data-label="MyPortal status">
-                        <select name="myportalStatus" class="form-input">
-                          <option value="">Select a MyPortal status</option>
-                          {% for status_option in ticket_status_definitions %}
-                            <option value="{{ status_option.tech_status }}">{{ status_option.tech_label }}</option>
-                          {% endfor %}
-                        </select>
-                      </td>
-                    </tr>
-                  {% endfor %}
+                  <tr data-syncro-status-mapping-row>
+                    <td data-label="Syncro status">
+                      <input name="syncroStatus" class="form-input" maxlength="128" placeholder="e.g. Waiting on Customer" />
+                    </td>
+                    <td data-label="MyPortal status">
+                      <select name="myportalStatus" class="form-input">
+                        <option value="">Select a MyPortal status</option>
+                        {% for status_option in ticket_status_definitions %}
+                          <option value="{{ status_option.tech_status }}">{{ status_option.tech_label }}</option>
+                        {% endfor %}
+                      </select>
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -112,7 +110,7 @@
               <button type="submit" class="button button--primary">Save status mappings</button>
             </div>
           </form>
-        </article>
+        </details>
 
         <article class="card card--panel">
           <header class="card__header">

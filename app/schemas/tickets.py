@@ -279,6 +279,9 @@ class SyncroTicketImportSummary(BaseModel):
     created: int = Field(default=0, ge=0)
     updated: int = Field(default=0, ge=0)
     skipped: int = Field(default=0, ge=0)
+    skipped_reasons: list[str] = Field(default_factory=list, alias="skippedReasons")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class TicketTaskCreate(BaseModel):
