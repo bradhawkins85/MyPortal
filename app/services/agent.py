@@ -12,6 +12,7 @@ from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import reporting as reporting_repo
 from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import tickets as tickets_repo
 from app.services import company_access
 from app.services import backup_jobs as backup_jobs_service
@@ -164,6 +165,16 @@ async def _search_staff_sources(
             continue
         try:
             staff_rows = await staff_repo.list_staff(company_id, page_size=500)
+            staff_ids = [
+                int(staff_member["id"])
+                for staff_member in staff_rows
+                if staff_member.get("id") is not None
+            ]
+            custom_field_values = (
+                await staff_custom_fields_repo.get_all_staff_field_values(
+                    company_id, staff_ids
+                )
+            )
         except Exception as exc:  # pragma: no cover - defensive guard
             log_error(
                 "Agent staff lookup failed", company_id=company_id, error=str(exc)
@@ -178,7 +189,11 @@ async def _search_staff_sources(
                 staff_member.get("job_title"),
                 staff_member.get("department"),
                 staff_member.get("mobile_phone"),
+                staff_member.get("org_company"),
+                staff_member.get("manager_name"),
+                staff_member.get("account_action"),
                 staff_member.get("onboarding_status"),
+                custom_field_values.get(int(staff_member.get("id") or 0), {}),
             ):
                 continue
             full_name = " ".join(
@@ -189,6 +204,8 @@ async def _search_staff_sources(
                 )
                 if str(part or "").strip()
             ).strip()
+            staff_id = int(staff_member.get("id") or 0)
+            custom_fields = custom_field_values.get(staff_id, {})
             sources.append(
                 {
                     "id": staff_member.get("id"),
@@ -199,6 +216,11 @@ async def _search_staff_sources(
                     "email": staff_member.get("email"),
                     "job_title": staff_member.get("job_title"),
                     "department": staff_member.get("department"),
+                    "mobile_phone": staff_member.get("mobile_phone"),
+                    "org_company": staff_member.get("org_company"),
+                    "manager_name": staff_member.get("manager_name"),
+                    "account_action": staff_member.get("account_action"),
+                    "custom_fields": dict(custom_fields),
                     "enabled": bool(staff_member.get("enabled")),
                     "is_ex_staff": bool(staff_member.get("is_ex_staff")),
                     "onboarding_status": staff_member.get("onboarding_status"),
@@ -1238,6 +1260,23 @@ async def execute_agent_query(
                 parts.append(f"title: {staff_member['job_title']}")
             if staff_member.get("department"):
                 parts.append(f"department: {staff_member['department']}")
+            if staff_member.get("mobile_phone"):
+                parts.append(f"mobile: {staff_member['mobile_phone']}")
+            if staff_member.get("org_company"):
+                parts.append(f"organisation: {staff_member['org_company']}")
+            if staff_member.get("manager_name"):
+                parts.append(f"manager: {staff_member['manager_name']}")
+            if staff_member.get("account_action"):
+                parts.append(f"account action: {staff_member['account_action']}")
+            custom_field_parts = [
+                f"{key}: {value}"
+                for key, value in sorted(
+                    (staff_member.get("custom_fields") or {}).items()
+                )
+                if value not in (None, "", [], {})
+            ]
+            if custom_field_parts:
+                parts.append("custom fields: " + ", ".join(custom_field_parts[:5]))
             if staff_member.get("onboarding_status"):
                 parts.append(f"status: {staff_member['onboarding_status']}")
             context_sections.append("- " + " — ".join(parts))
