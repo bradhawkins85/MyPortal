@@ -56,7 +56,9 @@ async def test_import_product_by_vendor_sku_processes_feed_item(monkeypatch):
     mock_process = AsyncMock(return_value=True)
     monkeypatch.setattr(products_service, "_process_feed_item", mock_process)
     refresh = AsyncMock(return_value={"description": "AI", "features": []})
-    monkeypatch.setattr(products_service.product_descriptions, "improve_product_description", refresh)
+    monkeypatch.setattr(
+        products_service.product_descriptions, "improve_product_description", refresh
+    )
 
     result = await products_service.import_product_by_vendor_sku("  ABC123  ")
 
@@ -71,16 +73,26 @@ async def test_import_product_by_vendor_sku_processes_feed_item(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
-async def test_import_product_by_vendor_sku_refreshes_description_for_existing_product(monkeypatch):
+async def test_import_product_by_vendor_sku_refreshes_description_for_existing_product(
+    monkeypatch,
+):
     item = {"sku": "ABC123"}
     existing_product = {"id": 42}
 
-    monkeypatch.setattr(products_service.stock_feed_repo, "get_item_by_sku", AsyncMock(return_value=item))
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "get_item_by_sku",
+        AsyncMock(return_value=item),
+    )
     get_product = AsyncMock(side_effect=[existing_product, existing_product])
     monkeypatch.setattr(products_service.shop_repo, "get_product_by_sku", get_product)
-    monkeypatch.setattr(products_service, "_process_feed_item", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        products_service, "_process_feed_item", AsyncMock(return_value=True)
+    )
     refresh = AsyncMock(return_value={"description": "AI", "features": []})
-    monkeypatch.setattr(products_service.product_descriptions, "improve_product_description", refresh)
+    monkeypatch.setattr(
+        products_service.product_descriptions, "improve_product_description", refresh
+    )
 
     result = await products_service.import_product_by_vendor_sku("ABC123")
 
@@ -302,7 +314,9 @@ async def test_process_feed_item_links_cross_sells_from_opt_accessori(monkeypatc
         "opt_accessori": "ACC1, ACC2",
     }
 
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_ids_by_skus",
@@ -319,7 +333,11 @@ async def test_process_feed_item_links_cross_sells_from_opt_accessori(monkeypatc
         "replace_product_recommendations",
         mock_replace,
     )
-    monkeypatch.setattr(products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
 
     result = await products_service._process_feed_item(item, None)
 
@@ -331,7 +349,9 @@ async def test_process_feed_item_links_cross_sells_from_opt_accessori(monkeypatc
 
 
 @pytest.mark.anyio("asyncio")
-async def test_process_feed_item_skips_cross_sells_when_opt_accessori_absent(monkeypatch):
+async def test_process_feed_item_skips_cross_sells_when_opt_accessori_absent(
+    monkeypatch,
+):
     """When opt_accessori is absent, cross-sells are not updated."""
     item = {
         "sku": "MAIN1",
@@ -355,21 +375,29 @@ async def test_process_feed_item_skips_cross_sells_when_opt_accessori_absent(mon
         "opt_accessori": None,
     }
 
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_by_sku",
         AsyncMock(return_value={"id": 5, "image_url": ""}),
     )
     mock_get_ids = AsyncMock(return_value=[])
-    monkeypatch.setattr(products_service.shop_repo, "get_product_ids_by_skus", mock_get_ids)
+    monkeypatch.setattr(
+        products_service.shop_repo, "get_product_ids_by_skus", mock_get_ids
+    )
     mock_replace = AsyncMock()
     monkeypatch.setattr(
         products_service.shop_repo,
         "replace_product_recommendations",
         mock_replace,
     )
-    monkeypatch.setattr(products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
 
     result = await products_service._process_feed_item(item, None)
 
@@ -403,9 +431,13 @@ async def test_process_feed_item_empty_opt_accessori_preserves_cross_sells(monke
         "opt_accessori": "",
     }
 
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     mock_get_ids = AsyncMock(return_value=[])
-    monkeypatch.setattr(products_service.shop_repo, "get_product_ids_by_skus", mock_get_ids)
+    monkeypatch.setattr(
+        products_service.shop_repo, "get_product_ids_by_skus", mock_get_ids
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_by_sku",
@@ -417,7 +449,11 @@ async def test_process_feed_item_empty_opt_accessori_preserves_cross_sells(monke
         "replace_product_recommendations",
         mock_replace,
     )
-    monkeypatch.setattr(products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
 
     result = await products_service._process_feed_item(item, None)
 
@@ -521,7 +557,9 @@ async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
         "get_product_by_sku",
         AsyncMock(return_value={"id": 1, "image_url": None}),
     )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_ids_by_skus",
@@ -534,13 +572,19 @@ async def test_update_products_from_feed_sets_cross_sells(monkeypatch):
         mock_replace,
     )
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=[]),
     )
 
     await products_service.update_products_from_feed()
@@ -571,22 +615,32 @@ async def test_update_products_from_feed_upserts_only_existing_feed_items(monkey
             return {"id": 1, "image_url": None}
         return None
 
-    monkeypatch.setattr(products_service.shop_repo, "get_product_by_sku", fake_get_by_sku)
+    monkeypatch.setattr(
+        products_service.shop_repo, "get_product_by_sku", fake_get_by_sku
+    )
     mock_upsert = AsyncMock()
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", mock_upsert)
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", mock_upsert
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "replace_product_recommendations",
         AsyncMock(),
     )
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=[]),
     )
 
     await products_service.update_products_from_feed()
@@ -614,23 +668,35 @@ async def test_update_products_from_feed_cross_sells_resolved_for_existing_produ
         "list_all_items",
         AsyncMock(return_value=feed_items),
     )
-    monkeypatch.setattr(products_service.shop_repo, "get_product_by_sku", fake_get_by_sku)
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
     monkeypatch.setattr(
-        products_service.shop_repo, "get_product_ids_by_skus", AsyncMock(return_value=[99])
+        products_service.shop_repo, "get_product_by_sku", fake_get_by_sku
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_ids_by_skus",
+        AsyncMock(return_value=[99]),
     )
     mock_replace = AsyncMock()
     monkeypatch.setattr(
         products_service.shop_repo, "replace_product_recommendations", mock_replace
     )
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=[]),
     )
 
     await products_service.update_products_from_feed()
@@ -655,7 +721,9 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
         "get_product_by_sku",
         AsyncMock(return_value={"id": 10, "image_url": None}),
     )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_ids_by_skus",
@@ -668,13 +736,19 @@ async def test_update_products_from_feed_uses_vendor_sku_for_cross_sells(monkeyp
         mock_replace,
     )
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=[]),
     )
 
     await products_service.update_products_from_feed()
@@ -690,7 +764,10 @@ async def test_update_products_from_feed_does_not_download_images_for_new_produc
     monkeypatch,
 ):
     """Images must not be downloaded for products that do not yet exist in the store."""
-    feed_item = {**_make_feed_item("NEW-SKU"), "image_url": "https://example.com/img.jpg"}
+    feed_item = {
+        **_make_feed_item("NEW-SKU"),
+        "image_url": "https://example.com/img.jpg",
+    }
 
     monkeypatch.setattr(
         products_service.stock_feed_repo,
@@ -702,16 +779,26 @@ async def test_update_products_from_feed_does_not_download_images_for_new_produc
         "get_product_by_sku",
         AsyncMock(return_value=None),
     )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
-    monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+        products_service.shop_repo, "replace_product_recommendations", AsyncMock()
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=[]),
     )
 
     mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
@@ -727,7 +814,10 @@ async def test_update_products_from_feed_downloads_image_for_existing_product_wi
     monkeypatch,
 ):
     """Images should be downloaded for store products that do not yet have an image."""
-    feed_item = {**_make_feed_item("EXISTING-SKU"), "image_url": "https://example.com/img.jpg"}
+    feed_item = {
+        **_make_feed_item("EXISTING-SKU"),
+        "image_url": "https://example.com/img.jpg",
+    }
 
     monkeypatch.setattr(
         products_service.stock_feed_repo,
@@ -739,16 +829,26 @@ async def test_update_products_from_feed_downloads_image_for_existing_product_wi
         "get_product_by_sku",
         AsyncMock(return_value={"id": 7, "image_url": None}),
     )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
-    monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=0)
+        products_service.shop_repo, "replace_product_recommendations", AsyncMock()
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "list_pending_optional_accessories", AsyncMock(return_value=[])
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "list_pending_optional_accessories",
+        AsyncMock(return_value=[]),
     )
 
     mock_download = AsyncMock(return_value="/uploads/shop/downloaded.jpg")
@@ -766,14 +866,18 @@ async def test_process_feed_item_skips_image_download_for_new_product_when_disab
     """_process_feed_item with download_image_if_new=False must not download images for new products."""
     item = {**_make_feed_item("NEW-SKU"), "image_url": "https://example.com/img.jpg"}
 
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_by_sku",
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
     )
 
     mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
@@ -794,14 +898,18 @@ async def test_process_feed_item_downloads_image_for_new_product_when_enabled(
     """_process_feed_item with download_image_if_new=True (default) downloads images for new products."""
     item = {**_make_feed_item("NEW-SKU"), "image_url": "https://example.com/img.jpg"}
 
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
+    monkeypatch.setattr(
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
+    )
     monkeypatch.setattr(
         products_service.shop_repo,
         "get_product_by_sku",
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
     )
 
     mock_download = AsyncMock(return_value="/uploads/shop/some.jpg")
@@ -907,7 +1015,9 @@ async def test_download_pending_accessory_images_skips_when_no_url(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
-async def test_download_pending_accessory_images_skips_update_when_download_fails(monkeypatch):
+async def test_download_pending_accessory_images_skips_update_when_download_fails(
+    monkeypatch,
+):
     """If the image download fails (returns None), the DB record is not updated."""
     accessories = [
         {
@@ -928,7 +1038,9 @@ async def test_download_pending_accessory_images_skips_update_when_download_fail
         "update_pending_accessory_image_url",
         mock_update,
     )
-    monkeypatch.setattr(products_service, "_download_product_image", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        products_service, "_download_product_image", AsyncMock(return_value=None)
+    )
 
     await products_service._download_pending_accessory_images()
 
@@ -936,7 +1048,9 @@ async def test_download_pending_accessory_images_skips_update_when_download_fail
 
 
 @pytest.mark.anyio("asyncio")
-async def test_update_products_from_feed_downloads_pending_accessory_images(monkeypatch):
+async def test_update_products_from_feed_downloads_pending_accessory_images(
+    monkeypatch,
+):
     """update_products_from_feed downloads images for pending accessories with external URLs."""
     feed_item = _make_feed_item("EXISTING-SKU")
     monkeypatch.setattr(
@@ -949,13 +1063,21 @@ async def test_update_products_from_feed_downloads_pending_accessory_images(monk
         "get_product_by_sku",
         AsyncMock(return_value={"id": 1, "image_url": None}),
     )
-    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", AsyncMock())
-    monkeypatch.setattr(products_service.shop_repo, "replace_product_recommendations", AsyncMock())
     monkeypatch.setattr(
-        products_service, "_get_or_create_category_hierarchy", AsyncMock(return_value=None)
+        products_service.shop_repo, "upsert_product_from_feed", AsyncMock()
     )
     monkeypatch.setattr(
-        products_service.shop_repo, "sync_pending_optional_accessories", AsyncMock(return_value=1)
+        products_service.shop_repo, "replace_product_recommendations", AsyncMock()
+    )
+    monkeypatch.setattr(
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=1),
     )
     pending = [
         {
@@ -1013,7 +1135,115 @@ async def test_download_product_image_rejects_non_public_url(monkeypatch):
     mock_client = AsyncMock()
     monkeypatch.setattr(products_service.httpx, "AsyncClient", mock_client)
 
-    result = await products_service._download_product_image("http://127.0.0.1/internal.png")
+    result = await products_service._download_product_image(
+        "http://127.0.0.1/internal.png"
+    )
 
     assert result is None
     mock_client.assert_not_called()
+
+
+def test_parse_stock_feed_xml_skips_item_with_invalid_character_reference():
+    xml_payload = """
+        <rss><channel>
+            <item><StockCode>GOOD1</StockCode><ProductName>Good</ProductName></item>
+            <item><StockCode>BAD1</StockCode><ProductName>Bad &#0; Name</ProductName></item>
+            <item><StockCode>GOOD2</StockCode><ProductName>Also Good</ProductName></item>
+        </channel></rss>
+    """
+
+    items, skipped_skus = products_service._parse_stock_feed_xml_with_skipped(
+        xml_payload
+    )
+
+    assert [item["sku"] for item in items] == ["GOOD1", "GOOD2"]
+    assert skipped_skus == ["BAD1"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_stock_feed_marks_skipped_invalid_xml_item_out_of_stock(
+    monkeypatch,
+):
+    xml_payload = """
+        <rss><channel>
+            <item><StockCode>GOOD1</StockCode><ProductName>Good</ProductName></item>
+            <item><StockCode>BAD1</StockCode><ProductName>Bad &#0; Name</ProductName></item>
+        </channel></rss>
+    """
+
+    class DummyResponse:
+        text = xml_payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class DummyClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # type: ignore[override]
+            return False
+
+        async def get(self, url: str, follow_redirects: bool = True) -> DummyResponse:
+            return DummyResponse()
+
+    monkeypatch.setattr(products_service.httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr(
+        products_service,
+        "get_settings",
+        lambda: SimpleNamespace(stock_feed_url="https://example.com/feed.xml"),
+    )
+    mock_replace = AsyncMock()
+    mock_mark_out = AsyncMock()
+    monkeypatch.setattr(products_service.stock_feed_repo, "replace_feed", mock_replace)
+    monkeypatch.setattr(
+        products_service.shop_repo, "mark_product_out_of_stock_by_sku", mock_mark_out
+    )
+    monkeypatch.setattr(
+        products_service.stock_feed_repo, "record_price_if_changed", AsyncMock()
+    )
+
+    count = await products_service.update_stock_feed()
+
+    assert count == 1
+    assert [item["sku"] for item in mock_replace.await_args.args[0]] == ["GOOD1"]
+    mock_mark_out.assert_awaited_once_with("BAD1")
+
+
+@pytest.mark.anyio("asyncio")
+async def test_update_products_from_feed_marks_failed_item_out_of_stock(monkeypatch):
+    feed_items = [_make_feed_item("FAIL-SKU")]
+    monkeypatch.setattr(
+        products_service.stock_feed_repo,
+        "list_all_items",
+        AsyncMock(return_value=feed_items),
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "get_product_by_sku",
+        AsyncMock(return_value={"id": 12, "sku": "FAIL-SKU"}),
+    )
+    monkeypatch.setattr(
+        products_service,
+        "_process_feed_item",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    mock_mark_out = AsyncMock()
+    monkeypatch.setattr(
+        products_service.shop_repo, "mark_product_out_of_stock_by_sku", mock_mark_out
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "sync_pending_optional_accessories",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        products_service, "_download_pending_accessory_images", AsyncMock()
+    )
+
+    await products_service.update_products_from_feed()
+
+    mock_mark_out.assert_awaited_once_with("FAIL-SKU")
