@@ -227,9 +227,34 @@ _IMAGE_EXTENSIONS = {
 }
 
 
+_COMMENT_IMAGE_URL_KEYS = (
+    "url",
+    "download_url",
+    "downloadUrl",
+    "file_url",
+    "fileUrl",
+    "attachment_url",
+    "attachmentUrl",
+    "content_url",
+    "contentUrl",
+    "mapped_content_url",
+    "mappedContentUrl",
+    "inline_url",
+    "inlineUrl",
+    "original_url",
+    "originalUrl",
+    "full_url",
+    "fullUrl",
+    "href",
+)
+_COMMENT_IMAGE_FILENAME_KEYS = ("filename", "file_name", "fileName", "name", "title", "alt")
+_COMMENT_IMAGE_MIME_KEYS = ("content_type", "contentType", "mime_type", "mimeType")
+
+
 def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str, str | None]]:
     """Return image attachment candidates embedded in a Syncro comment."""
     candidates: list[dict[str, str | None]] = []
+    seen: set[tuple[str, str]] = set()
 
     def add(url: Any, filename: Any = None, content_type: Any = None) -> None:
         url_text = str(url or "").strip()
@@ -241,38 +266,46 @@ def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str,
         if mime and not mime.startswith("image/"):
             return
         filename_text = _clean_text(filename)
+        guessed_type, _ = mimetypes.guess_type(filename_text or url_text)
+        if not mime and guessed_type and guessed_type.startswith("image/"):
+            mime = guessed_type
+        if not mime and filename_text and "." in filename_text:
+            guessed_from_name, _ = mimetypes.guess_type(filename_text)
+            if guessed_from_name and not guessed_from_name.startswith("image/"):
+                return
         key = (url_text, filename_text or "")
-        if any((item["url"], item.get("filename") or "") == key for item in candidates):
+        if key in seen:
             return
+        seen.add(key)
         candidates.append({"url": url_text, "filename": filename_text, "mime_type": mime})
 
-    for key in ("attachments", "files", "uploads", "images"):
-        raw = comment.get(key)
-        if not isinstance(raw, list):
-            continue
-        for item in raw:
-            if isinstance(item, str):
-                add(item)
-            elif isinstance(item, dict):
-                add(
-                    item.get("url")
-                    or item.get("download_url")
-                    or item.get("downloadUrl")
-                    or item.get("file_url")
-                    or item.get("fileUrl")
-                    or item.get("attachment_url")
-                    or item.get("attachmentUrl"),
-                    item.get("filename")
-                    or item.get("file_name")
-                    or item.get("fileName")
-                    or item.get("name"),
-                    item.get("content_type")
-                    or item.get("contentType")
-                    or item.get("mime_type")
-                    or item.get("mimeType"),
+    def scan(value: Any) -> None:
+        if isinstance(value, dict):
+            url = next((value.get(key) for key in _COMMENT_IMAGE_URL_KEYS if value.get(key)), None)
+            if url:
+                filename = next(
+                    (value.get(key) for key in _COMMENT_IMAGE_FILENAME_KEYS if value.get(key)),
+                    None,
                 )
+                content_type = next(
+                    (value.get(key) for key in _COMMENT_IMAGE_MIME_KEYS if value.get(key)),
+                    None,
+                )
+                add(url, filename, content_type)
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    scan(nested)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    add(item)
+                elif isinstance(item, (dict, list)):
+                    scan(item)
 
-    for body_key in ("body", "comment", "text", "content"):
+    for key in ("attachments", "files", "uploads", "images", "inline_images", "inlineImages"):
+        scan(comment.get(key))
+
+    for body_key in ("body", "html_body", "htmlBody", "comment", "text", "content"):
         body = comment.get(body_key)
         if not isinstance(body, str) or "<img" not in body.lower():
             continue
