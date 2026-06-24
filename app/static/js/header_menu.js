@@ -15,18 +15,36 @@
 
   var openMenu = null;
 
-  function positionPanel(menu) {
+  function positionPanel(menu, panel) {
     var toggle = menu.querySelector('[data-header-menu-toggle]');
-    var panel = menu.querySelector('[data-header-menu-panel]');
+    panel = panel || getMenuPanel(menu);
     if (!toggle || !panel) {
       return;
     }
     var rect = toggle.getBoundingClientRect();
+    var gap = 4;
+    var right = Math.max(8, window.innerWidth - rect.right);
     panel.style.position = 'fixed';
-    panel.style.top = (rect.bottom + 4) + 'px';
     panel.style.left = 'auto';
-    panel.style.right = (window.innerWidth - rect.right) + 'px';
+    panel.style.right = right + 'px';
     panel.style.zIndex = '9999';
+
+    // Measure after fixing the panel so row menus inside horizontally
+    // scrollable table wrappers can escape the wrapper's clipping. If there
+    // is not enough room below the button, open upward instead.
+    var panelHeight = panel.offsetHeight || 0;
+    var spaceBelow = window.innerHeight - rect.bottom - gap - 8;
+    if (panelHeight > spaceBelow && rect.top > spaceBelow) {
+      panel.style.top = 'auto';
+      panel.style.bottom = Math.max(8, window.innerHeight - rect.top + gap) + 'px';
+    } else {
+      panel.style.top = (rect.bottom + gap) + 'px';
+      panel.style.bottom = 'auto';
+    }
+  }
+
+  function getMenuPanel(menu) {
+    return menu.querySelector('[data-header-menu-panel]') || menu.querySelector('.header-title-menu__list');
   }
 
   function resetPanelPosition(panel) {
@@ -37,18 +55,22 @@
     panel.style.top = '';
     panel.style.left = '';
     panel.style.right = '';
+    panel.style.bottom = '';
     panel.style.zIndex = '';
   }
 
   function setMenuState(menu, open) {
     var toggle = menu.querySelector('[data-header-menu-toggle]');
-    var panel = menu.querySelector('[data-header-menu-panel]');
+    var panel = getMenuPanel(menu);
     if (!toggle || !panel) {
       return;
     }
     if (open) {
+      if (menu.tagName === 'DETAILS') {
+        menu.setAttribute('open', '');
+      }
       panel.hidden = false;
-      positionPanel(menu);
+      positionPanel(menu, panel);
       toggle.setAttribute('aria-expanded', 'true');
       menu.classList.add('header-menu--open');
       openMenu = menu;
@@ -57,6 +79,9 @@
       resetPanelPosition(panel);
       toggle.setAttribute('aria-expanded', 'false');
       menu.classList.remove('header-menu--open');
+      if (menu.tagName === 'DETAILS') {
+        menu.removeAttribute('open');
+      }
       if (openMenu === menu) {
         openMenu = null;
       }
@@ -76,11 +101,7 @@
       return;
     }
     var toggle = menu.querySelector('[data-header-menu-toggle]');
-    var panel = menu.querySelector('[data-header-menu-panel]');
-    // Only manage menus that follow the button + panel disclosure contract.
-    // Legacy <details>/<summary> title menus (no panel marker) rely on the
-    // native disclosure behaviour and are wired up elsewhere; if we bound
-    // here we'd preventDefault() the summary click and they'd never open.
+    var panel = getMenuPanel(menu);
     if (!toggle || !panel) {
       return;
     }
@@ -92,7 +113,7 @@
       closeAllMenus(menu);
       setMenuState(menu, willOpen);
       if (willOpen) {
-        var panel = menu.querySelector('[data-header-menu-panel]');
+        var panel = getMenuPanel(menu);
         var first = panel ? panel.querySelector('a, button, input') : null;
         if (first && typeof first.focus === 'function') {
           // Defer focus so the click doesn't immediately close the menu via outside-click handling.
@@ -102,7 +123,7 @@
     });
     // Close the menu when a menu item (but not a checkbox toggle) is clicked.
     panel.addEventListener('click', function (event) {
-      var item = event.target.closest('.header-menu__item');
+      var item = event.target.closest('.header-menu__item, .header-title-menu__item');
       if (item && !item.closest('.header-menu__check')) {
         setMenuState(menu, false);
       }
