@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -255,11 +256,14 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
     memberships = [
         {
             "company_id": 1,
-            "company_name": "Contoso",
+            "company_name": "VPN Co",
             "can_access_shop": False,
             "can_access_chat": True,
             "can_access_orders": True,
             "can_manage_assets": True,
+            "can_manage_issues": True,
+            "can_view_m365_user_mailboxes": True,
+            "can_view_m365_best_practices": True,
         }
     ]
 
@@ -278,6 +282,26 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
     )
 
     async def fake_fetch_all(sql, params):
+        if "FROM service_status_services" in sql:
+            return [
+                {
+                    "id": 8,
+                    "name": "VPN Service",
+                    "description": "Remote access platform",
+                    "status": "degraded",
+                    "status_message": "VPN logins are delayed",
+                }
+            ]
+        if "FROM m365_mailboxes" in sql:
+            return [
+                {
+                    "company_id": 1,
+                    "user_principal_name": "vpn.user@example.com",
+                    "display_name": "VPN User",
+                    "mailbox_type": "UserMailbox",
+                    "storage_used_bytes": 1234,
+                }
+            ]
         if "FROM chat_rooms" in sql:
             return [
                 {
@@ -328,11 +352,83 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
         assert "Chats accessible" in prompt
         assert "Orders accessible" in prompt
         assert "Assets accessible" in prompt
+        assert "Service statuses accessible" in prompt
+        assert "Backup summary jobs accessible" in prompt
+        assert "Reports accessible" in prompt
+        assert "Office 365 mailboxes accessible" in prompt
+        assert "Microsoft 365 best practices accessible" in prompt
         return {
             "status": "succeeded",
             "model": "llama3",
             "response": {"response": "Found sources"},
         }
+
+    issue_overviews = [
+        SimpleNamespace(
+            issue_id=22,
+            name="VPN rollout",
+            slug="vpn-rollout",
+            description="Track VPN deployment issues",
+            updated_at_iso="2025-01-10T10:00:00+00:00",
+            assignments=[
+                SimpleNamespace(
+                    company_id=1,
+                    company_name="VPN Co",
+                    status="investigating",
+                    status_label="Investigating",
+                )
+            ],
+        )
+    ]
+    monkeypatch.setattr(
+        agent_service.issues_service,
+        "build_issue_overview",
+        AsyncMock(return_value=issue_overviews),
+    )
+    monkeypatch.setattr(
+        agent_service.backup_jobs_service,
+        "list_jobs_with_latest",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 44,
+                    "company_id": 1,
+                    "name": "VPN Config Backup",
+                    "description": "Backs up VPN configuration",
+                    "latest_status": "pass",
+                    "today_status": "pass",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        agent_service.reporting_repo,
+        "list_queries_for_user",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 55,
+                    "slug": "vpn-report",
+                    "name": "VPN Report",
+                    "description": "Reports VPN usage",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        agent_service.m365_bp_repo,
+        "list_results",
+        AsyncMock(
+            return_value=[
+                {
+                    "check_id": "vpn-mfa",
+                    "check_name": "VPN MFA Best Practice",
+                    "status": "pass",
+                    "details": "VPN users require MFA",
+                }
+            ]
+        ),
+    )
 
     monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
 
@@ -340,9 +436,16 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
         "VPN", user, active_company_id=1, memberships=memberships
     )
 
+    assert result["sources"]["companies"][0]["name"] == "VPN Co"
+    assert result["sources"]["issues"][0]["id"] == 22
     assert result["sources"]["chats"][0]["id"] == 11
     assert result["sources"]["orders"][0]["order_number"] == "ORD-100"
     assert result["sources"]["assets"][0]["id"] == 33
+    assert result["sources"]["service_status"][0]["id"] == 8
+    assert result["sources"]["backup_jobs"][0]["id"] == 44
+    assert result["sources"]["reports"][0]["key"] == "vpn-report"
+    assert result["sources"]["mailboxes"][0]["user_principal_name"] == "vpn.user@example.com"
+    assert result["sources"]["best_practices"][0]["check_id"] == "vpn-mfa"
     assert result["has_relevant_sources"] is True
 
 
