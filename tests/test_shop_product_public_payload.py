@@ -53,3 +53,20 @@ def test_public_shop_product_payload_uses_vip_price_for_vip_company() -> None:
     payload = main._public_shop_product_payload(product, is_vip=True)
 
     assert payload["price"] == 22.0
+
+
+def test_public_shop_product_payload_includes_sanitized_description_html() -> None:
+    product = {
+        "id": 12,
+        "name": "Firewall",
+        "description": '<h3>Overview</h3><script>alert(1)</script><p onclick="evil()">Safe</p>',
+        "price": 99.0,
+    }
+
+    payload = main._public_shop_product_payload(product, is_vip=False)
+
+    assert payload["description"] == product["description"]
+    assert "<h3>Overview</h3>" in payload["description_html"]
+    assert "<p>Safe</p>" in payload["description_html"]
+    assert "script" not in payload["description_html"].lower()
+    assert "onclick" not in payload["description_html"].lower()

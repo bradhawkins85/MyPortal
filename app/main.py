@@ -8958,3 +8958,11 @@ async def readiness_probe() -> JSONResponse:
 # at ``app/features/chat/``.  They are loaded on startup via the
 # ``FEATURE_PACKS`` setting and can be hot-reloaded without restarting
 # the application.
+
+
+def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    """Compatibility wrapper for the shop feature-pack public payload helper."""
+
+    from app.features.shop.handlers import _public_shop_product_payload as shop_payload
+
+    return shop_payload(product, is_vip=is_vip)
