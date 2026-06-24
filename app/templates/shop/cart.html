@@ -394,7 +394,7 @@
   <script src="{{ static_url('/static/js/cart.js') }}" defer></script>
   <script>
     (function () {
-      var freightTotal = {{ freight_total | tojson }};
+      var freightTotal = {{ (freight_total | float) | tojson }};
       var subtotalEl = document.getElementById('cart-subtotal-amount');
       var cartSubtotal = subtotalEl ? parseFloat(subtotalEl.dataset.value || '0') : 0;
 
