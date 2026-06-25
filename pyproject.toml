@@ -36,6 +36,7 @@ dependencies = [
     "paramiko",
     "defusedxml",
     "apprise>=1.9.9",
+    "tiktoken>=0.6",
 ]
 
 [project.optional-dependencies]

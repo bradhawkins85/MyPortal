@@ -19,9 +19,10 @@ Mirrors the routes that used to live in ``app/main.py``:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -209,6 +210,32 @@ def _related_items_from_agent_sources(
                 return items
     return items
 
+
+async def _retrieve_related_rag_candidates(
+    query: str,
+    current_user: Mapping[str, Any],
+    *,
+    active_company_id: int | None,
+    memberships: Sequence[Mapping[str, Any]] | None,
+    ticket_id: int,
+) -> list[dict[str, Any]]:
+    try:
+        return await rag_retrieval.retrieve_candidates(
+            query,
+            current_user,
+            active_company_id=active_company_id,
+            memberships=memberships,
+            limit=12,
+            min_score=0.08,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error(
+            "Ticket related RAG retrieval failed",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return []
+
 def _parse_requester_value(raw: Any) -> tuple[str | None, int | None]:
     value = str(raw or "").strip()
     if not value:
@@ -291,24 +318,23 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
             "skipped": False,
             "generated_at": None,
         })
-    result = await agent_service.execute_agent_query(
-        query,
-        current_user,
-        active_company_id=getattr(request.state, "active_company_id", None),
-        memberships=getattr(request.state, "available_companies", None),
-    )
-    try:
-        rag_candidates = await rag_retrieval.retrieve_candidates(
+    active_company_id = getattr(request.state, "active_company_id", None)
+    available_companies = getattr(request.state, "available_companies", None)
+    result, rag_candidates = await asyncio.gather(
+        agent_service.execute_agent_query(
             query,
             current_user,
-            active_company_id=getattr(request.state, "active_company_id", None),
-            memberships=getattr(request.state, "available_companies", None),
-            limit=12,
-            min_score=0.08,
-        )
-    except Exception as exc:  # pragma: no cover - defensive guard
-        log_error("Ticket related RAG retrieval failed", ticket_id=ticket_id, error=str(exc))
-        rag_candidates = []
+            active_company_id=active_company_id,
+            memberships=available_companies,
+        ),
+        _retrieve_related_rag_candidates(
+            query,
+            current_user,
+            active_company_id=active_company_id,
+            memberships=available_companies,
+            ticket_id=ticket_id,
+        ),
+    )
 
     items: list[dict[str, str]] = []
     for candidate in rag_candidates:
