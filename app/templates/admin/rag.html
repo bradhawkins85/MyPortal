@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">Administration</p>
+    <h1>RAG Index</h1>
+    <p class="page-description">Monitor retrieval-augmented generation coverage and refresh the searchable index.</p>
+  </div>
+  <button type="button" class="button" data-rag-index-trigger>Trigger indexing</button>
+</section>
+
+<div class="card card--panel" data-rag-dashboard>
+  <div class="card__header">
+    <div>
+      <h2 class="card__title">Index health</h2>
+      <p class="card__description" data-rag-status>Loading RAG statistics…</p>
+    </div>
+    <button type="button" class="button button--ghost" data-rag-refresh>Refresh</button>
+  </div>
+  <div class="card__body">
+    <div class="stats-grid" data-rag-summary></div>
+
+    <div class="grid grid--2" style="margin-top: 1.5rem; gap: 1rem;">
+      <section>
+        <h3>Sources</h3>
+        <div class="table-responsive">
+          <table class="table">
+            <thead><tr><th>Source</th><th>Documents</th><th>Chunks</th><th>Tokens</th><th>Last indexed</th></tr></thead>
+            <tbody data-rag-sources></tbody>
+          </table>
+        </div>
+      </section>
+      <section>
+        <h3>Recent indexing jobs</h3>
+        <div class="table-responsive">
+          <table class="table">
+            <thead><tr><th>ID</th><th>Status</th><th>Message</th><th>Finished</th></tr></thead>
+            <tbody data-rag-jobs></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <section style="margin-top: 1.5rem;">
+      <h3>Recently indexed documents</h3>
+      <div class="table-responsive">
+        <table class="table">
+          <thead><tr><th>Title</th><th>Source</th><th>Company</th><th>Model</th><th>Indexed</th></tr></thead>
+          <tbody data-rag-documents></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const root = document.querySelector('[data-rag-dashboard]');
+  if (!root) return;
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const summary = root.querySelector('[data-rag-summary]');
+  const sourcesBody = root.querySelector('[data-rag-sources]');
+  const docsBody = root.querySelector('[data-rag-documents]');
+  const jobsBody = root.querySelector('[data-rag-jobs]');
+  const status = root.querySelector('[data-rag-status]');
+  const fmt = (value) => value === null || value === undefined || value === '' ? '—' : value;
+  const number = (value) => Number(value || 0).toLocaleString();
+  const date = (value) => value ? new Date(value).toLocaleString() : '—';
+  const esc = (value) => String(fmt(value)).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function metric(label, value, hint) {
+    return `<article class="stat-card"><span class="stat-card__label">${esc(label)}</span><strong class="stat-card__value">${esc(value)}</strong><span class="stat-card__hint">${esc(hint)}</span></article>`;
+  }
+  function emptyRow(cols, text) { return `<tr><td colspan="${cols}" class="table__empty">${esc(text)}</td></tr>`; }
+  async function loadHealth() {
+    status.textContent = 'Loading RAG statistics…';
+    const res = await fetch('/api/agent/rag/health', {headers: {'Accept': 'application/json'}});
+    if (!res.ok) throw new Error('Unable to load RAG health');
+    const data = await res.json();
+    summary.innerHTML = [
+      metric('Active documents', number(data.documents), `${number(data.inactive_documents)} inactive`),
+      metric('Active chunks', number(data.chunks), `${number(data.stale_chunks)} stale chunks`),
+      metric('Indexed tokens', number(data.token_count), `${Number(data.avg_tokens_per_chunk || 0).toFixed(1)} avg/chunk`),
+      metric('Companies covered', number(data.company_count), `${number(data.model_count)} embedding model(s)`),
+      metric('First indexed', date(data.first_indexed_at), 'Oldest active document'),
+      metric('Last indexed', date(data.last_indexed_at), 'Newest active document'),
+    ].join('');
+    sourcesBody.innerHTML = (data.sources || []).map((row) => `<tr><td>${esc(row.source_type)}</td><td>${number(row.count)}</td><td>${number(row.chunk_count)}</td><td>${number(row.token_count)}</td><td>${date(row.last_indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No indexed sources yet.');
+    docsBody.innerHTML = (data.recent_documents || []).map((row) => `<tr><td>${esc(row.title)}</td><td>${esc(row.source_type)}:${esc(row.source_id)}</td><td>${esc(row.company_id)}</td><td>${esc(row.embedding_model)}</td><td>${date(row.indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No recent documents.');
+    jobsBody.innerHTML = (data.recent_jobs || []).map((row) => `<tr><td>#${esc(row.id)}</td><td><span class="badge">${esc(row.status)}</span></td><td>${esc(row.message)}</td><td>${date(row.finished_at || row.created_at)}</td></tr>`).join('') || emptyRow(4, 'No indexing jobs yet.');
+    status.textContent = `Last refreshed ${new Date().toLocaleTimeString()}`;
+  }
+  async function triggerIndex() {
+    status.textContent = 'Queueing indexing job…';
+    const res = await fetch('/api/agent/rag/index', {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-Token': csrf}});
+    if (!res.ok) throw new Error('Unable to trigger indexing');
+    const data = await res.json();
+    status.textContent = `Indexing job #${data.job_id} queued.`;
+    setTimeout(loadHealth, 1500);
+  }
+  root.querySelector('[data-rag-refresh]')?.addEventListener('click', () => loadHealth().catch(err => status.textContent = err.message));
+  document.querySelector('[data-rag-index-trigger]')?.addEventListener('click', () => triggerIndex().catch(err => status.textContent = err.message));
+  loadHealth().catch(err => status.textContent = err.message);
+})();
+</script>
+{% endblock %}
