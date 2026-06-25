@@ -271,7 +271,7 @@ def _stage(
 
 
 def _summarise_rag_by_source(
-    candidates: Sequence[Mapping[str, Any]]
+    candidates: Sequence[Mapping[str, Any]],
 ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int]]:
     evidence: dict[str, list[dict[str, Any]]] = {
         "tickets": [],
@@ -308,7 +308,9 @@ def _summarise_rag_by_source(
     return evidence, counts
 
 
-def _extract_module_text(module_response: Mapping[str, Any]) -> tuple[str | None, str | None]:
+def _extract_module_text(
+    module_response: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
     payload = module_response.get("response")
     if isinstance(payload, Mapping):
         return (
@@ -372,7 +374,9 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
     }
 
 
-def _build_query_understanding_prompt(query_text: str, allowed_sources: set[str]) -> str:
+def _build_query_understanding_prompt(
+    query_text: str, allowed_sources: set[str]
+) -> str:
     return _truncate_prompt_sections(
         [
             "You are classifying a MyPortal user query for staged RAG retrieval.",
@@ -500,9 +504,8 @@ def _build_llm_context(
                 for duplicate in (candidate.get("duplicates") or [])[:5]
                 if isinstance(duplicate, Mapping)
             ]
-            duplicate_text = (
-                f"\n  Also found in {duplicate_count} similar results"
-                + (f": {', '.join(duplicate_labels)}" if duplicate_labels else "")
+            duplicate_text = f"\n  Also found in {duplicate_count} similar results" + (
+                f": {', '.join(duplicate_labels)}" if duplicate_labels else ""
             )
         item_text = (
             f"- {label} {title}\n  Relevance: curated\n  Score: {score}\n"
@@ -1647,6 +1650,7 @@ async def execute_agent_query(
             user,
             active_company_id=active_company_id,
             memberships=resolved_memberships,
+            source_filters=sorted(allowed_rag_sources),
         )
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent RAG retrieval failed", error=str(exc))
@@ -1729,7 +1733,9 @@ async def execute_agent_query(
     answer_text = final_llm["text"]
     model_name = final_llm["model"]
     event_id = final_llm["event_id"]
-    stages.append(_stage("final_answer", status="complete" if answer_text else module_status))
+    stages.append(
+        _stage("final_answer", status="complete" if answer_text else module_status)
+    )
 
     return {
         "query": query_text,

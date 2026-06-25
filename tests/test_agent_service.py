@@ -944,3 +944,88 @@ async def test_execute_agent_query_returns_stages_and_grouped_evidence(monkeypat
         "category_summaries",
         "final_answer",
     ]
+
+
+def test_filter_rag_candidates_does_not_duplicate_selected_sources(monkeypatch):
+    monkeypatch.setattr(agent_service, "_threshold_for_source", lambda source_type: 0.0)
+
+    result = agent_service._filter_rag_candidates(
+        [
+            {
+                "source_type": "knowledge_base",
+                "source_id": "reset-guide",
+                "title": "Reset guide",
+                "score": 0.9,
+            }
+        ],
+        allowed_sources={"knowledge_base"},
+    )
+
+    assert len(result) == 1
+    assert result[0]["source_id"] == "reset-guide"
+    assert result[0]["was_selected_by_rag"] is True
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_passes_all_allowed_source_types_to_rag(monkeypatch):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [
+        {
+            "company_id": 1,
+            "company_name": "Visible Co",
+            "can_access_chat": True,
+            "can_manage_assets": True,
+            "can_manage_issues": True,
+        }
+    ]
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value={"results": []}),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        agent_service, "_search_issue_sources", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        agent_service, "_search_feature_pack_sources", AsyncMock(return_value={})
+    )
+    retrieve_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        agent_service.rag_retrieval, "retrieve_candidates", retrieve_mock
+    )
+    monkeypatch.setattr(
+        agent_service,
+        "_invoke_agent_llm",
+        AsyncMock(
+            return_value={
+                "status": "succeeded",
+                "message": None,
+                "text": "ok",
+                "model": "test",
+                "event_id": None,
+            }
+        ),
+    )
+
+    await agent_service.execute_agent_query(
+        "network outage", user, memberships=memberships
+    )
+
+    source_filters = retrieve_mock.await_args.kwargs["source_filters"]
+    assert source_filters == [
+        "assets",
+        "chats",
+        "issues",
+        "knowledge_base",
+        "ticket_comments",
+        "tickets",
+    ]
