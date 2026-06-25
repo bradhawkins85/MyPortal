@@ -23,21 +23,24 @@ const { URL } = require('url');
 // Parse --url argument
 // ---------------------------------------------------------------------------
 
-function getChatURL() {
-  // In a packaged Electron app process.argv[0] is the executable and user
-  // arguments begin at index 1.  In development (electron .) argv[1] is the
-  // app entry point, so user arguments begin at index 2.
+function getLaunchArg(name) {
+  const prefix = `--${name}=`;
   const argv = process.argv.slice(app.isPackaged ? 1 : 2);
   for (const arg of argv) {
-    if (arg.startsWith('--url=')) {
-      const val = arg.slice('--url='.length).trim();
+    if (arg.startsWith(prefix)) {
+      const val = arg.slice(prefix.length).trim();
       return val || null;
     }
   }
   return null;
 }
 
+function getChatURL() {
+  return getLaunchArg('url');
+}
+
 const chatURL = getChatURL();
+let windowTitle = getLaunchArg('title') || 'MyPortal Chat';
 let launchURL = chatURL;
 let appReady = false;
 
@@ -50,6 +53,16 @@ let appReady = false;
 // session.
 const CHAT_PARTITION = 'persist:myportal-tray-chat';
 
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[ch]);
+}
+
 // How long (ms) to display the informational window when the app is run without
 // a --url= argument (e.g. manually by a user).
 const INFO_WINDOW_DISPLAY_MS = 8000;
@@ -61,7 +74,7 @@ const INFO_WINDOW_DISPLAY_MS = 8000;
 // instance is launched with a different URL, focus the existing window and
 // navigate it to the new URL.
 
-const gotLock = app.requestSingleInstanceLock({ chatURL: chatURL || '' });
+const gotLock = app.requestSingleInstanceLock({ chatURL: chatURL || '', windowTitle });
 if (!gotLock) {
   app.quit();
   process.exit(0);
@@ -135,7 +148,7 @@ function createChatWindow(url) {
     height: 680,
     minWidth: 480,
     minHeight: 400,
-    title: 'MyPortal Chat',
+    title: windowTitle,
     autoHideMenuBar: true,
     backgroundColor: '#ffffff',
     webPreferences: {
@@ -171,6 +184,11 @@ function createChatWindow(url) {
 
 app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
   const newURL = (additionalData && additionalData.chatURL) || null;
+  if (additionalData && additionalData.windowTitle) {
+    windowTitle = additionalData.windowTitle;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(windowTitle);
+    if (infoWindow && !infoWindow.isDestroyed()) infoWindow.setTitle(windowTitle);
+  }
   if (newURL) {
     launchURL = newURL;
   }
@@ -212,7 +230,7 @@ app.whenReady().then(() => {
     infoWindow = new BrowserWindow({
       width: 480,
       height: 220,
-      title: 'MyPortal Chat',
+      title: windowTitle,
       autoHideMenuBar: true,
       resizable: false,
       webPreferences: {
@@ -226,7 +244,7 @@ app.whenReady().then(() => {
       'data:text/html,' +
         encodeURIComponent(
           '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px;margin:0">' +
-            '<h3 style="margin-top:0">MyPortal Chat</h3>' +
+            '<h3 style="margin-top:0">' + escapeHTML(windowTitle) + '</h3>' +
             '<p>This application opens automatically when you click ' +
             '<strong>Support Chat</strong> in the MyPortal tray menu.</p>' +
             '<p style="color:#888;font-size:0.9em">This window will close in a few seconds.</p>' +

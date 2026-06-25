@@ -36,7 +36,7 @@ func showTextWindow(title, text string) {
 
 // openChatWindow resolves the chat URL (requesting an auth token when needed)
 // then delegates to openChatAppWindow which handles the launch strategy.
-func openChatWindow(chatURL string, _ *api.ConfigResponse) {
+func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	if chatURL == "" {
 		// Request a short-lived one-time auth token from the portal.  If the
 		// request fails (portal unreachable, device not enrolled, etc.) we do
@@ -61,7 +61,7 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 		return
 	}
 
-	openChatAppWindow(chatURL)
+	openChatAppWindow(chatURL, cfg)
 }
 
 // findAppBrowser returns the full path to a Chromium-based browser binary that
@@ -96,12 +96,12 @@ func findAppBrowser() string {
 }
 
 // openChatAppWindow implements the three-tier launch strategy for macOS.
-func openChatAppWindow(chatURL string) {
+func openChatAppWindow(chatURL string, cfg *api.ConfigResponse) {
 	mode := chatClientMode()
 
 	// Tier 1: dedicated Electron chat shell.
 	if mode != "browser" {
-		if openWithChatShell(chatURL) {
+		if openWithChatShell(chatURL, cfg) {
 			return
 		}
 		if mode == "shell" {

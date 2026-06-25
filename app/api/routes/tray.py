@@ -38,6 +38,7 @@ from app.repositories import chat as chat_repo
 from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as users_repo
 from app.repositories import staff as staff_repo
 from app.schemas.tray import (
@@ -730,9 +731,12 @@ def _render_ticket_form(
     error: str | None = None,
     values: dict[str, str] | None = None,
     success: str | None = None,
+    branding_display_name: str | None = None,
+    branding_icon_url: str = "/tray/icon.ico",
 ) -> str:
     values = values or {}
     title = "Create Syncro Ticket" if mode == "syncro" else "Submit Ticket"
+    brand_name = (branding_display_name or "MyPortal Helpdesk").strip() or "MyPortal Helpdesk"
     intro = "Create a support ticket linked to this computer."
     fields = []
     for name, label, field_type, placeholder, required in [
@@ -824,19 +828,20 @@ def _render_ticket_form(
     meta_json = _html.escape(json.dumps(question_meta), quote=True)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{_html.escape(title)}</title>
+<title>{_html.escape(title)} - {_html.escape(brand_name)}</title>
+<link rel="icon" href="{_html.escape(branding_icon_url, quote=True)}" type="image/x-icon">
 <style>
 :root{{--primary:#0f8f8f;--ink:#1f2937;--muted:#64748b;--line:#e5e7eb;--bg:#f8fafc}}
 *{{box-sizing:border-box}}body{{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}}
 .shell{{min-height:100vh;display:grid;grid-template-columns:220px 1fr;grid-template-rows:auto 1fr}}
-.nav{{grid-row:1/3;background:#0f172a;color:white;padding:24px}}.nav h1{{font-size:18px;margin:0 0 18px}}.nav p{{color:#cbd5e1;font-size:13px;line-height:1.5}}
+.nav{{grid-row:1/3;background:#0f172a;color:white;padding:24px}}.brand{{display:flex;align-items:center;gap:10px;margin-bottom:18px}}.brand img{{width:32px;height:32px;border-radius:8px;background:white;padding:4px}}.brand h1{{font-size:18px;margin:0}}.nav p{{color:#cbd5e1;font-size:13px;line-height:1.5}}
 .header{{background:white;border-bottom:1px solid var(--line);padding:20px 28px}}.header h2{{margin:0;font-size:24px}}.header p{{margin:6px 0 0;color:var(--muted)}}
 .main{{padding:28px;overflow:auto}}.card{{max-width:860px;background:white;border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.06)}}
 .field{{display:grid;gap:8px;margin-bottom:18px}}.field span{{font-weight:600}}input,textarea,select{{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font:inherit}}textarea{{resize:vertical}}.check{{display:flex;gap:8px;align-items:center}}.check input{{width:auto}}
 .actions{{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}}button{{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer}}.primary{{background:var(--primary);color:white}}.secondary{{background:#e5e7eb;color:#111827}}
 .alert{{border-radius:12px;padding:12px 14px;margin-bottom:18px}}.alert-error{{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}}.alert-success{{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}}
 @media(max-width:760px){{.shell{{display:block}}.nav{{padding:16px}}.main{{padding:16px}}}}
-</style></head><body><div class="shell"><aside class="nav"><h1>MyPortal</h1><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{''.join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
+</style></head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{''.join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
 <script>
 const meta=JSON.parse(document.getElementById('question-meta').value||'[]');
 function valueFor(id){{const el=document.querySelector(`[data-question-input="${{id}}"]`);if(!el)return'';if(el.type==='checkbox')return el.checked?'Yes':'No';return (el.value||'').trim();}}
@@ -884,12 +889,14 @@ async def tray_ticket_form(token: str) -> HTMLResponse:
     if not device or device.get("status") == "revoked":
         raise HTTPException(status_code=403, detail="Device not found or revoked")
     questions = await tq_service.get_questions_for_company(device.get("company_id"))
+    branding_display_name = await site_settings_repo.get_tray_icon_tooltip_name()
     return HTMLResponse(
         _render_ticket_form(
             token=token,
             csrf=str(session["csrf"]),
             mode=str(session["mode"]),
             questions=questions,
+            branding_display_name=branding_display_name,
         )
     )
 
@@ -909,6 +916,7 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
     if not device or device.get("status") == "revoked":
         raise HTTPException(status_code=403, detail="Device not found or revoked")
     questions = await tq_service.get_questions_for_company(device.get("company_id"))
+    branding_display_name = await site_settings_repo.get_tray_icon_tooltip_name()
     values = {
         k: str(v)
         for k, v in form.multi_items()
@@ -955,6 +963,7 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
                 csrf=str(session["csrf"]),
                 mode=str(session["mode"]),
                 questions=questions,
+                branding_display_name=branding_display_name,
                 error=detail,
                 values=values,
             ),
@@ -974,6 +983,7 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
             csrf=str(session["csrf"]),
             mode=str(session["mode"]),
             questions=questions,
+            branding_display_name=branding_display_name,
             success=success,
             values={},
         )

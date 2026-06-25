@@ -37,7 +37,7 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	}
 	w := webview.New(false)
 	defer w.Destroy()
-	w.SetTitle("MyPortal Chat")
+	w.SetTitle(trayDisplayName(cfg) + " Chat")
 	w.SetSize(900, 650, webview.HintNone)
 	w.Navigate(chatURL)
 	w.Run()

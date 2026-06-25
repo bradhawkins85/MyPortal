@@ -34,7 +34,7 @@ func showTextWindow(title, text string) {
 	fmt.Printf("[%s] %s\n", title, text)
 }
 
-func openChatWindow(chatURL string, _ *api.ConfigResponse) {
+func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	if chatURL == "" {
 		// Request a short-lived one-time auth token from the portal.  If the
 		// request fails (portal unreachable, device not enrolled, etc.) we do
@@ -58,7 +58,7 @@ func openChatWindow(chatURL string, _ *api.ConfigResponse) {
 		return
 	}
 
-	openChatAppWindow(chatURL)
+	openChatAppWindow(chatURL, cfg)
 }
 
 // findAppBrowser returns the full path to an Edge or Chrome executable that
@@ -107,12 +107,12 @@ func findAppBrowser() string {
 	return ""
 }
 
-func openChatAppWindow(chatURL string) {
+func openChatAppWindow(chatURL string, cfg *api.ConfigResponse) {
 	mode := chatClientMode()
 
 	// Tier 1: dedicated Electron chat shell.
 	if mode != "browser" {
-		if openWithChatShell(chatURL) {
+		if openWithChatShell(chatURL, cfg) {
 			return
 		}
 		if mode == "shell" {
@@ -138,7 +138,7 @@ func openChatAppWindow(chatURL string) {
 			if gPortalURL != "" {
 				iconURL := strings.TrimRight(gPortalURL, "/") + "/tray/icon.ico"
 				edgeArgs = append(edgeArgs,
-					"--app-name=MyPortal Chat",
+					"--app-name="+trayDisplayName(cfg)+" Chat",
 					"--app-icon-url="+iconURL,
 				)
 			}

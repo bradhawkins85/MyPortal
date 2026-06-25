@@ -147,7 +147,7 @@ func TestOpenWithChatShell_ReturnsFalseWhenAbsent(t *testing.T) {
 		t.Skipf("chat shell binary present at %s — skipping absence test", candidate)
 	}
 
-	result := openWithChatShell("https://example.com/tray/chat")
+	result := openWithChatShell("https://example.com/tray/chat", nil)
 	if result {
 		t.Error("expected false when chat shell is not installed, got true")
 	}
