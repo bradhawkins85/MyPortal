@@ -539,7 +539,7 @@
             class="card card--panel card-collapsible ticket-related"
             data-ticket-related
             data-ticket-id="{{ ticket.id }}"
-            data-auto-scan="{{ 'true' if ticket_related_auto_scan else 'false' }}"
+            data-auto-scan="false"
           >
             <summary class="card__header card__header--collapsible ticket-related__summary">
               <h2 class="card__title">Related</h2>
@@ -555,14 +555,30 @@
               </div>
             </summary>
             <div class="card-collapsible__content card__body">
-              <div class="ticket-related__status" data-ticket-related-status>
-                {% if ticket_related_auto_scan %}
-                  Open this section or use refresh to scan the ticket for related MyPortal content.
-                {% else %}
-                  Syncro-imported tickets are not scanned automatically. Use refresh to scan this ticket manually.
-                {% endif %}
+              <div
+                class="ticket-related__status"
+                data-ticket-related-status
+                {% if ticket_related_items %}hidden{% endif %}
+              >
+                No pre-discovered related MyPortal content is available yet. Use refresh to scan this ticket manually.
               </div>
-              <ul class="ticket-related__list" data-ticket-related-list hidden></ul>
+              <ul
+                class="ticket-related__list"
+                data-ticket-related-list
+                {% if not ticket_related_items %}hidden{% endif %}
+              >
+                {% for item in ticket_related_items %}
+                  <li class="ticket-related__item">
+                    <a
+                      class="ticket-related__link"
+                      href="{{ item.url }}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="{{ item.label }}"
+                    >{{ item.label }}</a>
+                  </li>
+                {% endfor %}
+              </ul>
             </div>
           </details>
 
