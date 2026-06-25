@@ -460,7 +460,10 @@ async def retrieve_candidates(
         return []
     settings = get_settings()
     profile = _profile_query(query_text)
-    resolved_limit = int(limit if limit is not None else settings.rag_candidate_limit)
+    requested_source_types = list(source_filters or SOURCE_TYPE_CAPS.keys())
+    cap_total = sum(SOURCE_TYPE_CAPS.get(source_type, 3) for source_type in requested_source_types)
+    configured_limit = int(limit if limit is not None else settings.rag_candidate_limit)
+    resolved_limit = configured_limit if limit is not None else max(configured_limit, cap_total)
     resolved_min_score = float(
         min_score if min_score is not None else settings.rag_min_score
     )
@@ -468,7 +471,6 @@ async def retrieve_candidates(
         memberships or []
     ) or await company_access.list_accessible_companies(user)
     query_embedding = embed_text(profile.expanded)
-    requested_source_types = list(source_filters or SOURCE_TYPE_CAPS.keys())
     rows: list[Mapping[str, Any]] = []
     for source_type in requested_source_types:
         source_rows = await rag_repo.list_active_chunks(

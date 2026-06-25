@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -40,10 +41,10 @@ _ISSUE_RESULT_LIMIT = 1000
 _SYSTEM_RESULT_LIMIT = 1000
 _MAX_SNIPPET_LENGTH = 320
 _LLM_SOURCE_LIMIT = 5
-_LLM_RAG_CANDIDATE_LIMIT = 8
+_LLM_RAG_CANDIDATE_LIMIT = 30
 _LLM_COMPANY_CONTEXT_LIMIT = 3
-_LLM_PROMPT_CHAR_LIMIT = 24000
-_LLM_SNIPPET_LENGTH = 180
+_LLM_PROMPT_CHAR_LIMIT = 64000
+_LLM_SNIPPET_LENGTH = 500
 _EXPLICIT_TICKET_ID_RE = re.compile(
     r"(?:ticket\s*#?|#)\s*(\d{3,})|\b(\d{4,})\b", re.IGNORECASE
 )
@@ -307,6 +308,142 @@ def _summarise_rag_by_source(
     return evidence, counts
 
 
+def _extract_module_text(module_response: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    payload = module_response.get("response")
+    if isinstance(payload, Mapping):
+        return (
+            payload.get("response") or payload.get("message"),
+            payload.get("model") or module_response.get("model"),
+        )
+    if isinstance(payload, str):
+        return payload.strip(), module_response.get("model")
+    return module_response.get("message"), module_response.get("model")
+
+
+async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
+    """Invoke the configured LLM module for one internal agent stage."""
+
+    stage_prompt = f"MyPortal internal stage: {stage_name}\n\n{prompt}"
+    try:
+        module_response = await modules_service.trigger_module(
+            "ollama",
+            {
+                "prompt": stage_prompt,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are running a MyPortal multi-stage RAG "
+                            f"pipeline step named {stage_name}."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "stage": stage_name,
+            },
+            background=False,
+        )
+    except ValueError as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "text": None,
+            "model": None,
+            "event_id": None,
+        }
+    except Exception as exc:  # pragma: no cover - network or module failure
+        log_error("Agent LLM stage failed", stage=stage_name, error=str(exc))
+        return {
+            "status": "error",
+            "message": "Failed to contact Ollama module",
+            "text": None,
+            "model": None,
+            "event_id": None,
+        }
+
+    text, model_name = _extract_module_text(module_response)
+    event_candidate = module_response.get("event_id")
+    return {
+        "status": str(module_response.get("status") or "unknown"),
+        "message": module_response.get("message"),
+        "text": text,
+        "model": model_name,
+        "event_id": event_candidate if isinstance(event_candidate, int) else None,
+    }
+
+
+def _build_query_understanding_prompt(query_text: str, allowed_sources: set[str]) -> str:
+    return _truncate_prompt_sections(
+        [
+            "You are classifying a MyPortal user query for staged RAG retrieval.",
+            "Return JSON only.",
+            f"User query: {query_text}",
+            "Return keys: intent, entities, preferred_sources, blocked_sources.",
+            "Allowed source types: "
+            + ", ".join(sorted(allowed_sources | {"products", "orders", "assets"})),
+        ],
+        limit=12000,
+    )
+
+
+def _build_evidence_review_prompt(
+    query_text: str, candidates: Sequence[Mapping[str, Any]]
+) -> str:
+    compact_candidates = [
+        {
+            "source": _candidate_label(candidate),
+            "source_type": candidate.get("source_type"),
+            "title": candidate.get("title") or candidate.get("subject"),
+            "excerpt": _truncate(
+                candidate.get("excerpt") or candidate.get("summary"),
+                _LLM_SNIPPET_LENGTH,
+            ),
+            "score": candidate.get("score"),
+            "duplicate_count": candidate.get("duplicate_count", 0),
+        }
+        for candidate in candidates[:60]
+    ]
+    return _truncate_prompt_sections(
+        [
+            "You are reviewing retrieved MyPortal evidence.",
+            f"User query:\n{query_text}",
+            "Candidate evidence:",
+            json.dumps(compact_candidates, ensure_ascii=False, default=str),
+            "Classify each item as direct, supporting, duplicate, or unrelated.",
+            "Keep only evidence that directly helps answer the query.",
+            "Return JSON only.",
+        ],
+        limit=32000,
+    )
+
+
+def _build_category_summary_prompt(
+    query_text: str, evidence: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> str:
+    compact = {
+        source_type: [
+            {
+                "label": item.get("label"),
+                "title": item.get("title"),
+                "summary": item.get("summary"),
+                "duplicate_count": item.get("duplicate_count", 0),
+            }
+            for item in items[:12]
+        ]
+        for source_type, items in evidence.items()
+    }
+    return _truncate_prompt_sections(
+        [
+            "Summarise curated MyPortal evidence by source type.",
+            f"User query:\n{query_text}",
+            "Curated evidence:",
+            json.dumps(compact, ensure_ascii=False, default=str),
+            "Return concise category summaries and explicitly note zero-match categories.",
+        ],
+        limit=32000,
+    )
+
+
 def _candidate_label(candidate: Mapping[str, Any]) -> str:
     source_type = str(candidate.get("source_type") or "source")
     source_id = candidate.get("source_id") or candidate.get("document_id")
@@ -343,7 +480,7 @@ def _build_llm_context(
         return _truncate_prompt_sections(sections)
 
     rag_context_chars = 0
-    rag_context_char_budget = int(get_settings().rag_max_context_tokens) * 4
+    rag_context_char_budget = max(int(get_settings().rag_max_context_tokens) * 4, 48000)
     for candidate in rag_evidence[:_LLM_RAG_CANDIDATE_LIMIT]:
         label = _candidate_label(candidate)
         title = candidate.get("title") or candidate.get("subject") or label
@@ -1057,16 +1194,27 @@ async def execute_agent_query(
     company_context = _company_summary(resolved_memberships)
     is_super_admin = bool(user.get("is_super_admin"))
     explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
+    allowed_rag_sources = _infer_allowed_rag_sources(query_text)
     stages: list[dict[str, Any]] = [
         _stage(
             "query_understanding",
             data={
                 "intent": "mixed",
                 "ticket_ids": explicit_ticket_ids,
-                "preferred_sources": sorted(_infer_allowed_rag_sources(query_text)),
+                "preferred_sources": sorted(allowed_rag_sources),
             },
         )
     ]
+    query_understanding_llm = await _invoke_agent_llm(
+        "query_understanding",
+        _build_query_understanding_prompt(query_text, allowed_rag_sources),
+    )
+    stages[0]["data"].update(
+        {
+            "llm_status": query_understanding_llm["status"],
+            "event_id": query_understanding_llm["event_id"],
+        }
+    )
 
     kb_context = await knowledge_base_service.build_access_context(user)
     try:
@@ -1504,7 +1652,6 @@ async def execute_agent_query(
         log_error("Agent RAG retrieval failed", error=str(exc))
         raw_rag_candidates = []
 
-    allowed_rag_sources = _infer_allowed_rag_sources(query_text)
     rag_candidates = direct_ticket_evidence + _filter_rag_candidates(
         raw_rag_candidates, allowed_sources=allowed_rag_sources
     )
@@ -1514,6 +1661,10 @@ async def execute_agent_query(
             "deduplication",
             data={"duplicates_grouped": evidence_counts.get("duplicates_grouped", 0)},
         )
+    )
+    evidence_review_llm = await _invoke_agent_llm(
+        "evidence_review",
+        _build_evidence_review_prompt(query_text, rag_candidates),
     )
     stages.append(
         _stage(
@@ -1528,16 +1679,27 @@ async def execute_agent_query(
                     + len(direct_ticket_evidence)
                     - len(rag_candidates),
                 ),
+                "llm_status": evidence_review_llm["status"],
+                "event_id": evidence_review_llm["event_id"],
             },
         )
+    )
+    category_summary_llm = await _invoke_agent_llm(
+        "category_summaries",
+        _build_category_summary_prompt(query_text, curated_evidence),
     )
     stages.append(
         _stage(
             "category_summaries",
             data={
-                source_type: count
-                for source_type, count in evidence_counts.items()
-                if source_type != "duplicates_grouped"
+                **{
+                    source_type: count
+                    for source_type, count in evidence_counts.items()
+                    if source_type != "duplicates_grouped"
+                },
+                "summary": category_summary_llm["text"],
+                "llm_status": category_summary_llm["status"],
+                "event_id": category_summary_llm["event_id"],
             },
         )
     )
@@ -1561,34 +1723,12 @@ async def execute_agent_query(
     event_id: int | None = None
     message: str | None = None
 
-    try:
-        module_response = await modules_service.trigger_module(
-            "ollama",
-            {"prompt": prompt},
-            background=False,
-        )
-    except ValueError as exc:
-        module_status = "error"
-        message = str(exc)
-    except Exception as exc:  # pragma: no cover - network or module failure
-        module_status = "error"
-        message = "Failed to contact Ollama module"
-        log_error("Agent Ollama invocation failed", error=str(exc))
-    else:
-        module_status = str(module_response.get("status") or "unknown")
-        event_candidate = module_response.get("event_id")
-        if isinstance(event_candidate, int):
-            event_id = event_candidate
-        payload = module_response.get("response")
-        if isinstance(payload, Mapping):
-            answer_text = payload.get("response") or payload.get("message")
-            model_name = payload.get("model") or module_response.get("model")
-        elif isinstance(module_response.get("response"), str):
-            answer_text = str(module_response["response"]).strip()
-            model_name = module_response.get("model")
-        else:
-            answer_text = module_response.get("message")
-            model_name = module_response.get("model")
+    final_llm = await _invoke_agent_llm("final_answer", prompt)
+    module_status = final_llm["status"]
+    message = final_llm["message"]
+    answer_text = final_llm["text"]
+    model_name = final_llm["model"]
+    event_id = final_llm["event_id"]
     stages.append(_stage("final_answer", status="complete" if answer_text else module_status))
 
     return {

@@ -106,7 +106,7 @@ Successful responses return:
 }
 ```
 
-The `stages` array exposes query-understanding, retrieval, deduplication, category-summary, and final-answer progress for non-streaming clients. The `evidence` object contains curated, grouped RAG evidence by source type so duplicate chats are represented as duplicate counts and references instead of repeated snippets.
+The `stages` array exposes query-understanding, retrieval, deduplication, evidence-review, category-summary, and final-answer progress for non-streaming clients. Query understanding, evidence review, category summary, and final answer each run as separate internal LLM requests with a `stage` marker in the module payload for auditing. The `evidence` object contains curated, grouped RAG evidence by source type so duplicate chats are represented as duplicate counts and references instead of repeated snippets.
 
 Streaming clients can call `POST /api/agent/query/stream` with the same request body to receive server-sent events for `stage`, `evidence`, `answer_delta`, and `done` events.
 

@@ -912,9 +912,11 @@ async def test_execute_agent_query_returns_stages_and_grouped_evidence(monkeypat
     )
 
     captured_prompt = ""
+    llm_stages = []
 
     async def fake_trigger(slug, payload, *, background):
-        nonlocal captured_prompt
+        nonlocal captured_prompt, llm_stages
+        llm_stages.append(payload.get("stage"))
         captured_prompt = payload.get("prompt", "")
         return {"status": "succeeded", "response": {"response": "Curated answer"}}
 
@@ -936,3 +938,9 @@ async def test_execute_agent_query_returns_stages_and_grouped_evidence(monkeypat
     assert result["evidence"]["tickets"][0]["label"] == "[Ticket:#24425]"
     assert result["evidence"]["chats"][0]["duplicate_count"] == 1
     assert "Also found in 1 similar results: [Chat:#31]" in captured_prompt
+    assert llm_stages == [
+        "query_understanding",
+        "evidence_review",
+        "category_summaries",
+        "final_answer",
+    ]
