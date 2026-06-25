@@ -859,8 +859,12 @@ async def issue_ticket_token(
     body: dict[str, Any] = {}
     try:
         body = await request.json()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_info(
+            "tray.ticket_token.request_json_unavailable",
+            error=str(exc),
+        )
+        body = {}
     mode = "syncro" if str(body.get("mode") or "").lower() == "syncro" else "myportal"
     token, _csrf = _issue_ticket_form_token(device, mode)
     ticket_url = _ticket_form_url(token, request)
