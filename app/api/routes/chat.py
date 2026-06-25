@@ -16,6 +16,7 @@ from app.repositories import matrix_ai_tag_synonyms as synonyms_repo
 from app.schemas.chat import (
     ChatMessageCreate,
     ChatRoomCreate,
+    ChatRoomBulkDelete,
     ChatRoomRename,
     ExternalInviteCreate,
     AiTagSynonymGroupCreate,
@@ -160,6 +161,43 @@ async def list_rooms(
         rooms = await chat_repo.list_rooms(user_id=user_id, company_id=company_id, status=status)
 
     return JSONResponse(_serialize([dict(r) for r in rooms]))
+
+
+@router.delete("/rooms", summary="Bulk delete chat rooms (super admin)")
+async def bulk_delete_rooms(
+    body: ChatRoomBulkDelete,
+    current_user: dict = Depends(require_super_admin),
+) -> JSONResponse:
+    _require_matrix_enabled()
+    room_ids = sorted({int(room_id) for room_id in body.room_ids if int(room_id) > 0})
+    if not room_ids:
+        raise HTTPException(status_code=422, detail="Select at least one chat to delete")
+
+    rooms = await chat_repo.list_rooms_by_ids(room_ids)
+    if not rooms:
+        raise HTTPException(status_code=404, detail="No matching chat rooms found")
+
+    found_ids = {int(room["id"]) for room in rooms}
+    missing_ids = [room_id for room_id in room_ids if room_id not in found_ids]
+    deleted_count = await chat_repo.delete_rooms(sorted(found_ids))
+
+    await audit_service.log_action(
+        action="bulk_delete",
+        entity_type="chat_room",
+        entity_id=None,
+        user_id=current_user["id"],
+        previous_value={
+            "room_ids": sorted(found_ids),
+            "missing_room_ids": missing_ids,
+            "subjects": {str(room["id"]): room.get("subject") for room in rooms},
+        },
+    )
+
+    await refresh_notifier.publish(
+        topics=["chat:rooms"],
+        payload={"type": "chat_rooms_deleted", "room_ids": sorted(found_ids)},
+    )
+    return JSONResponse({"deleted": deleted_count, "room_ids": sorted(found_ids), "missing_room_ids": missing_ids})
 
 
 @router.post("/rooms", summary="Create a chat room")
@@ -385,7 +423,7 @@ async def rename_room(
         entity_type="chat_room",
         entity_id=room_id,
         user_id=current_user["id"],
-        old_value={"subject": old_subject},
+        previous_value={"subject": old_subject},
         new_value={"subject": new_subject},
     )
 
