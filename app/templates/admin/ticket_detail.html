@@ -476,11 +476,15 @@
             </article>
           {% endif %}
 
-          <article class="card card--panel">
-            <header class="card__header">
+          <details class="card card--panel card-collapsible" {% if not ticket_attachments %}open{% endif %}>
+            <summary class="card__header card__header--collapsible">
               <h2 class="card__title">Attachments</h2>
-            </header>
-            <div class="card__body">
+              <div class="card__collapsible-meta">
+                {% if ticket_attachments %}<span class="badge badge--muted">{{ ticket_attachments|length }}</span>{% endif %}
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content card__body">
               <div
                 class="attachments-grid"
                 data-attachments-grid
@@ -529,7 +533,38 @@
                 No attachments have been added yet.
               </p>
             </div>
-          </article>
+          </details>
+
+          <details
+            class="card card--panel card-collapsible ticket-related"
+            data-ticket-related
+            data-ticket-id="{{ ticket.id }}"
+            data-auto-scan="{{ 'true' if ticket_related_auto_scan else 'false' }}"
+          >
+            <summary class="card__header card__header--collapsible ticket-related__summary">
+              <h2 class="card__title">Related</h2>
+              <div class="card__collapsible-meta ticket-related__actions">
+                <button
+                  type="button"
+                  class="button button--ghost button--small ticket-related__refresh"
+                  data-ticket-related-refresh
+                  title="Re-scan this ticket for related MyPortal content"
+                  aria-label="Re-scan related content"
+                >Refresh</button>
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content card__body">
+              <div class="ticket-related__status" data-ticket-related-status>
+                {% if ticket_related_auto_scan %}
+                  Open this section or use refresh to scan the ticket for related MyPortal content.
+                {% else %}
+                  Syncro-imported tickets are not scanned automatically. Use refresh to scan this ticket manually.
+                {% endif %}
+              </div>
+              <ul class="ticket-related__list" data-ticket-related-list hidden></ul>
+            </div>
+          </details>
 
           {% if ticket.xero_invoice_number %}
             <article class="card card--panel">

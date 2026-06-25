@@ -8633,6 +8633,13 @@ async def _render_ticket_detail(
         "ticket_call_recordings": enriched_recordings,
         "ticket_watchers": enriched_watchers,
         "ticket_attachments": formatted_attachments,
+        "ticket_related_auto_scan": not (
+            str(ticket.get("module_slug") or "").lower() == "syncro"
+            or (
+                str(ticket.get("external_reference") or "").isdigit()
+                and bool(ticket.get("ticket_number"))
+            )
+        ),
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
