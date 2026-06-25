@@ -13,6 +13,7 @@ from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
 from app.core.logging import log_error
 from app.repositories import m365_best_practices as m365_bp_repo
+from app.repositories import rag_index as rag_index_repo
 from app.repositories import reporting as reporting_repo
 from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
@@ -25,6 +26,7 @@ from app.services import reports as reports_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
+from app.services import rag_relationships as rag_relationship_service
 from app.services import rag_retrieval
 
 try:
@@ -1421,10 +1423,7 @@ async def execute_agent_query(
             },
         )
     ]
-    query_understanding_llm = await _invoke_agent_llm(
-        "query_understanding",
-        _build_query_understanding_prompt(query_text, allowed_rag_sources),
-    )
+    query_understanding_llm = {"status": "skipped_final_prompt_only", "event_id": None}
     stages[0]["data"].update(
         {
             "llm_status": query_understanding_llm["status"],
@@ -1879,32 +1878,41 @@ async def execute_agent_query(
             data={"duplicates_grouped": evidence_counts.get("duplicates_grouped", 0)},
         )
     )
-    evidence_review_llm = await _invoke_agent_llm(
-        "evidence_review",
-        _build_evidence_review_prompt(query_text, rag_candidates),
-    )
+    # Relationship discovery is deliberately not performed in the foreground.
+    # Evidence review uses precomputed RAG relationships populated by the
+    # background relationship engine; the final response generation remains the
+    # only LLM call after retrieval.
+    relationship_evidence = []
+    for ticket_id in explicit_ticket_ids:
+        try:
+            doc = await rag_index_repo.get_document_by_source("tickets", str(ticket_id), rag_index_service.embedding_model())
+            if doc:
+                relationship_evidence.extend(await rag_relationship_service.load_evidence_for_document(int(doc["id"])))
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent stored relationship retrieval failed", error=str(exc), ticket_id=ticket_id)
+    for item in relationship_evidence:
+        rag_candidates.append({
+            "source_type": item.get("source_type"),
+            "source_id": item.get("source_id"),
+            "title": item.get("title"),
+            "excerpt": item.get("supporting_excerpt") or item.get("content"),
+            "score": item.get("relevance_score"),
+            "url": item.get("url"),
+        })
+    curated_evidence, evidence_counts = _summarise_rag_by_source(rag_candidates)
     stages.append(
         _stage(
             "evidence_review",
             data={
-                "candidates_reviewed": len(raw_rag_candidates)
-                + len(direct_ticket_evidence),
+                "candidates_reviewed": len(raw_rag_candidates) + len(direct_ticket_evidence),
                 "curated_evidence": len(rag_candidates),
-                "removed_unrelated": max(
-                    0,
-                    len(raw_rag_candidates)
-                    + len(direct_ticket_evidence)
-                    - len(rag_candidates),
-                ),
-                "llm_status": evidence_review_llm["status"],
-                "event_id": evidence_review_llm["event_id"],
+                "precomputed_relationships": len(relationship_evidence),
+                "llm_status": "skipped_precomputed_relationships",
+                "event_id": None,
             },
         )
     )
-    category_summary_llm = await _invoke_agent_llm(
-        "category_summaries",
-        _build_category_summary_prompt(query_text, curated_evidence),
-    )
+    category_summary_llm = {"status": "skipped_final_prompt_only", "event_id": None, "text": ""}
     stages.append(
         _stage(
             "category_summaries",

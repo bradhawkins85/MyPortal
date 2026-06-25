@@ -5,6 +5,16 @@ from typing import Any, Sequence
 from app.core.database import db
 
 
+async def get_document_by_source(source_type: str, source_id: str, embedding_model: str) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        """
+        SELECT * FROM rag_documents
+        WHERE source_type = ? AND source_id = ? AND embedding_model = ?
+        """,
+        (source_type, source_id, embedding_model),
+    )
+
+
 async def upsert_document(record: dict[str, Any]) -> int:
     existing = await db.fetch_one(
         """
