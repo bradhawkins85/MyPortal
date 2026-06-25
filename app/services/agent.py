@@ -260,6 +260,53 @@ def _filter_rag_candidates(
     return filtered
 
 
+def _stage(
+    name: str, status: str = "complete", data: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"name": name, "status": status}
+    if data is not None:
+        payload["data"] = dict(data)
+    return payload
+
+
+def _summarise_rag_by_source(
+    candidates: Sequence[Mapping[str, Any]]
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, int]]:
+    evidence: dict[str, list[dict[str, Any]]] = {
+        "tickets": [],
+        "ticket_comments": [],
+        "knowledge_base": [],
+        "products": [],
+        "assets": [],
+        "orders": [],
+        "issues": [],
+        "chats": [],
+        "best_practices": [],
+    }
+    duplicate_count = 0
+    for candidate in candidates:
+        source_type = str(candidate.get("source_type") or "unknown")
+        item = {
+            "label": _candidate_label(candidate),
+            "source_type": source_type,
+            "source_id": candidate.get("source_id"),
+            "title": candidate.get("title") or candidate.get("subject"),
+            "url": candidate.get("url"),
+            "score": candidate.get("score"),
+            "summary": _truncate(
+                candidate.get("excerpt") or candidate.get("summary"),
+                _LLM_SNIPPET_LENGTH,
+            ),
+            "duplicates": candidate.get("duplicates") or [],
+            "duplicate_count": int(candidate.get("duplicate_count") or 0),
+        }
+        duplicate_count += item["duplicate_count"]
+        evidence.setdefault(source_type, []).append(item)
+    counts = {source_type: len(items) for source_type, items in evidence.items()}
+    counts["duplicates_grouped"] = duplicate_count
+    return evidence, counts
+
+
 def _candidate_label(candidate: Mapping[str, Any]) -> str:
     source_type = str(candidate.get("source_type") or "source")
     source_id = candidate.get("source_id") or candidate.get("document_id")
@@ -308,7 +355,22 @@ def _build_llm_context(
             or "No excerpt available"
         )
         score = candidate.get("score")
-        item_text = f"- {label} {title}\n  Score: {score}\n  Excerpt: {excerpt}"
+        duplicate_count = int(candidate.get("duplicate_count") or 0)
+        duplicate_text = ""
+        if duplicate_count:
+            duplicate_labels = [
+                _candidate_label(duplicate)
+                for duplicate in (candidate.get("duplicates") or [])[:5]
+                if isinstance(duplicate, Mapping)
+            ]
+            duplicate_text = (
+                f"\n  Also found in {duplicate_count} similar results"
+                + (f": {', '.join(duplicate_labels)}" if duplicate_labels else "")
+            )
+        item_text = (
+            f"- {label} {title}\n  Relevance: curated\n  Score: {score}\n"
+            f"  Excerpt: {excerpt}{duplicate_text}"
+        )
         if rag_context_chars + len(item_text) > rag_context_char_budget:
             continue
         rag_context_chars += len(item_text)
@@ -994,6 +1056,17 @@ async def execute_agent_query(
     accessible_company_ids = _extract_company_ids(resolved_memberships)
     company_context = _company_summary(resolved_memberships)
     is_super_admin = bool(user.get("is_super_admin"))
+    explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
+    stages: list[dict[str, Any]] = [
+        _stage(
+            "query_understanding",
+            data={
+                "intent": "mixed",
+                "ticket_ids": explicit_ticket_ids,
+                "preferred_sources": sorted(_infer_allowed_rag_sources(query_text)),
+            },
+        )
+    ]
 
     kb_context = await knowledge_base_service.build_access_context(user)
     try:
@@ -1039,7 +1112,6 @@ async def execute_agent_query(
         user_id = int(user_id_value)
     except (TypeError, ValueError):
         user_id = 0
-    explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
     direct_ticket_evidence: list[dict[str, Any]] = []
     if user_id > 0:
         for explicit_ticket_id in explicit_ticket_ids[:3]:
@@ -1405,6 +1477,21 @@ async def execute_agent_query(
         "best_practices": best_practice_sources,
         "feature_packs": feature_pack_sources,
     }
+    stages.append(
+        _stage(
+            "retrieval",
+            data={
+                "knowledge_base": len(knowledge_base_sources),
+                "tickets": len(ticket_sources),
+                "products": len(product_sources),
+                "chats": len(chat_sources),
+                "orders": len(order_sources),
+                "assets": len(asset_sources),
+                "issues": len(issue_sources),
+                "best_practices": len(best_practice_sources),
+            },
+        )
+    )
     try:
         await rag_index_service.index_agent_sources(assembled_sources)
         raw_rag_candidates = await rag_retrieval.retrieve_candidates(
@@ -1420,6 +1507,39 @@ async def execute_agent_query(
     allowed_rag_sources = _infer_allowed_rag_sources(query_text)
     rag_candidates = direct_ticket_evidence + _filter_rag_candidates(
         raw_rag_candidates, allowed_sources=allowed_rag_sources
+    )
+    curated_evidence, evidence_counts = _summarise_rag_by_source(rag_candidates)
+    stages.append(
+        _stage(
+            "deduplication",
+            data={"duplicates_grouped": evidence_counts.get("duplicates_grouped", 0)},
+        )
+    )
+    stages.append(
+        _stage(
+            "evidence_review",
+            data={
+                "candidates_reviewed": len(raw_rag_candidates)
+                + len(direct_ticket_evidence),
+                "curated_evidence": len(rag_candidates),
+                "removed_unrelated": max(
+                    0,
+                    len(raw_rag_candidates)
+                    + len(direct_ticket_evidence)
+                    - len(rag_candidates),
+                ),
+            },
+        )
+    )
+    stages.append(
+        _stage(
+            "category_summaries",
+            data={
+                source_type: count
+                for source_type, count in evidence_counts.items()
+                if source_type != "duplicates_grouped"
+            },
+        )
     )
 
     # Check if we have any relevant RAG evidence for the prompt.
@@ -1469,6 +1589,7 @@ async def execute_agent_query(
         else:
             answer_text = module_response.get("message")
             model_name = module_response.get("model")
+    stages.append(_stage("final_answer", status="complete" if answer_text else module_status))
 
     return {
         "query": query_text,
@@ -1479,6 +1600,8 @@ async def execute_agent_query(
         "message": message,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "has_relevant_sources": has_relevant_sources,
+        "stages": stages,
+        "evidence": curated_evidence,
         "sources": {
             "knowledge_base": knowledge_base_sources,
             "tickets": ticket_sources,

@@ -194,16 +194,36 @@ class AgentContextCompany(BaseModel):
 
 class AgentContextRagCandidate(BaseModel):
     source_type: str | None = None
-    source_id: str | None = None
+    source_id: str | int | None = None
     title: str | None = None
     url: str | None = None
     excerpt: str | None = None
     score: float | None = None
+    duplicate_count: int = 0
+    duplicates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AgentContext(BaseModel):
     companies: list[AgentContextCompany] = Field(default_factory=list)
     rag_candidates: list[AgentContextRagCandidate] = Field(default_factory=list)
+
+
+class AgentStage(BaseModel):
+    name: str
+    status: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentEvidenceItem(BaseModel):
+    label: str
+    source_type: str
+    source_id: str | int | None = None
+    title: Optional[str] = None
+    url: Optional[str] = None
+    score: Optional[float] = None
+    summary: Optional[str] = None
+    duplicates: list[dict[str, Any]] = Field(default_factory=list)
+    duplicate_count: int = 0
 
 
 class AgentQueryRequest(BaseModel):
@@ -219,5 +239,7 @@ class AgentQueryResponse(BaseModel):
     message: Optional[str] = None
     generated_at: datetime
     has_relevant_sources: bool = True
+    stages: list[AgentStage] = Field(default_factory=list)
+    evidence: dict[str, list[AgentEvidenceItem]] = Field(default_factory=dict)
     sources: AgentSources
     context: AgentContext
