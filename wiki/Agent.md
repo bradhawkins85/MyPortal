@@ -54,6 +54,27 @@ Successful responses return:
   "model": "llama3",
   "event_id": 4182,
   "generated_at": "2025-01-07T10:52:00.000000+00:00",
+  "stages": [
+    {"name": "query_understanding", "status": "complete", "data": {}},
+    {"name": "retrieval", "status": "complete", "data": {"tickets": 1, "chats": 0}},
+    {"name": "deduplication", "status": "complete", "data": {"duplicates_grouped": 0}},
+    {"name": "evidence_review", "status": "complete", "data": {"curated_evidence": 1}},
+    {"name": "category_summaries", "status": "complete", "data": {"tickets": 1}},
+    {"name": "final_answer", "status": "complete"}
+  ],
+  "evidence": {
+    "tickets": [
+      {
+        "label": "[Ticket:#512]",
+        "source_type": "tickets",
+        "source_id": 512,
+        "title": "Firewall throughput alerts",
+        "duplicate_count": 0,
+        "duplicates": []
+      }
+    ],
+    "chats": []
+  },
   "sources": {
     "knowledge_base": [
       {
@@ -84,6 +105,10 @@ Successful responses return:
   }
 }
 ```
+
+The `stages` array exposes query-understanding, retrieval, deduplication, category-summary, and final-answer progress for non-streaming clients. The `evidence` object contains curated, grouped RAG evidence by source type so duplicate chats are represented as duplicate counts and references instead of repeated snippets.
+
+Streaming clients can call `POST /api/agent/query/stream` with the same request body to receive server-sent events for `stage`, `evidence`, `answer_delta`, and `done` events.
 
 HTTP `401` is returned when the caller is unauthenticated. If the Ollama/OpenAI module is disabled the response status is `skipped` and the payload only contains the contextual sources.
 
