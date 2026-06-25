@@ -126,4 +126,5 @@ def test_main_app_exempts_public_callback_paths():
     assert csrf_middleware is not None
     exempt_paths = csrf_middleware.kwargs.get("exempt_paths", ())
     assert "/api/tray/popup-chat" in exempt_paths
+    assert "/api/tray/ticket-form" in exempt_paths
     assert "/api/staff/workflow-webhooks" in exempt_paths
