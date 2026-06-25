@@ -512,6 +512,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/rag" {% if current_path.startswith('/admin/rag') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2a8 8 0 0 1 8 8c0 5.25-8 12-8 12S4 15.25 4 10a8 8 0 0 1 8-8zm0 2a6 6 0 0 0-6 6c0 2.94 3.68 7.1 6 9.36 2.32-2.26 6-6.42 6-9.36a6 6 0 0 0-6-6zm-2 5h4v2h-4zm0 3h4v2h-4z"/></svg>
+                  </span>
+                  <span class="menu__label">RAG Index</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/chat/ai-tag-synonyms" {% if current_path.startswith('/admin/chat/ai-tag-synonyms') or current_path.startswith('/chat/configuration') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-5 5v-5H6a2 2 0 0 1-2-2V4zm4 4v2h8V8H8zm0 4v2h5v-2H8z"/></svg>

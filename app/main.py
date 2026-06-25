@@ -5445,6 +5445,19 @@ async def admin_profile_page(request: Request):
     return templates.TemplateResponse(context["request"], "admin/profile.html", context)
 
 
+@app.get("/admin/rag", response_class=HTMLResponse)
+async def admin_rag_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _render_template(
+        "admin/rag.html",
+        request,
+        current_user,
+        extra={"title": "RAG Index"},
+    )
+
+
 @app.get("/admin/impersonation", response_class=HTMLResponse)
 async def admin_impersonation_page(
     request: Request,
