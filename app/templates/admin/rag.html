@@ -20,6 +20,16 @@
   <div class="card__body">
     <div class="stat-strip rag-stat-strip" data-rag-summary></div>
 
+    <section style="margin-top: 1.5rem;">
+      <div class="section-heading">
+        <div>
+          <h3>Matching Statistics</h3>
+          <p class="section-description">Relationship lookup status for matched, queued, and failed RAG document comparisons.</p>
+        </div>
+      </div>
+      <div class="stat-strip rag-stat-strip" data-rag-matching-summary></div>
+    </section>
+
     <div class="grid grid--2" style="margin-top: 1.5rem; gap: 1rem;">
       <section>
         <h3>Sources</h3>
@@ -60,6 +70,7 @@
   if (!root) return;
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
   const summary = root.querySelector('[data-rag-summary]');
+  const matchingSummary = root.querySelector('[data-rag-matching-summary]');
   const sourcesBody = root.querySelector('[data-rag-sources]');
   const docsBody = root.querySelector('[data-rag-documents]');
   const jobsBody = root.querySelector('[data-rag-jobs]');
@@ -74,9 +85,14 @@
   function emptyRow(cols, text) { return `<tr><td colspan="${cols}" class="table__empty">${esc(text)}</td></tr>`; }
   async function loadHealth() {
     status.textContent = 'Loading RAG statistics…';
-    const res = await fetch('/api/agent/rag/health', {headers: {'Accept': 'application/json'}});
-    if (!res.ok) throw new Error('Unable to load RAG health');
-    const data = await res.json();
+    const [healthRes, matchingRes] = await Promise.all([
+      fetch('/api/agent/rag/health', {headers: {'Accept': 'application/json'}}),
+      fetch('/api/rag/relationships/metrics', {headers: {'Accept': 'application/json'}}),
+    ]);
+    if (!healthRes.ok) throw new Error('Unable to load RAG health');
+    if (!matchingRes.ok) throw new Error('Unable to load matching statistics');
+    const data = await healthRes.json();
+    const matching = await matchingRes.json();
     summary.innerHTML = [
       metric('Active documents', number(data.documents), `${number(data.inactive_documents)} inactive`, 'total'),
       metric('Active chunks', number(data.chunks), `${number(data.stale_chunks)} stale chunks`, 'success'),
@@ -84,6 +100,13 @@
       metric('Companies covered', number(data.company_count), `${number(data.model_count)} embedding model(s)`, 'neutral'),
       metric('First indexed', date(data.first_indexed_at), 'Oldest active document', 'warning'),
       metric('Last indexed', date(data.last_indexed_at), 'Newest active document', 'success'),
+    ].join('');
+    matchingSummary.innerHTML = [
+      metric('Matched documents', number(matching.matched_documents), `${number(matching.positive_matches)} successful match(es)`, 'success'),
+      metric('Pending matches', number(matching.pending_matches), 'Queued or currently processing', 'warning'),
+      metric('Failed lookups', number(matching.failed_lookups), 'Exhausted retries and still failed', matching.failed_lookups ? 'danger' : 'neutral'),
+      metric('Stored decisions', number(matching.total_stored_relationships), `${number(matching.stale_matches)} stale decision(s)`, 'info'),
+      metric('Avg lookup time', `${Number(matching.average_evaluation_duration_ms || 0).toFixed(0)} ms`, 'Relationship evaluator runtime', 'neutral'),
     ].join('');
     sourcesBody.innerHTML = (data.sources || []).map((row) => `<tr><td>${esc(row.source_type)}</td><td>${number(row.count)}</td><td>${number(row.chunk_count)}</td><td>${number(row.token_count)}</td><td>${date(row.last_indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No indexed sources yet.');
     docsBody.innerHTML = (data.recent_documents || []).map((row) => `<tr><td>${esc(row.title)}</td><td>${esc(row.source_type)}:${esc(row.source_id)}</td><td>${esc(row.company_id)}</td><td>${esc(row.embedding_model)}</td><td>${date(row.indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No recent documents.');
