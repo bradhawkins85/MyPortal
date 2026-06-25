@@ -193,9 +193,10 @@ async def bulk_delete_rooms(
         },
     )
 
-    await refresh_notifier.publish(
+    await refresh_notifier.broadcast_refresh(
+        reason="chat_rooms_deleted",
         topics=["chat:rooms"],
-        payload={"type": "chat_rooms_deleted", "room_ids": sorted(found_ids)},
+        data={"room_ids": sorted(found_ids)},
     )
     return JSONResponse({"deleted": deleted_count, "room_ids": sorted(found_ids), "missing_room_ids": missing_ids})
 
