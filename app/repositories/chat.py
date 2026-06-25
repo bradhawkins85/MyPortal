@@ -97,6 +97,33 @@ async def list_rooms(
     return [dict(r) for r in rows]
 
 
+def _placeholders(count: int) -> str:
+    return ", ".join(["%s"] * count)
+
+
+async def list_rooms_by_ids(room_ids: list[int]) -> list[dict[str, Any]]:
+    if not room_ids:
+        return []
+    rows = await db.fetch_all(
+        f"SELECT * FROM chat_rooms WHERE id IN ({_placeholders(len(room_ids))})",
+        tuple(room_ids),
+    )
+    return [dict(r) for r in rows]
+
+
+async def delete_rooms(room_ids: list[int]) -> int:
+    if not room_ids:
+        return 0
+    placeholders = _placeholders(len(room_ids))
+    params = tuple(room_ids)
+    await db.execute(f"DELETE FROM chat_ticket_reply_links WHERE room_id IN ({placeholders})", params)
+    await db.execute(f"DELETE FROM matrix_ai_analysis_queue WHERE chat_room_id IN ({placeholders})", params)
+    await db.execute(f"DELETE FROM chat_invites WHERE room_id IN ({placeholders})", params)
+    await db.execute(f"DELETE FROM chat_room_participants WHERE room_id IN ({placeholders})", params)
+    await db.execute(f"DELETE FROM chat_messages WHERE room_id IN ({placeholders})", params)
+    return await db.execute_rowcount(f"DELETE FROM chat_rooms WHERE id IN ({placeholders})", params)
+
+
 async def create_room(
     *,
     subject: str,

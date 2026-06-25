@@ -62,6 +62,10 @@ class ChatRoomRename(BaseModel):
     subject: str = Field(..., min_length=1, max_length=500)
 
 
+class ChatRoomBulkDelete(BaseModel):
+    room_ids: list[int] = Field(..., min_length=1, max_length=100)
+
+
 class ChatMessageResponse(BaseModel):
     id: int
     room_id: int

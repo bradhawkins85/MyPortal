@@ -11,11 +11,15 @@
   {% if is_super_admin | default(false) %}
     {% set chat_actions = chat_actions + [{"label": "AI tag synonyms", "type": "link", "href": "/admin/chat/ai-tag-synonyms"}, {"label": "Auto-assign rules", "type": "link", "href": "/chat/auto-assign"}] %}
   {% endif %}
+  {% if is_super_admin | default(false) %}
+    {% set chat_actions = chat_actions + [{"label": "Delete selected", "variant": "danger", "type": "button", "attrs": {"id": "bulk-delete-chats", "disabled": "disabled"}}] %}
+  {% endif %}
   {{ page_header_actions(chat_actions) }}
 {% endblock %}
 
 {% block content %}
 <section class="card card--panel">
+  {% if csrf_token %}<input type="hidden" id="chat-csrf-token" value="{{ csrf_token }}" />{% endif %}
   <header class="card__header">
     <div class="card__controls">
       <form method="get" autocomplete="off" class="tickets-toolbar__form" id="chat-filter-form">
@@ -114,6 +118,9 @@
     <table class="table" id="chat-rooms-table" data-table>
       <thead>
         <tr>
+          {% if is_super_admin | default(false) %}
+          <th scope="col" data-column="select"><span class="sr-only">Select</span><input type="checkbox" id="select-all-chats" aria-label="Select all chats" /></th>
+          {% endif %}
           <th scope="col" data-column="id" data-sort="int">ID</th>
           <th scope="col" data-column="subject" data-sort="string">Subject</th>
           <th scope="col" data-column="device" data-sort="string">Device</th>
@@ -131,6 +138,9 @@
       <tbody>
         {% for room in rooms %}
         <tr>
+          {% if is_super_admin | default(false) %}
+          <td data-column="select" data-label="Select"><input type="checkbox" class="chat-bulk-select" value="{{ room.id }}" aria-label="Select chat {{ room.id }}" /></td>
+          {% endif %}
           <td data-column="id" data-label="ID">{{ room.id }}</td>
           <td data-column="subject" data-label="Subject">
             <a href="/chat/{{ room.id }}">{{ room.subject | e }}</a>
@@ -248,8 +258,63 @@
     el.addEventListener('change', () => document.getElementById('chat-filter-form').submit());
   });
 
+  // Bulk delete controls for super admins
+  const csrf = document.getElementById('chat-csrf-token')?.value || document.querySelector('[name="_csrf"]')?.value || '';
+  const bulkDeleteButton = document.getElementById('bulk-delete-chats');
+  const selectAllChats = document.getElementById('select-all-chats');
+  const chatSelectBoxes = Array.from(document.querySelectorAll('.chat-bulk-select'));
+
+  function selectedChatIds() {
+    return chatSelectBoxes.filter(box => box.checked).map(box => Number(box.value));
+  }
+
+  function refreshBulkDeleteState() {
+    const selectedCount = selectedChatIds().length;
+    if (bulkDeleteButton) {
+      bulkDeleteButton.disabled = selectedCount === 0;
+      bulkDeleteButton.textContent = selectedCount ? `Delete selected (${selectedCount})` : 'Delete selected';
+    }
+    if (selectAllChats) {
+      selectAllChats.checked = selectedCount > 0 && selectedCount === chatSelectBoxes.length;
+      selectAllChats.indeterminate = selectedCount > 0 && selectedCount < chatSelectBoxes.length;
+    }
+  }
+
+  selectAllChats?.addEventListener('change', function() {
+    chatSelectBoxes.forEach(box => { box.checked = this.checked; });
+    refreshBulkDeleteState();
+  });
+
+  chatSelectBoxes.forEach(box => box.addEventListener('change', refreshBulkDeleteState));
+
+  bulkDeleteButton?.addEventListener('click', async function() {
+    const roomIds = selectedChatIds();
+    if (!roomIds.length) return;
+    const plural = roomIds.length === 1 ? 'chat' : 'chats';
+    if (!confirm(`Permanently delete ${roomIds.length} selected ${plural}? This removes messages, participants, invites, and sync links.`)) return;
+    this.disabled = true;
+    try {
+      const resp = await fetch('/api/chat/rooms', {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+        body: JSON.stringify({room_ids: roomIds}),
+      });
+      if (resp.ok) {
+        window.location.reload();
+      } else {
+        const err = await resp.json();
+        alert(err.detail || 'Failed to delete selected chats');
+        refreshBulkDeleteState();
+      }
+    } catch(err) {
+      alert('Network error: ' + err.message);
+      refreshBulkDeleteState();
+    }
+  });
+
+  refreshBulkDeleteState();
+
   // Assign & Join buttons
-  const csrf = document.querySelector('[name="_csrf"]')?.value || '';
   document.querySelectorAll('.btn-assign-join').forEach(btn => {
     btn.addEventListener('click', async function() {
       const roomId = this.dataset.roomId;
