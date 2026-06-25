@@ -134,6 +134,8 @@ from app.repositories import staff_onboarding_workflows as staff_workflow_repo
 from app.repositories import staff_requests as staff_requests_repo
 from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import rag_index as rag_index_repo
+from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import ticket_statuses as ticket_status_repo
@@ -192,6 +194,7 @@ from app.services import staff_onboarding_workflows as staff_onboarding_workflow
 from app.services import labour_types as labour_types_service
 from app.services import subscription_shop_integration
 from app.services import tickets as tickets_service
+from app.services import rag_index as rag_index_service
 from app.services import ticket_attachments as attachments_service
 from app.services import template_variables
 from app.services import webhook_monitor
@@ -8212,6 +8215,74 @@ async def _render_tickets_dashboard(
     return response
 
 
+def _ticket_related_safe_url(url: Any) -> str | None:
+    candidate = str(url or "").strip()
+    if not candidate:
+        return None
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        return None
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    return candidate
+
+
+def _ticket_related_fallback_url(source_type: str, source_id: Any) -> str | None:
+    identifier = str(source_id or "").strip()
+    if not identifier:
+        return None
+    if source_type == "tickets":
+        return f"/admin/tickets/{quote(identifier, safe='')}"
+    if source_type == "assets":
+        return f"/admin/assets/{quote(identifier, safe='')}"
+    if source_type == "companies":
+        return f"/admin/companies/{quote(identifier, safe='')}"
+    if source_type == "staff":
+        return f"/admin/staff/{quote(identifier, safe='')}"
+    if source_type == "chats":
+        return f"/chat/{quote(identifier, safe='')}"
+    if source_type == "issues":
+        return f"/admin/issues/{quote(identifier, safe='')}"
+    return None
+
+
+async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) -> list[dict[str, str]]:
+    try:
+        document = await rag_index_repo.get_document_by_source(
+            "tickets",
+            str(ticket_id),
+            rag_index_service.embedding_model(),
+        )
+        if not document:
+            return []
+        evidence_rows = await rag_relationship_repo.list_relationship_evidence(
+            int(document["id"]),
+            limit=limit,
+        )
+    except Exception as exc:  # pragma: no cover - defensive UI fallback
+        log_error("Failed to load stored ticket related content", ticket_id=ticket_id, error=str(exc))
+        return []
+
+    items: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for row in evidence_rows:
+        source_type = str(row.get("source_type") or "").strip()
+        source_id = row.get("source_id")
+        if source_type == "tickets":
+            try:
+                if int(source_id) == ticket_id:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        url = _ticket_related_safe_url(row.get("url")) or _ticket_related_fallback_url(source_type, source_id)
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        label = str(row.get("title") or f"{source_type.title()} {source_id}").strip()[:180]
+        items.append({"type": source_type, "label": label, "url": url})
+    return items
+
+
 async def _render_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -8625,6 +8696,8 @@ async def _render_ticket_detail(
 
     asset_options.sort(key=lambda option: option["label"].lower())
 
+    ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
+
     # Find relevant knowledge base articles based on AI tag matching
     relevant_articles: list[dict[str, Any]] = []
     ticket_ai_tags = ticket.get("ai_tags") or []
@@ -8667,13 +8740,8 @@ async def _render_ticket_detail(
         "ticket_call_recordings": enriched_recordings,
         "ticket_watchers": enriched_watchers,
         "ticket_attachments": formatted_attachments,
-        "ticket_related_auto_scan": not (
-            str(ticket.get("module_slug") or "").lower() == "syncro"
-            or (
-                str(ticket.get("external_reference") or "").isdigit()
-                and bool(ticket.get("ticket_number"))
-            )
-        ),
+        "ticket_related_auto_scan": False,
+        "ticket_related_items": ticket_related_items,
         "ticket_labour_types": labour_types,
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
