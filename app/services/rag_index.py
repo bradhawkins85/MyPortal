@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 from app.core.config import get_settings
 from app.repositories import rag_index as rag_repo
+from app.services import rag_relationships
 from app.services.sanitization import sanitize_rich_text
 
 
@@ -163,6 +164,11 @@ def document_from_source(
 
 
 async def index_document(document: RagDocument) -> int:
+    previous = await rag_repo.get_document_by_source(
+        document.source_type, document.source_id, embedding_model()
+    )
+    new_hash = content_hash(document.text)
+    content_changed = not previous or str(previous.get("content_hash") or "") != new_hash
     chunks = chunk_text(document.text)
     if not chunks:
         chunks = [normalise_text(document.title)]
@@ -179,10 +185,12 @@ async def index_document(document: RagDocument) -> int:
             "metadata_json": json.dumps(
                 document.metadata or {}, ensure_ascii=False, default=str
             ),
-            "content_hash": content_hash(document.text),
+            "content_hash": new_hash,
             "embedding_model": embedding_model(),
         }
     )
+    if not content_changed:
+        return doc_id
     await rag_repo.replace_chunks(
         doc_id,
         [
@@ -197,6 +205,7 @@ async def index_document(document: RagDocument) -> int:
             for index, chunk in enumerate(chunks)
         ],
     )
+    await rag_relationships.on_document_indexed(doc_id, content_changed=content_changed)
     return doc_id
 
 

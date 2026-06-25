@@ -176,6 +176,7 @@ from app.services import dashboard as dashboard_service
 from app.services import email as email_service
 from app.services import m365_mail as m365_mail_service
 from app.services import knowledge_base as knowledge_base_service
+from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
@@ -2739,6 +2740,12 @@ async def on_startup() -> None:
             log_info("BCP default template bootstrapped")
 
     await scheduler_service.start()
+    global _rag_relationship_stop, _rag_relationship_tasks
+    _rag_relationship_stop = asyncio.Event()
+    _rag_relationship_tasks = []
+    if settings.enable_background_relationships and settings.rag_relationship_workers > 0:
+        for _ in range(settings.rag_relationship_workers):
+            _rag_relationship_tasks.append(asyncio.create_task(rag_relationship_service.relationship_worker(_rag_relationship_stop)))
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         import asyncio as _asyncio
@@ -2783,6 +2790,12 @@ async def on_shutdown() -> None:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         matrix_sync.stop_sync_loop()
         matrix_ai_waiting_assistant.stop_worker_loop()
+    if globals().get("_rag_relationship_stop") is not None:
+        _rag_relationship_stop.set()
+    for task in globals().get("_rag_relationship_tasks", []) or []:
+        task.cancel()
+    if globals().get("_rag_relationship_tasks"):
+        await asyncio.gather(*_rag_relationship_tasks, return_exceptions=True)
     if _feature_pack_watcher is not None:
         await _feature_pack_watcher.stop()
     await feature_registry.unload_all()
@@ -5444,6 +5457,13 @@ async def admin_profile_page(request: Request):
         },
     )
     return templates.TemplateResponse(context["request"], "admin/profile.html", context)
+
+
+@app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
+async def rag_relationship_metrics():
+    from app.repositories import rag_relationships as rel_repo
+
+    return JSONResponse(await rel_repo.metrics())
 
 
 @app.get("/admin/rag", response_class=HTMLResponse)

@@ -261,6 +261,30 @@ class Settings(BaseSettings):
     rag_max_context_tokens: int = Field(
         default=2500, validation_alias="RAG_MAX_CONTEXT_TOKENS", ge=500, le=20000
     )
+    enable_background_relationships: bool = Field(
+        default=True, validation_alias="ENABLE_BACKGROUND_RELATIONSHIPS"
+    )
+    enable_ticket_relationships: bool = Field(
+        default=False, validation_alias="ENABLE_TICKET_RELATIONSHIPS"
+    )
+    rag_relationship_model: str = Field(
+        default="gemma4:e2b", validation_alias="RAG_RELATIONSHIP_MODEL"
+    )
+    rag_relationship_workers: int = Field(
+        default=2, validation_alias="RAG_RELATIONSHIP_WORKERS", ge=0, le=16
+    )
+    rag_relationship_max_concurrent: int = Field(
+        default=1, validation_alias="RAG_RELATIONSHIP_MAX_CONCURRENT", ge=1, le=16
+    )
+    rag_relationship_batch_size: int = Field(
+        default=20, validation_alias="RAG_RELATIONSHIP_BATCH_SIZE", ge=1, le=200
+    )
+    rag_relationship_min_score: float = Field(
+        default=0.55, validation_alias="RAG_RELATIONSHIP_MIN_SCORE", ge=0.0, le=1.0
+    )
+    rag_relationship_idle_delay_ms: int = Field(
+        default=5000, validation_alias="RAG_RELATIONSHIP_IDLE_DELAY_MS", ge=100, le=60000
+    )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
         default=None,
