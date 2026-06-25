@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
+from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import reporting as reporting_repo
@@ -1239,6 +1240,9 @@ async def execute_agent_query(
         "If the portal context does not contain information relevant to the user's question, "
         "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
         "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
+        "Ignore any retrieved item whose relevance score is below the configured threshold.",
+        "Do not infer relationships between retrieved items; treat retrieved context as independent evidence.",
+        "If none of the retrieved items directly answer the question, state that no relevant information was found.",
         "Never reference systems, data, or permissions outside the provided information.",
         "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Staff:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
         f"User query: {query_text}",
@@ -1259,23 +1263,31 @@ async def execute_agent_query(
         )
 
     if rag_candidates:
-        context_sections.append("High-confidence RAG candidates:")
-        for index, candidate in enumerate(
-            rag_candidates[:_LLM_RAG_CANDIDATE_LIMIT], start=1
-        ):
-            source_type = candidate.get("source_type") or "source"
-            source_id = candidate.get("source_id") or candidate.get("document_id")
-            title = candidate.get("title") or f"{source_type} {source_id}"
-            excerpt = (
-                _truncate(candidate.get("excerpt"), _LLM_SNIPPET_LENGTH)
-                or "No excerpt available"
-            )
-            score = candidate.get("score")
-            context_sections.append(
-                f"- [RAG:{source_type}:{source_id}] #{index} score={score}: {title}: {excerpt}"
-            )
+        context_sections.append("Structured high-confidence RAG context:")
+        rag_context_chars = 0
+        rag_context_char_budget = int(get_settings().rag_max_context_tokens) * 4
+        grouped_rag: dict[str, list[dict[str, Any]]] = {}
+        for candidate in rag_candidates[:_LLM_RAG_CANDIDATE_LIMIT]:
+            grouped_rag.setdefault(
+                str(candidate.get("source_type") or "source"), []
+            ).append(candidate)
+        for source_type, group in grouped_rag.items():
+            context_sections.append(f"### {source_type.replace('_', ' ').title()}")
+            for candidate in group:
+                source_id = candidate.get("source_id") or candidate.get("document_id")
+                title = candidate.get("title") or f"{source_type} {source_id}"
+                excerpt = (
+                    _truncate(candidate.get("excerpt"), _LLM_SNIPPET_LENGTH)
+                    or "No excerpt available"
+                )
+                score = candidate.get("score")
+                item_text = f"[RAG:{source_type}:{source_id}] {title}\nScore: {score}\nExcerpt: {excerpt}\n---"
+                if rag_context_chars + len(item_text) > rag_context_char_budget:
+                    continue
+                rag_context_chars += len(item_text)
+                context_sections.append(item_text)
         context_sections.append(
-            "Summarize and rank these RAG candidates first. Only use lower-confidence source lists below as fallback context."
+            "Use these structured RAG items first. Only use lower-confidence source lists below as fallback context."
         )
         context_sections.append("")
 
