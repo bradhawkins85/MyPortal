@@ -21,9 +21,10 @@ import zlib
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.dependencies.auth import (
     get_current_tray_device,
@@ -53,6 +54,7 @@ from app.schemas.tray import (
     TrayMenuConfigUpdate,
     TrayTicketQuestionCreate,
     TrayTicketQuestionsResponse,
+    TrayTicketTokenResponse,
     TrayTicketQuestionUpdate,
     TrayTicketSubmitRequest,
     TrayTicketSubmitResponse,
@@ -673,6 +675,308 @@ async def tray_submit_syncro_ticket(
     return TrayTicketSubmitResponse(
         ticket_id=ticket_id,
         ticket_number=str(ticket.get("number") or raw_ticket_id or "") or None,
+    )
+
+
+_TICKET_TOKEN_TTL_SECONDS = 300
+
+
+def _issue_ticket_form_token(device: dict[str, Any], mode: str) -> tuple[str, str]:
+    csrf = secrets.token_urlsafe(24)
+    exp = (
+        datetime.now(timezone.utc) + timedelta(seconds=_TICKET_TOKEN_TTL_SECONDS)
+    ).isoformat()
+    raw = json.dumps(
+        {
+            "device_id": int(device["id"]),
+            "mode": "syncro" if mode == "syncro" else "myportal",
+            "csrf": csrf,
+            "exp": exp,
+        }
+    )
+    return encrypt_secret(raw), csrf
+
+
+def _parse_ticket_form_token(token: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(decrypt_secret(token))
+    except Exception:
+        return None
+    try:
+        exp = datetime.fromisoformat(str(payload.get("exp") or ""))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            return None
+    except Exception:
+        return None
+    mode = str(payload.get("mode") or "myportal")
+    if mode not in {"myportal", "syncro"}:
+        return None
+    return payload
+
+
+def _ticket_form_url(token: str, request: Request) -> str:
+    portal_url = (_settings.public_base_url or str(request.base_url)).rstrip("/")
+    return f"{portal_url}/api/tray/ticket-form?token={quote(token, safe='')}"
+
+
+def _render_ticket_form(
+    *,
+    token: str,
+    csrf: str,
+    mode: str,
+    questions: list[Any],
+    error: str | None = None,
+    values: dict[str, str] | None = None,
+    success: str | None = None,
+) -> str:
+    values = values or {}
+    title = "Create Syncro Ticket" if mode == "syncro" else "Submit Ticket"
+    intro = "Create a support ticket linked to this computer."
+    fields = []
+    for name, label, field_type, placeholder, required in [
+        ("name", "Name", "text", "e.g. John Smith", True),
+        ("email", "Email", "email", "e.g. john@example.com", True),
+        ("phone", "Phone", "tel", "The best number to reach you at", False),
+        ("subject", "Subject", "text", "e.g. I'm having networking issues", True),
+    ]:
+        req = " required" if required else ""
+        star = " *" if required else ""
+        fields.append(
+            f'<label class="field"><span>{_html.escape(label + star)}</span>'
+            f'<input name="{name}" type="{field_type}" value="{_html.escape(values.get(name, ""))}" '
+            f'placeholder="{_html.escape(placeholder)}"{req}></label>'
+        )
+    fields.append(
+        '<label class="field"><span>Description</span>'
+        f'<textarea name="description" rows="6" placeholder="Please provide details about the issue">{_html.escape(values.get("description", ""))}</textarea></label>'
+    )
+    question_meta: list[dict[str, Any]] = []
+    for q in questions:
+        qid = int(q.get("id") if isinstance(q, dict) else q.id)
+        label = str(q.get("label") if isinstance(q, dict) else q.label)
+        field_type = str(q.get("field_type") if isinstance(q, dict) else q.field_type)
+        placeholder = str(
+            (q.get("placeholder") if isinstance(q, dict) else q.placeholder) or ""
+        )
+        is_required = bool(
+            q.get("is_required") if isinstance(q, dict) else q.is_required
+        )
+        options = q.get("options") if isinstance(q, dict) else q.options
+        conditions = q.get("conditions") if isinstance(q, dict) else q.conditions
+        value = values.get(f"answer_{qid}", "")
+        star = " *" if is_required else ""
+        conds = []
+        for c in conditions or []:
+            conds.append(
+                {
+                    "parent_question_id": int(
+                        c.get("parent_question_id")
+                        if isinstance(c, dict)
+                        else c.parent_question_id
+                    ),
+                    "operator": str(
+                        c.get("operator") if isinstance(c, dict) else c.operator
+                    ),
+                    "expected_value": str(
+                        c.get("expected_value")
+                        if isinstance(c, dict)
+                        else c.expected_value
+                    ),
+                }
+            )
+        question_meta.append(
+            {
+                "id": qid,
+                "field_type": field_type,
+                "required": is_required,
+                "conditions": conds,
+            }
+        )
+        attrs = f'name="answer_{qid}" data-question-input="{qid}"'
+        if field_type == "select":
+            option_html = ['<option value="">Select...</option>']
+            for opt in options or []:
+                opt_s = str(opt)
+                selected = " selected" if opt_s == value else ""
+                option_html.append(
+                    f'<option value="{_html.escape(opt_s)}"{selected}>{_html.escape(opt_s)}</option>'
+                )
+            control = f'<select {attrs}>{"".join(option_html)}</select>'
+        elif field_type == "boolean":
+            checked = " checked" if value.lower() in {"yes", "true", "1", "on"} else ""
+            control = f'<label class="check"><input type="checkbox" {attrs} value="Yes"{checked}> Yes</label>'
+        else:
+            control = f'<input type="text" {attrs} value="{_html.escape(value)}" placeholder="{_html.escape(placeholder)}">'
+        fields.append(
+            f'<div class="field" data-question="{qid}"><span>{_html.escape(label + star)}</span>{control}</div>'
+        )
+    notice = (
+        f'<div class="alert alert-error">{_html.escape(error)}</div>' if error else ""
+    )
+    done = (
+        f'<div class="alert alert-success">{_html.escape(success)}</div>'
+        if success
+        else ""
+    )
+    disabled = " disabled" if success else ""
+    meta_json = _html.escape(json.dumps(question_meta), quote=True)
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_html.escape(title)}</title>
+<style>
+:root{{--primary:#0f8f8f;--ink:#1f2937;--muted:#64748b;--line:#e5e7eb;--bg:#f8fafc}}
+*{{box-sizing:border-box}}body{{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}}
+.shell{{min-height:100vh;display:grid;grid-template-columns:220px 1fr;grid-template-rows:auto 1fr}}
+.nav{{grid-row:1/3;background:#0f172a;color:white;padding:24px}}.nav h1{{font-size:18px;margin:0 0 18px}}.nav p{{color:#cbd5e1;font-size:13px;line-height:1.5}}
+.header{{background:white;border-bottom:1px solid var(--line);padding:20px 28px}}.header h2{{margin:0;font-size:24px}}.header p{{margin:6px 0 0;color:var(--muted)}}
+.main{{padding:28px;overflow:auto}}.card{{max-width:860px;background:white;border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.06)}}
+.field{{display:grid;gap:8px;margin-bottom:18px}}.field span{{font-weight:600}}input,textarea,select{{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font:inherit}}textarea{{resize:vertical}}.check{{display:flex;gap:8px;align-items:center}}.check input{{width:auto}}
+.actions{{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}}button{{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer}}.primary{{background:var(--primary);color:white}}.secondary{{background:#e5e7eb;color:#111827}}
+.alert{{border-radius:12px;padding:12px 14px;margin-bottom:18px}}.alert-error{{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}}.alert-success{{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}}
+@media(max-width:760px){{.shell{{display:block}}.nav{{padding:16px}}.main{{padding:16px}}}}
+</style></head><body><div class="shell"><aside class="nav"><h1>MyPortal</h1><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{''.join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
+<script>
+const meta=JSON.parse(document.getElementById('question-meta').value||'[]');
+function valueFor(id){{const el=document.querySelector(`[data-question-input="${{id}}"]`);if(!el)return'';if(el.type==='checkbox')return el.checked?'Yes':'No';return (el.value||'').trim();}}
+function matches(c){{const actual=valueFor(c.parent_question_id).toLowerCase();const expected=(c.expected_value||'').toLowerCase();if(c.operator==='not_equals')return actual!==expected;if(c.operator==='contains')return actual.includes(expected);return actual===expected;}}
+function updateVisibility(){{for(const q of meta){{const row=document.querySelector(`[data-question="${{q.id}}"]`);if(!row)continue;const visible=!q.conditions||q.conditions.length===0||q.conditions.every(matches);row.style.display=visible?'grid':'none';const input=row.querySelector('[data-question-input]');if(input)input.dataset.visible=visible?'1':'0';}}}}
+document.addEventListener('input',updateVisibility);document.addEventListener('change',updateVisibility);updateVisibility();
+const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{const el=form.elements[k];const saved=localStorage.getItem('myportal.tray.ticket.'+k);if(el&&!el.value&&saved)el.value=saved;}});form.addEventListener('submit',()=>{{['name','email','phone'].forEach(k=>{{const el=form.elements[k];if(el)localStorage.setItem('myportal.tray.ticket.'+k,el.value||'');}});}});
+</script></body></html>"""
+
+
+@router.post(
+    "/ticket-token",
+    response_model=TrayTicketTokenResponse,
+    summary="Issue a short-lived authenticated tray ticket form URL",
+)
+async def issue_ticket_token(
+    request: Request,
+    device: dict = Depends(get_current_tray_device),
+) -> TrayTicketTokenResponse:
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception as exc:
+        log_info(
+            "tray.ticket_token.request_json_unavailable",
+            error=str(exc),
+        )
+        body = {}
+    mode = "syncro" if str(body.get("mode") or "").lower() == "syncro" else "myportal"
+    token, _csrf = _issue_ticket_form_token(device, mode)
+    ticket_url = _ticket_form_url(token, request)
+    return TrayTicketTokenResponse(
+        token=token, expires_in=_TICKET_TOKEN_TTL_SECONDS, ticket_url=ticket_url
+    )
+
+
+@router.get("/ticket-form", response_class=HTMLResponse, include_in_schema=False)
+async def tray_ticket_form(token: str) -> HTMLResponse:
+    session = _parse_ticket_form_token(token)
+    if not session:
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired ticket form token"
+        )
+    device = await tray_repo.get_device_by_id(int(session["device_id"]))
+    if not device or device.get("status") == "revoked":
+        raise HTTPException(status_code=403, detail="Device not found or revoked")
+    questions = await tq_service.get_questions_for_company(device.get("company_id"))
+    return HTMLResponse(
+        _render_ticket_form(
+            token=token,
+            csrf=str(session["csrf"]),
+            mode=str(session["mode"]),
+            questions=questions,
+        )
+    )
+
+
+@router.post("/ticket-form", response_class=HTMLResponse, include_in_schema=False)
+async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
+    form = await request.form()
+    token = str(form.get("token") or "")
+    session = _parse_ticket_form_token(token)
+    if not session:
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired ticket form token"
+        )
+    if str(form.get("csrf") or "") != str(session.get("csrf") or ""):
+        raise HTTPException(status_code=403, detail="Invalid form token")
+    device = await tray_repo.get_device_by_id(int(session["device_id"]))
+    if not device or device.get("status") == "revoked":
+        raise HTTPException(status_code=403, detail="Device not found or revoked")
+    questions = await tq_service.get_questions_for_company(device.get("company_id"))
+    values = {
+        k: str(v)
+        for k, v in form.multi_items()
+        if isinstance(k, str) and isinstance(v, str)
+    }
+    answers = []
+    for q in questions:
+        qid = int(q.get("id") if isinstance(q, dict) else q.id)
+        field_type = str(q.get("field_type") if isinstance(q, dict) else q.field_type)
+        key = f"answer_{qid}"
+        value = (
+            "No"
+            if field_type == "boolean" and form.get(key) is None
+            else str(form.get(key) or "")
+        )
+        answers.append({"question_id": qid, "value": value})
+    payload = TrayTicketSubmitRequest(
+        device_uid=str(device.get("device_uid") or ""),
+        name=str(form.get("name") or "").strip(),
+        email=str(form.get("email") or "").strip(),
+        phone=str(form.get("phone") or "").strip() or None,
+        subject=str(form.get("subject") or "").strip(),
+        description=str(form.get("description") or "").strip() or None,
+        answers=answers,
+    )
+
+    class _NoAuthRequest:
+        headers: dict[str, str] = {}
+
+    try:
+        if str(session.get("mode")) == "syncro":
+            result = await tray_submit_syncro_ticket(payload, _NoAuthRequest())
+        else:
+            result = await tray_submit_ticket(payload, _NoAuthRequest())
+    except HTTPException as exc:
+        detail = (
+            exc.detail
+            if isinstance(exc.detail, str)
+            else "Ticket submission failed. Please review the form and try again."
+        )
+        return HTMLResponse(
+            _render_ticket_form(
+                token=token,
+                csrf=str(session["csrf"]),
+                mode=str(session["mode"]),
+                questions=questions,
+                error=detail,
+                values=values,
+            ),
+            status_code=exc.status_code if exc.status_code < 500 else 200,
+        )
+    ticket_number = result.ticket_number or (
+        f"#{result.ticket_id}" if result.ticket_id else ""
+    )
+    success = (
+        f"Your ticket {ticket_number} has been submitted. We will be in touch soon."
+        if ticket_number
+        else "Your ticket has been submitted. We will be in touch soon."
+    )
+    return HTMLResponse(
+        _render_ticket_form(
+            token=token,
+            csrf=str(session["csrf"]),
+            mode=str(session["mode"]),
+            questions=questions,
+            success=success,
+            values={},
+        )
     )
 
 
