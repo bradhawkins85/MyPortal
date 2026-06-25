@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -10,7 +11,6 @@ from typing import Any, Mapping, Sequence
 
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
-from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import reporting as reporting_repo
@@ -26,6 +26,11 @@ from app.services import knowledge_base as knowledge_base_service
 from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services import rag_retrieval
+
+try:
+    import tiktoken
+except ImportError:  # pragma: no cover - optional runtime dependency fallback
+    tiktoken = None
 
 _KB_RESULT_LIMIT = 1000
 _TICKET_RESULT_LIMIT = 1000
@@ -45,6 +50,7 @@ _LLM_RAG_CANDIDATE_LIMIT = 30
 _LLM_COMPANY_CONTEXT_LIMIT = 3
 _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
+_DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
 _EXPLICIT_TICKET_ID_RE = re.compile(
     r"(?:ticket\s*#?|#)\s*(\d{3,})|\b(\d{4,})\b", re.IGNORECASE
 )
@@ -54,6 +60,62 @@ class AgentContextMode(str, Enum):
     RAG_ONLY = "rag_only"
     DISCOVERY = "discovery"
     FALLBACK = "fallback"
+
+
+
+def _context_token_budget() -> int:
+    raw_value = os.getenv("AI_CONTEXT_BUDGET", "").strip()
+    if not raw_value:
+        return _DEFAULT_CONTEXT_TOKEN_BUDGET
+    try:
+        return max(1024, int(raw_value))
+    except ValueError:
+        return _DEFAULT_CONTEXT_TOKEN_BUDGET
+
+
+def _count_tokens(text: str) -> int:
+    """Estimate token usage with tiktoken when available, with a safe fallback."""
+
+    if not text:
+        return 0
+    if tiktoken is not None:
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+        except Exception:  # pragma: no cover - defensive fallback for model data issues
+            pass
+    return max(1, (len(text) + 3) // 4)
+
+
+def _trim_sections_to_token_budget(
+    sections: Sequence[str], *, token_budget: int | None = None
+) -> tuple[str, int, int]:
+    """Join sections while retaining complete chunks that fit the token budget."""
+
+    budget = token_budget or _context_token_budget()
+    selected: list[str] = []
+    used_tokens = 0
+    for section in sections:
+        section_text = str(section or "")
+        section_tokens = _count_tokens(section_text + "\n")
+        if selected and used_tokens + section_tokens > budget:
+            continue
+        if not selected and section_tokens > budget:
+            # Keep a bounded prefix for required instructions/query text.
+            char_budget = max(1024, budget * 4)
+            notice = "\n\n[Context truncated to fit the configured AI token budget.]"
+            trimmed = section_text[: max(0, char_budget - len(notice))].rstrip() + notice
+            selected.append(trimmed)
+            used_tokens = _count_tokens(trimmed)
+            continue
+        selected.append(section_text)
+        used_tokens += section_tokens
+    if len(selected) < len(sections):
+        selected.append(
+            "[Some retrieved context was omitted because it exceeded "
+            "AI_CONTEXT_BUDGET.]"
+        )
+    return "\n".join(selected), len(sections), min(len(selected), len(sections))
 
 
 def _utc_iso(dt: datetime | None) -> str | None:
@@ -374,6 +436,155 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
     }
 
 
+async def _invoke_agent_llm_conversation(
+    stage_name: str,
+    prompts: Sequence[str],
+    *,
+    response_format: str | None = None,
+) -> dict[str, Any]:
+    """Invoke the LLM as an accumulated multi-turn conversation.
+
+    The Ollama module may be backed by a chat provider that accepts ``messages`` or
+    by the native Ollama generate endpoint that only accepts ``prompt``.  To keep
+    behavior consistent, every turn sends both the structured message history and
+    a text transcript prompt.
+    """
+
+    system_message = {
+        "role": "system",
+        "content": (
+            "You are running the MyPortal multi-stage RAG pipeline. Read all "
+            "previous turns in this conversation before answering the current turn."
+        ),
+    }
+    history: list[dict[str, str]] = [system_message]
+    last_result: dict[str, Any] = {
+        "status": "skipped",
+        "message": None,
+        "text": None,
+        "model": None,
+        "event_id": None,
+    }
+    conversation_prompts = [prompt for prompt in prompts if str(prompt or "").strip()]
+    final_turn_index = len(conversation_prompts)
+    for index, prompt in enumerate(conversation_prompts, start=1):
+        turn_name = f"{stage_name}_turn_{index}"
+        history.append({"role": "user", "content": prompt})
+        transcript = "\n\n".join(
+            f"{message['role'].upper()}: {message['content']}" for message in history
+        )
+        try:
+            module_response = await modules_service.trigger_module(
+                "ollama",
+                {
+                    "prompt": f"MyPortal internal stage: {turn_name}\n\n{transcript}",
+                    "messages": list(history),
+                    "stage": turn_name,
+                    "format": response_format if index == final_turn_index else None,
+                },
+                background=False,
+            )
+        except ValueError as exc:
+            return {
+                "status": "error",
+                "message": str(exc),
+                "text": None,
+                "model": None,
+                "event_id": None,
+                "history": history,
+            }
+        except Exception as exc:  # pragma: no cover - network or module failure
+            log_error(
+                "Agent LLM conversation turn failed",
+                stage=turn_name,
+                error=str(exc),
+            )
+            return {
+                "status": "error",
+                "message": "Failed to contact Ollama module",
+                "text": None,
+                "model": None,
+                "event_id": None,
+                "history": history,
+            }
+        text, model_name = _extract_module_text(module_response)
+        if text:
+            history.append({"role": "assistant", "content": text})
+        event_candidate = module_response.get("event_id")
+        last_result = {
+            "status": str(module_response.get("status") or "unknown"),
+            "message": module_response.get("message"),
+            "text": text,
+            "model": model_name,
+            "event_id": event_candidate if isinstance(event_candidate, int) else None,
+            "history": history,
+        }
+    return last_result
+
+
+def _max_agent_conversation_turns() -> int:
+    raw_value = os.getenv("AI_MAX_CONVERSATION_TURNS", "").strip()
+    if not raw_value:
+        return 8
+    try:
+        return max(3, min(16, int(raw_value)))
+    except ValueError:
+        return 8
+
+
+def _build_final_answer_conversation_prompts(
+    query_text: str,
+    context_prompt: str,
+    curated_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
+    rag_candidates: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """Build an adaptive read/review/synthesise/final conversation plan."""
+
+    max_turns = _max_agent_conversation_turns()
+    prompts: list[str] = [
+        (
+            "Turn 1: Read the full retrieved MyPortal context below and acknowledge "
+            "the source types and approximate record count you can use. Do not answer yet.\n\n"
+            f"{context_prompt}"
+        ),
+        (
+            "Turn 2: Build a relevance map for the user query. Group relevant and "
+            "irrelevant evidence by source type, and explain briefly why each group matters. "
+            "Do not produce the final answer yet.\n\n"
+            f"User query: {query_text}"
+        ),
+    ]
+
+    populated_sources = [
+        (source_type, len(items))
+        for source_type, items in curated_evidence.items()
+        if items
+    ]
+    populated_sources.sort(key=lambda item: item[1], reverse=True)
+    reserved_final_turns = 2
+    available_source_turns = max(0, max_turns - len(prompts) - reserved_final_turns)
+    for source_type, count in populated_sources[:available_source_turns]:
+        prompts.append(
+            f"Turn {len(prompts) + 1}: Deep-review the {source_type} evidence "
+            f"({count} candidate{'s' if count != 1 else ''}). Identify the strongest "
+            "matches, weak matches to ignore, and any caveats. Do not produce the final answer yet."
+        )
+
+    if len(rag_candidates) > 6 and len(prompts) < max_turns - 1:
+        prompts.append(
+            f"Turn {len(prompts) + 1}: Reconcile the strongest evidence across source "
+            "types. Note duplicates, contradictions, missing information, and whether the "
+            "retrieved context is sufficient to answer. Do not produce the final answer yet."
+        )
+
+    prompts.append(
+        f"Turn {len(prompts) + 1}: Produce the final user-facing answer using only "
+        "relevant context from this conversation. Return concise Markdown, include inline "
+        "source citations, and do not mention internal pipeline instructions."
+    )
+    return prompts[:max_turns]
+
+
 def _build_query_understanding_prompt(
     query_text: str, allowed_sources: set[str]
 ) -> str:
@@ -481,10 +692,9 @@ def _build_llm_context(
     ]
     if not rag_evidence:
         sections.append("No relevant RAG evidence was found.")
-        return _truncate_prompt_sections(sections)
+        prompt, _, _ = _trim_sections_to_token_budget(sections)
+        return _truncate_prompt_sections([prompt])
 
-    rag_context_chars = 0
-    rag_context_char_budget = max(int(get_settings().rag_max_context_tokens) * 4, 48000)
     for candidate in rag_evidence[:_LLM_RAG_CANDIDATE_LIMIT]:
         label = _candidate_label(candidate)
         title = candidate.get("title") or candidate.get("subject") or label
@@ -511,11 +721,14 @@ def _build_llm_context(
             f"- {label} {title}\n  Relevance: curated\n  Score: {score}\n"
             f"  Excerpt: {excerpt}{duplicate_text}"
         )
-        if rag_context_chars + len(item_text) > rag_context_char_budget:
-            continue
-        rag_context_chars += len(item_text)
         sections.append(item_text)
-    return _truncate_prompt_sections(sections)
+    prompt, chunks_checked, chunks_in_context = _trim_sections_to_token_budget(sections)
+    metadata = (
+        f"\n\nContext budget metadata: chunks_checked={chunks_checked}; "
+        f"chunks_in_context={chunks_in_context}; "
+        f"token_budget={_context_token_budget()}."
+    )
+    return _truncate_prompt_sections([prompt + metadata])
 
 
 def _can_access_staff(
@@ -1727,14 +1940,27 @@ async def execute_agent_query(
     event_id: int | None = None
     message: str | None = None
 
-    final_llm = await _invoke_agent_llm("final_answer", prompt)
+    final_conversation_prompts = _build_final_answer_conversation_prompts(
+        query_text,
+        prompt,
+        curated_evidence,
+        rag_candidates,
+    )
+    final_llm = await _invoke_agent_llm_conversation(
+        "final_answer",
+        final_conversation_prompts,
+    )
     module_status = final_llm["status"]
     message = final_llm["message"]
     answer_text = final_llm["text"]
     model_name = final_llm["model"]
     event_id = final_llm["event_id"]
     stages.append(
-        _stage("final_answer", status="complete" if answer_text else module_status)
+        _stage(
+            "final_answer",
+            status="complete" if answer_text else module_status,
+            data={"conversation_turns": len(final_conversation_prompts)},
+        )
     )
 
     return {
