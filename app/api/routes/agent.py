@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.schemas.agent import AgentQueryRequest, AgentQueryResponse
@@ -25,6 +28,52 @@ async def query_agent(
         memberships=memberships,
     )
     return AgentQueryResponse(**result)
+
+
+@router.post("/query/stream")
+async def stream_agent_query(
+    payload: AgentQueryRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    active_company_id = getattr(request.state, "active_company_id", None)
+    memberships = getattr(request.state, "available_companies", None)
+    result = await agent_service.execute_agent_query(
+        payload.query,
+        current_user,
+        active_company_id=active_company_id,
+        memberships=memberships,
+    )
+
+    async def events():
+        for stage in result.get("stages") or []:
+            payload = {"event": "stage", **stage}
+            yield f"data: {json.dumps(payload, default=str)}\n\n"
+        evidence = (
+            result.get("evidence")
+            if isinstance(result.get("evidence"), dict)
+            else {}
+        )
+        for source_type, items in evidence.items():
+            if items:
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "event": "evidence",
+                            "source_type": source_type,
+                            "count": len(items),
+                        },
+                        default=str,
+                    )
+                    + "\n\n"
+                )
+        if result.get("answer"):
+            payload = {"event": "answer_delta", "text": result["answer"]}
+            yield f"data: {json.dumps(payload, default=str)}\n\n"
+        yield f"data: {json.dumps({'event': 'done'}, default=str)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 @router.get("/rag/health")

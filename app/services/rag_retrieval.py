@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -141,14 +142,19 @@ _SOURCE_WEIGHTS = {
     "products": 0.60,
     "best_practices": 0.50,
 }
-_SOURCE_LIMITS = {
-    "knowledge_base": 5,
-    "chats": 5,
-    "tickets": 5,
-    "products": 2,
-    "assets": 2,
+SOURCE_TYPE_CAPS = {
+    "tickets": 4,
+    "ticket_comments": 6,
+    "knowledge_base": 4,
+    "chats": 4,
+    "products": 4,
+    "assets": 3,
+    "orders": 3,
+    "issues": 3,
     "best_practices": 2,
 }
+_SOURCE_LIMITS = SOURCE_TYPE_CAPS
+_DUPLICATE_SIMILARITY_THRESHOLD = 0.94
 _PRODUCT_TERMS = {
     "product",
     "sku",
@@ -336,6 +342,109 @@ def _threshold(source_type: str, fallback: float) -> float:
     return max(fallback, _SOURCE_THRESHOLDS.get(source_type, fallback))
 
 
+def _normalised_hash_text(candidate: Mapping[str, Any]) -> str:
+    return " ".join(
+        _tokens(
+            " ".join(
+                str(candidate.get(key) or "")
+                for key in ("title", "excerpt", "source_id", "url")
+            )
+        )
+    )
+
+
+def _duplicate_keys(candidate: Mapping[str, Any]) -> set[str]:
+    metadata = (
+        candidate.get("metadata")
+        if isinstance(candidate.get("metadata"), Mapping)
+        else {}
+    )
+    keys: set[str] = set()
+    exact_text = str(candidate.get("excerpt") or "").strip()
+    normalised = _normalised_hash_text(candidate)
+    if exact_text:
+        digest = hashlib.sha256(exact_text.encode("utf-8")).hexdigest()
+        keys.add(f"exact:{digest}")
+    if normalised:
+        digest = hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+        keys.add(f"normalised:{digest}")
+    url = str(candidate.get("url") or metadata.get("url") or "").strip().casefold()
+    if url:
+        keys.add(f"url:{url}")
+    linked_ticket_id = (
+        metadata.get("linked_ticket_id")
+        or metadata.get("ticket_id")
+        or candidate.get("linked_ticket_id")
+    )
+    if linked_ticket_id:
+        keys.add(f"ticket:{linked_ticket_id}")
+    slug = str(
+        metadata.get("slug") or metadata.get("canonical_slug") or ""
+    ).strip().casefold()
+    if slug:
+        keys.add(f"slug:{slug}")
+    return keys
+
+
+def _candidate_embedding(candidate: Mapping[str, Any]) -> list[float]:
+    embedding = candidate.get("_embedding")
+    if not isinstance(embedding, list):
+        return []
+    try:
+        return [float(v) for v in embedding]
+    except (TypeError, ValueError):
+        return []
+
+
+def _group_duplicate_candidates(
+    candidates: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return primary evidence with duplicate references grouped under it."""
+
+    grouped: list[dict[str, Any]] = []
+    keys_by_primary: list[set[str]] = []
+    for candidate in candidates:
+        item = dict(candidate)
+        item_keys = _duplicate_keys(item)
+        item_embedding = _candidate_embedding(item)
+        duplicate_index: int | None = None
+        for idx, primary in enumerate(grouped):
+            if item_keys and item_keys & keys_by_primary[idx]:
+                duplicate_index = idx
+                break
+            primary_embedding = _candidate_embedding(primary)
+            if item_embedding and primary_embedding:
+                if (
+                    cosine_similarity(item_embedding, primary_embedding)
+                    > _DUPLICATE_SIMILARITY_THRESHOLD
+                ):
+                    duplicate_index = idx
+                    break
+        if duplicate_index is None:
+            item["duplicates"] = []
+            item["duplicate_count"] = 0
+            grouped.append(item)
+            keys_by_primary.append(set(item_keys))
+            continue
+        duplicate_ref = {
+            "document_id": item.get("document_id"),
+            "chunk_id": item.get("chunk_id"),
+            "source_type": item.get("source_type"),
+            "source_id": item.get("source_id"),
+            "title": item.get("title"),
+            "url": item.get("url"),
+            "score": item.get("score"),
+        }
+        grouped[duplicate_index].setdefault("duplicates", []).append(duplicate_ref)
+        grouped[duplicate_index]["duplicate_count"] = len(
+            grouped[duplicate_index].get("duplicates") or []
+        )
+        keys_by_primary[duplicate_index].update(item_keys)
+    for item in grouped:
+        item.pop("_embedding", None)
+    return grouped
+
+
 async def retrieve_candidates(
     query: str,
     user: Mapping[str, Any],
@@ -351,7 +460,10 @@ async def retrieve_candidates(
         return []
     settings = get_settings()
     profile = _profile_query(query_text)
-    resolved_limit = int(limit if limit is not None else settings.rag_candidate_limit)
+    requested_source_types = list(source_filters or SOURCE_TYPE_CAPS.keys())
+    cap_total = sum(SOURCE_TYPE_CAPS.get(source_type, 3) for source_type in requested_source_types)
+    configured_limit = int(limit if limit is not None else settings.rag_candidate_limit)
+    resolved_limit = configured_limit if limit is not None else max(configured_limit, cap_total)
     resolved_min_score = float(
         min_score if min_score is not None else settings.rag_min_score
     )
@@ -359,9 +471,12 @@ async def retrieve_candidates(
         memberships or []
     ) or await company_access.list_accessible_companies(user)
     query_embedding = embed_text(profile.expanded)
-    rows = await rag_repo.list_active_chunks(
-        embedding_model=embedding_model(), source_types=source_filters
-    )
+    rows: list[Mapping[str, Any]] = []
+    for source_type in requested_source_types:
+        source_rows = await rag_repo.list_active_chunks(
+            embedding_model=embedding_model(), source_types=[source_type]
+        )
+        rows.extend(source_rows)
     metadata_by_chunk = {
         int(r.get("chunk_id") or 0): (_loads(r.get("metadata_json"), {}) or {})
         for r in rows
@@ -417,6 +532,7 @@ async def retrieve_candidates(
             "metadata": metadata if isinstance(metadata, dict) else {},
             "entities": profile.entities,
             "intents": profile.intents,
+            "_embedding": [float(v) for v in embedding],
         }
         if not can_access_candidate(
             candidate, user=user, memberships=resolved_memberships
@@ -446,6 +562,7 @@ async def retrieve_candidates(
         diverse.append(candidate)
         if len(diverse) >= max(1, resolved_limit):
             break
+    diverse = _group_duplicate_candidates(diverse)
     log_info(
         "RAG hybrid retrieval completed",
         query=query_text,

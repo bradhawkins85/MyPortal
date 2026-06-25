@@ -50,3 +50,37 @@ def test_hybrid_score_prefers_exact_entities_over_semantic_neighbour():
     assert rag_retrieval._metadata_boost(
         profile, relevant, metadata[1]
     ) > rag_retrieval._metadata_boost(profile, irrelevant, metadata[2])
+
+
+def test_group_duplicate_candidates_exposes_duplicates_without_repeating_snippets():
+    candidates = [
+        {
+            "document_id": 30,
+            "chunk_id": 1,
+            "source_type": "chats",
+            "source_id": 30,
+            "title": "Lenovo touchpad",
+            "excerpt": "User was shown a Lenovo touchpad article.",
+            "score": 0.9,
+            "metadata": {"linked_ticket_id": 24425},
+            "_embedding": [1.0, 0.0, 0.0],
+        },
+        {
+            "document_id": 31,
+            "chunk_id": 2,
+            "source_type": "chats",
+            "source_id": 31,
+            "title": "Lenovo touchpad follow-up",
+            "excerpt": "User was shown a Lenovo touchpad article.",
+            "score": 0.87,
+            "metadata": {"linked_ticket_id": 24425},
+            "_embedding": [1.0, 0.0, 0.0],
+        },
+    ]
+
+    grouped = rag_retrieval._group_duplicate_candidates(candidates)
+
+    assert len(grouped) == 1
+    assert grouped[0]["source_id"] == 30
+    assert grouped[0]["duplicate_count"] == 1
+    assert grouped[0]["duplicates"][0]["source_id"] == 31
