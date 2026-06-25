@@ -19,6 +19,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
@@ -34,8 +35,10 @@ from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_statuses as ticket_status_repo
+from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
+from app.services import agent as agent_service
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import tickets as tickets_service
@@ -45,6 +48,17 @@ from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(tags=["Tickets"])
 
+_RELATED_STOP_WORDS = {
+    "about", "after", "again", "also", "and", "are", "attachment", "attachments",
+    "before", "below", "can", "cannot", "client", "customer", "description",
+    "does", "error", "from", "have", "helpdesk", "internal", "issue", "known",
+    "message", "messages", "need", "needs", "please", "public", "reply", "replace",
+    "replacement", "request", "service", "setup", "subject", "support", "that",
+    "the", "their", "there", "this", "ticket", "with", "without", "would", "you",
+    "your",
+}
+
+
 
 def _main():
     from app import main as main_module
@@ -53,6 +67,146 @@ def _main():
 
 
 
+
+
+def _strip_external_links(text: str) -> str:
+    return re.sub(r"https?://\S+|www\.\S+", " ", text or "")
+
+
+def _compact_ticket_text(value: Any, *, limit: int = 700) -> str:
+    sanitized = sanitize_rich_text(_strip_external_links(str(value or "")))
+    text = re.sub(r"\s+", " ", sanitized.text_content).strip()
+    return text[:limit]
+
+
+def _ticket_related_text_parts(
+    ticket: dict[str, Any],
+    replies: Sequence[dict[str, Any]],
+    attachments: Sequence[dict[str, Any]],
+) -> list[str]:
+    parts = [
+        _compact_ticket_text(ticket.get("subject"), limit=220),
+        _compact_ticket_text(ticket.get("description"), limit=900),
+        _compact_ticket_text(ticket.get("category"), limit=120),
+    ]
+    parts.extend(_compact_ticket_text(reply.get("body"), limit=600) for reply in replies[-8:])
+    parts.extend(
+        _compact_ticket_text(attachment.get("original_filename") or attachment.get("filename"), limit=160)
+        for attachment in attachments[:12]
+    )
+    return [part for part in parts if part]
+
+
+def _related_search_terms(text_parts: Sequence[str], *, limit: int = 30) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for text in text_parts:
+        for token in re.findall(r"[a-z0-9][a-z0-9_.:-]{2,}", text.lower()):
+            token = token.strip("._:-")
+            if len(token) < 3 or token in _RELATED_STOP_WORDS or token in seen:
+                continue
+            seen.add(token)
+            terms.append(token)
+            if len(terms) >= limit:
+                return terms
+    return terms
+
+
+def _build_related_ticket_query(
+    ticket: dict[str, Any],
+    replies: Sequence[dict[str, Any]],
+    attachments: Sequence[dict[str, Any]],
+) -> str:
+    text_parts = _ticket_related_text_parts(ticket, replies, attachments)
+    terms = _related_search_terms(text_parts)
+    if terms:
+        return " ".join(terms)[:2000]
+    return " ".join(text_parts).strip()[:2000]
+
+
+def _safe_related_url(url: str | None) -> str | None:
+    candidate = str(url or "").strip()
+    if not candidate:
+        return None
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        return None
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    return candidate
+
+
+def _source_url(source_type: str, item: dict[str, Any]) -> str | None:
+    supplied_url = _safe_related_url(item.get("url"))
+    if supplied_url:
+        return supplied_url
+    identifier = item.get("id")
+    if source_type == "tickets" and identifier:
+        return f"/admin/tickets/{identifier}"
+    if source_type == "assets" and identifier:
+        return f"/admin/assets/{identifier}"
+    if source_type == "companies" and identifier:
+        return f"/admin/companies/{identifier}"
+    if source_type == "staff" and identifier:
+        return f"/admin/staff/{identifier}"
+    if source_type == "orders" and item.get("order_number"):
+        return f"/admin/orders/{item['order_number']}"
+    if source_type == "chats" and identifier:
+        return f"/chat/{identifier}"
+    if source_type == "issues" and identifier:
+        return f"/admin/issues/{identifier}"
+    return None
+
+
+def _source_relevance_score(item: dict[str, Any], search_terms: set[str]) -> int:
+    if not search_terms:
+        return 0
+    source_text = " ".join(
+        str(item.get(key) or "")
+        for key in (
+            "title", "subject", "name", "summary", "excerpt", "description",
+            "serial_number", "os_name", "status", "order_number", "key",
+        )
+    ).lower()
+    return sum(1 for term in search_terms if term in source_text)
+
+
+def _related_items_from_agent_sources(
+    sources: dict[str, Any],
+    current_ticket_id: int,
+    *,
+    search_terms: Sequence[str] = (),
+) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    meaningful_terms = {term for term in search_terms if len(term) >= 4}
+
+    for source_type, values in sources.items():
+        if source_type == "feature_packs" and isinstance(values, dict):
+            iterable = [(f"feature:{slug}", item) for slug, records in values.items() for item in (records or [])]
+        else:
+            iterable = [(source_type, item) for item in (values or [])]
+        for item_type, raw_item in iterable:
+            if not isinstance(raw_item, dict):
+                continue
+            if item_type == "tickets":
+                try:
+                    if int(raw_item.get("id")) == current_ticket_id:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            if meaningful_terms and _source_relevance_score(raw_item, meaningful_terms) == 0:
+                continue
+            url = _source_url(item_type, raw_item)
+            if not url:
+                continue
+            label = (
+                raw_item.get("title") or raw_item.get("subject") or raw_item.get("name")
+                or raw_item.get("order_number") or raw_item.get("key") or f"{item_type.title()} {raw_item.get('id', '')}"
+            )
+            items.append({"type": item_type, "label": str(label).strip()[:180], "url": url})
+            if len(items) >= 12:
+                return items
+    return items
 
 def _parse_requester_value(raw: Any) -> tuple[str | None, int | None]:
     value = str(raw or "").strip()
@@ -113,6 +267,46 @@ async def admin_ticket_detail(
         ticket_id=ticket_id,
     )
 
+
+
+@router.post("/admin/tickets/{ticket_id:int}/related/rescan", response_class=JSONResponse)
+async def admin_rescan_ticket_related(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    attachments = await attachments_repo.list_attachments(ticket_id)
+    query = _build_related_ticket_query(ticket, replies, attachments)
+    search_terms = _related_search_terms(_ticket_related_text_parts(ticket, replies, attachments))
+    if not query:
+        return JSONResponse({
+            "items": [],
+            "scanned": True,
+            "skipped": False,
+            "generated_at": None,
+        })
+    result = await agent_service.execute_agent_query(
+        query,
+        current_user,
+        active_company_id=getattr(request.state, "active_company_id", None),
+        memberships=getattr(request.state, "available_companies", None),
+    )
+    items = _related_items_from_agent_sources(
+        dict(result.get("sources") or {}),
+        ticket_id,
+        search_terms=search_terms,
+    )
+    return JSONResponse({
+        "items": items,
+        "scanned": True,
+        "skipped": False,
+        "generated_at": result.get("generated_at"),
+    })
 
 @router.post("/admin/tickets", response_class=HTMLResponse)
 async def admin_create_ticket(request: Request):
