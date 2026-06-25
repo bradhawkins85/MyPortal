@@ -16,7 +16,6 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # Placeholder values that must be replaced before running in production. These
 # match the defaults distributed in ``.env.example`` and other template files.
 _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
@@ -68,7 +67,9 @@ class Settings(BaseSettings):
 
     app_name: str = "MyPortal"
     environment: str = "development"
-    secret_key: str = Field(validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY"))
+    secret_key: str = Field(
+        validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY")
+    )
     totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
     database_host: str | None = Field(default=None, validation_alias="DB_HOST")
     database_user: str | None = Field(default=None, validation_alias="DB_USER")
@@ -103,12 +104,20 @@ class Settings(BaseSettings):
         default=None, validation_alias="VERIFY_WEBHOOK_URL"
     )
     verify_api_key: str | None = Field(default=None, validation_alias="VERIFY_API_KEY")
-    sms_endpoint: AnyHttpUrl | None = Field(default=None, validation_alias="SMS_ENDPOINT")
+    sms_endpoint: AnyHttpUrl | None = Field(
+        default=None, validation_alias="SMS_ENDPOINT"
+    )
     sms_auth: str | None = Field(default=None, validation_alias="SMS_AUTH")
     portal_url: AnyHttpUrl | None = Field(default=None, validation_alias="PORTAL_URL")
-    azure_client_id: str | None = Field(default=None, validation_alias="AZURE_CLIENT_ID")
-    azure_client_secret: str | None = Field(default=None, validation_alias="AZURE_CLIENT_SECRET")
-    azure_tenant_id: str | None = Field(default=None, validation_alias="AZURE_TENANT_ID")
+    azure_client_id: str | None = Field(
+        default=None, validation_alias="AZURE_CLIENT_ID"
+    )
+    azure_client_secret: str | None = Field(
+        default=None, validation_alias="AZURE_CLIENT_SECRET"
+    )
+    azure_tenant_id: str | None = Field(
+        default=None, validation_alias="AZURE_TENANT_ID"
+    )
     licenses_webhook_url: AnyHttpUrl | None = Field(
         default=None, validation_alias="LICENSES_WEBHOOK_URL"
     )
@@ -146,7 +155,8 @@ class Settings(BaseSettings):
         default=14, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
     )
     m365_onedrive_export_destination_parent_item_id: str = Field(
-        default="root", validation_alias="M365_ONEDRIVE_EXPORT_DESTINATION_PARENT_ITEM_ID"
+        default="root",
+        validation_alias="M365_ONEDRIVE_EXPORT_DESTINATION_PARENT_ITEM_ID",
     )
     m365_onedrive_export_mark_source_read_only: bool = Field(
         default=True, validation_alias="M365_ONEDRIVE_EXPORT_MARK_SOURCE_READ_ONLY"
@@ -200,9 +210,7 @@ class Settings(BaseSettings):
     force_env_module_settings: bool = Field(
         default=False, validation_alias="FORCE_ENV_MODULE_SETTINGS"
     )
-    disable_caching: bool = Field(
-        default=True, validation_alias="DISABLE_CACHING"
-    )
+    disable_caching: bool = Field(default=True, validation_alias="DISABLE_CACHING")
     rag_embedding_model: str = Field(
         default="myportal-hash-embedding-v1",
         validation_alias="RAG_EMBEDDING_MODEL",
@@ -225,7 +233,33 @@ class Settings(BaseSettings):
         default=8, validation_alias="RAG_CANDIDATE_LIMIT", ge=1, le=50
     )
     rag_min_score: float = Field(
-        default=0.12, validation_alias="RAG_MIN_SCORE", ge=0.0, le=1.0
+        default=0.35,
+        validation_alias=AliasChoices("RAG_MIN_SCORE", "MIN_SIMILARITY"),
+        ge=0.0,
+        le=1.0,
+    )
+    rag_vector_weight: float = Field(
+        default=0.55,
+        validation_alias=AliasChoices("RAG_VECTOR_WEIGHT", "VECTOR_WEIGHT"),
+        ge=0.0,
+        le=1.0,
+    )
+    rag_bm25_weight: float = Field(
+        default=0.35,
+        validation_alias=AliasChoices("RAG_BM25_WEIGHT", "BM25_WEIGHT"),
+        ge=0.0,
+        le=1.0,
+    )
+    rag_metadata_weight: float = Field(
+        default=0.10, validation_alias="RAG_METADATA_WEIGHT", ge=0.0, le=1.0
+    )
+    rag_rerank_enabled: bool = Field(default=False, validation_alias="RERANK_ENABLED")
+    rag_query_expansion: bool = Field(default=True, validation_alias="QUERY_EXPANSION")
+    rag_entity_extraction: bool = Field(
+        default=True, validation_alias="ENTITY_EXTRACTION"
+    )
+    rag_max_context_tokens: int = Field(
+        default=2500, validation_alias="RAG_MAX_CONTEXT_TOKENS", ge=500, le=20000
     )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
@@ -330,7 +364,7 @@ class Settings(BaseSettings):
         default=False,
         validation_alias="ENABLE_HSTS",
     )
-    
+
     # MCP (Model Context Protocol) Server Configuration
     mcp_enabled: bool = Field(
         default=False,
@@ -373,30 +407,81 @@ class Settings(BaseSettings):
 
     # Matrix.org Chat Integration
     matrix_enabled: bool = Field(default=False, validation_alias="MATRIX_ENABLED")
-    matrix_homeserver_url: str | None = Field(default=None, validation_alias="MATRIX_HOMESERVER_URL")
-    matrix_server_name: str | None = Field(default=None, validation_alias="MATRIX_SERVER_NAME")
-    matrix_bot_user_id: str | None = Field(default=None, validation_alias="MATRIX_BOT_USER_ID")
-    matrix_bot_access_token: str | None = Field(default=None, validation_alias="MATRIX_BOT_ACCESS_TOKEN")
-    matrix_device_id: str | None = Field(default=None, validation_alias="MATRIX_DEVICE_ID")
-    matrix_is_self_hosted: bool = Field(default=False, validation_alias="MATRIX_IS_SELF_HOSTED")
-    matrix_admin_access_token: str | None = Field(default=None, validation_alias="MATRIX_ADMIN_ACCESS_TOKEN")
-    matrix_default_room_preset: str = Field(default="private_chat", validation_alias="MATRIX_DEFAULT_ROOM_PRESET")
-    matrix_e2ee_enabled: bool = Field(default=False, validation_alias="MATRIX_E2EE_ENABLED")
-    matrix_invite_domain: str | None = Field(default=None, validation_alias="MATRIX_INVITE_DOMAIN")
-    matrixbot_ai_waiting_assistant_enabled: bool = Field(default=False, validation_alias="MATRIXBOT_AI_WAITING_ASSISTANT_ENABLED")
-    matrixbot_ai_ollama_enabled: bool = Field(default=False, validation_alias="MATRIXBOT_AI_OLLAMA_ENABLED")
-    matrixbot_ai_ollama_url: str | None = Field(default=None, validation_alias="MATRIXBOT_AI_OLLAMA_URL")
-    matrixbot_ai_ollama_model: str | None = Field(default=None, validation_alias="MATRIXBOT_AI_OLLAMA_MODEL")
-    matrixbot_ai_ollama_provider: str = Field(default="ollama", validation_alias="MATRIXBOT_AI_OLLAMA_PROVIDER")
-    matrixbot_ai_ollama_api_key: str | None = Field(default=None, validation_alias="MATRIXBOT_AI_OLLAMA_API_KEY")
-    matrixbot_ai_response_delay_minutes: int = Field(default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1)
-    matrixbot_ai_max_responses: int = Field(default=2, validation_alias="MATRIXBOT_AI_MAX_RESPONSES", ge=0)
-    matrixbot_ai_kb_confidence_threshold: float = Field(default=50.0, validation_alias="MATRIXBOT_AI_KB_CONFIDENCE_THRESHOLD", ge=0, le=100)
-    matrixbot_ai_queue_retry_minutes: int = Field(default=5, validation_alias="MATRIXBOT_AI_QUEUE_RETRY_MINUTES", ge=1)
-    matrixbot_ai_queue_timeout_minutes: int = Field(default=60, validation_alias="MATRIXBOT_AI_QUEUE_TIMEOUT_MINUTES", ge=1)
-    matrixbot_ai_show_match_tags: bool = Field(default=True, validation_alias="MATRIXBOT_AI_SHOW_MATCH_TAGS")
-    ntfy_chat_new_enabled: bool = Field(default=False, validation_alias="NTFY_CHAT_NEW_ENABLED")
-    ntfy_chat_reply_enabled: bool = Field(default=False, validation_alias="NTFY_CHAT_REPLY_ENABLED")
+    matrix_homeserver_url: str | None = Field(
+        default=None, validation_alias="MATRIX_HOMESERVER_URL"
+    )
+    matrix_server_name: str | None = Field(
+        default=None, validation_alias="MATRIX_SERVER_NAME"
+    )
+    matrix_bot_user_id: str | None = Field(
+        default=None, validation_alias="MATRIX_BOT_USER_ID"
+    )
+    matrix_bot_access_token: str | None = Field(
+        default=None, validation_alias="MATRIX_BOT_ACCESS_TOKEN"
+    )
+    matrix_device_id: str | None = Field(
+        default=None, validation_alias="MATRIX_DEVICE_ID"
+    )
+    matrix_is_self_hosted: bool = Field(
+        default=False, validation_alias="MATRIX_IS_SELF_HOSTED"
+    )
+    matrix_admin_access_token: str | None = Field(
+        default=None, validation_alias="MATRIX_ADMIN_ACCESS_TOKEN"
+    )
+    matrix_default_room_preset: str = Field(
+        default="private_chat", validation_alias="MATRIX_DEFAULT_ROOM_PRESET"
+    )
+    matrix_e2ee_enabled: bool = Field(
+        default=False, validation_alias="MATRIX_E2EE_ENABLED"
+    )
+    matrix_invite_domain: str | None = Field(
+        default=None, validation_alias="MATRIX_INVITE_DOMAIN"
+    )
+    matrixbot_ai_waiting_assistant_enabled: bool = Field(
+        default=False, validation_alias="MATRIXBOT_AI_WAITING_ASSISTANT_ENABLED"
+    )
+    matrixbot_ai_ollama_enabled: bool = Field(
+        default=False, validation_alias="MATRIXBOT_AI_OLLAMA_ENABLED"
+    )
+    matrixbot_ai_ollama_url: str | None = Field(
+        default=None, validation_alias="MATRIXBOT_AI_OLLAMA_URL"
+    )
+    matrixbot_ai_ollama_model: str | None = Field(
+        default=None, validation_alias="MATRIXBOT_AI_OLLAMA_MODEL"
+    )
+    matrixbot_ai_ollama_provider: str = Field(
+        default="ollama", validation_alias="MATRIXBOT_AI_OLLAMA_PROVIDER"
+    )
+    matrixbot_ai_ollama_api_key: str | None = Field(
+        default=None, validation_alias="MATRIXBOT_AI_OLLAMA_API_KEY"
+    )
+    matrixbot_ai_response_delay_minutes: int = Field(
+        default=5, validation_alias="MATRIXBOT_AI_RESPONSE_DELAY_MINUTES", ge=1
+    )
+    matrixbot_ai_max_responses: int = Field(
+        default=2, validation_alias="MATRIXBOT_AI_MAX_RESPONSES", ge=0
+    )
+    matrixbot_ai_kb_confidence_threshold: float = Field(
+        default=50.0,
+        validation_alias="MATRIXBOT_AI_KB_CONFIDENCE_THRESHOLD",
+        ge=0,
+        le=100,
+    )
+    matrixbot_ai_queue_retry_minutes: int = Field(
+        default=5, validation_alias="MATRIXBOT_AI_QUEUE_RETRY_MINUTES", ge=1
+    )
+    matrixbot_ai_queue_timeout_minutes: int = Field(
+        default=60, validation_alias="MATRIXBOT_AI_QUEUE_TIMEOUT_MINUTES", ge=1
+    )
+    matrixbot_ai_show_match_tags: bool = Field(
+        default=True, validation_alias="MATRIXBOT_AI_SHOW_MATCH_TAGS"
+    )
+    ntfy_chat_new_enabled: bool = Field(
+        default=False, validation_alias="NTFY_CHAT_NEW_ENABLED"
+    )
+    ntfy_chat_reply_enabled: bool = Field(
+        default=False, validation_alias="NTFY_CHAT_REPLY_ENABLED"
+    )
 
     # IP Whitelisting Configuration
     ip_whitelist_enabled: bool = Field(
@@ -509,17 +594,16 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_inline_comments(cls, value: bool | str) -> bool | str:
         """Strip inline comments from boolean fields in environment variables.
-        
+
         Environment files may contain inline comments like:
             IP_WHITELIST_ADMIN_ONLY=true  # admin routes only
-        
+
         This validator removes the comment portion to allow proper boolean parsing.
         """
         if isinstance(value, str):
             # Split on '#' and take the first part, then strip whitespace
             value = value.split("#")[0].strip()
         return value
-
 
     @field_validator(
         "app_log_path",
@@ -528,7 +612,9 @@ class Settings(BaseSettings):
         mode="before",
     )
     @classmethod
-    def _empty_string_to_none_for_paths(cls, value: Path | str | None) -> Path | str | None:
+    def _empty_string_to_none_for_paths(
+        cls, value: Path | str | None
+    ) -> Path | str | None:
         """Coerce blank path environment variables to ``None`` so file sinks can be disabled."""
 
         if isinstance(value, str) and value.strip() == "":
@@ -570,8 +656,12 @@ class Settings(BaseSettings):
                 raise ValueError("ALLOWED_ORIGINS cannot include wildcard '*'.")
             try:
                 url_adapter.validate_python(origin)
-            except ValidationError as exc:  # pragma: no cover - exercised in settings construction
-                raise ValueError(f"Invalid CORS origin in ALLOWED_ORIGINS: {origin}") from exc
+            except (
+                ValidationError
+            ) as exc:  # pragma: no cover - exercised in settings construction
+                raise ValueError(
+                    f"Invalid CORS origin in ALLOWED_ORIGINS: {origin}"
+                ) from exc
 
         return value
 
@@ -607,7 +697,9 @@ class Settings(BaseSettings):
         if normalised.startswith("/"):
             return normalised
 
-        candidate = normalised.replace("{element}", _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE)
+        candidate = normalised.replace(
+            "{element}", _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE
+        )
         try:
             TypeAdapter(AnyHttpUrl).validate_python(candidate)
         except ValidationError as exc:
